@@ -135,7 +135,7 @@ Counts are files under `data/`.
 | `.bin` | 862 | Binary NxuStream collision (the game's conversion of a collision `.xml`, scale baked in) | Header **Verified**, see [collision.md](collision.md) |
 | `.layout` | 53 | MyGUI | Not analyzed |
 | `.pu` | 93 | ParticleUniverse scripts | Not analyzed |
-| `.bnk` | 24 | Wwise sound banks | Not analyzed |
+| `.bnk` | 24 | Wwise sound banks: all audio, embedded (no loose `.wem`) | Sections, ids and the version 112 hierarchy **Verified**, see [wwise-bnk.md](wwise-bnk.md); Vorbis audio not decoded |
 | `.phs`, `.bod2`, `.body`, `.PxProj` | ~200 | Physics / ragdoll; `.PxProj` = 3ds Max PhysX plug-in projects (not loaded) | `.phs` see [phs.md](phs.md); `.PxProj` see [collision.md](collision.md); rest not analyzed |
 
 ## World data (Observed, folder names only)

@@ -279,6 +279,8 @@ build (`meitou`) passes its own clock's hours instead. `--heat-haze <x>` replace
 Wwise events `Weather_Rain_Start` / `Weather_Rain_End` when the rain level becomes non-zero / zero, RTPC `Rain_Intensity` = the
 rain level (0..100); RTPC `Intensity` = `wind intensity × wind speed × 0.01` with `Weather_Wind_Start` / `Weather_Wind_Stop`;
 bank `SFX_Amb_Weather_Bank.bnk`. Effects carry their own AMBIENT_SOUND (`sound`, e.g. "Inferno" on the beam effects).
+The bank has no `Weather_Wind_Stop` event: its stop event is `Weather_Wind_End` (**Verified** by name hash, [wwise-bnk.md](wwise-bnk.md#ids-and-names)),
+so the wind stop the exe posts does nothing (Observed, not tested in the game). No decoded object in the bank uses `Rain_Intensity` or `Intensity`.
 
 ## Effects (particles)
 
