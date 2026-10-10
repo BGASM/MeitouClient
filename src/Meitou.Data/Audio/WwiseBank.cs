@@ -28,6 +28,10 @@ public sealed class WwiseBank
     /// <summary>The <c>STID</c> table: bank ids and names (Kenshi's banks list only themselves).</summary>
     public IReadOnlyDictionary<uint, string> BankNames { get; private set; } = new Dictionary<uint, string>();
     public IReadOnlyList<WwiseObject> Objects { get; private set; } = [];
+    /// <summary><c>STMG</c> (only in <c>Init.bnk</c>): each game parameter's default value, by id.</summary>
+    public IReadOnlyDictionary<uint, float> GameParameterDefaults { get; private set; } = new Dictionary<uint, float>();
+    /// <summary><c>STMG</c>: each state group's default transition time in ms, by id.</summary>
+    public IReadOnlyDictionary<uint, int> StateGroupTransitions { get; private set; } = new Dictionary<uint, int>();
 
     public WwiseObject? Find(uint id) => byId.GetValueOrDefault(id);
     public T? Find<T>(uint id) where T : WwiseObject => byId.GetValueOrDefault(id) as T;
@@ -74,6 +78,9 @@ public sealed class WwiseBank
                 case "STID":
                     bank.BankNames = ReadStringTable(span);
                     break;
+                case "STMG":
+                    ReadGlobalSettings(bank, span);
+                    break;
             }
             p = body + length;
         }
@@ -99,6 +106,48 @@ public sealed class WwiseBank
             if (tag == "HIRC") bank.Objects = WwiseHierarchyReader.Read(data.AsSpan(offset, length), bank.Version == DecodedVersion);
         foreach (var o in bank.Objects) bank.byId.TryAdd(o.Id, o);
         return bank;
+    }
+
+    /// <summary>
+    /// <c>STMG</c>: f32 volume threshold, u16 max voices, u32 state group count, per group u32 id, u32 default transition ms, u32 count and
+    /// (u32 from, u32 to, u32 ms) transitions; u32 switch group count, per group u32 id, u32 game parameter, u32 count and (f32, u32, u32) points;
+    /// u32 game parameter count, per parameter u32 id, f32 default, u32 ramp type, f32 ramp up, f32 ramp down, u8 built-in.
+    /// </summary>
+    static void ReadGlobalSettings(WwiseBank bank, ReadOnlySpan<byte> s)
+    {
+        int p = 6;
+        var transitions = new Dictionary<uint, int>();
+        for (int i = U32(s, ref p); i > 0; i--)
+        {
+            uint id = (uint)U32(s, ref p);
+            transitions[id] = U32(s, ref p);
+            int count = U32(s, ref p);
+            p += 12 * count;
+        }
+        for (int i = U32(s, ref p); i > 0; i--)
+        {
+            p += 8;
+            int count = U32(s, ref p);
+            p += 12 * count;
+        }
+        var defaults = new Dictionary<uint, float>();
+        for (int i = U32(s, ref p); i > 0; i--)
+        {
+            uint id = (uint)U32(s, ref p);
+            defaults[id] = BinaryPrimitives.ReadSingleLittleEndian(s[p..]);
+            p += 4 + 13;
+        }
+        if (p != s.Length) throw new InvalidDataException($"STMG has {s.Length - p} bytes left over");
+        bank.StateGroupTransitions = transitions;
+        bank.GameParameterDefaults = defaults;
+    }
+
+    static int U32(ReadOnlySpan<byte> s, ref int p)
+    {
+        if (p + 4 > s.Length) throw new InvalidDataException("STMG is truncated");
+        int v = BinaryPrimitives.ReadInt32LittleEndian(s[p..]);
+        p += 4;
+        return v;
     }
 
     /// <summary><c>STID</c>: u32 string type (1), u32 count, then per entry u32 bank id, u8 length, the name (ASCII, no terminator).</summary>

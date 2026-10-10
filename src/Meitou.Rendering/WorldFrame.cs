@@ -127,6 +127,9 @@ sealed class WorldOptions
     public bool NoParticles;
     /// <summary><c>--no-fog-volumes</c>: the placed fog volumes of <c>fogfeatures.dat</c> are not drawn (comparison; docs/formats/fogfeatures.md).</summary>
     public bool NoFogVolumes;
+    /// <summary><c>--no-audio</c>: no sound (docs/audio.md); <c>--audio-gain &lt;dB&gt;</c> raises or lowers the whole mix (0 = the game's levels).</summary>
+    public bool NoAudio;
+    public float AudioGainDb;
     /// <summary><c>--no-fog-cull</c>: everything the fog hides is drawn anyway (comparison; docs/formats/fogfeatures.md "In Meitou").</summary>
     public bool NoFogCull;
     /// <summary><c>--no-occlusion-cull</c>: foliage hidden behind the previous frame's depth is drawn anyway (comparison; docs/formats/foliage.md "Occlusion culling").</summary>
@@ -270,6 +273,7 @@ sealed class WorldOptions
           --clouds <0..1>          cloud density c (test override)
           --cloud-wind <x>,<z>     the clouds' drift velocity in world units per second (test; the drift is held still in --screenshot)
           --no-fog-volumes         leave out the placed fog volumes (fogfeatures.dat: the swamp's fog, the Fog Islands', the Vain's)
+          --no-audio               no sound (the biome ambience and weather beds from the game's Wwise banks)   --audio-gain <dB> raise or lower the whole mix (0 = the game's levels)
           --no-fog-cull            draw what the fog in front of the camera completely hides (comparison; the image is the same)
           --no-fog-vrs             shade every pixel at full rate where the fog hides the surface (the fog shading rate is on by default)
           --no-particles           no weather particles   --particle-prewarm <s> seconds simulated before the first picture (default: the longest particle life; 0 starts empty)   --particle-dwell <s> seconds the camera must stay in another weather region before its particles are rebuilt (default 2)   --particle-density <x> the effects' emission rate x (0.1-1, the Tab slider)   --anisotropy <n> the most anisotropic filtering any texture gets (1-16, the Tab slider; 16 default)   --particle-area <r> place weather effects within r units of the start point (test)   --particle-seed <n>   --particle-only <a,b> keep only the weather effects with these in their names (test)
@@ -441,6 +445,8 @@ sealed class WorldOptions
                 case "--weather-seed": o.WeatherSeed = int.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--no-particles": o.NoParticles = true; break;
                 case "--no-fog-volumes": o.NoFogVolumes = true; break;
+                case "--no-audio": o.NoAudio = true; break;
+                case "--audio-gain": o.AudioGainDb = F(); break;
                 case "--no-fog-cull": o.NoFogCull = true; break;
                 case "--no-occlusion-cull": o.NoOcclusionCull = true; break;
                 case "--fog-vrs": o.FogVrs = true; break;

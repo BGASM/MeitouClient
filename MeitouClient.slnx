@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Meitou.Audio/Meitou.Audio.csproj" />
     <Project Path="src/Meitou.Core/Meitou.Core.csproj" />
     <Project Path="src/Meitou.Data/Meitou.Data.csproj" />
     <Project Path="src/Meitou.Engine/Meitou.Engine.csproj" />

@@ -53,7 +53,7 @@ public class WwiseBankInstallTests
                 }
                 else count++;
             }
-        Assert.Equal(2492, count);
+        Assert.Equal(2503, count); // with the 11 buses (partly decoded)
     }
 
     [Fact]

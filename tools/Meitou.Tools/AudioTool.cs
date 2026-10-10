@@ -10,6 +10,7 @@ static class AudioTool
     public static int Run(GameInstall install, string[] args)
     {
         if (args.Length == 0) return Survey(install);
+        if (args[0] == "render") return Render(install, args[1..]);
         var path = File.Exists(args[0]) ? args[0] : Path.Combine(AudioDirectory(install), args[0].EndsWith(".bnk", StringComparison.OrdinalIgnoreCase) ? args[0] : args[0] + ".bnk");
         if (!File.Exists(path))
         {
@@ -24,10 +25,64 @@ static class AudioTool
         return 0;
     }
 
+    /// <summary>
+    /// <c>audio render &lt;seconds&gt; &lt;out.wav&gt; [banks and events...] [name=value parameters] [group:state states]</c>: plays events through
+    /// <see cref="Meitou.Audio.WwisePlayer"/> offline (no sound card) and writes the mix; a word ending in <c>.bnk</c> loads that bank first.
+    /// Prints the level each second.
+    /// </summary>
+    static int Render(GameInstall install, string[] args)
+    {
+        if (args.Length < 2 || !double.TryParse(args[0], System.Globalization.CultureInfo.InvariantCulture, out double seconds))
+        {
+            Console.Error.WriteLine("audio render <seconds> <out.wav> [Bank.bnk ...] [Event ...] [Parameter=value ...] [Group:State ...]");
+            return 2;
+        }
+        if (Library(install) is not { } library) return 1;
+        const int rate = Meitou.Audio.AudioSystem.SampleRate;
+        using var player = new Meitou.Audio.WwisePlayer(library, AudioDirectory(install), rate);
+        var loads = new List<Task>();
+        foreach (var a in args[2..])
+        {
+            if (a.EndsWith(".bnk", StringComparison.OrdinalIgnoreCase)) loads.Add(player.LoadBank(a[..^4]));
+            else if (a.Split('=') is [var p, var v]) player.SetParameter(p, float.Parse(v, System.Globalization.CultureInfo.InvariantCulture));
+            else if (a.Split(':') is [var g, var s]) player.SetState(g, s);
+        }
+        Task.WaitAll([.. loads]);
+        foreach (var a in args[2..])
+            if (!a.EndsWith(".bnk", StringComparison.OrdinalIgnoreCase) && !a.Contains('=') && !a.Contains(':')) player.Post(a);
+        int total = (int)(seconds * rate);
+        var all = new float[total * 2];
+        var block = new float[Meitou.Audio.AudioOutput.BlockFrames * 2];
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        for (int at = 0; at < total; at += Meitou.Audio.AudioOutput.BlockFrames)
+        {
+            Array.Clear(block);
+            player.Mix(block, Meitou.Audio.AudioOutput.BlockFrames);
+            Array.Copy(block, 0, all, at * 2, Math.Min(block.Length, (total - at) * 2));
+            if ((at / Meitou.Audio.AudioOutput.BlockFrames) % 43 == 0)
+            {
+                var (instances, voices, _, clips) = player.Stats;
+                int from = Math.Max(0, at - rate) * 2, to = at * 2;
+                double rms = 0;
+                float peak = 0;
+                for (int i = from; i < to; i++)
+                {
+                    rms += all[i] * all[i];
+                    peak = Math.Max(peak, Math.Abs(all[i]));
+                }
+                rms = to > from ? Math.Sqrt(rms / (to - from)) : 0;
+                Console.WriteLine($"{(double)at / rate,6:0.0} s  instances {instances,2} voices {voices,2} clips {clips,3}  last second: rms {20 * Math.Log10(rms + 1e-9),6:0.0} dBFS peak {peak:0.000}");
+            }
+        }
+        WriteWav(args[1], all, 2, rate);
+        Console.WriteLine($"{args[1]}: {seconds} s mixed in {watch.Elapsed.TotalSeconds:0.00} s");
+        return 0;
+    }
+
     static WwiseCodebookLibrary? Library(GameInstall install)
     {
         var exe = Path.Combine(install.Root, "kenshi_x64.exe");
-        var library = File.Exists(exe) ? WwiseCodebookLibrary.FromExecutable(exe) : null;
+        var library = WwiseCodebookLibrary.Load(exe);
         if (library is null) Console.Error.WriteLine($"No Wwise codebook library found in {exe}");
         return library;
     }

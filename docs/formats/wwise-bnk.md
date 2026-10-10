@@ -10,7 +10,7 @@ code was used. Reader: `Meitou.Data.Audio.WwiseBank`. Dump tool: `meitou-tools a
 
 | Bank | Version | Contents |
 |---|---|---|
-| `Init.bnk` | 112 | Buses (9), effects (6), aux buses (2); sections `STMG` and `ENVS` (not decoded) |
+| `Init.bnk` | 112 | Buses (9), effects (6), aux buses (2); global settings `STMG` (decoded) and `ENVS` (not decoded) |
 | `Reverb_Indoor_Bank`, `Reverb_Outdoor_Bank` | 112 | One bus, effect share set, effects, aux bus each |
 | `SFX_Amb_<Biome>` ×10 | 112 | Ambience beds of Ashlands, Boneyard, Canyons, Coast, Desert, Forest, Jungle, Plains, Swamplands, Tarsands |
 | `SFX_Amb_Indoors_Bank` | 112 | Interior ambience (`Enter_Building`, `Enter_Building_Big`, `Leave_Building`) |
@@ -35,7 +35,8 @@ by length. **Verified** for all 24 banks (the sections tile the file exactly).
 | `DATA` | The WEM files back to back, at the `DIDX` offsets |
 | `HIRC` | The object hierarchy (below) |
 | `STID` | Bank names: u32 string type (1), u32 count, per entry u32 bank id, u8 length, ASCII name. Lists the bank itself, and in `MT_Music_Bank` also `SFX_General_Bank` (which its event plays from). **Verified** |
-| `STMG`, `ENVS` | Only in `Init.bnk`: global settings (state groups, switch groups, game parameters) and environment curves. **Unknown**, not decoded |
+| `STMG` | Only in `Init.bnk`: global settings, see [below](#global-settings-stmg) |
+| `ENVS` | Only in `Init.bnk`: environment (obstruction / occlusion) curves. **Unknown**, not decoded |
 
 ## Ids and names
 
@@ -54,9 +55,10 @@ Names found (from the exe's strings, combined as the exe's fragments suggest; **
 - Music: `Music_<Biome>_Play` / `Music_<Biome>_Stop` (Dunes, Savannah, Swamplands, Tarsands), `Create_or_Load_Game`.
 - State group `Time_in_Game` with states `Day`, `night`, `none` (used by switch containers in Ashlands and Coast); interior switch `Wicker`.
 - General: `Start_Emitter`, `Stop_Emitter`, `Footsteps`, `Door_Open`, `Map_Open`, UI clicks and many more in `SFX_General_Bank`.
-- **Unknown**: game parameter `5FE07BCE`, the one RTPC and layer-crossfade parameter every ambience and weather bank uses (not
-  `Intensity`, `Rain_Intensity`, `Wind`, `Distance` or the time-of-day names tried). Neither `Intensity` nor `Rain_Intensity`, which the
-  exe sets for weather, drives anything in the decoded objects (buses in `Init.bnk` are not decoded, so they may).
+- Game parameters (the 24 in `STMG`): `Camera_Zoom` (`5FE07BCE`, the one RTPC and layer-crossfade parameter of every ambience and weather
+  bank), `Time_in_Game`, `User_Volume_Ambient_SFX`, `User_Volume_Music`, `User_Volume_SFX`, `User_Volume_VO`, `User_Volume_UI`,
+  `Footstep_Volume`, `Building_Integrity`, `Intensity`; what the game sets them to is in [audio.md](../audio.md#game-parameters-and-states).
+  `Rain_Intensity`, which the exe sets, is not among them: setting it does nothing. 14 of the 24 are not named.
 
 ## HIRC
 
@@ -65,7 +67,7 @@ the objects tile the section exactly.
 
 Types (the format's numbers): 1 state, 2 sound, 3 action, 4 event, 5 random/sequence container, 6 switch container, 7 actor-mixer,
 8 bus, 9 layer (blend) container, 10 music segment, 11 music track, 12 music switch, 13 music random/sequence, 14 attenuation,
-18 effect share set, 19 effect, 20 aux bus. The reader decodes 2, 3, 4, 5, 6, 7 and 9 in version 112 banks and keeps the rest raw.
+18 effect share set, 19 effect, 20 aux bus. The reader decodes 2, 3, 4, 5, 6, 7 and 9 in version 112 banks, buses (8) in part ([below](#buses)), and keeps the rest raw.
 
 **Verified** (`Every_version_112_object_of_a_decoded_type_uses_exactly_its_size`): with the layouts below, all 2,492 objects of those types
 in the 22 version-112 banks decode to exactly their size. The field order is certain; the meaning of a field is **Observed** unless
@@ -76,7 +78,11 @@ said otherwise.
 - **Property list**: u8 count, that many u8 property ids, then a u32 value each (float or int by property); then u8 count, the ids,
   and a (f32 min, f32 max) random range each.
 - **RTPC list**: u16 count; per entry u32 game parameter id, u8 type (0), u8 accumulation (1), u8 target property (0 volume, 2 pitch,
-  3 low-pass), u32 curve id, u8 scaling (2 = dB for volume curves, 0 otherwise), u16 point count, points of (f32 x, f32 y, u32 interpolation).
+  3 low-pass), u32 curve id, u8 scaling (2 = dB for volume curves, 0 otherwise), u16 point count, points of (f32 x, f32 y, u32 interpolation:
+  4 linear, 9 constant and others seen, the Wwise curve shapes). **Observed**: the y of all 111 volume curves (scaling 2) lies in −1 .. +0.08
+  while pitch curves are in cents and low-pass curves in its units; read as linear gain − 1 (−1 silent, 0 unchanged) every one makes
+  sense (the slider curves are silent at 0 and unchanged at 100; [audio.md](../audio.md#volume-curves-observed)). Layer crossfade curves
+  are plain linear gains (all 1 in Kenshi).
 
 ### Event (4)
 
@@ -139,6 +145,24 @@ Action properties seen: `0x0F` (int ms, 1000 to 10000 on stops and plays: the fa
   s32 fade out, s32 fade in.
 - **Layer (9)**: node base, u32 child count and ids, u32 layer count, per layer u32 layer id, RTPC list, u32 crossfade game parameter,
   u8 its type, u32 association count, per association u32 child id, u32 point count, points (f32, f32, u32).
+
+## Global settings (`STMG`)
+
+In `Init.bnk` only. f32 volume threshold (−80), u16 maximum voices (256), u32 state group count, per group u32 id, u32 default transition
+(ms), u32 count and (u32 from, u32 to, u32 ms) transitions; u32 switch group count, per group u32 id, u32 game parameter, u32 count and
+(f32, u32, u32) points; u32 game parameter count, per parameter u32 id, f32 **default value**, u32 ramp type, f32 ramp up, f32 ramp down,
+u8 built-in. **Verified** by size (the 546 bytes are used exactly; the switch group entry layout is a guess, Kenshi has none). Kenshi: two
+state groups (`Time_in_Game` 1000 ms, `C2E2475B` 500 ms) and 24 game parameters, `Camera_Zoom` 50, `Time_in_Game` 5, the user volumes 50
+or 100 ([audio.md](../audio.md#game-parameters-and-states)).
+
+## Buses
+
+A bus (type 8) starts with u32 parent bus (0 for the two top buses), then a property list without ranges: ids `1A`, `1B`, `1C`, `1F`
+(values 0, 100, 0, 100 on every bus; Unknown) and on three buses `05`, the **bus volume** in dB (+6 footsteps, −4 music, −9 on the aux
+bus `5E1D37D4`). The rest of the layout is not decoded; the reader finds the bus's RTPC list by its shape (a u16 count of 1..8 followed by
+well-formed entries), which gives each category bus its slider curve (**Observed**, the curves are listed in [audio.md](../audio.md#volumes)).
+Sounds reach a bus through the nearest node with an override bus id (in the biome banks the top actor-mixer goes to the SFX bus
+`59927CD0` and the one below it to the ambience bus `95836E4C`).
 
 ## How an ambience bank is built (Observed, e.g. `SFX_Amb_Desert`)
 

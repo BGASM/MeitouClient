@@ -7,6 +7,12 @@ namespace Meitou.Data.World;
 /// <summary><c>WeatherAffecting</c> (fcs_enums.def): the direct effect of a weather or effect on characters.</summary>
 public enum WeatherAffecting { None = 0, DustStorm = 1, Acid = 2, Burning = 3, Gas = 4, Rain = 5 }
 
+/// <summary>The biome ambience of a region (fcs_enums.def `Ambience`; each names an `SFX_Amb_<name>.bnk`).</summary>
+public enum Ambience { Ashlands, Boneyard, Canyons, Coast, Desert, Forest, Jungle, Plains, Swamplands, Tarsands }
+
+/// <summary>The music of a region (fcs_enums.def `BiomeMusic`; the spellings are the enum's, the banks are Dunes, Savannah, Swamplands, Tarsands).</summary>
+public enum BiomeMusic { Dunes, Savanah, Swamp, Tarsands, None }
+
 /// <summary><c>EffectType</c> (fcs_enums.def, docs/formats/weather.md "Spawning").</summary>
 public enum EffectType
 {
@@ -178,6 +184,11 @@ public sealed record RegionDef
     /// <summary>True when the record lists no seasons of its own (always clear).</summary>
     public bool HasNoSeasons { get; init; }
 
+    /// <summary>The region's biome ambience (BIOME_GROUP `ambience`, fcs.def default Desert): which `SFX_Amb_<name>` bank plays here.</summary>
+    public Ambience Ambience { get; init; } = Ambience.Desert;
+    /// <summary>The region's music (BIOME_GROUP `music`, default None).</summary>
+    public BiomeMusic Music { get; init; } = BiomeMusic.None;
+
     public override string ToString() => Name;
 }
 
@@ -317,6 +328,8 @@ public sealed class WeatherData
             {
                 StringId = g.StringId, Name = g.Name, Index = g.GetInt("index"), Seasons = list, HasNoSeasons = listed.Count == 0,
                 StrengthMultiplierMin = g.GetFloat("weather strength multiplier min", 1), StrengthMultiplierMax = g.GetFloat("weather strength multiplier max", 1),
+                Ambience = Enum.IsDefined((Ambience)g.GetInt("ambience", (int)Ambience.Desert)) ? (Ambience)g.GetInt("ambience", (int)Ambience.Desert) : Ambience.Desert,
+                Music = Enum.IsDefined((BiomeMusic)g.GetInt("music", (int)BiomeMusic.None)) ? (BiomeMusic)g.GetInt("music", (int)BiomeMusic.None) : BiomeMusic.None,
             });
         }
         var none = regions.FirstOrDefault(r => r.StringId == NoneRegionId) ?? regions.FirstOrDefault(r => r.Name == "NONE" && r.Index == 0) ?? MakeNone(defaultWeather, daysPerYear);

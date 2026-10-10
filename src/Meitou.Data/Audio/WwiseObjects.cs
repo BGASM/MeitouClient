@@ -100,8 +100,12 @@ public static class WwisePropertyId
     public const byte Pitch = 0x02;
     /// <summary>Low-pass filter amount 0..100 (float).</summary>
     public const byte LowPass = 0x03;
+    /// <summary>On actions: the delay before the action runs, in ms (int; 6000 on some actions, Observed).</summary>
+    public const byte Delay = 0x0E;
     /// <summary>On actions: the fade time, in ms (int).</summary>
     public const byte FadeTime = 0x0F;
+    /// <summary>On buses: the bus volume in dB (float).</summary>
+    public const byte BusVolume = 0x05;
     /// <summary>Loop count: 0 = forever, 1 = once (int).</summary>
     public const byte Loop = 0x3A;
 }
@@ -171,3 +175,9 @@ public sealed record WwiseLayer(uint Id, WwiseRtpc[] Rtpcs, uint CrossfadeParame
 
 /// <summary>A layer container (blend container): plays all its children at once.</summary>
 public sealed record WwiseLayerContainer(uint Id, WwiseNodeBase Node, uint[] Children, WwiseLayer[] Layers) : WwiseObject(WwiseObjectType.LayerContainer, Id);
+
+/// <summary>
+/// A bus, partly decoded: its parent bus, its properties (bus volume <c>0x05</c> in dB) and its RTPCs (the user volume sliders), found by
+/// shape in the undecoded rest (<see cref="Body"/>).
+/// </summary>
+public sealed record WwiseBus(uint Id, uint ParentBusId, WwiseProperties Properties, WwiseRtpc[] Rtpcs, byte[] Body) : WwiseObject(WwiseObjectType.Bus, Id);

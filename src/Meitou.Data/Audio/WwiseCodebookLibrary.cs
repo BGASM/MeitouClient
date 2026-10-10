@@ -26,6 +26,70 @@ public sealed class WwiseCodebookLibrary
     /// <summary>Finds the library in a Wwise-linked 64-bit Windows executable; null when none is found.</summary>
     public static WwiseCodebookLibrary? FromExecutable(string exePath) => FromExecutable(File.ReadAllBytes(exePath));
 
+    /// <summary>The default cache folder: <c>%LOCALAPPDATA%\Meitou\audio</c>.</summary>
+    public static string DefaultCacheDirectory =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Meitou", "audio");
+
+    static ReadOnlySpan<byte> CacheMagic => "MWCB"u8;
+    const int CacheVersion = 1;
+
+    /// <summary>
+    /// The library of <paramref name="exePath"/>, from <c>codebooks.bin</c> in <paramref name="cacheDirectory"/> when that was made from an exe of
+    /// the same size and modification time; otherwise read from the exe (36 MB, about 50 ms) and the cache rewritten. Null when the exe holds no
+    /// library. A cache that cannot be written is skipped.
+    /// </summary>
+    public static WwiseCodebookLibrary? Load(string exePath, string? cacheDirectory = null)
+    {
+        var exe = new FileInfo(exePath);
+        if (!exe.Exists) return null;
+        var cacheFile = Path.Combine(cacheDirectory ?? DefaultCacheDirectory, "codebooks.bin");
+        long stamp = exe.LastWriteTimeUtc.Ticks;
+        if (TryReadCache(cacheFile, exe.Length, stamp) is { } cached) return cached;
+        var library = FromExecutable(exePath);
+        if (library is not null)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(cacheFile)!);
+                using var w = new BinaryWriter(File.Create(cacheFile));
+                w.Write(CacheMagic);
+                w.Write(CacheVersion);
+                w.Write(exe.Length);
+                w.Write(stamp);
+                w.Write(library.codebooks.Length);
+                foreach (var book in library.codebooks)
+                {
+                    w.Write((ushort)book.Length);
+                    w.Write(book);
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        return library;
+    }
+
+    static WwiseCodebookLibrary? TryReadCache(string file, long exeLength, long stamp)
+    {
+        try
+        {
+            if (!File.Exists(file)) return null;
+            using var r = new BinaryReader(File.OpenRead(file));
+            if (!r.ReadBytes(4).AsSpan().SequenceEqual(CacheMagic) || r.ReadInt32() != CacheVersion || r.ReadInt64() != exeLength || r.ReadInt64() != stamp) return null;
+            var books = new byte[r.ReadInt32()][];
+            for (int i = 0; i < books.Length; i++)
+            {
+                books[i] = r.ReadBytes(r.ReadUInt16());
+                if (WwiseVorbis.PackedCodebookBits(books[i]) / 8 + 1 != books[i].Length) return null;
+            }
+            return new WwiseCodebookLibrary(books);
+        }
+        catch (Exception e) when (e is IOException or EndOfStreamException or InvalidDataException or UnauthorizedAccessException or OverflowException)
+        {
+            return null;
+        }
+    }
+
     public static WwiseCodebookLibrary? FromExecutable(byte[] exe)
     {
         var sections = Sections(exe, out ulong imageBase);

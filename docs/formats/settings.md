@@ -277,7 +277,10 @@ Steam, if Steam's current game language differs from `steam_language`, the local
 
 ## Audio
 
-All floats, sliders 0 … 1, **missing → 0.5**, applied when the options close (FUN_1403e7290 → the audio manager).
+All floats, sliders 0 … 1, **missing → 0.5**, applied when the options close (FUN_1403e7290 → the audio manager). Each becomes a Wwise game
+parameter × 100 (`Music volume` → `User_Volume_Music`, `Ambient volume` → `User_Volume_Ambient_SFX`, `Footstep volume` → `Footstep_Volume`,
+`Sfx volume` → `User_Volume_SFX`, `UI volume` → `User_Volume_UI`, `VO volume` → `User_Volume_VO`; at start too, FUN_140259620), which the
+category buses turn into gains ([audio.md](../audio.md#volumes)). The viewer reads `Ambient volume`.
 
 | Key | Options label |
 | --- | --- |

@@ -31,6 +31,7 @@ static class WwiseHierarchyReader
 
     static WwiseObject Decode(WwiseObjectType type, uint id, ReadOnlySpan<byte> body)
     {
+        if (type == WwiseObjectType.Bus) return Bus(id, body);
         var r = new Reader(body);
         try
         {
@@ -231,6 +232,48 @@ static class WwiseHierarchyReader
         var parameters = new (uint, byte, byte, int, int)[r.Count(r.U32(), 14)];
         for (int i = 0; i < parameters.Length; i++) parameters[i] = (r.U32(), r.U8(), r.U8(), r.I32(), r.I32());
         return new WwiseSwitchContainer(id, node, groupType, group, defaultSwitch, continuous, children, switches, parameters);
+    }
+
+    /// <summary>
+    /// A bus, partly: u32 parent bus, then the property list without ranges (bus volume is <c>0x05</c>). The rest of the layout is not decoded;
+    /// the RTPC list is found by its shape (docs/formats/wwise-bnk.md#buses): the last place where a u16 count of 1..8 is followed by that many
+    /// well-formed RTPC entries that end exactly at a known position (the end, or before u16 0 / u32 0 tails seen in the banks).
+    /// </summary>
+    static WwiseObject Bus(uint id, ReadOnlySpan<byte> body)
+    {
+        try
+        {
+            var r = new Reader(body);
+            uint parent = r.U32();
+            int n = r.U8();
+            var ids = r.Bytes(n);
+            var values = new Dictionary<byte, uint>(n);
+            for (int i = 0; i < n; i++) values[ids[i]] = r.U32();
+            var rtpcs = FindRtpcs(body, body.Length - r.Remaining);
+            return new WwiseBus(id, parent, new WwiseProperties(values, new Dictionary<byte, (float, float)>()), rtpcs, body.ToArray());
+        }
+        catch (InvalidDataException e)
+        {
+            return new WwiseRawObject(WwiseObjectType.Bus, id, body.ToArray(), e.Message);
+        }
+    }
+
+    static WwiseRtpc[] FindRtpcs(ReadOnlySpan<byte> body, int from)
+    {
+        for (int start = body.Length - 2; start >= from; start--)
+        {
+            int count = BinaryPrimitives.ReadUInt16LittleEndian(body[start..]);
+            if (count is < 1 or > 8) continue;
+            var r = new Reader(body[start..]);
+            try
+            {
+                var list = Rtpcs(ref r);
+                if (list.All(x => x.Points.Length is > 0 and < 64 && x.ParameterId < 64 && x.RtpcType == 0 && x.Points.All(p => float.IsFinite(p.X) && float.IsFinite(p.Y))))
+                    return list;
+            }
+            catch (InvalidDataException) { }
+        }
+        return [];
     }
 
     static WwiseLayerContainer Layer(ref Reader r, uint id)
