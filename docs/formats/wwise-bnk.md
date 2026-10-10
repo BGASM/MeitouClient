@@ -142,10 +142,10 @@ Action properties seen: `0x0F` (int ms, 1000 to 10000 on stops and plays: the fa
 
 ## How an ambience bank is built (Observed, e.g. `SFX_Amb_Desert`)
 
-`Enter_Desert_Day` = stop all of `3A626E51` (an object in no bank: probably the outer ambience mixer in `Init.bnk`'s hierarchy, Unknown),
+`Enter_Desert_Day` = stop all of `3A626E51` (the main theme: the music random/sequence container of `MT_Music_Bank`),
 play a **layer container** holding one looping sound (a long stereo bed, `loop=0`), play a **random container** of short one-shots
 (random volume -55..0 dB and pitch, positioned 3D along paths around the listener, transition 1000 ms, avoid repeating the last 4-6),
-stop the night versions, and turn an effect bypass on a bus off. `Enter_Desert_Night` is the same with the night bed and one-shots.
+stop the night versions, and set the effect bypass of aux bus `5E1D37D4` (the outdoor reverb, in `Init.bnk` and `Reverb_Outdoor_Bank`). `Enter_Desert_Night` is the same with the night bed and one-shots.
 All of these fade over 10 s (`0x0F` = 10000). `Leave_Desert` stops the biome's top mixer. Ashlands and Coast also have switch
 containers on `Time_in_Game` (`Day` / `night` / `none`). The weather bank: `Weather_Rain_Start` plays a layer container of three looping
 rain beds plus a random container of extra layers; `Weather_Wind_Start` plays two looping wind beds; the ends stop their mixers.
