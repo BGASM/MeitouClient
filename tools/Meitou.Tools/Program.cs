@@ -48,7 +48,7 @@ static int Usage()
         meitou-tools particles warmup [weather...]  what changing to a weather costs: the schedule, the simulation of the warm-up on one thread and in parallel, and a frame
         meitou-tools world         read the heightmap, zone/level files and features.dat and cross-check them
         meitou-tools weather [--region name | --at x,z] [--days d0 d1] [--seed n] [--list] [--cells]  print a region's season and weather timeline (--list: the regions and their calendars)
-        meitou-tools audio [bank] [--media]  survey every Wwise bank in data/audio (decode failures, media, references), or dump one bank's events and object tree
+        meitou-tools audio [bank] [--media | --decode | --wav <folder> [wem id]]  survey every Wwise bank in data/audio, dump one bank's events and object tree, decode its Vorbis WEMs, or write them as WAV
         meitou-tools image-diff <a.png> <b.png> [diff.png]  compare two screenshots: mean difference, share of pixels over 12/255
         meitou-tools draw-log-diff <a> <b> [--keep-handles]  compare two MEITOU_DRAW_LOG files draw by draw (handles renamed by first use)
         meitou-tools world-map <png> [step]  render a top-down world map (every step-th height sample, default 16)

@@ -154,8 +154,95 @@ rain beds plus a random container of extra layers; `Weather_Wind_Start` plays tw
 
 A WEM is RIFF/WAVE. **Verified** for the ambience banks (`Ambience_WEMs_are_Wwise_Vorbis...`): a 66-byte `fmt ` chunk with codec tag
 `0xFFFF` (Wwise Vorbis), then directly a `data` chunk: there is no separate `vorb` chunk, so the Vorbis setup values are in the extended
-`fmt `. The 292 ambience WEMs are 44100 Hz, 252 stereo and 40 mono (Observed with `meitou-tools audio <bank> --media`). Decoding needs the Wwise Vorbis packet layout and its codebook
-references, **Unknown**, next step.
+`fmt `. The 292 ambience WEMs are 44100 Hz, 252 stereo and 40 mono (Observed with `meitou-tools audio <bank> --media`). Three tiny
+ones in `SFX_Amb_Indoors_Bank` (`12C0F32E`, `0888326E`, `34EC0D31`, 461 to 1625 bytes) are encoded silence of 1, 5 and 10 s, the
+gaps of the interior random containers (**Verified**: they decode to exact zeros).
+
+## Wwise Vorbis
+
+Reader: `Meitou.Data.Audio.WwiseVorbis` (WEM → standard Ogg Vorbis, which NVorbis, MIT, decodes). `meitou-tools audio <bank> --decode`
+decodes a bank, `--wav <folder> [id]` writes WAV files.
+
+**Verified**: every WEM in all 24 banks (2,786, about 5.5 hours, including `SFX_Bank`'s media) converts and decodes to exactly its sample
+count (`--decode` over each bank; the ambience banks in `Every_ambience_WEM_decodes_to_exactly_its_sample_count`). A wrong setup layout
+or codebook would make the decoder reject the stream; this does not show whether the window flags are right (see Audio packets).
+Speed: about 200× real time on one core (Release).
+
+### The `fmt ` chunk (66 bytes)
+
+| Offset in `fmt ` | Field |
+|---|---|
+| 0x00 | u16 codec `0xFFFF` |
+| 0x02 | u16 channels |
+| 0x04 | u32 sample rate |
+| 0x08 | u32 average bytes per second (× 8 is the nominal bitrate of the rebuilt identification header) |
+| 0x0C, 0x0E | u16 block align, u16 bits per sample: 0 |
+| 0x10 | u16 extra size: 48 |
+| 0x12 | u16 0 |
+| 0x14 | u32 channel mask (3 for stereo) |
+| 0x18 | u32 **sample count** (frames the sound plays) |
+| 0x1C | u32, equal to the first audio packet offset in the files looked at (Unknown) |
+| 0x20 | u32, equal to the `data` chunk length in the files looked at (Unknown) |
+| 0x24 | u32 (Unknown) |
+| 0x28 | u32 **setup packet offset** in `data` (0) |
+| 0x2C | u32 **first audio packet offset** in `data` |
+| 0x30 .. 0x3B | three u32 (Unknown; perhaps packet size bounds) |
+| 0x3C | u32 uid (the rebuilt stream's Ogg serial) |
+| 0x40 | u8 log2 of the short block size (8: 256) |
+| 0x41 | u8 log2 of the long block size (11: 2048) |
+
+### Packets
+
+The `data` chunk holds packets, each a u16 size and then the packet, with no granule positions. The first is the setup packet, the rest
+are audio. There is no identification or comment packet: the converter writes both (from channels, rate, bitrate and block sizes).
+
+### The setup packet
+
+Bit-packed as Vorbis (least significant bit first): a shortened Vorbis setup header (**Verified**: rebuilt as below, every setup packet
+in every bank is used up to within its last byte, which the converter checks, and the result decodes):
+
+- No packet type and `vorbis` signature.
+- u8 codebook count - 1, then per codebook a **10-bit index into the codebook library** (below) instead of the codebook.
+- No time-domain transform list (the converter writes one entry of type 0).
+- Floors: 6-bit count - 1, per floor the floor-1 fields of Vorbis without the 16-bit floor type (all are type 1).
+- Residues: 6-bit count - 1, per residue a **2-bit** residue type instead of 16 bits, then the Vorbis fields.
+- Mappings: 6-bit count - 1, per mapping no 16-bit type (all type 0), then the Vorbis fields.
+- Modes: 6-bit count - 1, per mode a 1-bit block flag, no window or transform type (both 0), the 8-bit mapping.
+- No framing bit.
+
+### Packed codebooks
+
+A library entry is a codebook in a packed form of the Vorbis layout (**Verified**: all 598 parse and fill their span as below, and the
+expanded codebooks decode):
+
+- No `BCV` sync. u4 dimensions (Vorbis: 16 bits), u14 entries (Vorbis: 24), u1 ordered.
+- Ordered: u5 initial length - 1, then the Vorbis run counts.
+- Not ordered: u3 bits per codeword length (1..5), u1 sparse, then per entry (after a u1 present flag when sparse) the length - 1 in that
+  many bits (Vorbis: 5 bits).
+- u1 lookup type (Vorbis: 4 bits; so only 0 and 1). Type 1: u32 minimum, u32 delta, u4 value bits - 1, u1 sequence, then the
+  `lookup1_values` multiplicands as in Vorbis.
+- Each takes `bits / 8 + 1` bytes: a whole extra byte when it ends on a byte boundary.
+
+### The codebook library
+
+The library is part of the game's Wwise decoder in `kenshi_x64.exe`: a table of 599 increasing 64-bit pointers in `.data` (598
+codebooks and the end) into one block of packed codebooks in `.rdata` (about 72 KB). `WwiseCodebookLibrary.FromExecutable` finds it by
+that shape (a run of 200+ increasing pointers at most 8000 bytes apart) and accepts it only if every entry parses to exactly its span.
+So it is read from the user's install, never shipped, and no exe build's offsets are hardcoded. **Verified** on the Steam exe
+(36,718,592 bytes): one such table, 598 codebooks (`The_exe_holds_a_library_of_598_packed_codebooks`).
+
+### Audio packets
+
+A Vorbis audio packet without its first bit (the packet type, 0) and, for a long block, without the previous/next window flags. The
+converter writes the type bit, copies the mode number (`ilog(modes - 1)` bits), for a long block writes the flags from the neighbouring
+packets' modes (previous = the previous packet is a long block, next = the next one is), then copies the rest. Granule positions are
+rebuilt from the block sizes (each packet after the first adds a quarter of its own and of the previous block size), and the last page
+gets the sample count so the decoder trims the end.
+
+The flags follow the Vorbis definition (the encoder writes exactly the neighbours' block types), but no signal test singles them out:
+at long/short transitions, forcing every flag to "short" gives identical output (both reconstruct completely there), while forcing them
+to "long" or swapping them changes it, and a mismatched window both attenuates and aliases, so energy measures do not decide.
+**Observed**; to be confirmed by listening.
 
 ## Version 88 (`SFX_Bank`)
 

@@ -16,8 +16,83 @@ static class AudioTool
             Console.Error.WriteLine($"No bank {args[0]}");
             return 1;
         }
-        Dump(WwiseBank.ReadFile(path), args.Contains("--media"));
+        var bank = WwiseBank.ReadFile(path);
+        int wav = Array.IndexOf(args, "--wav");
+        if (wav >= 0 && wav + 1 < args.Length) return ExportWav(install, bank, args[wav + 1], args.Length > wav + 2 ? args[wav + 2] : null);
+        if (args.Contains("--decode")) return DecodeAll(install, bank);
+        Dump(bank, args.Contains("--media"));
         return 0;
+    }
+
+    static WwiseCodebookLibrary? Library(GameInstall install)
+    {
+        var exe = Path.Combine(install.Root, "kenshi_x64.exe");
+        var library = File.Exists(exe) ? WwiseCodebookLibrary.FromExecutable(exe) : null;
+        if (library is null) Console.Error.WriteLine($"No Wwise codebook library found in {exe}");
+        return library;
+    }
+
+    /// <summary>Converts every Vorbis WEM of the bank and reports failures and sample counts.</summary>
+    static int DecodeAll(GameInstall install, WwiseBank bank)
+    {
+        if (Library(install) is not { } library) return 1;
+        Console.WriteLine($"codebook library: {library.Count} codebooks");
+        int failed = 0;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        double seconds = 0;
+        foreach (var m in bank.Media)
+        {
+            try
+            {
+                var w = WwiseVorbis.Read(bank.MediaBytes(m));
+                var pcm = w.Decode(library);
+                seconds += (double)w.SampleCount / w.SampleRate;
+                int frames = pcm.Length / w.Channels;
+                float peak = pcm.Length == 0 ? 0 : pcm.Max(MathF.Abs);
+                if (frames != w.SampleCount || peak is 0 or > 4) Console.WriteLine($"  {m.Id:X8} frames {frames} of {w.SampleCount}, peak {peak:0.###}");
+            }
+            catch (Exception e) when (e is InvalidDataException or ArgumentException or IndexOutOfRangeException)
+            {
+                failed++;
+                Console.WriteLine($"  {m.Id:X8} FAIL {e.Message}");
+            }
+        }
+        Console.WriteLine($"{bank.Media.Count - failed} of {bank.Media.Count} decoded, {seconds:0.0} s of audio in {watch.Elapsed.TotalSeconds:0.00} s");
+        return failed == 0 ? 0 : 1;
+    }
+
+    /// <summary>Writes WEMs of the bank (one id, or all) as 16-bit WAV files into a folder.</summary>
+    static int ExportWav(GameInstall install, WwiseBank bank, string folder, string? id)
+    {
+        if (Library(install) is not { } library) return 1;
+        Directory.CreateDirectory(folder);
+        foreach (var m in bank.Media.Where(m => id is null || m.Id.ToString("X8").Equals(id, StringComparison.OrdinalIgnoreCase)))
+        {
+            var w = WwiseVorbis.Read(bank.MediaBytes(m));
+            var pcm = w.Decode(library);
+            var file = Path.Combine(folder, $"{m.Id:X8}.wav");
+            WriteWav(file, pcm, w.Channels, w.SampleRate);
+            Console.WriteLine($"{file}: {pcm.Length / w.Channels} frames, {w.Channels} ch, {w.SampleRate} Hz");
+        }
+        return 0;
+    }
+
+    static void WriteWav(string file, float[] pcm, int channels, int rate)
+    {
+        using var s = new BinaryWriter(File.Create(file));
+        s.Write("RIFF"u8);
+        s.Write(36 + pcm.Length * 2);
+        s.Write("WAVEfmt "u8);
+        s.Write(16);
+        s.Write((short)1);
+        s.Write((short)channels);
+        s.Write(rate);
+        s.Write(rate * channels * 2);
+        s.Write((short)(channels * 2));
+        s.Write((short)16);
+        s.Write("data"u8);
+        s.Write(pcm.Length * 2);
+        foreach (var x in pcm) s.Write((short)Math.Clamp(MathF.Round(x * 32767), -32768, 32767));
     }
 
     /// <summary>Every bank: version, sections, object types, decode failures, media and references that do not resolve.</summary>
