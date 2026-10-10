@@ -69,8 +69,8 @@ Types (the format's numbers): 1 state, 2 sound, 3 action, 4 event, 5 random/sequ
 8 bus, 9 layer (blend) container, 10 music segment, 11 music track, 12 music switch, 13 music random/sequence, 14 attenuation,
 18 effect share set, 19 effect, 20 aux bus. The reader decodes 2, 3, 4, 5, 6, 7 and 9 in version 112 banks, buses (8) in part ([below](#buses)), and keeps the rest raw.
 
-**Verified** (`Every_version_112_object_of_a_decoded_type_uses_exactly_its_size`): with the layouts below, all 2,492 objects of those types
-in the 22 version-112 banks decode to exactly their size. The field order is certain; the meaning of a field is **Observed** unless
+**Verified** (`Every_version_112_object_of_a_decoded_type_uses_exactly_its_size`): with the layouts below, all 2,492 objects of types 2-7
+and 9 in the 22 version-112 banks decode to exactly their size (the test also counts the 11 buses, which are decoded only in part). The field order is certain; the meaning of a field is **Observed** unless
 said otherwise.
 
 ### Shared pieces
@@ -266,7 +266,7 @@ gets the sample count so the decoder trims the end.
 The flags follow the Vorbis definition (the encoder writes exactly the neighbours' block types), but no signal test singles them out:
 at long/short transitions, forcing every flag to "short" gives identical output (both reconstruct completely there), while forcing them
 to "long" or swapping them changes it, and a mismatched window both attenuates and aliases, so energy measures do not decide.
-**Observed**; to be confirmed by listening.
+**Observed**, and confirmed by listening (2026-10-10: the owner heard the decoded beds and one-shots clean, no clicks).
 
 ## Version 88 (`SFX_Bank`)
 

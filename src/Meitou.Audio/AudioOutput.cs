@@ -21,6 +21,7 @@ public sealed unsafe class AudioOutput : IDisposable
     readonly Action<float[], int> fill;
     readonly Thread thread;
     volatile bool running = true;
+    bool failed;
 
     public int SampleRate { get; }
     public string DeviceName { get; }
@@ -77,7 +78,17 @@ public sealed unsafe class AudioOutput : IDisposable
         void Queue(uint buffer)
         {
             Array.Clear(mix);
-            fill(mix, BlockFrames);
+            if (!failed)
+            {
+                // A fault in the mixer stops the sound, never the host: report it once and play silence from then on.
+                try { fill(mix, BlockFrames); }
+                catch (Exception e)
+                {
+                    failed = true;
+                    Array.Clear(mix);
+                    Console.Error.WriteLine($"audio     stopped: {e.GetType().Name}: {e.Message}");
+                }
+            }
             for (int i = 0; i < mix.Length; i++) pcm[i] = (short)Math.Clamp(mix[i] * 32767f, -32768f, 32767f);
             fixed (short* p = pcm) al.BufferData(buffer, BufferFormat.Stereo16, p, pcm.Length * sizeof(short), SampleRate);
             al.SourceQueueBuffers(source, 1, &buffer);
