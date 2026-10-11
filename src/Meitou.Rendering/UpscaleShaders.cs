@@ -23,6 +23,7 @@ static class UpscaleShaders
         uniform vec2 uTan;                     // tan(fov / 2) * aspect, tan(fov / 2)
         uniform vec3 uRight, uUp, uBack;       // the view axes in the world
         uniform float uEyeY, uWaterY, uWaterReactive;
+        uniform vec4 uSun, uSunMotion;         // the sun's direction and its inner cos; its motion, outer cos, on (PostProcess.SunMotion.cs)
 
         // Distance along the view axis from a depth-buffer value: System.Numerics' projection gives clip depth 0..1 (D3D style), which GL's
         // depth range stores as 0.5..1.
@@ -50,6 +51,9 @@ static class UpscaleShaders
             if (uMode == 2) { fragColour = vec4(reactive, 0.0, 0.0, 1.0); return; }
             vec4 prev = toPrev * vec4(ndc, 2.0 * d - 1.0, 1.0);
             vec2 motion = ((ndc - uJitterNdc) - prev.xy / prev.w) * 0.5;
+            // The sky round the sun moves with the sun (PostProcess.SunMotion.cs).
+            if (uSunMotion.w != 0.0 && d >= 1.0)
+                motion += uSunMotion.xy * smoothstep(uSunMotion.z, uSun.w, dot(normalize(offset), uSun.xyz));
             fragColour = vec4(motion, depth, reactive);
         }
         """;

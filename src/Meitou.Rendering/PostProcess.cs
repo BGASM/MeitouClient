@@ -168,8 +168,10 @@ public sealed unsafe partial class PostProcess : IDisposable
     {
         public readonly SamplerSlot NearDepth, FarDepth;
         public readonly UniformHandle NearToPrev, FarToPrev, NearPlanes, FarPlanes, FullPlanes, JitterNdc, HasFar, Mode, Tan, Right, Up, Back, EyeY, WaterY, WaterReactive;
+        public readonly UniformHandle Sun, SunMotionUniform;
         public VelocityPass(GpuContext gpu) : base(gpu, UpscaleShaders.Velocity, "post velocity")
         {
+            (Sun, SunMotionUniform) = (P.Uniform("uSun"), P.Uniform("uSunMotion"));
             (NearDepth, FarDepth) = (P.Sampler("uNearDepth"), P.Sampler("uFarDepth"));
             (NearToPrev, FarToPrev, NearPlanes, FarPlanes, FullPlanes) = (P.Uniform("uNearToPrev"), P.Uniform("uFarToPrev"), P.Uniform("uNearPlanes"),
                 P.Uniform("uFarPlanes"), P.Uniform("uFullPlanes"));
@@ -990,6 +992,7 @@ public sealed unsafe partial class PostProcess : IDisposable
         // post-merge: the motion, the upscalers' depth and the water's reactivity in one dispatch (the vendor upscalers take the last two; TAA only the motion target).
         var external = ExternalFor(Options.Upscale.Kind);
         bool merged = MergeVelocity && MergeSupported;
+        PrepareSunMotion();
         if (merged) VelocityMerged(motion!, external is null ? null : upscaleDepth!, external is null || WaterHeight is null ? null : reactive!);
         else Velocity(motion!, 0);
         if (ObjectMotion is { } objectMotion)
@@ -1090,6 +1093,8 @@ public sealed unsafe partial class PostProcess : IDisposable
         v.P.Set(v.EyeY, eyeNow.Y);
         v.P.Set(v.WaterY, WaterHeight ?? float.MinValue);
         v.P.Set(v.WaterReactive, WaterReactive);
+        v.P.Set(v.Sun, sunMotion.Sun);
+        v.P.Set(v.SunMotionUniform, sunMotion.Motion);
         Draw(v.P, target);
     }
 

@@ -35,6 +35,7 @@ static partial class WorldApp
         }
         if (post.FogVrsSupported) AbToggles.Register("fog-vrs", () => post.FogVrs, v => post.FogVrs = v, "variable-rate shading where the fog hides the surface: the opaque scene passes shade 2x2 or 4x4 pixels with one fragment (MEITOU_FOG_VRS=a,b the opacities); B: every pixel shaded");
         AbToggles.Register("layer-merge", () => post.MergeLayers, v => post.MergeLayers = v, "the light shafts' apply, the fog volumes and the SSAO onto the scene in one pass (A) against three passes (B)");
+        AbToggles.Register("sun-motion", () => post.SunMotion, v => post.SunMotion = v, "the sky round the sun moves with the sun in the motion vectors (A) against the camera's motion alone (B)");
         AbToggles.Register("fog-half", () => post.FogHalf, v => post.FogHalf = v, "with the merged layers, the fog volumes at half the render size, upsampled by depth (A) against full size (B)");
         AbToggles.Register("shafts-half", () => post.ShaftsHalf, v => post.ShaftsHalf = v, "with the merged layers, the light shafts' apply at half the render size too, in the fog volumes' texture, upsampled by depth (A) against full size (B)");
         AbToggles.Register("layers-lean", () => post.LeanLayers, v => post.LeanLayers = v, "with the layers at half size, the merged pass only upsamples and the few pixels no half-size texel fits are drawn by a second pass tested by a mask depth (A) against one pass doing both (B; MEITOU_LAYERS_LEAN=0)");
