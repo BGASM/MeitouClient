@@ -84,6 +84,18 @@ public sealed unsafe partial class ShadowPass : IDisposable
     public VramGuard? Guard { get; set; }
     /// <summary>The distance past which the weather fog hides everything (<see cref="FogVolumes.AtmosphereDistance"/>), set each frame by the caller; shortens the range in Meitou mode.</summary>
     public float? RangeCap { get; set; }
+    /// <summary>On: the range is also capped at the placed fog block's hide distance (<see cref="SetFogHide"/>); the <c>shadow-fogcap</c> A/B switch.</summary>
+    public bool FogCapEnabled { get; set; } = Environment.GetEnvironmentVariable("MEITOU_SHADOW_FOGCAP") != "0";
+    readonly ShadowFogCap fogCapState = new();
+    /// <summary>The cap from the placed fog block this frame (<see cref="ShadowFogCap"/>), null for none.</summary>
+    public float? FogCap { get; private set; }
+
+    /// <summary>Called once a frame with <see cref="FogVolumes.ShadowHideDistance"/> (null: none).</summary>
+    internal void SetFogHide(float? hide)
+    {
+        if (!FogCapEnabled) { fogCapState.Reset(); FogCap = null; return; }
+        FogCap = fogCapState.Update(hide);
+    }
     /// <summary>The range the cascades are fitted to and the casters are culled by: <see cref="Settings"/>' range, clamped by the guard.</summary>
     public float EffectiveRange
     {
@@ -91,6 +103,7 @@ public sealed unsafe partial class ShadowPass : IDisposable
         {
             float range = Settings.Range, scale = Guard?.RangeScale ?? 1f;
             if (Meitou && RangeCap is { } cap) range = MathF.Min(range, cap);   // beyond the weather fog's distance nothing shows (FogVolumes.AtmosphereDistance)
+            if (Meitou && FogCap is { } fog) range = MathF.Min(range, fog);   // and beyond the placed fog block's hide distance (FogVolumes.ShadowHideDistance)
             return scale >= 1f ? range : Math.Max(Math.Min(range, KenshiShadows.DefaultRange), range * scale);
         }
     }

@@ -62,6 +62,14 @@ internal sealed class FogVolumes
     /// The shadow cascades' far distance is clamped to it (<see cref="ShadowPass.RangeCap"/>).</summary>
     public float? AtmosphereDistance => atmosphereRadiusSquared > 0 ? MathF.Sqrt(atmosphereRadiusSquared) : null;
 
+    /// <summary>
+    /// The distance beyond which the placed fog block the eye is in hides every pixel of the view: the cull's radius when the block also hides the sky in
+    /// every direction of the view (<see cref="SkyHidden"/>, so each ray runs inside it for at least that far and its fog is opaque past it, whether or not a
+    /// surface lies inside the block); null otherwise. The shadow range is capped to it (<see cref="ShadowPass.SetFogHide"/>): a receiver within the
+    /// distance has a view depth under it.
+    /// </summary>
+    public float? ShadowHideDistance => occluder is not null && SkyHidden ? CullRadius : null;
+
     /// <summary>The F11 / log text of the cull (null when it is off for this view): what hides things and from how far, and the counts left out.</summary>
     public string? DescribeCull()
     {

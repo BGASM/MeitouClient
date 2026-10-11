@@ -1312,6 +1312,7 @@ static class WorldFrame
         }
         StageClock.Lap(13);
         if (gpu.Shadow is not null) gpu.Shadow.RangeCap = gpu.FogVolumes?.AtmosphereDistance;   // the cascades end where the weather fog hides everything
+        gpu.Shadow?.SetFogHide(gpu.FogVolumes?.ShadowHideDistance);   // or where the placed fog block the eye is in hides the whole view
         if (gpu.Shadow is not null) { gpu.Shadow.Temporal = gpu.Post?.Temporal == true; DrawShadows(gpu, camera, render, light, rw, rh, gpu.Sky.ShadowSunHeight); }
         StageClock.Lap(12);
         gpu.Lamps?.Update(eye);
