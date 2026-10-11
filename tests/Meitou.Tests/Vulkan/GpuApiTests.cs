@@ -184,7 +184,8 @@ public class GpuApiTests
         ["sky simple"] = "4C48F27F2EFC495E4B81B6421F095B12",
         ["sky"] = "0972A032C1C30EEF65513C87C81CBCCA",
         ["water"] = "8AD06469B9CA4D8ED1DDCEA8DFF07308",
-        ["water meitou"] = "A47F5E3490100D950F0AF4DB9843479E",
+        // Refreshed 2026-10-11 for the Meitou water optimization branches and explicit gradients.
+        ["water meitou"] = "BD756C955B7037BA2AF248070EFA3696",
         ["debug overlay"] = "AE37E44A4CF61D8AE0E36CD0364EE1A2",
         ["terrain patch"] = "5A7D7246C3197B774046DCB4474F5F35",
         ["terrain mesh"] = "60B60AF6E8913A2269623E476D97C248",

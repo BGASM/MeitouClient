@@ -12,8 +12,8 @@ Part of the world view of `meitou-viewer` (and the game, which shares `src/Meito
   see-through near the camera, and it is opaque beyond 4000 units, as in the game. With reflections (default; `R` or `--no-reflections` toggles) it reflects the mirrored scene (`ReflectionPass`: sky, terrain, objects at 2000 units or nearer (Meitou; the game-like 3000 with `--ab refl-cull` off) drawn about Y = 100 into a half-resolution RGBA16F texture, drawn 4x multisampled and resolved (without it the mirrored shoreline showed stair steps, magnified by the normal-map distortion), with oblique near-plane clipping at the water; the Fresnel and normal-map distortion are the old shader's); without, it reflects the sky colour. The glint widens and dims with distance and is capped, so a far sea shows no blown-out disc.
 - **Meitou water** (the `water` switch, `F9`, default on; `--faithful water` is the game's flat water above, unchanged to the pixel;
   `WaterRenderer` with `WaveSet`, `WaterFoam`; branch `meitou-water`, 2026-10-08). Visual only: the water the game uses stays a plane at Y = 100.
-  - *Mesh.* A polar grid round the eye instead of the quad (`--water-grid <n>` segments, default 256, 128 for integrated GPUs): rings
-    from 1 unit out to 6000 spaced as finely across as along (about 84000 vertices at 256), then one ring at the plane's extent. One draw.
+  - *Mesh.* A polar grid round the eye instead of the quad (`--water-grid <n>` segments, default 256; 128 for lower detail, 512 for finer geometry): rings
+    from 1 unit out to 6000 spaced as finely across as along (23553 vertices at 128, 92417 at 256), then one ring at the plane's extent. One draw.
   - *Open water.* Tessendorf's FFT ocean (`OceanSpectrum`, `OceanWaves`, since 2026-10-08; it replaced four Gerstner waves whose
     wavelength and speed changed with the wind, which made a change of weather look like a change of game speed). A fetch-limited JONSWAP
     spectrum (fetch 30 km, wind U = weather wind speed / 10 m/s, 1.5 to 20) spread round the wind by Q(s) |cos(θ/2)|^2s (s after
@@ -139,7 +139,7 @@ Part of the world view of `meitou-viewer` (and the game, which shares `src/Meito
     0.286 / 0.292 / 0.262 ms at distance 350 (clock 0, 3) and 800, against 0.271 / 0.273 / 0.260 ms before: about +0.015-0.02 ms near the
     shore. **Unknown**: how it moves in a running game (judged from stills a fraction of a second apart).
   - *Rivers* (2026-10-08, `RiverFlowBake`, `FlowMapTests`, `RiverFlowTests`). The game's `flowmap.png` does not follow the river channels ([formats/terrain.md](formats/terrain.md)), so the viewer bakes its own map at load from the whole-world heights the world already holds (one texel per flow-map texel, 144 units, RGBA8, 16 MB, about 0.45 s on the CPU, `MEITOU_RIVERS=0` leaves it out for comparisons). Water is a river where its half-width (the largest distance to land within 5 texels) is under 3 texels (fading out to 6: a lake or the sea is not a river); the river texels' axis is the principal axis of the river texels within 10 texels, and has to be clearly elongated (ponds and marsh are not); the sense comes from the valley: the lowest land beside each river texel is regressed along the axis, the senses are made consistent along each connected river (spread from texel to texel), and one vote of the clamped slopes per river decides which way is down (a river shorter than 24 texels, or whose vote is not clearly downhill, is no river). R, G the direction, B the half-width, A the weight, dilated three texels onto the banks. In the shader (`Shore.river`, `flow`, `speed`): the direction is refined by the shore field's channel axis (sampled 40 units each way) only within about 25 degrees of the map and in a narrow channel (half-width under 2-4 texels; round a pond the isolines circle and the first version, which trusted them within 50 degrees, made the water spin in a pinwheel); where neighbouring map texels disagree the filtered direction shortens and the river fades there to still water (before, it snapped to +x along the texel grid: the straight seams). The bake smooths the fitted directions (4 passes of 3 × 3 weighted averaging) and fades the weight where the directions within 2 texels disagree (mean length under 0.55-0.85); **Verified** on the game's heights (`RiverFlowWorldTests`): of about 16 000 neighbouring texel pairs with weight none turns by more than 37 degrees (2 before the smoothing, so the seams and the pinwheel came from the shader); the speed falls from 30 (narrow) to 14 units a second (wide), times 1.5 in the shallows to 0.8 beyond 60 units depth. In a river the normal map's three layers are carried with the flow by two cross-faded phases (2.5 s cycle, renewed where their weight is zero, so the pattern does not stretch where the flow turns); the foam's two scales are stretched three and a half times along the flow into streaks and carried the same way, with a thin trace everywhere and a white rush in rapids (fast, shallow stretches, in patches of the foam noise); the open waves, the breakers and the swash are switched off by the river weight (`oceanScale` and the shore's exposure are multiplied by 1 - weight). `MEITOU_WATER_DEBUG=2` shows the weight (red) and flow direction (green, blue). **Observed** in pictures (SW rivers at (-65016, 87768) and (-99144, 97416); the NW river): the stretches carry coherent directions along their bends, and the surface moves (two screenshots 0.8 s apart differ by a mean of 2.9 of 255 over the picture); the direction's sign is **Unknown** to be right (no ground truth: the game's own rivers flow nowhere visible). The real rivers are shallow streams (about a decimetre to a metre of water) that mostly show the ground through them, so the effect is subtle; coverage is partial: rivers whose water mask is broken into pieces under 24 texels long at this resolution, or whose banks give no clear fall, stay still. Cost (**Observed**, `--fly-pipelined --fly-benchmark 300` at (-99144, 97416), 1920 × 1080, RTX 4070 shared with other jobs): the water pass 0.08 ms with rivers against 0.06 ms without (stage line 0.16 against 0.11); +16 MB video memory.
-  - *Light and colour* (2026-10-08). **Refraction**: before each of its draws (one per depth slice) the scene pass ends, the slice's colour
+  - *Light and colour* (2026-10-08). **Refraction**: before each draw in a depth slice that can show transmitted colour or wet sand, the scene pass ends, the slice's colour
     is copied at half size (`CaptureRefraction`, one blit), and the pass opens again; the water looks the copy up bent by its normal (less
     in thin water and far off) and composites itself opaque, instead of blending over the scene. `--no-water-refraction` keeps the
     blending (the game's alpha from depth). **Absorption**: what is under the water is dimmed per channel by exp(−σ L), σ = the biome's
@@ -257,3 +257,96 @@ pairs (+0.06 ms); the GPU total moved by less than the run-to-run noise (6.27 / 
 
 - **No sun shadows in the reflection** (Meitou; `ReflectionPass.NoShadows`, default on, `--ab refl-shadows`; Faithful shadows keep them). While the pass records, `GpuContext.Globals.OverrideBlock` swaps the frame's `KenshiShadowReceiver` block for an all-zero one (the shadows-off block), so every receiver (terrain, objects, foliage, the atmosphere's sun term) sees a lit surface and `kenshiShadow` returns 1 before touching the map; no new pipelines, no shader change. What the game does for its reflection target is **Unknown**, so Faithful (`ShadowPass.Meitou` false) keeps them as before. **Observed** (swamp target view, `--upscaler dlss --render-scale native`, 600 frames, `--ab refl-shadows`, period 1 and 16): the `reflection` GPU stage 0.53 to 0.46 ms (-0.06 +-0.01 and -0.06 +-0.02, median -0.05/-0.06); less than the 0.15 to 0.27 ms the receiver was estimated to cost in the pass (shadows.md), because the half-resolution mirror pass is mostly vertex, draw and fill bound. The frame total moved -0.33 and -0.17 ms in those runs but that includes shadow-scheduling noise from other work and is not attributable. Picture (`--upscaler off --no-particles --bench-motion still`, `MEITOU_REFL_AGE=0` so each side draws its own reflection): 1,692 pixels differ by 1/255 or more, none by 4, max 3 (the swamp's shadows are faint in the mirror; views with long tree shadows on the shore were not compared: **Unknown**).
 - **Multisampling** (`ReflectionPass.Samples`, default `DefaultSamples` = 4, unchanged; `--reflection-samples n`, `--ab refl-msaa` = the option's value against `MEITOU_REFL_AB_SAMPLES`, default 1). **Observed** (same view, 600 frames, `--ab refl-msaa`): the `reflection` stage 4 samples 0.46 ms, 2 samples 0.43 ms (-0.03 +-0.01), 1 sample 0.38 ms (4 against 1: -0.08 +-0.01, 2 against 1: -0.04 +-0.01 paired); so 4x costs 0.08 ms more than none at half resolution. Picture (stills, as above): 4 against 1: 14,005 pixels differ by 1/255 or more, 3 by 4, max 10; 4 against 2: 8,919, none by 4, max 3; 2 against 1: 13,334, 3 by 4, max 10. The swamp orbit has little mirrored shoreline, so the stair steps the earlier note describes were not looked for here (**Unknown** in views with a straight shore or buildings on it); the default is left at 4 for the user to decide.
+
+
+## Water optimizations (2026-10-11, water-optimization)
+
+**From the code** (`WaterRenderer`, `WorldFrame`): five changes to the Meitou water; Faithful keeps its flat quad.
+
+- The surf coordinates, envelopes and texture reads run only where the surf zone contributes or the pixel is swash.
+  River foam, open-water foam and the waterline edge remain independent of this branch.
+- The ocean strength is evaluated before the six fragment texture reads. Zero strength skips those reads; vertices
+  also skip displacement reads at zero strength. Texture gradients are explicit in the fragment branch.
+- The default polar grid is 128 segments, 23553 vertices / 46976 triangles instead of 256 segments,
+  92417 vertices / 184576 triangles. Its vertex mip selection still follows the grid spacing; fragment normals
+  retain the fine waves. `--water-grid 256` restores the previous density. This changes geometry and is not pixel-exact.
+- A slice with near plane at or beyond max(1.5 times the clamped see-through distance, 10000) skips the refraction
+  copy and its pass restart. The near-plane distance bounds the fragment's eye distance from below, transmission
+  is then zero, and swash has faded out; the ordinary blended path is opaque there. Increasing the clarity distance
+  restores the copy for the far slice. No heuristic based on terrain or reflection visibility is used.
+- Caustic reads are omitted beyond 2500 units, at depths of at most 1.5 units or with the sun below the horizon;
+  bubble reads are omitted beyond 600 units. The repeated floor height lookup reuses the shore's depth inside the world.
+
+`MEITOU_WATER_LEAN=0` or `--ab water-lean` disables the shader skips and slice-copy skip for comparisons.
+The mesh is selected at load, independently with `--water-grid`; the FFT resolution and reflection settings are unchanged.
+
+**Verified** (`MeitouWaterTests.Refraction_slice_keeps_transparent_floor_and_shore_runup`): the cutoff preserves
+near water, high-clarity far water and the shore's range even when the see-through distance is very short; the boundary
+at 15000 units for default clarity is excluded. The existing polar-grid test checks topology and winding for both densities.
+
+**Observed**, RTX 4070, 1600x900, upscaler off, texture quality 3, water clock 3 s, no particles: Port South
+(distance 900, pitch 30, yaw 180, time 16), old build `c5327ae` versus the shader/copy changes at grid 256:
+image-diff mean 0.0061/255, 0.001% of pixels over 12/255, maximum 19. Grid 256 versus 128 with the shader changes:
+mean 0.1220/255, 0.142% over 12, maximum 75; differences concentrate on water and its shoreline. These are stills,
+not a guarantee for all views or moving waves.
+
+**Unknown**: a reliable GPU saving. A 768-frame paired `water-lean` run at Shark (`--view swamp-rain --bench-motion still
+--size 1920x1080 --upscaler off --texture-quality 3 --water-grid 256 --ab-period 16`) was heavily disturbed by another
+viewer sharing the GPU (97% utilization, 11 GB used): water stage medians 0.23 ms on / 0.28 off, but scheduling stalls
+of roughly 67 ms dominated the means and paired deltas. Those timings do not establish a performance gain. The initial
+full-texture baseline aborted at the VRAM guard; all subsequent visual comparisons used texture quality 3 consistently.
+
+**Observed**, close unobstructed shore at (87627, -88100), distance 350, pitch 25, yaw 180, same clock,
+resolution and quality, objects/foliage off: old grid 256 against new default grid 128, mean 0.5372/255,
+1.448% of pixels over 12/255, max 123. Differences are on the moving water and shoreline; there was no visible
+faceting in the still. Motion and other wind conditions remain **Unknown**.
+
+**Observed**, synchronization-validation screenshots of the baseline and new build: zero errors during rendering,
+both report one leaked `VkImageView` at device destruction. This existing shutdown diagnostic is not fixed here.
+
+**Observed**, verification: Release build has zero warnings/errors; quick suite 1050 passed, water/ocean/native
+texture tests 22 passed. Full suite before refreshing the intentional Meitou water snapshots: 1351 passed,
+7 failed (two shader snapshots, four local save-fixture checks, one shore-bake timing assertion at 962 ms).
+After refreshing only the water entries, the final quick/GPU/snapshot selection has 1053 passed and two failures
+for foliage mesh, foliage depth and velocity hashes; those identical two failures were reproduced in the untouched
+`c5327ae` baseline. No save or foliage/velocity code is changed by this branch; the full suite is not green.
+
+
+### Shark A/B after the GPU became quiet (2026-10-11)
+
+**Observed**, RTX 4070, 1920x1080 native, upscaler off, default texture quality, forced `swamp rain no wind`,
+time 16, still camera `018C6C25C7309B75C4723B5747D78075406DF4113E00A00C46`. GPU utilization was 5% before
+measurement, with roughly 2 GB used before loading. The harness holds the water clock (one FFT dispatch per run),
+so these results measure surface/refraction work; they do not measure an animated ocean's whole per-frame cost.
+
+Same-process `--ab water-lean --water-grid 256 --ab-period 16 --bench-frames 1024` (A on / B off), GPU means:
+water 0.36 / 0.44 ms, paired delta -0.07 +/-0.01 ms; total 4.63 / 4.79 ms, delta -0.16 +/-0.09 ms.
+Wall frame 5.25 / 5.41 ms, delta -0.16 +/-0.38 ms (not significant); render-thread water 0.29 / 0.38 ms,
+paired delta -0.10 +/-0.03 ms. This isolates the four shader/copy changes at the original mesh density.
+
+All five together: alternating processes of baseline `c5327ae` (grid 256) and new defaults (grid 128),
+768 frames per process, two pairs:
+
+| Metric, mean ms | Old 1 | New 1 | Old 2 | New 2 |
+| --- | ---: | ---: | ---: | ---: |
+| GPU water | 0.4123 | 0.3382 | 0.4591 | 0.3521 |
+| GPU total | 4.6577 | 5.0839 | 5.2910 | 4.9851 |
+| Wall frame | 5.5919 | 8.1413 | 6.2419 | 7.2226 |
+| CPU total | 4.8778 | 7.5134 | 5.2504 | 6.6787 |
+
+Water is 18% / 23% cheaper on the GPU. Total frame results are inconsistent and the optimized processes have
+higher CPU times elsewhere: in pair 2 foliage 1.76 -> 2.32 ms, shadows 1.14 -> 1.43, terrain 0.13 -> 0.32,
+GI 0.31 -> 0.40. The separate-process FPS decreased; these runs do not establish an overall FPS benefit or
+attribute the CPU increase to the water change. The same-process GPU water gain above is the stronger evidence.
+Temporary result prefix: `%TEMP%/water-shark-ab-clean` and `%TEMP%/water-shark-old1`, `new1`, `old2`, `new2`
+(JSON, frame CSV and logs). **Unknown**: moving-camera, animated-wave and DLSS gains.
+
+
+### Mesh quality correction (2026-10-11)
+
+**Observed**: the owner judged the optimized water noticeably worse in the interactive Shark view with DLSS at
+native render scale. The 128-segment mesh was the change with a known visual tradeoff; its earlier screenshot
+checks do not establish acceptable quality in motion. The default is restored to 256 segments. `--water-grid 128`
+remains an explicit lower-detail option; the four shader/refraction optimizations remain enabled. The mesh's role
+in the reported regression is an **Unknown** inference until the owner compares the restored-density view.
+The 128-grid measurements above describe the earlier candidate, not the current default.

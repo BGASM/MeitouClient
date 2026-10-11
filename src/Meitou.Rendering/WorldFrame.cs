@@ -248,7 +248,7 @@ sealed class WorldOptions
           --time-speed <h/min>     the viewer's clock runs on, game hours per real minute (default 0: stopped; Tab slider)
           --no-water               leave out the water
           --water-seconds <s>      start the Meitou water's clock at s game seconds (pictures of the waves at a moment; default 0)
-          --water-grid <n>         the Meitou water grid's segments round the eye (default 256; 128 for integrated GPUs, 512 finer)
+          --water-grid <n>         the Meitou water grid's segments round the eye (default 256; 128 lower detail, 512 finer)
           --water-ocean <n>        the Meitou water's FFT size per cascade: 64, 128 or 256 (default 256; 128 for integrated GPUs, a quarter of the work)
           --no-water-refraction    the Meitou water blends over the scene instead of refracting it (saves a copy of the scene per depth slice)
           --no-reflections         the water reflects only the sky colour, not the mirrored scene (R toggles; the same as --water-reflection 0)
@@ -1437,8 +1437,8 @@ static class WorldFrame
                 post.CharactersDrawn = characters.DrawnCharacters > 0;
                 StageClock.Lap(7);
             }
-            // The Meitou water refracts the slice's opaque scene: the pass ends for a copy of its colour and opens again for the water.
-            if (render.Water && gpu.Water is { Meitou: true, Refraction: true } refracting)
+            // Transparent water refracts the slice's scene. Fully opaque distant slices need no copy or pass restart.
+            if (render.Water && gpu.Water is { } refracting && refracting.NeedsRefraction(near))
             {
                 host.Close();
                 refracting.CaptureRefraction(post.SceneColour);
