@@ -68,7 +68,9 @@ static partial class WorldApp
             frameWatch.Restart();
             // With weather particles the frame clock runs (1/60 s a frame, in the draw's time units of 600 s) so they simulate; without, it stays 0 as before.
             float clock = gpu.Particles is { Groups.Count: > 0 } ? (float)(i / 60.0 / 600) : 0;
-            { Draw(gpu, scene, camera, render, w, h, o.Hour, clock, o.FogDistance); EndFrame(context); }
+            // --time-speed: the hour runs on as in the viewer (game hours per real minute), at 1/60 s a frame.
+            float hour = o.TimeSpeed > 0 ? (o.Hour + o.TimeSpeed * i / 3600f) % 24 : o.Hour;
+            { Draw(gpu, scene, camera, render, w, h, hour, clock, o.FogDistance); EndFrame(context); }
             double cpuMs = frameWatch.Elapsed.TotalMilliseconds;
             if (i % 500 == 0 || i <= 4) Console.WriteLine($"gpu       frame {i}: {context.Frame.Stats}");
             cpu.Add(cpuMs);
