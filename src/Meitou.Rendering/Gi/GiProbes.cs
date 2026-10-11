@@ -44,6 +44,9 @@ internal sealed unsafe class GiProbes : IDisposable
     readonly Vector4[] grid = new Vector4[Cascades * 2];
     readonly float[] baseHeights = new float[Columns * Columns * Cascades];
     readonly (int X, int Z)[] placed = new (int, int)[Cascades];
+    readonly bool[] basesPlaced = new bool[Cascades];
+    /// <summary>True (default; `MEITOU_GI_BASES_FULL=1` off): when a grid scrolls only the columns that scrolled in have their base heights sampled again (the result is the same as sampling them all).</summary>
+    public bool IncrementalBases { get; set; } = Environment.GetEnvironmentVariable("MEITOU_GI_BASES_FULL") != "1";
     object? placedHeights;
     readonly Random random = new(1);
     int slot;
@@ -251,12 +254,18 @@ internal sealed unsafe class GiProbes : IDisposable
             grid[c * 2] = new Vector4(ox * s, oz * s, s, sy);
             grid[c * 2 + 1] = new Vector4(Mod(ox, Columns), Mod(oz, Columns), 2 * s, 0);
             // The bases only change when the grid scrolls or the terrain's fine window is swapped.
-            if (placed[c] == (ox, oz) && ReferenceEquals(placedHeights, heights.Fine)) continue;
+            bool sameHeights = ReferenceEquals(placedHeights, heights.Fine);
+            if (placed[c] == (ox, oz) && sameHeights) continue;
+            // A column that stays in the window keeps its tile (toroidal) and its height (the snapshot is immutable): only the columns that scrolled in are sampled.
+            var (oldX, oldZ) = placed[c];
+            bool keep = IncrementalBases && sameHeights && basesPlaced[c];
             placed[c] = (ox, oz);
+            basesPlaced[c] = true;
             moved = true;
             for (int k = 0; k < Columns; k++)
                 for (int i = 0; i < Columns; i++)
                 {
+                    if (keep && (uint)(ox + i - oldX) < Columns && (uint)(oz + k - oldZ) < Columns) continue;
                     float x = (ox + i) * s, z = (oz + k) * s;
                     // The lowest ground under the column's cell, so that the bottom probe stands above it all.
                     float h = heights.HeightAt(x, z);

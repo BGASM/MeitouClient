@@ -43,7 +43,7 @@ reflection reads neither storage images nor acceleration structures, and pushes 
 
 *From the code.*
 
-- **Origin.** Positions in the structures are relative to `GiScene.Origin`, the eye rounded to 64 units, which follows the eye only once it is more than 1024 units away (2026-10-11, see "Cost of the GI stage"). Each frame's instance transforms
+- **Origin.** Positions in the structures are relative to `GiScene.Origin`, the eye rounded to 64 units, which follows the eye only once it is more than 1024 units away (2026-10-11, see "Cost of the GI stage"; and then only on the frame of a commit, see "The moving camera"). Each frame's instance transforms
   are offset by it, so floats keep their precision anywhere in the world, which is 1.47 M units across.
 - **Terrain.** Two height-field grids around the eye: 256 × 256 quads at 16 units (4096 across) and at 160 units (40960 across). Each is
   sampled from the CPU `HeightSnapshot` on a worker, uploaded and built into a bottom level. A grid is rebuilt when the eye has moved an
@@ -64,7 +64,7 @@ reflection reads neither storage images nor acceleration structures, and pushes 
     level the mesh holds (or that level's manual LOD mesh), one geometry per part.
   - A structure unused for 600 frames is dropped. Evicting the mesh itself does not invalidate it: a built structure no longer reads its
     inputs.
-- **Top level.** One per frame slot, sized for 16384 instances and rebuilt in place (built to trace fast) when its instances are not those of its last build (2026-10-11: with the eye still or walking that is rare, see "Cost of the GI stage"; it was every frame, built fast). Instances and
+- **Top level.** One for all frame slots (2026-10-11, "The moving camera"; it was one per slot), sized for 16384 instances and rebuilt in place (built to trace fast) when its instances are not those of its last build (2026-10-11: with the eye still or walking that is rare, see "Cost of the GI stage"; it was every frame, built fast). Instances and
   geometry records are written into host-visible buffers of the slot.
 - **Geometry records.** 32 bytes per geometry: vertex address, index address, stride, kind. A hit's record is the instance's custom index
   plus the geometry index. The shader fetches the triangle's indices and positions with `GL_EXT_buffer_reference` (`uvec2` addresses,
@@ -445,8 +445,87 @@ A against B at Shark (476 k / 7.9 k / 892, max 33) is exactly the old build's ow
 over 12, max 38, because 32 rays settle in about twice the frames: after a teleport or a load the GI is not at its final value for about a second longer. **Unknown:** the probes' noise in motion (flicker from frame to frame at 32 rays) was measured only as the stills' difference above.
 Vulkan validation (`MEITOU_VK_VALIDATION=sync`, a flight at 20 units a frame with the reuse): 0 errors.
 
-**Open:** the alpha test of the leaves (about a fifth of what is left); the resolve (0.09); a fast camera, where the structure is built every frame (the instances change faster than the origin
-can lag; a refit does not help, the count changes); fewer rays for cascade 1 (16000 long) than for cascade 0.
+**Open:** the alpha test of the leaves (about a fifth of what is left); the resolve (0.09); a fast camera, where the structure was built every frame (done 2026-10-11, see "The moving camera");
+fewer rays for cascade 1 (16000 long) than for cascade 0.
+
+## The moving camera (2026-10-11, `perf-gi-moving`)
+
+Meitou's own optimisations; the picture is meant not to change. **Observed**, RTX 4070, Shark in the swamp rain (`--world --camera-code
+018C6C25C7309B75C4723B5747D78075406DF4113E00A00C46 --radius 2 --size 1920x1080 --upscaler dlss --render-scale native`), master 48c601b plus the changes below.
+
+**It was not the probe updates.** The `gi` stage costs 0.26 ms with the camera still and 0.55 to 0.6 orbiting (`--bench-motion orbit`, the eye moves 135 units a frame). The first guess was that the
+probes are cached while still and redone while moving. They are not: the pass meter (`MEITOU_PASS_STATS=1 MEITOU_PASS_STATS_SKIP=80 ... --fly-benchmark 400`, `--fly-speed 0` against `--fly-speed 135`; serialised, GPU ms)
+has the trace at 0.19 and 0.15 to 0.17, the blend at 0.06 to 0.07 and 0.06 to 0.08: the same work. All of the growth is the traced scene being built:
+
+| Part (serialised pass meter, GPU ms) | still | 135 units a frame |
+| --- | --- | --- |
+| `gi scene blas` (bottom levels) | 0.00 to 0.01 | 0.14 to 0.20 |
+| `gi scene` (top level) | 0.01 | 0.10 to 0.13 |
+| `gi trace` + `gi blend` | 0.26 | 0.22 to 0.27 |
+
+Taking one part away at a time (throw-away switches, 135 units a frame): the fine terrain grid's rebuild is 0.11 of the bottom levels' 0.14 to 0.15 (never rebuilt: 0.04), the coarse grid 0.02, and new
+object structures about 0 (no new ones after frame 150: 0.14 against 0.15). The top level was built on 401 of 401 frames: the object selection changed every frame (its snap is 128 units), the foliage block every
+second, a terrain grid every fourth, and each change had to be built once per frame slot. A **budget of probe updates per frame was therefore not built**: it would have cut the still cost too, changed how fast the
+probes settle, and left the 0.3 ms alone.
+
+**Changes** (each a Meitou switch, default on; `--ab <name>`, side A the change; `MEITOU_...=0` turns it off):
+
+| Switch | What |
+| --- | --- |
+| `gi-terrain-refit` (`MEITOU_GI_TERRAIN_REFIT=0`) | a terrain grid that follows the eye is refitted in place instead of rebuilt into a new structure |
+| `gi-lazy-scene` (`MEITOU_GI_LAZY_SCENE=0`) | the scene changes in steps: object selection, foliage block, origin and finished terrain grids all on the frame the eye crosses into another 1024-unit cell |
+| `gi-top-shared` (`MEITOU_GI_SHARED_TOP=0`) | one top-level structure for all frame slots |
+| none (`MEITOU_GI_BASES_FULL=1` turns it off) | only the probe columns that scrolled in have their base heights sampled (render thread; identical values) |
+
+- **`gi-terrain-refit`** (`AccelerationStructure.RefitBottom`, `GiScene.TerrainGrid`). A grid's triangles never change, only its heights at the new place; the layout across is the same, so the tree built for it
+  stays a good one. The structure is built with `ALLOW_UPDATE` (and keeps its scratch buffer), and the next 15 times the grid has to move, the new heights are written into the vertex buffer **in place** and the structure
+  is updated **in place** (update mode, source = destination); every 16th time it is built anew, so the tree does not drift. In place is safe because every frame's upload command buffer starts with a full barrier
+  (`FrameLoop.BeginFrame`): the frame's uploads and builds run after the traces of the frames before. The vertex buffer's address, and so the geometry record, stays. A refitted bottom level is not what the top levels
+  were built over, so the slots' "built over" bytes are cleared and each top level is built again before it is traced. **Verified**: `RayQueryTests.A_refitted_bottom_level_is_hit_where_its_vertices_moved` (rays hit the moved
+  triangle at its new height after the refit).
+- **`gi-lazy-scene`** (`GiScene.LazyScene`, `EpochSize`). Six things changed the top level's instances on their own cadence (selection snap 128 units, foliage 250, fine grid 512 plus the frames its job took, the coarse
+  grid, the origin 1024), so any speed above a walk changed them every frame. Now they change together, on the **commit**: the frame the eye is in another 1024-unit cell than at the last commit (a cube; the eye crosses one
+  every 6 frames orbiting). The objects are selected around the cell's centre (range as before, widened by 111), the foliage block is rebuilt around the eye, the origin follows when the eye is 1024 away, and a terrain
+  grid whose sampling job has finished is installed (a grid is asked for when the eye is a 16th of its side from the centre sampled last instead of an 8th, and installed at the next commit, or after 8 frames without
+  one, so that a camera that has stopped is not left with a stale grid). Between commits the instances are byte for byte those of the last build and the top level is not built (with `ReuseTop`, as before).
+  **The price**: what is traced lags the eye by up to a cell. An object within the range is certainly in only to 6111 less up to 887 units (the cube's half diagonal) and the foliage to 4000 less up to about 1450 (the
+  eye's way across a cell after the commit); the instances beyond that are missing until the next commit, and the fine terrain grid, the coarse one underneath, is up to a cell and a few frames late. This is far geometry that
+  only the long rays of the far cascade, or of the near probes' last 1000 units, reach.
+  512-unit cells instead of 1024 save half as much (see Measured).
+- **`gi-top-shared`** (`GiScene.SharedTop`). The top level was one per frame slot, so each change was built once per slot (twice). The full barrier at the start of every frame orders the frames' GPU work, so one structure
+  is enough: the instances and the records stay per slot (the CPU writes them), the structure and what it was built over are shared.
+- **Incremental base heights** (`GiProbes.IncrementalBases`; render thread only). When a probe grid scrolled, `GiProbes.Update` sampled the base height of every column again (1024 columns, 5 `HeightAt` each); the cascade
+  of 128 units scrolls nearly every frame at 135 units a frame. A column's tile is its world column modulo the grid and the height snapshot is immutable, so only the columns that scrolled in need sampling.
+  **Verified** identical: a check against the full sampling after every scroll of a 400-frame flight at 135 units a frame, 393 scrolls, 0 columns differ. Render thread, the `gi` stage 0.78 to 0.34 ms (pass meter;
+  the `gi probes barrier` row, which holds the CPU work before the probe passes, 0.38 to 0.06).
+
+**Measured** (**Observed**, `--bench-frames 768`, quiet card, `gi-top-reuse`'s method: the same binary with the four env switches off against on, run alternately in separate processes, `--bench-compare`, delta = on - off; the card was shared with other
+sessions' viewers, which hit one orbit run, so it is listed apart):
+
+| View | `gi` stage (GPU) | GPU total | Frame | Render thread, total / `gi` |
+| --- | --- | --- | --- | --- |
+| orbit, three clean runs | 0.53 to 0.35 (-0.18 +-0.02, each) | -0.17, -0.16, -0.18 (+-0.07) | -0.17, -0.27, -0.36 (+-0.13) | -0.23, -0.39, -0.58 (+-0.12) / 0.63 to 0.28, 0.64 to 0.28, 0.65 to 0.28 |
+| orbit, a run another viewer disturbed (frame 7.19 and 9.24, GPU total 6.82 and 8.53) | 0.54 to 0.48 | not readable | not readable | -0.29 for `gi` |
+| still, two runs | 0.26 to 0.27, 0.26 to 0.26 | +0.05, 0.00 (+-0.05) | +0.01, +0.01 | `gi` 0.14 to 0.14 |
+| `--bench-motion fly --fly-speed 16` (walking), the second of two runs (the first was disturbed by another viewer: GPU total 6.15 and 7.40) | 0.34 to 0.30 (-0.04 +-0.01) | -0.05 (+-0.05) | -0.04 (+-0.09) | -0.03 (+-0.08) / 0.19 to 0.15 |
+
+- `--ab gi-lazy-scene` alone (B: the old steps, the other three on), orbit, 768 frames, period 16, `gi` stage A against B: **1024-unit cells** 0.35 against 0.42 and 0.35 against 0.43 (**-0.08 +-0.02**, medians 0.32 against 0.42), GPU total -0.15 and -0.20
+  (+-0.16), render thread `gi` -0.15 and -0.12; **512-unit cells** 0.41 against 0.44 (a disturbed run) and 0.39 against 0.42 (-0.03 +-0.02, median 0.34 against 0.42). Still, both sides: `gi` 0.26 against 0.26 (0.00), the pictures equal. Hence the 1024.
+- **What is left of the 0.09 ms between still (0.26) and orbit (0.35)**: the refit of the fine grid on every commit, the coarse grid's, the object structures that come into range, the top level built on each commit (about one frame in six), the
+  invalidate pass when a cascade scrolls (every frame orbiting), and the probes that start over where a column scrolled in.
+- The pass meter's `gi scene blas` row (135 units a frame, the fine and the coarse grid and any new object structures) is 0.05 and 0.06 with the refit and 0.14 and 0.14 without it (two runs each, the same session; the trace is unchanged at 0.15 to 0.17).
+- **The probe passes were not touched**: trace 0.15 to 0.17 and blend 0.06 in the pass meter, still or moving.
+
+**Pictures** (**Observed**; `--screenshot --upscaler off --no-particles` at 1920 x 1080 after `--fly-to` three arrival points 3000 to 6000 units from Shark, 135 units a frame as the flight runs, all four switches off against on; the A/B harness's own
+stills in motion are not comparable, the two sides stand at different places): mean 0.0047, 0.0019 and 0.0687, pixels over 12/255 0.000 %, 0.000 % and 0.002 %, max 27, 28 and 20, against 0 for a repeat of one build (two identical shots); at point 3 the differences are in the canopies at the right edge of the view, a few 1/255 steps of light under trees. With 512-unit cells the same three points gave mean 0.0002, 0.0202 and 0.0431, max 10, 32 and 21. Still camera,
+`--ab gi-lazy-scene`: 647 k pixels by 1/255, 1.1 k by 4, 0 by 12, max 10, the same as a no-op switch (the rain's dither). **Not looked at**: the light's change as trees and objects come into the scene at a commit, in motion, in the interactive viewer.
+Vulkan validation (`MEITOU_VK_VALIDATION=sync` and `=1`, `--fly-benchmark 400 --fly-speed 135`, all four on): 0 errors (the exit message about 1 leaked object is there with all four off as well).
+
+**Not done / tried**:
+- A **budget of probe updates per frame** (priority by visibility, distance and age): the premise (probe updates cost more moving) did not hold, see above.
+- The terrain grid's build flag **`PREFER_FAST_BUILD`** (one flag): tried once in the pass meter, inside the noise of two runs and superseded by the refit; not kept.
+- **Object structures**: no new structure for objects after frame 150 (a throw-away switch): no change, so they are not the cost.
+- **Open**: the fine grid in tiles (a bottom level per 1024-unit square, built once and kept, only the squares that enter built) would not need the refit and would keep the fine terrain complete up to the cell; every 16th refit is a full build (about 0.4 ms) that could be spread; the orbit's invalidate pass and the starting-over probes were not measured on their own.
 
 ## Resolve (`--gi-resolve <n>`, `Gi/GiResolveShaders.cs`, `PostProcess.RunGiResolve`)
 

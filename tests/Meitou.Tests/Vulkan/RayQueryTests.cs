@@ -126,4 +126,92 @@ public class RayQueryTests
         results.Dispose();
         device.DeferFree(instances);
     }
+
+    [Fact]
+    [Slow]
+    public unsafe void A_refitted_bottom_level_is_hit_where_its_vertices_moved()
+    {
+        VulkanDevice? d;
+        try { d = VulkanDevice.Create(new VulkanDeviceOptions { Validation = true, RayTracing = true }); }
+        catch (Exception e) when (e is VulkanException or DllNotFoundException or EntryPointNotFoundException or Silk.NET.Core.Loader.SymbolLoadingException) { d = null; }
+        using var device = d;
+        Assert.SkipWhen(device is null || !device.HasRayQuery, "No Vulkan device with ray queries");
+        using var ctx = new GpuContext(device!);
+
+        // The triangle of the test above, built updatable at y 0; then its vertex buffer is written in place with y 1 and the structure refitted. Placed 2 up.
+        Vector3[] low = [new(0, 0, 0), new(0, 0, 1), new(1, 0, 0)], high = [new(0, 1, 0), new(0, 1, 1), new(1, 1, 0)];
+        uint[] indices = [0, 1, 2];
+        using var vertices = DeviceBuffer.Create(ctx, 36, BufferUse.Vertex | BufferUse.RayInput, "test triangle");
+        using var index = DeviceBuffer.Create(ctx, 12, BufferUse.Index | BufferUse.RayInput, "test triangle");
+        var instances = device!.Allocator.CreateBuffer(InstanceRecord.Size, BufferUsageFlags.ShaderDeviceAddressBit | BufferUsageFlags.AccelerationStructureBuildInputReadOnlyBitKhr,
+            MemoryKind.Upload, "test instances");
+        *(InstanceRecord*)instances.Mapped = InstanceRecord.Of(Matrix4x4.CreateTranslation(0, 2, 0), 7, 0xFF, 0, 0);
+        var results = DeviceBuffer.Create(ctx, N * N * 8, BufferUse.Storage | BufferUse.TransferSrc, "test results");
+        using var readback = ReadbackBuffer.Create(ctx, N * N * 8, "test results");
+        using var program = ctx.Shaders.Compute(Trace, "ray query test", [(0, DescriptorType.AccelerationStructureKhr), (1, DescriptorType.StorageBuffer)]);
+        var pipeline = ctx.Pipelines.Get(new ComputePipelineDesc(program, "ray query test"));
+        var tlas = AccelerationStructure.CreateTop(device, 4, "test top");
+        AccelerationStructure? blas = null;
+        var addressInfo = new BufferDeviceAddressInfo { SType = StructureType.BufferDeviceAddressInfo, Buffer = instances.Buffer };
+
+        Vector2[] Frame(bool refit)
+        {
+            ctx.EnsureFrame();
+            if (!refit)
+            {
+                ctx.Uploads.Write(vertices, 0, MemoryMarshal.AsBytes(low.AsSpan()));
+                ctx.Uploads.Write(index, 0, MemoryMarshal.AsBytes(indices.AsSpan()));
+            }
+            else ctx.Uploads.Write(vertices, 0, MemoryMarshal.AsBytes(high.AsSpan()));
+            var cmd = ctx.BeginNative("ray query test");
+            cmd.Barrier(BarrierBatch.Full);
+            var geometry = new TriangleGeometry(vertices.Address, 12, 3, index.Address, 1);
+            if (!refit)
+            {
+                blas = AccelerationStructure.BuildBottom(device, cmd, [geometry], "test bottom", updatable: true);
+                ((InstanceRecord*)instances.Mapped)->Reference = blas.Address;
+            }
+            else blas!.RefitBottom(cmd, [geometry]);
+            cmd.Barrier(AccelerationStructure.BuildToTrace);
+            tlas.RebuildTop(cmd, device.Vk.GetBufferDeviceAddress(device.Device, in addressInfo), 1);
+            cmd.Barrier(AccelerationStructure.BuildToTrace);
+            var handle = tlas.Handle;
+            var asWrite = new WriteDescriptorSetAccelerationStructureKHR { SType = StructureType.WriteDescriptorSetAccelerationStructureKhr, AccelerationStructureCount = 1, PAccelerationStructures = &handle };
+            var bufferInfo = new DescriptorBufferInfo(results.Handle, 0, results.Size);
+            var writes = stackalloc WriteDescriptorSet[2];
+            writes[0] = new WriteDescriptorSet { SType = StructureType.WriteDescriptorSet, PNext = &asWrite, DstBinding = 0, DescriptorCount = 1, DescriptorType = DescriptorType.AccelerationStructureKhr };
+            writes[1] = new WriteDescriptorSet { SType = StructureType.WriteDescriptorSet, DstBinding = 1, DescriptorCount = 1, DescriptorType = DescriptorType.StorageBuffer, PBufferInfo = &bufferInfo };
+            cmd.BindPipeline(pipeline);
+            cmd.PushDescriptors(program.Layout, 0, new ReadOnlySpan<WriteDescriptorSet>(writes, 2), PipelineBindPoint.Compute);
+            var push = new Push { StartY = 10, DirY = -1, Flags = 0x10 };
+            cmd.PushConstants(program.Layout, ShaderStageFlags.ComputeBit, in push);
+            cmd.Dispatch(1, 1);
+            cmd.Barrier(BarrierBatch.Full);
+            cmd.CopyBuffer(results.Handle, readback.Handle, new BufferCopy(0, 0, results.Size));
+            ctx.EndNative(cmd);
+            ctx.Finish();
+            return MemoryMarshal.Cast<byte, Vector2>(readback.Read(0, results.Size)).ToArray();
+        }
+
+        var before = Frame(refit: false);
+        var after = Frame(refit: true);
+        int inside = 0;
+        for (int j = 0; j < N; j++)
+            for (int i = 0; i < N; i++)
+            {
+                float x = (i + 0.5f) / N * 2 - 1, z = (j + 0.5f) / N * 2 - 1;
+                if (!(x > 0.05f && z > 0.05f && x + z < 0.95f)) continue;
+                inside++;
+                Assert.Equal(8f, before[j * N + i].X, 3);   // from y 10 to the triangle at y 2
+                Assert.Equal(7f, after[j * N + i].X, 3);    // refitted to y 3
+                Assert.Equal(7f, after[j * N + i].Y);
+            }
+        Assert.True(inside > 20, $"only {inside} rays inside the triangle");
+        Assert.True(device.ValidationErrors == 0, "Validation errors:\n" + string.Join("\n", device.ValidationLog));
+
+        tlas.Dispose();
+        blas!.Dispose();
+        results.Dispose();
+        device.DeferFree(instances);
+    }
 }

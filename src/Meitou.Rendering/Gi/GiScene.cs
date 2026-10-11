@@ -50,6 +50,21 @@ internal sealed unsafe class GiScene : IDisposable
     public bool TopReused { get; private set; }
     /// <summary>True: the top level is built for tracing (the build takes longer); the default while it is built rarely (<see cref="ReuseTop"/>), the bench's gi-top-trace switch.</summary>
     public bool TopFastTrace { get; set; } = Environment.GetEnvironmentVariable("MEITOU_GI_TOP_TRACE") != "0";
+    /// <summary>True (default; `MEITOU_GI_TERRAIN_REFIT=0` off, the bench's gi-terrain-refit switch): a terrain grid that must follow the eye is refitted in place (same triangles, new heights; every `FullRebuildEvery`-th time rebuilt) instead of rebuilt into a new structure.</summary>
+    public bool RefitTerrain { get; set; } = Environment.GetEnvironmentVariable("MEITOU_GI_TERRAIN_REFIT") != "0";
+    /// <summary>
+    /// True (default; `MEITOU_GI_LAZY_SCENE=0` off, the bench's gi-lazy-scene switch; needs <see cref="ReuseTop"/>): everything that changes the traced scene changes at once, when the eye crosses into another cell of
+    /// <see cref="EpochSize"/>: the object selection, the foliage block, the origin and the terrain grids that have finished sampling. Between those commits the instances stay as they are and
+    /// the top level is not built. A moving camera used to change one of them nearly every frame (the selection snap 128 units, the foliage 250, a terrain grid 512 and its completion later).
+    /// </summary>
+    public bool LazyScene { get; set; } = Environment.GetEnvironmentVariable("MEITOU_GI_LAZY_SCENE") != "0";
+    /// <summary>True (default; `MEITOU_GI_SHARED_TOP=0` off, the bench's gi-top-shared switch): one top-level structure for all frame slots. The frame's full barrier orders each frame's builds after the traces of the
+    /// frames before, so the slots need none of their own, and a changed scene is built once, not once per slot.</summary>
+    public bool SharedTop { get; set; } = Environment.GetEnvironmentVariable("MEITOU_GI_SHARED_TOP") != "0";
+    /// <summary>The cell of the eye (a cube of this many units) that <see cref="LazyScene"/> commits on.</summary>
+    const float EpochSize = 1024;
+    (int X, int Y, int Z) epochCell;
+    bool epochSet;
     bool originSet;
     CommandList? seg;
     bool split;
@@ -131,11 +146,21 @@ internal sealed unsafe class GiScene : IDisposable
     {
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
         frame++;
+        // The scene's step (LazyScene): commit is true on the frames where the eye is in another cell than on the last commit (always, with the old behaviour).
+        bool lazy = ReuseTop && LazyScene, commit = true;
+        if (lazy)
+        {
+            var cell = ((int)MathF.Round(eye.X / EpochSize), (int)MathF.Round(eye.Y / EpochSize), (int)MathF.Round(eye.Z / EpochSize));
+            commit = !epochSet || cell != epochCell;
+            if (commit) { epochCell = cell; epochSet = true; }
+        }
         var rounded = new Vector3(MathF.Round(eye.X / 64) * 64, MathF.Round(eye.Y / 64) * 64, MathF.Round(eye.Z / 64) * 64);
         // The origin follows the eye in steps of OriginSlack, not 64 units: the instances (their transforms are relative to it) then stay the same while the eye walks, and the top level of a frame whose instances
         // are those of its slot's last build is not built again (ReuseTop).
-        if (!ReuseTop || !originSet || MathF.Max(MathF.Abs(eye.X - Origin.X), MathF.Max(MathF.Abs(eye.Y - Origin.Y), MathF.Abs(eye.Z - Origin.Z))) > OriginSlack) { Origin = rounded; originSet = true; }
+        if (!ReuseTop || !originSet || commit && MathF.Max(MathF.Abs(eye.X - Origin.X), MathF.Max(MathF.Abs(eye.Y - Origin.Y), MathF.Abs(eye.Z - Origin.Z))) > OriginSlack) { Origin = rounded; originSet = true; }
         var slot = slots[ctx.Frame.Slot];
+        // The top level and what it was built over: the first slot's for all of them, or each slot's own.
+        var topSlot = SharedTop ? slots[0] : slot;
         instances.Clear();
         records.Clear();
         BuiltThisFrame = 0;
@@ -146,7 +171,11 @@ internal sealed unsafe class GiScene : IDisposable
 
         foreach (var grid in terrain)
         {
-            grid.Update(Open, eye, heights);
+            grid.Refit = RefitTerrain;
+            grid.RequestDivisor = lazy && grid.Fine ? 16 : 8;
+            grid.Update(Open, eye, heights, commit);
+            // A refitted bottom level is not what the slots' top levels were built over: every one of them is built again before it is traced.
+            if (grid.Refitted) foreach (var s in slots) { s.BuiltBytes = null; s.BuiltLength = -1; }
             if (grid.Blas is null) continue;
             var world = Matrix4x4.CreateTranslation(grid.Centre - Origin);
             // Facing culled: the grid is coarser than the drawn terrain, so a surface in a hollow lies under it and its rays must pass up through it
@@ -157,7 +186,7 @@ internal sealed unsafe class GiScene : IDisposable
 
         // The objects are those near the eye snapped to a grid of SelectionSnap (the range widened by the snap's half diagonal, so every object within Range is in): the set then changes when the
         // snapped eye does, not whenever an object crosses the range, and the top level can be left as it is.
-        var selectionEye = ReuseTop ? new Vector3(MathF.Round(eye.X / SelectionSnap), MathF.Round(eye.Y / SelectionSnap), MathF.Round(eye.Z / SelectionSnap)) * SelectionSnap : eye;
+        var selectionEye = lazy ? new Vector3(epochCell.X, epochCell.Y, epochCell.Z) * EpochSize : ReuseTop ? new Vector3(MathF.Round(eye.X / SelectionSnap), MathF.Round(eye.Y / SelectionSnap), MathF.Round(eye.Z / SelectionSnap)) * SelectionSnap : eye;
         float selectionRange = ReuseTop ? Range + SelectionSnap * 0.87f : Range;
         if (objects is not null)
             foreach (var inst in objects.RayInstances(selectionEye, selectionRange))
@@ -180,7 +209,7 @@ internal sealed unsafe class GiScene : IDisposable
 
         if (foliage is not null && FoliageMinSize > 0)
         {
-            if (FoliageStale(eye, foliage)) RebuildFoliage(eye, foliage);
+            if (FoliageStale(eye, foliage, lazy, commit)) RebuildFoliage(eye, foliage);
             // The cached block, moved to this frame's origin, its records with this frame's texture indices (a texture can be unloaded or move
             // in the table between rebuilds; the structures cannot, FoliageRenderer.RayGeneration rebuilds the block when a mesh goes).
             int firstRecord = records.Count;
@@ -210,7 +239,7 @@ internal sealed unsafe class GiScene : IDisposable
         // The top level, over this frame's instances: built again only when they are not those of its slot's last build (the eye still or walking, the
         // origin and the object set hold, see ReuseTop). The instances are plain data, so equal bytes are an equal structure.
         var bytes = MemoryMarshal.AsBytes(CollectionsMarshal.AsSpan(instances));
-        bool same = ReuseTop && slot.BuiltTrace == TopFastTrace && slot.BuiltBytes is { } built && slot.BuiltLength == bytes.Length && bytes.SequenceEqual(built.AsSpan(0, bytes.Length));
+        bool same = ReuseTop && topSlot.BuiltTrace == TopFastTrace && topSlot.BuiltBytes is { } built && topSlot.BuiltLength == bytes.Length && bytes.SequenceEqual(built.AsSpan(0, bytes.Length));
         TopReused = same;
         if (!same)
         {
@@ -220,15 +249,15 @@ internal sealed unsafe class GiScene : IDisposable
             if (split) { cmd.EndLabel(); ctx.EndNative(cmd); StageClock.Sub("gi scene blas"); cmd = seg = ctx.BeginNative("gi scene"); cmd.BeginLabel("gi scene"); }
             CollectionsMarshal.AsSpan(instances).CopyTo(new Span<InstanceRecord>(slot.Instances.Mapped, MaxInstances));
             var info = new BufferDeviceAddressInfo { SType = StructureType.BufferDeviceAddressInfo, Buffer = slot.Instances.Buffer };
-            slot.Top.RebuildTop(cmd, device.Vk.GetBufferDeviceAddress(device.Device, in info), (uint)instances.Count, TopFastTrace);
+            topSlot.Top.RebuildTop(cmd, device.Vk.GetBufferDeviceAddress(device.Device, in info), (uint)instances.Count, TopFastTrace);
             if (ReuseTop)
             {
-                if (slot.BuiltBytes is null || slot.BuiltBytes.Length < bytes.Length) slot.BuiltBytes = new byte[Math.Max(bytes.Length * 5 / 4, 4096)];
-                bytes.CopyTo(slot.BuiltBytes);
-                slot.BuiltLength = bytes.Length;
+                if (topSlot.BuiltBytes is null || topSlot.BuiltBytes.Length < bytes.Length) topSlot.BuiltBytes = new byte[Math.Max(bytes.Length * 5 / 4, 4096)];
+                bytes.CopyTo(topSlot.BuiltBytes);
+                topSlot.BuiltLength = bytes.Length;
             }
-            else slot.BuiltBytes = null;
-            slot.BuiltTrace = TopFastTrace;
+            else topSlot.BuiltBytes = null;
+            topSlot.BuiltTrace = TopFastTrace;
         }
         CollectionsMarshal.AsSpan(records).CopyTo(new Span<GeometryRecord>(slot.Records.Mapped, MaxRecords));
         if (seg is { } open)
@@ -238,7 +267,7 @@ internal sealed unsafe class GiScene : IDisposable
             ctx.EndNative(open);
             seg = null;
         }
-        Top = slot.Top;
+        Top = topSlot.Top;
         Records = new BufferBinding(slot.Records.Buffer, 0, (ulong)(Math.Max(records.Count, 1) * GeometryRecord.Size));
         InstanceCount = instances.Count;
         UpdateMs = (float)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
@@ -321,8 +350,8 @@ internal sealed unsafe class GiScene : IDisposable
     int foliageGeneration = -1;
     bool foliageComplete;
 
-    bool FoliageStale(Vector3 eye, FoliageRenderer foliage) =>
-        frame - foliageFrame >= 120 || Vector3.DistanceSquared(eye, foliageEye) > 250f * 250f || foliage.RayGeneration != foliageGeneration
+    bool FoliageStale(Vector3 eye, FoliageRenderer foliage, bool lazy, bool commit) =>
+        frame - foliageFrame >= 120 || (lazy ? commit : Vector3.DistanceSquared(eye, foliageEye) > 250f * 250f) || foliage.RayGeneration != foliageGeneration
         || !foliageComplete && frame - foliageFrame >= 2;
 
     /// <summary>Trees, bushes and rocks big enough to matter for the probes (FoliageRenderer.RayInstances), nearest first while the budget lasts.</summary>
@@ -422,18 +451,34 @@ internal sealed unsafe class GiScene : IDisposable
         // instance never places the old grid at the new centre.
         Vector3 requested;
         bool hasRequested;
+        /// <summary>Set by the scene each frame: refit the structure in place when the grid moves (see <see cref="GiScene.RefitTerrain"/>).</summary>
+        public bool Refit { get; set; }
+        /// <summary>The grid is rebuilt when the eye is further than a <c>RequestDivisor</c>-th of its side from the centre sampled last (8; 16 for the fine grid with <see cref="GiScene.LazyScene"/>, whose refit is cheap and waits for the scene's commit).</summary>
+        public int RequestDivisor { get; set; } = 8;
+        public bool Fine => spacing < 100;
+        /// <summary>True when the last <see cref="Update"/> refitted the structure in place.</summary>
+        public bool Refitted { get; private set; }
+        const int FullRebuildEvery = 16;
+        int refitsSinceBuild;
+        bool updatable;
         float Side => cells * spacing;
+        const int MaxWait = 8;
+        int waited;
 
-        public void Update(Func<CommandList> open, Vector3 eye, HeightSnapshot heights)
+        public void Update(Func<CommandList> open, Vector3 eye, HeightSnapshot heights, bool install = true)
         {
-            if (job is { IsCompleted: true })
+            Refitted = false;
+            // A finished grid is installed on the scene's commit, or at once when there is none yet, or when it has waited for a commit for MaxWait frames (a camera that stopped).
+            if (job is { IsCompleted: true } && ++waited >= MaxWait) install = true;
+            if (job is { IsCompleted: true } && (install || Blas is null))
             {
                 var (centre, positions) = job.Result;
                 job = null;
+                waited = 0;
                 Build(open(), centre, positions);
             }
             var wanted = new Vector3(MathF.Round(eye.X / spacing) * spacing, 0, MathF.Round(eye.Z / spacing) * spacing);
-            bool far = !hasRequested || MathF.Max(MathF.Abs(wanted.X - requested.X), MathF.Abs(wanted.Z - requested.Z)) > Side / 8;
+            bool far = !hasRequested || MathF.Max(MathF.Abs(wanted.X - requested.X), MathF.Abs(wanted.Z - requested.Z)) > Side / RequestDivisor;
             if (far && job is null)
             {
                 hasRequested = true;
@@ -480,14 +525,28 @@ internal sealed unsafe class GiScene : IDisposable
                 indices = DeviceBuffer.Create(ctx, (ulong)idx.Length * 4, BufferUse.Index | BufferUse.RayInput, name);
                 ctx.Uploads.Write(indices, 0, MemoryMarshal.AsBytes(idx.AsSpan()));
             }
+            if (Refit && updatable && Blas is not null && vertices is not null && vertices.Size == (ulong)(positions.Length * 12) && refitsSinceBuild < FullRebuildEvery)
+            {
+                // The same triangles over new heights: written into the vertex buffer in place and the structure refitted. The frame's full barrier (FrameLoop) orders both after the
+                // frames that traced the old ones; the vertex buffer's address, and so the geometry record, stay.
+                ctx.Uploads.Write(vertices, 0, MemoryMarshal.AsBytes(positions.AsSpan()));
+                cmd.Barrier(BarrierBatch.Full);
+                Blas.RefitBottom(cmd, [new TriangleGeometry(vertices.Address, 12, (uint)positions.Length, indices.Address, (uint)(cells * cells * 2))]);
+                refitsSinceBuild++;
+                Refitted = true;
+                Centre = new Vector3(centre.X, 0, centre.Z);
+                return;
+            }
             // A new vertex buffer every rebuild: the last frames' structures were built from the old one, which is freed after them.
             vertices?.Dispose();
             vertices = DeviceBuffer.Create(ctx, (ulong)(positions.Length * 12), BufferUse.Vertex | BufferUse.RayInput, name);
             ctx.Uploads.Write(vertices, 0, MemoryMarshal.AsBytes(positions.AsSpan()));
             cmd.Barrier(BarrierBatch.Full);
             Blas?.Dispose();
-            Blas = AccelerationStructure.BuildBottom(ctx.Device, cmd, [new TriangleGeometry(vertices.Address, 12, (uint)positions.Length, indices.Address, (uint)(cells * cells * 2))], name);
-            Blas.ReleaseScratch();
+            updatable = Refit;
+            refitsSinceBuild = 0;
+            Blas = AccelerationStructure.BuildBottom(ctx.Device, cmd, [new TriangleGeometry(vertices.Address, 12, (uint)positions.Length, indices.Address, (uint)(cells * cells * 2))], name, updatable);
+            if (!updatable) Blas.ReleaseScratch();
             Centre = new Vector3(centre.X, 0, centre.Z);
             Record = new GeometryRecord { Vertices = vertices.Address, Indices = indices.Address, Stride = 12, Kind = GeometryRecord.Terrain };
         }
