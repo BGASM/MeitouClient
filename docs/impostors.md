@@ -65,16 +65,16 @@ there is no depth map and no BC3: the VRAM of the first version (1.1 to 2.4 GB) 
 - **Normal.** Full-sphere because back-facing double-sided leaves have normals pointing away from the frame. It is stored at full
   resolution in the file but uploaded one level coarser (a normal needs less resolution than colour). The file also holds the mean gloss
   (`Gloss`, the mean of pass 2's G channel), passed as a push constant, replacing the per-texel gloss of the old depth map.
-- **No depth.** The old depth map served parallax and `gl_FragDepth` (`MEITOU_IMPOSTOR_DEPTH`); both are gone. The quad's depth is used,
+- **No depth.** The old depth map served parallax and `gl_FragDepth`; both are gone. The quad's depth is used,
   and the shadow casters use the frame plane through the crown's centre.
 
 **Frame size by distance (`ImpostorClass.For`).** With `ScreenDiameter(r) = 2 r / (2 tan(fov/2)) * 1080 / 4000` (the world radius of the
 largest instance, `radius x max scale`, seen at the 4000-unit reference distance, 1080 lines, 50 degrees):
 
-- `F = smallest power of two >= ScreenDiameter / 1.4`, clamped to 64 .. 256. The 1.4 (`MEITOU_IMPOSTOR_MAGNIFY`) lets the impostor be
+- `F = smallest power of two >= ScreenDiameter / 1.4`, clamped to 64 .. 256. The 1.4 (fixed; it was `MEITOU_IMPOSTOR_MAGNIFY`) lets the impostor be
   magnified by up to 1.4 at the reference distance. Meshes whose largest instance is smaller than radius 48 (`MinimumRadius`) get no
   medium or large impostor; since 2026-10-07 those with radius 2 or more and 100 or more triangles get the **small class** (section 11).
-- Grid `G = 12` (`MEITOU_IMPOSTOR_GRID`). Levels = `log2(F) - 1` (the chain stops at 4 x 4 per frame, the smallest BC block).
+- Grid `G = 12` (fixed). Levels = `log2(F) - 1` (the chain stops at 4 x 4 per frame, the smallest BC block).
 - BushTree01 (large): 256 px, 12 x 12, 3072 px per side, 18 MB resident (8.0 MB at 8 x 8).
 - **Observed** (the 267 base-game atlases, all resident, Release, RTX 4070): 68 at 256 px (1224 MB), 56 at 128 px (252 MB), 143 at 64 px
   (161 MB), 1637 MB in all, against 5669 MB for version 4. Only the atlases a view needs are resident (section 7).
@@ -144,7 +144,7 @@ mean scale and the size class follows the distance). Disk cache 376 MB (1153 MB)
 
 `Read` returns null on any mismatch (magic, either version, sizes, checksum, truncated stream): a damaged or old file is rebaked.
 
-**Cache (`ImpostorCache`).** `%LOCALAPPDATA%\Meitou\impostors\<name>_<key>.mimp`, overridable with `MEITOU_IMPOSTOR_CACHE`; never in the
+**Cache (`ImpostorCache`).** `%LOCALAPPDATA%\Meitou\impostors\<name>_<key>.mimp`, overridable with `MEITOU_IMPOSTOR_CACHE` (to become the shared `MEITOU_CACHE_DIR`); never in the
 repo. The key is the first 24 hex digits of a SHA-256 over the baker and format versions, each source file's path, length and write time,
 both materials' descriptions, the maximum **and mean** scale, the grid, magnify and bias. Files are written under a temporary name, then
 moved. Bump `ImpostorAtlas.BakerVersion` when the baker's output changes.
@@ -157,8 +157,8 @@ moved. Bump `ImpostorAtlas.BakerVersion` when the baker's output changes.
 2. deletes temporary files (`*.mimp.<pid>.tmp`) an hour old (a crashed writer's);
 3. when the remaining `.mimp` files total more than the cap, deletes the least recently used until the total is under 90% of it.
 
-Other files in the folder are not touched. The cap is `MaxBytes`: default 4096 MB since 2026-10-10, 512 MB before (`MEITOU_IMPOSTOR_CACHE_MB`,
-`--impostor-cache-mb`, 0 = no cap); the 267 base-game atlases were 376 MB on disk (**Observed**), but rocks are now baked per biome, and at 512 MB
+Other files in the folder are not touched. The cap is `MaxBytes`: default 4096 MB since 2026-10-10, 512 MB before (a constant now; the
+`--impostor-cache-mb` flag and `MEITOU_IMPOSTOR_CACHE_MB` were removed, `ImpostorCacheMb` stays as a property, 0 = no cap); the 267 base-game atlases were 376 MB on disk (**Observed**), but rocks are now baked per biome, and at 512 MB
 the cache stood full (546 MB, 139 files) and a fast flight over a route flown a dozen times that day still baked 401 atlases against 305 read
 from the cache (**Observed** 2026-10-10, docs/viewer.md "What makes travelling stutter"): the cap evicted what the next trip needed. **Verified**
 (`ImpostorTests`, a temporary folder, never the user's cache): eviction order and the 90% target, no cap, the stale rules above (older baker,
@@ -218,7 +218,7 @@ the largest instance of each mesh.
 
 ## 6. Verification: `--impostor-preview`
 
-`meitou-viewer --impostor-preview <FOLIAGE_MESH name, string id or .mesh file> [--out dir] [--size WxH] [--rebake] [--blend] [--debug n]
+`meitou-viewer --impostor-preview <FOLIAGE_MESH name, string id or .mesh file> [--out dir] [--size WxH] [--rebake] [--debug n]
 [--class medium|large]` renders offscreen (4x MSAA). `--impostor-bake-all [--rebake]` bakes or loads every eligible mesh and prints per-mesh
 and total time and size. (`--parallax` and `--depth-write` were removed with the depth map.)
 
@@ -250,7 +250,7 @@ Compare pairs with `meitou-tools image-diff a b`.
   picked one frame and cut on that frame's own coverage, so at the edge and, where the picked frame had no coverage at that point, inside the
   bulb, pixels were discarded at random: a dotted edge and a dither of holes. It was not the BC1 1-bit alpha (a bilinear 0/1 alpha is a smooth
   ramp over one texel and is cut at 0.5), not the mip coverage scale, not the fill or dilation of colour into transparent texels (the fill is
-  there, and the cut-out stays binary), and not the compression: the blended debug mode (`--blend`) with the same atlas has a clean edge.
+  there, and the cut-out stays binary), and not the compression: the blended debug mode (the former `--blend`, removed) with the same atlas had a clean edge.
   *Fix*: vote for the cut-out, pick for the colour (section 5, item 2). No change to the atlas, so `BakerVersion` stays 5, **VRAM is unchanged**
   (the format is the same BC1 + BC5; no BC3 / BC7 alpha was needed) and a cache from before is valid. The cost is two more albedo fetches
   and, for the normal, two more (the normal map is one level coarser and cheap) per impostor pixel.
@@ -285,12 +285,12 @@ split), `Impostors/ImpostorDraw.cs`. Tests: `FoliageCullTests.Impostor_split_is_
 
 - The `impostors` Enhancement (F7): Meitou (default) draws impostors; Faithful never loads, bakes or draws one. `--faithful impostors`
   turns it off, `--faithful all` includes it.
-- `ImpostorDistance` (default 4000; `--impostor-distance <u>`; Tab slider "Impostor distance (F7 Meitou)", 500 to 40000): the transition
+- `ImpostorDistance` (default 4000; Tab slider "Impostor distance (F7 Meitou)", 500 to 40000): the transition
   distance T along the ground, for every atlas.
-- `ImpostorBudgetMb` (`--impostor-budget <MB>`, env `MEITOU_IMPOSTOR_BUDGET_MB`): an explicit limit on the VRAM atlases may hold. Without it
+- `ImpostorBudgetMb` (`--impostor-budget <MB>`): an explicit limit on the VRAM atlases may hold. Without it
   (the default since 2026-10-07; it was a fixed 192) the limit is a share of the card's budget, section 10.
-- `MEITOU_IMPOSTOR_LOG=1` prints one line per atlas made Ready, evicted or refused. `MEITOU_IMPOSTOR_CASTERS=0` keeps the meshes as
-  shadow casters.
+- The per-atlas log line (`MEITOU_IMPOSTOR_LOG`) and the keep-mesh-casters switch (`MEITOU_IMPOSTOR_CASTERS=0`) were removed; impostor
+  casters are always used beyond T.
 - A group gets an impostor only when its mesh's atlas is Ready and T <= range - band. A mesh without a Ready atlas stays a mesh.
   **Meitou default ranges** are large 12000, medium 5000, small 800 (docs/render-foliage.md), so large meshes are impostors from 3600
   to 12000 and medium ones from 3600 to 5000.
@@ -319,8 +319,8 @@ The crossfade band is [T - B, T) with B = 0.1 T. With the transition fade m = cl
 - GPU: a group with an impostor has its mesh chunks flagged `ImpostorMesh` (4) and a second set flagged `Impostor` (8), with `Transition`
   and `InverseTransitionBand` in the chunk's former padding. Batches are meshes, TERRAIN-mode rocks, then impostors (one
   `DrawIndexedIndirect` of the six-index quad, bindless atlas indices, `ImpostorPush`).
-- **Verified**: the split test, `Gpu_impostor_split_matches_FoliageCull` (bit for bit), `MEITOU_GPU_CULL_VERIFY=1` in the forest view,
-  and `MEITOU_GPU_CULL=0` / `MEITOU_RECORD_THREADS=0` give pictures 0 px from the default.
+- **Verified**: the split test, `Gpu_impostor_split_matches_FoliageCull` (bit for bit), then (with the since removed `MEITOU_GPU_CULL_VERIFY=1`) the forest view,
+  and `MEITOU_GPU_CULL=0` / `MEITOU_RECORD_THREADS=0` gave pictures 0 px from the default.
 
 ### Streaming (from the code)
 
@@ -334,7 +334,7 @@ The crossfade band is [T - B, T) with B = 0.1 T. With the transition fade m = cl
 
 - In the cascades a group with an impostor casts the impostor beyond T (the same split, its own cull per cascade), drawn by the `Caster`
   program: one frame per texel by the pick (no fade), cut at coverage 0.5, depth on the frame plane through the crown's centre. The quad
-  faces the sun (`uImpostorView` w 1). `MEITOU_IMPOSTOR_CASTERS=0` keeps mesh casters.
+  faces the sun (`uImpostorView` w 1). (The `MEITOU_IMPOSTOR_CASTERS=0` switch for mesh casters was removed.)
 - **Observed** (forest close view, still camera, `--fly-benchmark 300`, RTX 4070, Meitou defaults, GPU timers of the shadow cascades,
   mean ms; the foliage-caster rows are the "fol meshes" pass inside the cascades):
 
@@ -436,7 +436,7 @@ compiled its shaders and pipelines on the render thread (a 60 ms frame).
 - the assembler's per-frame arrays come from a shared pool, its atlas levels are not cleared (every texel is written) and are reused by the
   next bake of the same size (a pool of two); `ImpostorAssembler.ReleasePool` frees them with the readback buffers after 10 s idle;
 - the first foliage update with impostors on constructs the baker (its programs compile with the loading);
-- **a bake step records rows by a sample budget** (`MEITOU_IMPOSTOR_BAKE_MSAMPLES`, default 4 million shaded samples a frame since
+- **a bake step records rows by a sample budget** (4 million shaded samples a frame, a constant; the `MEITOU_IMPOSTOR_BAKE_MSAMPLES` env knob was removed; since
   2026-10-08, 40 before; a row is `grid x 3 x (2F)^2`, and a step records at least one): 256 and 128 px atlases one row a frame (twelve
   frames), 64 px atlases six rows (two frames); it was 2 rows a frame whatever the size, then 4 / 12 / 12 rows with the budget of 40.
   **Correction (2026-10-08).** The sentence that stood here, "the GPU cost of a bake is small", was measured by frame time on a shared
@@ -513,7 +513,7 @@ VK_EXT_memory_budget, the figure `VramGuard` works from, so atlases and everythi
 - default = `clamp(share x B, 48 MB, cap)`, never more than 12% of `B`; share 8% and cap 1024 MB on a discrete GPU, 5% and 256 MB on an integrated one
   (`Properties.DeviceType`); 192 MB (the old fixed value) while `B` is unknown;
 - x0.75 while the guard is under pressure (the pattern of `WorldTextureCache.EffectiveMark`);
-- `--impostor-budget <MB>` / `MEITOU_IMPOSTOR_BUDGET_MB` replace the default (the pressure factor still applies).
+- `--impostor-budget <MB>` replaces the default (the pressure factor still applies).
 
 | Budget `B` | 2 GB | 4 GB | 8 GB | 11.2 GB (the RTX 4070's 11 453 MB: 916 MB) | 12 GB | 16 GB |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -532,7 +532,7 @@ ever take more. **Unknown** (no integrated GPU to run on): the heap sizes such d
 nearest distance it is drawn as an impostor (`LevelsToSkip` before, which used the transition distance for every atlas); the normal map one level fewer.
 The nearest distance is the nearest ground of any zone that wants the atlas (the scan already computed it for the bake order), less the eye's motion over 3 s,
 never inside the transition. One level is `4x` fewer bytes: a 256 px atlas is 9.0 MB at skip 0 and 2.2 MB at skip 1.
-- **Margin** (**Verified**, gate below). The mip is chosen for the distance divided by `2^margin` (`MEITOU_IMPOSTOR_MIP_MARGIN`, 1 level; plus the upscaler's
+- **Margin** (**Verified**, gate below). The mip is chosen for the distance divided by `2^margin` (1 level, fixed; plus the upscaler's
   negative texture bias): a ray off the screen's axis crosses a frame plane at a larger angle, so the sampler's lod at the edge is up to half a level finer than
   the centre's, and the transition's own level is what the base build clamps to. With no margin the Meitou view `zone14_30` 13:00 differed from the base in a few
   horizon pixels (max 17; the 02:00 render max 3); half a level gave max 2; one level gave 0 px.
@@ -540,7 +540,7 @@ never inside the transition. One level is `4x` fewer bytes: a 256 px atlas is 9.
   copy is kept), its new textures made and uploaded within the frame's 6 MB (64 MB settling) and swapped in; the old ones are drawn until then and freed after the
   frames in flight (`Bindless.Free`/deferred delete). Three run at once, finer ones first, nearest first, started as slots free up. A coarser one is made only when
   the plan is over the limit, or by two or more levels after ten seconds of holding more than needed. Under the guard's pressure nothing finer is started.
-  `MEITOU_IMPOSTOR_FARMIP=0` gives the old single level per atlas (no refine, no coarsen).
+  (`MEITOU_IMPOSTOR_FARMIP=0` once gave the old single level per atlas; the switch was removed.)
 
 **The plan** (once a second, every update while settling). `impostorWanted` (the atlases some zone wants as impostors, nearest ground each) is sorted by that
 distance (a resident atlas counts as 20% nearer: a newcomer must be that much nearer to take its place); each gets its mip, the bytes are summed, and when the sum is
@@ -552,7 +552,7 @@ A first greedy plan (nearest first, each atlas degraded alone, then left out) wa
 (master 46 ms); the plan above runs 20.6 ms there.
 
 **Measured** (**Observed**, RTX 4070, 1600 x 900, CPX preset, `--fly-pipelined`, GPU frame p50, three interleaved runs master / new; branch with the small class of section 11,
-which adds the rest; the F1 share is the run with `MEITOU_IMPOSTOR_SMALL=0`):
+which adds the rest; the F1 share is the run with the small class off, then `MEITOU_IMPOSTOR_SMALL=0`, since removed):
 
 | View | master | F1 only | F1 + small class | impostor VRAM, master / new (allocator) | atlas loads in 300 frames, master / new (refines) |
 | --- | --- | --- | --- | --- | --- |
@@ -560,7 +560,7 @@ which adds the rest; the F1 share is the run with `MEITOU_IMPOSTOR_SMALL=0`):
 | forest, CPX | 21.6, 21.4, 21.4 | 19.6 | 15.2, 15.1, 15.2 | 212 / 494 MB | 2 246-2 265 / 293 (154) |
 | Stack, CPX (one pair) | 45.6 | | 15.7 | | 324 atlases, 452 MB |
 
-Far mips alone, Hub CPX with the small class off: 874 MB with `MEITOU_IMPOSTOR_FARMIP=0`, about half that with them. At the defaults (11.4 GB card) nothing
+Far mips alone, Hub CPX with the small class off: 874 MB with far mips off (then `MEITOU_IMPOSTOR_FARMIP=0`, since removed), about half that with them. At the defaults (11.4 GB card) nothing
 measurable changes: forest flight pipelined 2.6 against 2.5-2.6 ms, paced 6.7, 6.8, 6.7 against 6.8, 6.7, 7.0, render thread 2.2 against 2.3;
 Hub 2.7-2.8 against 2.7. The default forest flight now holds the atlases master refused or evicted: 66 atlases 204 MB against 117 atlases 367 MB
 (whole process 3 461 against 3 589 MB; includes up to 20 s of atlases no longer wanted).
@@ -589,15 +589,15 @@ the far mips and budget alone (small class off; with it, section 11); `--faithfu
 meshes of the base game draw as meshes today; 139 get an atlas (0.28 MB each, 39 MB for all). Hub CPX 23.7 to 20.6 ms and forest CPX 19.6 to 15.2 ms on top of
 section 10; medium range 80 000 in the forest 6.6 to 4.0 ms; the default pictures differ only in a dozen small spots of one view.*
 
-**Survey** (**Observed**, `--impostor-bake-all` with `MEITOU_IMPOSTOR_SURVEY=1`, base game): 218 meshes with a radius under 48, of which 139 qualify (radius and triangle floors below), 39 MB at full detail, about 0.3 MB each. The heavy ones at the Hub CPX
+**Survey** (**Observed**, `--impostor-bake-all` with the survey print that has since been removed, base game): 218 meshes with a radius under 48, of which 139 qualify (radius and triangle floors below), 39 MB at full detail, about 0.3 MB each. The heavy ones at the Hub CPX
 were `CacTreeTu_03` (1 892 triangles x 1 459 instances) and `TechRustyJunk_*`; before this, "no impostor class" (the old
 `State()` label said radius under 48; the mesh's own radius, a half diagonal, can still differ from the baker's farthest vertex by a few percent, so the class is estimated from
 the bounds times 1.02 and the load decides).
 
 **Design** (`ImpostorClass`, `ImpostorClass.For(radius, triangles)`):
-- **Which meshes**: radius at least 2 (`MEITOU_IMPOSTOR_SMALL_MIN_RADIUS`) and at least 100 triangles (`MEITOU_IMPOSTOR_SMALL_MIN_TRIANGLES`: fewer cost less than the
-  quad). TERRAIN and EMISSIVE meshes stay ineligible as before. `MEITOU_IMPOSTOR_SMALL=0` switches the class off.
-- **Frame and grid**: 32 px, 12 x 12 (`MEITOU_IMPOSTOR_SMALL_FRAME`, `_GRID`): 4 levels, an atlas 384 px a side, 0.28 MB. Grid 8 (0.1 MB) was measured and is worse where it counts
+- **Which meshes**: radius at least 2 and at least 100 triangles (fewer cost less than the
+  quad); both are constants now. TERRAIN and EMISSIVE meshes stay ineligible as before. The class cannot be switched off any more.
+- **Frame and grid**: 32 px, 12 x 12 (constants): 4 levels, an atlas 384 px a side, 0.28 MB. Grid 8 (0.1 MB) was measured and is worse where it counts
   (mean difference to the mesh, `--impostor-preview`, field pictures: 0.34-0.52 at grid 8 against 0.30-0.42 at 12) for 0.2 MB an atlas, so "fewer views" is not taken.
 - **Transition** (`ImpostorClass.Transition`): `T = ImpostorDistance x radius / 48`, per mesh (the cull already carries one per group): the largest instance is the
   same 27.8 px across at its transition whatever its radius (at 1080 lines), as the smallest medium mesh (radius 48) is at 4000, so a 32 px frame is magnified 0.87 there: sharper than the 1.4 the
@@ -612,7 +612,7 @@ the bounds times 1.02 and the load decides).
 (`field`) 0.30-0.42.
 
 **Gate** (**Verified**): Meitou defaults, ten views against master's: nine views 0 px; forest 13:00 differs in a dozen small spots (mean 0.0125, 0.033% over 12, max 153) and 02:00 (0.0021, 0.003%, max 20),
-which are the small impostors (`MEITOU_IMPOSTOR_SMALL=0`: 0 px in both); `--faithful impostors` and `--faithful all` 0 px as in section 10.
+which are the small impostors (with the class off, 0 px in both); `--faithful impostors` and `--faithful all` 0 px as in section 10.
 
 **Measured** (**Observed**, CPX, pipelined GPU frame p50): Hub 23.7 (section 10 alone) to 20.6 ms, colour mesh triangles 5.47 M to 22 k (47.9 M on master), 49 of the 311 atlases small, 2.1 MB; forest 19.6 to 15.2 ms (11.7 M on master
 to 0.3 M mesh triangles); medium range 80 000 alone (other options default) 6.6, 6.7, 6.6 to 4.1, 4.0, 3.9 ms. Render thread (paced, cpu-only p50, three runs) forest CPX 8.3, 8.3, 8.2 to 8.6, 9.3, 8.6 ms (+0.3 to +1.0: `upd-foliage`, the reflection cull, more impostor sets); Hub CPX 7.7 to 7.0. At the defaults nothing measurable (section 10).
@@ -681,21 +681,20 @@ Format as for trees: 12 x 12 frames, BC1 albedo, BC5 normal, disk cache. **Cache
 (`TerrainTextures.BiomeKey`) is the record id, layer size, parameters and the texture names with file length and time, so a different biome, mod or texture file bakes again. Tree keys and `BakerVersion` are unchanged.
 
 **Run time** (`RockFragmentNative`): lit and shadowed by the impostor shader as trees are. To match the mesh at the transition it applies the terrain's far fade per pixel (to the ground map times the whole-world colour map) and the
-colour-map tint (`texture(colour) * 1.2` inside the window) that the mesh shader applies; without the tint the billboards looked whitish and too bright (**Observed**). `MEITOU_IMPOSTOR_ROCK_TINT=0` turns the tint off.
-**Crossfade**: the impostor dithers in over the mesh as for trees, and the rock mesh dithers out by the complementary threshold (the cull writes it into row 1 w, the terrain mesh shader discards on it); without the mesh side
+colour-map tint (`texture(colour) * 1.2` inside the window) that the mesh shader applies; without the tint the billboards looked whitish and too bright (**Observed**).**Crossfade**: the impostor dithers in over the mesh as for trees, and the rock mesh dithers out by the complementary threshold (the cull writes it into row 1 w, the terrain mesh shader discards on it); without the mesh side
 the solid mesh showed through a crosshatch (**Observed**).
 
-**Size rule for big rocks** (`ImpostorClass.ForRock`): the same classes, with the frame capped at 256 (`MEITOU_IMPOSTOR_ROCK_MAX_FRAME`). A rock too big for its frame (radius over the knee, about 620 units) keeps the frame magnified no
+**Size rule for big rocks** (`ImpostorClass.ForRock`): the same classes, with the frame capped at 256 (a constant). A rock too big for its frame (radius over the knee, about 620 units) keeps the frame magnified no
 more than the usual 1.4 by switching to its impostor further out: `transition = ImpostorDistance x R / knee`. A 512 frame cap was tried and dropped: 36 MB per atlas and 575 MB of host read-back buffers (**Observed**).
 Small rocks use the small class.
 
-**Filter** (`MEITOU_IMPOSTOR_ROCK_MIN_SURFACE`, 0.06): a mesh whose triangle area over the area of its bounding sphere is under 0.06 gets none (thin sticks make poor billboards). **Observed**: `FOLIAGE_Plant_Swamp-TwigLarger`
+**Filter** (0.06, a constant): a mesh whose triangle area over the area of its bounding sphere is under 0.06 gets none (thin sticks make poor billboards). **Observed**: `FOLIAGE_Plant_Swamp-TwigLarger`
 0.029, the other TERRAIN meshes 0.107 or more. **Observed negatives (2026-10-09, RTX 4070, 1920x1080 DLAA, `--ab`, a temporary switch since removed)**: a separate rock transition of 7000 instead of 12000 saved
 only 0.06 +-0.06 ms foliage on the swamp view (0.06 clear; 40 pixels over 12) because the visible TERRAIN rocks are mostly inside 7000 and the swamp's `FOLIAGE_Plant_Swamp-TwigLarger` has no atlas (so impostors for it stay **Unknown**: its
 radius, 3169 at most, puts the knee-rule transition beyond the range anyway; the generated levels are what helps it, formats/foliage.md "Rougher levels"); a large impostor distance of 7000 for every large mesh saved 0.27 +-0.16 ms foliage on the foggy
 swamp view but changed 190 000 pixels by 12 or more (mean 3.0) in a clear forest view: the giant trees turn into flat blobs, as the owner saw at 4000, so 12000 stays.
 
-**Measured** (**Observed**, RTX 4070, 1600 x 900, `--world --town "The Hub" --radius 2 --range-large 50000 --range-medium 12000 --object-distance 20000 --fly-benchmark 3600 --fly-pipelined`, `MEITOU_FOLIAGE_TRIS=1`, GPU idle before; base `87c7857`, cache warm for both):
+**Measured** (**Observed**, RTX 4070, 1600 x 900, `--world --town "The Hub" --radius 2 --range-large 50000 --range-medium 12000 --object-distance 20000 --fly-benchmark 3600 --fly-pipelined`, with the draw tally (then `MEITOU_FOLIAGE_TRIS=1`, since removed), GPU idle before; base `87c7857`, cache warm for both):
 
 | | base | rock impostors |
 |---|---|---|
@@ -709,11 +708,11 @@ swamp view but changed 190 000 pixels by 12 or more (mean 3.0) in a clear forest
 a crop against the untinted version had a mean difference of 1.14, tinted 0.82 (**Observed**; the rest is texture detail).
 
 **Gate** (**Verified**): Faithful ten views 0 px (`--faithful all`; `--faithful impostors` against the base viewer too); Meitou ten views against `C:\Temp\mi\meitou`: Port North 0, Hub 0.018 / 0.006, the others 0.15-0.73 mean (rock
-billboards and their crossfade dither), `MEITOU_IMPOSTOR_ROCKS=0` 0 px in all; `MEITOU_VK_VALIDATION=sync` with an empty cache 0 errors.
+billboards and their crossfade dither), with rock impostors off (then `MEITOU_IMPOSTOR_ROCKS=0`, since removed) 0 px in all; `MEITOU_VK_VALIDATION=sync` with an empty cache 0 errors.
 
 **Limits** (**Observed** / **Unknown**): rock impostors exist only with the GPU cull (not verify mode, not the CPU path), with textures on and the impostors switch on; when a biome's textures are not resident the mesh keeps drawing.
 A rock is baked in its biome of record, so a rock whose drawn pixels come from a different biome than its record (**Unknown** how often) matches less. Mirrored placements are checked by eye only. Thin sticks stay meshes.
-`MEITOU_IMPOSTOR_ROCKS=0` switches the whole thing off.
+The `MEITOU_IMPOSTOR_ROCKS=0` switch for the whole thing was removed.
 
 ## 14. Shadow receiver without the blocker search (2026-10-08)
 
@@ -737,7 +736,7 @@ in its place), blending the frames instead of the per-pixel vote −0.28 ms (not
 ## 15. A separate distance for the large size class (2026-10-08)
 
 Meshes of the large size class (`FoliageSizes.LargeFrom`, 125 units and up: rocks, rock stacks, hoodoos, cliffs, ruins, wrecks, houses, TERRAIN-mode rocks included, and trees; since 2026-10-08 the trees other than giants take the normal distance, see the end of this section) become
-impostors at `LargeImpostorDistance` (default 12000; Tab slider "Large impostor distance", `--large-impostor-distance`) instead of
+impostors at `LargeImpostorDistance` (default 12000; Tab slider "Large impostor distance"; the `--large-impostor-distance` option was removed) instead of
 `ImpostorDistance` (4000), which now covers the smaller meshes only (`FoliageRenderer.DistanceFor`). **Observed** (the owner's screenshots, Okran's
 Pride forests and rock stacks): at 4000 these billboards looked flat and dithered at close range. The rock knee rule (section 13) scales from the
 class's distance. The atlases are still sized for the 4000 reference, so at 12000 they have more texels than needed. The cost of drawing these

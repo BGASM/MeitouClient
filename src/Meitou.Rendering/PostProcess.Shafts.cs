@@ -59,10 +59,10 @@ public sealed unsafe partial class PostProcess
 
 
     /// <summary>
-    /// The integrate and scatter passes as one compute kernel walking each cell column's slices once (<see cref="LightShaftShaders.Scan"/>; MEITOU_SHAFT_SCAN=0 starts with it off).
+    /// The integrate and scatter passes as one compute kernel walking each cell column's slices once (<see cref="LightShaftShaders.Scan"/>; <c>--ab shafts-scan</c>).
     /// Off, or where the device cannot write the atlases as storage images, the two fragment passes run.
     /// </summary>
-    public bool ShaftScan { get; set; } = Environment.GetEnvironmentVariable("MEITOU_SHAFT_SCAN") != "0";
+    public bool ShaftScan { get; set; } = true;
     /// <summary>Whether the device can write the atlases as storage images (the scan kernel can run).</summary>
     public bool ShaftScanSupported => SupportsStorage(Vk.Format.R32Sfloat) && SupportsStorage(Vk.Format.R16G16B16A16Sfloat);
 
@@ -142,8 +142,7 @@ public sealed unsafe partial class PostProcess
     /// <summary>The grid's cells across, down (from the render size's aspect) and slices this frame, and the atlas's size.</summary>
     (int Across, int Down, int Slices, int AtlasWidth, int AtlasHeight) ShaftLayout()
     {
-        var o = Options;
-        int across = Math.Clamp(o.ShaftCells, 8, 1024), slices = Math.Clamp(o.ShaftSlices, 8, 256);
+        int across = Math.Clamp(PostOptions.ShaftCells, 8, 1024), slices = Math.Clamp(PostOptions.ShaftSlices, 8, 256);
         int down = Math.Max(1, (int)MathF.Round(across * height / (float)Math.Max(width, 1)));
         int columns = LightShaftShaders.AtlasColumns, rows = (slices + columns - 1) / columns;
         return (across, down, slices, across * columns, down * rows);
@@ -161,7 +160,7 @@ public sealed unsafe partial class PostProcess
         ShaftsDescribe = !o.LightShafts ? "off" : $"darkening {darkening:0.###} (none: no passes)";
         if (!o.LightShafts || darkening <= 0 || sceneColour is null || !haveNearSlice) return;
         var (across, down, slices, aw, ah) = ShaftLayout();
-        ShaftsDescribe = $"darkening {darkening:0.###}, grid {across} x {down} x {slices} ({o.ShaftSamples} samples), {o.ShaftNear:0} to {far:0} units, air {(o.ShaftAir > 0 ? $"x{o.ShaftAir:0.##} x{airByTime:0.##} by the hour from {groundY:0} (scale height {o.ShaftAirHeight:0}, g {o.ShaftAirPhase:0.##})" : "off")}";
+        ShaftsDescribe = $"darkening {darkening:0.###}, grid {across} x {down} x {slices} ({PostOptions.ShaftSamples} samples), {PostOptions.ShaftNear:0} to {far:0} units, air {(o.ShaftAir > 0 ? $"x{o.ShaftAir:0.##} x{airByTime:0.##} by the hour from {groundY:0} (scale height {PostOptions.ShaftAirHeight:0}, g {PostOptions.ShaftAirPhase:0.##})" : "off")}";
         if (shaftInjected is null || shaftInjected.Width != aw || shaftInjected.Height != ah)
         {
             foreach (var t in new[] { shaftInjected, shaftLight, shaftScatter }.OfType<Target2D>()) t.Texture.Dispose();   // released after the frames in flight
@@ -176,9 +175,9 @@ public sealed unsafe partial class PostProcess
         shaftApply ??= new ShaftApplyPass(Gpu);
         shaftScatterPass ??= new ShaftScatterPass(Gpu);
         // The air layer: density at the ground under the eye, its scale height, the phase's anisotropy (0 density: no layer, no pass).
-        var air = new Vector4(MathF.Max(o.ShaftAir, 0) * MathF.Max(airByTime, 0) * PostOptions.ShaftAirDensity, groundY, MathF.Max(o.ShaftAirHeight, 1), Math.Clamp(o.ShaftAirPhase, 0, 0.95f));
+        var air = new Vector4(MathF.Max(o.ShaftAir, 0) * MathF.Max(airByTime, 0) * PostOptions.ShaftAirDensity, groundY, MathF.Max(PostOptions.ShaftAirHeight, 1), Math.Clamp(PostOptions.ShaftAirPhase, 0, 0.95f));
 
-        float near = Math.Clamp(o.ShaftNear, 1, far * 0.5f);
+        float near = Math.Clamp(PostOptions.ShaftNear, 1, far * 0.5f);
         var grid = new Vector4(across, down, slices, LightShaftShaders.AtlasColumns);
         // The jitter moves every frame only for a temporal upscaler to average; without one it stays put (a still pattern, not a shimmer).
         var range = new Vector4(near, far, MathF.Log(far / near), Temporal ? Gpu.Frame.Number % 4096 : 0);
@@ -197,7 +196,7 @@ public sealed unsafe partial class PostProcess
 
         var i = shaftInject;
         Common(i);
-        i.P.Set(i.Samples, Math.Clamp(o.ShaftSamples, 1, 16));
+        i.P.Set(i.Samples, Math.Clamp(PostOptions.ShaftSamples, 1, 16));
         i.P.ApplyGlobals();   // the atmosphere's uniforms and the shadow receivers, through the frame globals
         Draw(i.P, shaftInjected!);
         if (ShaftStamps) Stamp("shafts-inject");
@@ -227,7 +226,7 @@ public sealed unsafe partial class PostProcess
             }
         }
 
-        var parameters = new Vector4(Math.Clamp(darkening, 0, 1), o.ShaftSky, o.ShaftDebug ? 1 : 0, 0);
+        var parameters = new Vector4(Math.Clamp(darkening, 0, 1), PostOptions.ShaftSky, 0, 0);
         shaftFrame = (grid, range, new Vector2(tanY * aspectNow, tanY), Math.Clamp(darkening, 0, 1));
         if (MergeLayers)
         {

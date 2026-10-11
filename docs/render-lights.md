@@ -4,8 +4,7 @@ Status: 2026-10-09, branch `global-illumination`. The data side, meaning what a 
 [formats/lights.md](formats/lights.md). This page covers how the renderer draws them. The claims say where they come from: *from the code*,
 *measured* (how), or *open*.
 
-The game draws these lights in both looks, so this is not a Faithful / Meitou switch. `--lights off` turns them off (the parity gates use
-it), and the bench's `lights` A/B switch does the same.
+The game draws these lights in both looks, so this is not a Faithful / Meitou switch. The bench's `lights` A/B switch turns them off (the former `--lights off` option, which the parity gates used, was removed).
 
 ## What is drawn
 
@@ -38,8 +37,8 @@ it), and the bench's `lights` A/B switch does the same.
 ## Measured
 
 - **Parity** (`image-diff`, 1280 × 720, `--view hub` and `--view swamp`, against `b84b372`):
-  - with `--lights off`: mean 0.0000 for both views;
-  - with `--gi --faithful gi --lights off`: mean 0.0000 for both views;
+  - with the lamps off (then `--lights off`): mean 0.0000 for both views;
+  - with `--faithful gi` and the lamps off (then `--gi --faithful gi --lights off`): mean 0.0000 for both views;
   - with the lamps at noon: the Hub mean 0.0000, the swamp mean 0.03.
 - **Cost** (RTX 4070, Mongrel at 22:00, 1920 × 1080 with DLSS 0.67, `--ab lights`): +0.07 ms GPU per frame.
 - **Picture** (Mongrel at 22:00): small blue-white pools under the lamp posts, mean difference 0.38. The lights' radii are 60–300 units,

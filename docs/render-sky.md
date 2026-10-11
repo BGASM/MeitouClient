@@ -24,9 +24,9 @@ Part of the world view of `meitou-viewer` (and the game, which shares `src/Meito
   once the sun is down: `Planetshine` in `NightSky.cs` gives its irradiance from its phase, size and mean albedo (times a strength, default 60), and
   `SkyRenderer.Prepare` publishes it in place of the sun's light (`uAtmoLight`, `uAtmoSunLight`, the `WorldLighting`, the shadows' direction), blended
   through twilight ([formats/sky.md](formats/sky.md), "Planetshine"); the ambient, the sky and the exposure stay the game's.
-  New shaders include `AtmosphereShaders.Functions` (sky.md, "Using the atmosphere in a new shader"). `--simple-sky` / `B` give
-  the old colour model, light and fog, with a fixed exposure.
+  New shaders include `AtmosphereShaders.Functions` (sky.md, "Using the atmosphere in a new shader"). The old colour model
+  (`--simple-sky` / `B`) was removed.
   Cost: not re-measured after the 2026-10-05 rewrite (the sky's integral now runs per pixel, about 4 × 5 exponentials, instead of
   a table lookup; the haze runs the same 4-sample integral per pixel). Earlier figures (2026-10-04, table version): the sky pass
-  0.06 to 0.09 ms GPU at 1280 × 720 (`MEITOU_SKY_BENCH=1` with `--screenshot` times 100 passes).
+  0.06 to 0.09 ms GPU at 1280 × 720.
   With the Meitou `stars` switch at night (2026-10-10, 1920 × 1080, RTX 4070, minimum of five runs): the sky pass 0.34 ms (measured with the Milky Way, since removed) against 0.12 ms for the game's starfield texture (0.26 ms without the faint star layer, which an integrated GPU skips); by day the stars are skipped (0.11 ms).

@@ -13,58 +13,11 @@ public class ShadowScheduleTests
     }
 
     [Fact]
-    public void The_nearest_cascade_is_always_drawn_when_wanted() =>
-        Assert.Equal([true, true, false, false], Pick([true, true, true, true], new int[4]));
-
-    [Fact]
-    public void Only_one_far_cascade_is_drawn_per_frame_and_the_others_wait()
-    {
-        var waited = new int[4];
-        Assert.Equal([false, true, false, false], Pick([false, true, true, true], waited));
-        Assert.Equal([0, 0, 1, 1], waited);
-    }
-
-    [Fact]
-    public void The_longest_waiting_goes_first_and_all_get_their_turn()
-    {
-        var waited = new int[4];
-        var want = new[] { false, true, true, true };
-        var order = new List<int>();
-        for (int frame = 0; frame < 3; frame++)
-        {
-            var draw = Pick(want, waited);
-            int i = Array.IndexOf(draw, true);
-            order.Add(i);
-            want[i] = false;
-        }
-        Assert.Equal([1, 2, 3], order);
-    }
-
-    [Fact]
     public void A_redraw_waiting_the_cap_is_forced_beyond_the_budget()
     {
         var waited = new[] { 0, 0, 3, 3 };
         Assert.Equal([false, false, true, true], Pick([false, true, true, true], waited, maxWait: 3));
         Assert.Equal([0, 1, 0, 0], waited);
-    }
-
-    [Fact]
-    public void A_cascade_without_a_map_is_never_deferred()
-    {
-        var draw = Pick([true, true, true, true], new int[4], must: [true, true, true, true]);
-        Assert.Equal([true, true, true, true], draw);
-    }
-
-    [Fact]
-    public void A_budget_of_zero_is_no_limit() =>
-        Assert.Equal([true, true, true, true], Pick([true, true, true, true], new int[4], budget: 0));
-
-    [Fact]
-    public void Nothing_wanted_resets_the_waits()
-    {
-        var waited = new[] { 0, 2, 1, 3 };
-        Assert.Equal([false, false, false, false], Pick([false, false, false, false], waited));
-        Assert.Equal([0, 0, 0, 0], waited);
     }
 
     [Fact]

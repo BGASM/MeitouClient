@@ -1,5 +1,9 @@
 # Native renderer API (proposal)
 
+> Cleanup note (2026-10): the foliage/streaming env switches that the measurement and gate records below name (`MEITOU_GPU_CULL`, `_GPU_CULL_VERIFY`,
+> `_GPU_GRASS`, `MEITOU_FOLIAGE_TIMING`, `_FOLIAGE_TRIS`, `MEITOU_MIP_*`, `MEITOU_MESH_STREAM`, `MEITOU_UNLOAD_IDLE`, `MEITOU_JOB_STATS`, `MEITOU_ALLOC_STATS`, `MEITOU_IMPOSTOR_*`
+> knobs, `MEITOU_UNCOMPRESSED_TEXTURES`) no longer exist. Those records are history of how each number was taken; they are not instructions to run now.
+
 **Status: built** (2026-10-07). [../DECISIONS.md](../DECISIONS.md) 22 was adopted on 2026-10-06; waves 2 to 4 and phase 8 are done:
 `IGl`, `VkGl` and the seam are deleted (8.9), and every renderer records through the native API in `src/Meitou.Rendering/Gpu/`. Sections 0
 and 4 describe the starting point and the coexistence seam and are kept as history; the "as built" sections (5.6.1 to 6.6, 8.3 to 8.9)
@@ -97,7 +101,7 @@ What the native path needs on top (the foundation turns them on and checks them 
 | `shaderDrawParameters` | `gl_DrawID` / `gl_BaseInstance` in multi-draw shaders (wave 3b) | Vulkan 1.1 feature |
 | `descriptorIndexing` with `runtimeDescriptorArray`, `descriptorBindingPartiallyBound`, `descriptorBindingVariableDescriptorCount`, `descriptorBindingSampledImageUpdateAfterBind`, `descriptorBindingUpdateUnusedWhilePending`, `shaderSampledImageArrayNonUniformIndexing` | bindless textures (section 2.6) | Vulkan 1.2 features |
 | `VK_EXT_debug_utils` whenever available, not only with validation | pass labels in RenderDoc and Nsight (today it is enabled only together with the validation layer: `debugExt = layer && ...`) | instance extension |
-| `VK_KHR_fragment_shading_rate` (optional: `attachmentFragmentShadingRate`, an R8_UINT image usable as the attachment) | the fog shading rate (`--fog-vrs`, [render-post.md](render-post.md)): the opaque scene passes shade 2 x 2 or 4 x 4 pixels with one fragment where the fog hides the surface. Turned on when present; `VulkanDevice.HasFragmentShadingRate` is false without it (or with `MEITOU_NO_VRS=1`) and nothing of it is built | device extension |
+| `VK_KHR_fragment_shading_rate` (optional: `attachmentFragmentShadingRate`, an R8_UINT image usable as the attachment) | the fog shading rate (`--fog-vrs`, [render-post.md](render-post.md)): the opaque scene passes shade 2 x 2 or 4 x 4 pixels with one fragment where the fog hides the surface. Turned on when present; `VulkanDevice.HasFragmentShadingRate` is false without it and nothing of it is built | device extension |
 
 `bufferDeviceAddress` is **not** needed: storage buffers bound as descriptors cover every use here. That keeps clear of the extension-versus-core
 issue DECISIONS 17 had to work around for Streamline.
@@ -157,7 +161,6 @@ public sealed class GpuContext : IDisposable
     public SamplerCache Samplers { get; }        // 2.4, the same rules VkGl uses
     public Uploader Uploads { get; }             // 2.3
     public GpuFrame Frame { get; }               // the frame being recorded (one at a time)
-    public DrawLog? Log { get; set; }            // 7.6, null unless a tool turns it on
 }
 
 /// The frame in flight being recorded. Begun and ended by the host. While VkGl exists, VkGl.BeginFrame/EndFrame drive it (section 4).
@@ -928,7 +931,7 @@ contraction into FMA) and the C#'s operation order, the GPU reproduces scalar C#
   two runs of the base build itself (21 pixels at 13:00, 6 at 02:00, one spot at (717-724, 315-323)); A1's rock pictures equal one of the
   base runs' exactly (docs/render-foliage.md).
 - **A2, GPU port.** The same formulas on the GPU. The remaining divergence is the square root inside the fade (`d` for w). A **cull
-  verification mode** (`MEITOU_GPU_CULL_VERIFY=1`) runs the A1 CPU cull as well, reads the GPU's per-view lists back a frame later, and
+  verification mode** (`MEITOU_GPU_CULL_VERIFY=1`, removed in the 2026-10 cleanup) ran the A1 CPU cull as well, reads the GPU's per-view lists back a frame later, and
   reports any difference in visible sets (must be none), order (must be none) and fade (each difference with its ulp distance). The pixel
   gate is 0 differing pixels. If it fails only where the verifier shows fade differences of ≤ 2 ulp, owner decision 2 applies (at most 1/255 per channel, documented); the options were:
   accept with the record, or keep the CPU fade (the GPU decides visibility, the CPU-identical fade is recomputed per instance in the vertex
@@ -1026,7 +1029,7 @@ Where it differs from 5.2 to 5.5, and why:
 - **Verified** by `FoliageGpuCullTests.Gpu_cull_matches_FoliageCull_on_synthetic_data` (six views, 40 groups in 5 batches, a third of the
   instances within ±2e-7 of their range, a fifth of the spheres moved onto a plane's limit, one view with 4 planes, an arena that grows):
   visible sets, order, all 16 floats of every matrix and every draw's arguments equal the CPU's.
-- **Verify mode** (`MEITOU_GPU_CULL_VERIFY=1`): each `Draw` runs the A1 CPU cull too (which also feeds the TERRAIN-mode rocks), keeps its
+- **Verify mode** (`MEITOU_GPU_CULL_VERIFY=1`, removed in the 2026-10 cleanup, with `FoliageRenderer.GrassVerify.cs`): each `Draw` ran the A1 CPU cull too (which also feeds the TERRAIN-mode rocks), keeps its
   batches, and copies the GPU's offsets, arguments and rows into a `ReadbackBuffer`; a frame ring later they are compared (visible counts per
   batch, every matrix but the fade bit for bit, the fade by ulp distance, every draw's arguments, the batch order, and that a batch not drawn
   had nothing visible). The summary line is printed when the renderer is disposed.
@@ -1041,8 +1044,9 @@ Where it differs from 5.2 to 5.5, and why:
 - **Per view** (main slices, the grass motion of the near slice): the CPU writes a patch table into the frame's constants, and two kernels in
   `GpuFrame.PreFrame` choose the pages in view (the same frustum and range tests as the CPU's `PrepareGrass`), the blades each shows (the
   density's prefix, `FoliageGrassGpu.DensityStep`) and the nearest-first order. One `DrawIndirectCount` records them all: 1,042 draws become 2.
-- **Switches.** `MEITOU_GPU_GRASS=0` (or `MEITOU_GPU_CULL=0`) keeps the CPU path, the reference. `MEITOU_GPU_CULL_VERIFY=1` runs both and
-  compares the GPU's draw list a frame later with the CPU's (set, blade counts, vertex counts, first blades, order): a `gpu grass verify` line at exit.
+- **Switches.** The env switches `MEITOU_GPU_GRASS=0` / `MEITOU_GPU_CULL=0` (the CPU path, the reference, stays reachable as the `GpuCull` / `GpuGrass`
+  properties for the tests) and `MEITOU_GPU_CULL_VERIFY=1` (compared the GPU's draw list a frame later with the CPU's: set, blade counts, vertex counts,
+  first blades, order; a `gpu grass verify` line at exit) were removed in the 2026-10 cleanup.
 - **Gate** (master `50b630d` + the grass branch, Release): build 0 warnings; tests 464 passed, 0 skipped (`FoliageGrassGpuTests`: synthetic pages
   against the CPU's decisions, `[Slow]`); `--faithful all` ten views 0 px against the rocks merge; verify mode forest flying 60 frames, grass range 8
   and density 2: 180 views, 125,040 draws, 0 set or order differences; `MEITOU_VK_VALIDATION=sync` forest 13:00 (TAA) and Hub 02:00: 0 errors.
@@ -1086,7 +1090,7 @@ These change the picture on purpose, so they are not part of any parity step. Th
   indirect draws, bindless atlases), lit, fogged and shadowed as the meshes, and cast into the shadow cascades as impostors. Atlases load
   or bake on demand. Details, measurements and the GLSL API are in [impostors.md](impostors.md) (section 7 for the foliage path).
 - **Hi-Z occlusion** (`occlusion`): last frame's depth pyramid reprojected. Built for foliage on 2026-10-08 with an exact parallax margin (no pixel differences in
-  fly/turn tests); see [formats/foliage.md](formats/foliage.md#occlusion-culling-in-the-viewer-meitou-2026-10-08). Switch `--no-occlusion-cull`.
+  fly/turn tests); see [formats/foliage.md](formats/foliage.md#occlusion-culling-in-the-viewer-meitou-2026-10-08). Always on (the `--no-occlusion-cull` switch was removed).
 - **What limits ranges at "1 px"** (2026-10-07, [render-distance-benchmark.md](render-distance-benchmark.md), section 8.15 below): the GPU's
   primitives, from the impostor budget's refusals, TERRAIN-mode rocks without LOD and meshes without an impostor class; not fill, shadows or VRAM.
 
@@ -1183,10 +1187,9 @@ moves off it costs about as much as the fork-join that brings it back (6.6).*
   `End()` records the jobs through `RenderJobs.For`, sums the secondaries' `GpuStats` into the frame's, adds each job's CPU time to
   `StageClock.JobMs[stage]`, and calls `vkCmdExecuteCommands` once with every secondary in order. The jobs are recorded on the render thread
   instead when any of these holds:
-  - `MEITOU_RECORD_THREADS=1`;
-  - a draw log is being written (its order must be the frame's);
+  - `Recording.Mode` is 1 or 0;
   - there is one job only;
-  - the jobs' `Size` sum is below `Recording.MinThreadedDraws`. This is `MEITOU_RECORD_MIN_DRAWS`, default 32: a reflection slice or a
+  - the jobs' `Size` sum is below `Recording.MinThreadedDraws` (32): a reflection slice or a
     small cascade costs less to record than to wake the workers.
 - **Secondaries per (thread, slot)**: `GpuFrame.ThreadPools`, one command pool per frame slot for each of `RenderJobs.Threads`
   (workers + the render thread, `RenderJobs.ThreadIndex`). The buffers are allocated as needed, reused and reset when the slot comes round.
@@ -1228,7 +1231,7 @@ moves off it costs about as much as the fork-join that brings it back (6.6).*
 - the Meitou shadow blocker map;
 - post-processing, the debug views and the overlays (VkGl and `LegacyProgram`, outside the hosts).
 
-**The switch**: `MEITOU_RECORD_THREADS`, read by `Recording.Mode`:
+**The switch**: `Recording.Mode` (the bench's `--ab record-threads`; it was the `MEITOU_RECORD_THREADS` variable, removed in the cleanup):
 - `0`: everything inline into the frame's command buffer, exactly as before wave 4;
 - `1`: the hosts use secondaries, recorded serially on the render thread. This tells a secondary-buffer problem from a race;
 - anything else (the default, `2`): the job threads.
@@ -2080,8 +2083,8 @@ additions in 2.8. Commits: `4186728` the steward additions (`GpuFrame.PreFrame`,
 kernels, the arena and `FoliageGpuCullTests`, `aab0faa` the renderer (switch, verify mode, statistics), `b3fee4d` the per-group bounds test and the rocks' timing.
 Files: `FoliageGpuCull.cs` (new), `FoliageShaders.cs` (`CrSqrt`, `CullCompute`, `ScanCompute`, `CompactCompute`), `FoliageRenderer.cs`; in `Gpu/` additions only.
 
-- *Switches.* `MEITOU_GPU_CULL=0` gives the A1 CPU cull (`FoliageCull`), the default is the GPU; `MEITOU_GPU_CULL_VERIFY=1` runs both and compares (5.6.1).
-  `MEITOU_FOLIAGE_TIMING=1` prints, besides A1's line, the cull's dispatch recording per call, the TERRAIN-mode rocks' share of the cull, and a `foliage gpu
+- *Switches* (the three env forms were removed in the 2026-10 cleanup; the CPU cull `FoliageCull` stays as the test reference). `MEITOU_GPU_CULL=0` gave the A1 CPU cull, the default is the GPU; `MEITOU_GPU_CULL_VERIFY=1` ran both and compared (5.6.1).
+  `MEITOU_FOLIAGE_TIMING=1` printed, besides A1's line, the cull's dispatch recording per call, the TERRAIN-mode rocks' share of the cull, and a `foliage gpu
   cull:` line (views a frame, groups, candidates per view, GPU time per view from the kernels' own timestamps, arena use and growths).
 - **Gate (Release; full gate; base = master `ddb16da` built unchanged, scratch in `C:\Temp\agent-A2`).** Build 0 warnings; `dotnet test -c Release`
   462 passed, 0 skipped (`KENSHI_PATH` set); `--faithful all` ten views **0 px** against the base (mean 0.0000, max 0; the base's two runs also 0 px between
@@ -2142,7 +2145,7 @@ with `DrawIndexedIndirect` through the terrain's TERRAIN-mode programs; design i
 fade ≥ 0.5, mirroring, biome rows by residency bits), `FoliageCull.RockBits`, the View buffer, and the test; `cbf97ba` the renderer (`FoliageRenderer` rock
 batches and draws, `TerrainRenderer.DrawMeshesIndirect` with `OpenMeshSegment` / `CloseMeshSegment` shared with `DrawGroups`, `TerrainTextures`
 `FeatureBiomeRowAny` / `ResidentBiomeBits`, verify mode). `DrawMeshes`' signature and the objects' calls are unchanged (objects' map features stay on it);
-`MEITOU_GPU_CULL=0` keeps the CPU path for the rocks as for the rest. Nothing in `Gpu/` changed.
+The CPU path (once `MEITOU_GPU_CULL=0`, removed) kept the rocks as it did the rest. Nothing in `Gpu/` changed.
 
 - **Gate (Release; lighter gate; base = master `5827596` built unchanged in `C:\Temp\agent-RK`).** Build 0 warnings; `dotnet test -c Release` 463 passed, 0
   skipped (`KENSHI_PATH` set; new `FoliageGpuCullTests.Gpu_cull_matches_the_terrain_mesh_path_for_rocks`: rock and mesh batches in one dispatch, mixed
@@ -2356,15 +2359,11 @@ terrain's step O should do from the start, in order of what it cost foliage:
    zone test (the cascades) records more than it saves. Write the verify mode (CPU and GPU both, compared a frame late through a `ReadbackBuffer`) first; it
    found every problem the pictures did not.
 
-### 7.6 The draw log
+### 7.6 The draw log (removed)
 
-The foundation adds a per-draw log on both sides: `VkGl` (in `PrepareDraw`) and `CommandList` (at each draw). One line per draw, with the
-stage and pass label, the program (source hash and name), the pipeline state (VkGl's `PipelineKey` fields, the native desc), the dynamic
-state values, the attachment images, the descriptor handles (textures as image and sampler handles, which are the same objects on both
-sides through export), vertex and index buffer handles and offsets, the counts, and a hash of each default block's bytes.
-`MEITOU_DRAW_LOG=<file>` writes it for one frame of a `--screenshot` run. `meitou-tools draw-log-diff a b` compares two logs after mapping
-GL names to handles. This turns "20 pixels differ" into "draw 1,812 has another sampler". docs/render-shadows.md records exactly such an
-unexplained case.
+The foundation added a per-draw log on both sides (`VkGl` and `CommandList`), written by `MEITOU_DRAW_LOG=<file>` and compared with
+`meitou-tools draw-log-diff`. It existed for the VkGl-versus-native parity gate; VkGl is gone, and the log, the tool and the variable were
+removed with the cleanup. The mentions of the draw log in this document describe the parity work as it was.
 
 ### 7.7 The parity gate procedure
 
@@ -2508,7 +2507,7 @@ Every resource is native now; what is left on GL is the GL mirror the native gue
   current data into a slice of the frame's constants. The casters' bias is set per cascade before the draw callback, and the
   guests take a new slice in their Prepare. A slice never outlives its frame. This is what VkGl's renaming of the GL buffer gave. `ShadowPass` publishes the seven shadow globals itself
   (the blocks, `uShadowMap`, `uShadowNoise`, `uShadowBlocker`, `uShadowTerrain`). They replace `ShadowShaders.PublishGlobals`, which reads
-  units and binding points and stays the source without a `ShadowPass` (`--no-shadows`, the model viewer). *Stage 3: the model viewer was dropped (DECISIONS 23, which replaces owner decision 7) and `PublishGlobals` deleted; without a `ShadowPass` the sky's `ShadowsOffGlobals` (8.6) are the source.*
+  units and binding points and stays the source without a `ShadowPass` (`--shadow-range 0`, formerly `--no-shadows`; the model viewer). *Stage 3: the model viewer was dropped (DECISIONS 23, which replaces owner decision 7) and `PublishGlobals` deleted; without a `ShadowPass` the sky's `ShadowsOffGlobals` (8.6) are the source.*
   - `uShadowTerrain` is `interop.Sampled(TerrainShadowMap.Texture)`: the terrain map is still a GL texture, owned by the terrain agent's file.
   - A texture is published from the point where the GL code bound it to its unit. Before that, readers get the stand-in.
 - *The blocker map* ("shadow blocker map", R32F) is drawn in its own `BeginNative` segment and rendering (`LOAD`), with a `DrawState`
@@ -2728,14 +2727,14 @@ for that handoff. 0 px everywhere.*
   `BindUnits` is empty now; it stays for its callers in the terrain, objects and foliage files. `Apply(program)` had no caller and is gone.
 - *Shadows-off blocks* (`ShadowsOffGlobals`, called by the sky's constructor): zero-filled `FrameBlock`s for the receiver, caster and
   Meitou blocks, published only where nothing is yet. This is what `ShadowShaders.Bind` put on the binding points through the terrain's GL
-  program. A `ShadowPass` publishes its own over them whenever it is made. With `--no-shadows` a `LegacyProgram` would otherwise throw on
+  program. A `ShadowPass` publishes its own over them whenever it is made. With `--shadow-range 0` (formerly `--no-shadows`) a `LegacyProgram` would otherwise throw on
   the unbound block (8.3, Learned). The shadow textures stay unpublished, so readers get the stand-in, as an empty GL unit gave.
 - *`TerrainRenderer`'s `globalsProgram`* is removed (its three lines). The terrain file has no GL call left.
 - *`AssignSamplerUnits`* (GL only) moved to `AtmosphereShaders`. `SkyRenderer.AssignSamplerUnits` forwards to it, because `WorldGl.Program`
   (reserved) and the model viewer's `Renderer` call it. Only GL programs need it: the impostor baker and preview (the impostor tool,
   which has no sky) and the model viewer's own. It no longer publishes unit-based globals. *Stage 3: the model viewer is dropped (DECISIONS 23, replacing owner decision 7), the impostor tools are native (8.8), and both `AssignSamplerUnits` are deleted (8.9).*
 - *Sky timer*: `PassTimer` replaces the GL timestamp queries. `Draw` polls each time, because a pair is readable only until its frame's
-  query pool comes round again. `Benchmark` (`MEITOU_SKY_BENCH`) now reports recording CPU time: the native API has no `Finish` inside a frame.
+  query pool comes round again. `Benchmark` (`MEITOU_SKY_BENCH`, since removed) then reported recording CPU time: the native API has no `Finish` inside a frame.
 - *Water*: the five maps are `SampledImage`s:
   - "water colour map" and "water flow map": one level, clamped;
   - "water normal map": mipmapped, repeating. A missing map's 1 × 1 stand-in keeps its trilinear filter;
@@ -2932,7 +2931,7 @@ sections 4, 5, 6 and 8.*
   filter arrays. Now 20 MB (2.2-2.7 GB), gen2 GCs 7-8 to 1-2, GC pauses 35-146 to 4-9 ms; cold p99 / max (flight at 600 units a frame, four
   interleaved runs) base 18.6-29.4 / 20.6-35.3 ms against 15.9-20.4 / 19.7-37.0 ms now, p95 15.1-17.3 against 12.5-14.9 (impostors.md section 8
   has every run; the shared machine's noise is as large as the difference in max).
-- **Cache.** `ImpostorCache.Maintain`: 4096 MB default cap (512 until 2026-10-10) (`--impostor-cache-mb`), LRU by last write time, older format / baker versions
+- **Cache.** `ImpostorCache.Maintain`: 4096 MB default cap (512 until 2026-10-10) (the `--impostor-cache-mb` flag was removed), LRU by last write time, older format / baker versions
   and junk and abandoned temporaries removed.
 - **Gate** (Release, RTX 4070, against `C:\Temp\base-87c7857`): `--faithful all` ten views max 0 (**Verified**); `--faithful impostors` ten
   views 0 px against the base viewer rendered with the same option (**Verified**); Meitou default views differ only where billboards are
@@ -3004,7 +3003,7 @@ game, display, viewer and test projects no longer reference `Meitou.Rendering.Vu
 - `GpuStats` keeps running totals of its eight counters (`Running`) for meters; the viewer's `PassMeter` (`MEITOU_PASS_STATS=1`) shows
   those plus fence-wait, submit, acquire and present ticks. Its stamps take their query index inside `Interleave`: the benchmark starts
   its clock before the frame is open, and an index taken earlier belonged to the previous frame's pool (the GPU column read NaN until
-  this was fixed in 5d). `MEITOU_VKGL_PHASES` is gone with VkGl; `MEITOU_VK_MICRO` stays (`VkCallMicro`, a native segment).
+  this was fixed in 5d). `MEITOU_VKGL_PHASES` is gone with VkGl; `MEITOU_VK_MICRO` (`VkCallMicro`, a native segment) was removed in the 2026-10-12 cleanup.
 
 **What is left, and why:**
 1. **`LegacyProgram` and the legacy shader model** (`ShaderLibrary.Legacy`, the default block moved to set 1, the stage binding shift)
@@ -3190,8 +3189,8 @@ their key in `Resolve`, after being told how near they are used.
   needed for 10 s (at once under the guard's pressure, which also drops one level more) is replaced by a coarser. At most 6 refinements and 2
   coarsenings load at once (the few worker threads are shared with the foliage's layouts). F11 / the benchmark's `resident` line: `mip streaming: N MB
   less than every mip, R refined, C coarsened`.
-- `MEITOU_MIP_STREAM=0` switches it off; `MEITOU_MIP_MARGIN=<levels>`, `MEITOU_MIP_TOP=<share>` (the 0.5%), `MEITOU_MIP_SKIP=<name,name>` (keep named textures whole)
-  and `MEITOU_MIP_LOG=1` (a line per image loaded with dropped levels) are for experiments.
+- The experiment switches (`MEITOU_MIP_STREAM=0`, `MEITOU_MIP_MARGIN=<levels>`, `MEITOU_MIP_TOP=<share>` (the 0.5%), `MEITOU_MIP_SKIP=<name,name>`
+  and `MEITOU_MIP_LOG=1`) were removed in the 2026-10 cleanup; the streaming is always on.
 
 **3. Meshes keep only the LOD levels near users draw** (`ObjectMeshCache`, `ObjectMesh.NearPass`, `GpuObjectMesh.MinLevel`):
 - A mesh is decoded for the nearest placement known when it is requested (the scan's distance, less six mesh radii, as the mesh's size is not known
@@ -3204,7 +3203,7 @@ their key in `Resolve`, after being told how near they are used.
   against the next boundary), and without the finer ones after 10 s (or at once under pressure). An instance that would need a finer level than the mesh holds
   (its mesh was made for farther ones) is not resolved, and the mesh is remade, until it is (`Resolve` returns false; `heldNear` counts those within 3000); an
   already resolved one draws the finest level held in the meantime instead of nothing (`Emit`). At most 2 remakes at once.
-  `MEITOU_MESH_STREAM=0` loads every level.
+  (`MEITOU_MESH_STREAM=0`, which loaded every level, was removed.)
 
 **4. Marks and the guard.** The caches' high-water marks are now the smaller of the old fixed one (768 / 2048 MB) and a share of the driver's budget
 (`HighWaterShare`, the old marks over the 11.4 GB card they were tuned on: 6.7% and 17.9%), and three quarters of that under pressure (`VramGuard.BudgetBytes`,
@@ -3310,7 +3309,7 @@ Files: new `ImpostorBudget.cs`; `FoliageRenderer.Impostors.cs` (plan, refine, `S
 - **Budget** (**Verified**, tests): `clamp(8% x B, 48 MB, 1024 MB)` and at most 12% of `B` on a discrete GPU, 5% and 256 MB on an integrated one, 192 MB when `B` is unknown, x0.75 under `VramGuard` pressure;
   `B` is the guard's budget (device-local heaps, VK_EXT_memory_budget). 164 / 328 / 655 / 983 / 1024 MB at 2 / 4 / 8 / 12 / 16 GB discrete, 102 / 205 / 256 / 256 / 256 integrated. `--impostor-budget` overrides.
   Integrated GPUs: **Unknown** (no card; `MEITOU_FORCE_INTEGRATED=1` tests the numbers).
-- **Far mips**: the albedo keeps the levels the nearest wanted instance can sample (one level of margin, `MEITOU_IMPOSTOR_MIP_MARGIN`), the normal map one fewer; refined or coarsened by reloading the atlas from the
+- **Far mips**: the albedo keeps the levels the nearest wanted instance can sample (one level of margin, fixed), the normal map one fewer; refined or coarsened by reloading the atlas from the
   disk cache on a worker and swapping the textures after the upload (old ones deferred-deleted), 3 at a time. Picture-neutral: 0 px in the ten views (with half a level: max 2, with none: max 17).
 - **Plan** (once a second): wanted atlases sorted by nearest distance (resident ones x0.8), mips, then over the limit the farthest take up to 3 more levels, then are left out; resident ones left out twice
   (once under pressure) are dropped. Replaces the refuse-and-retry-after-8-s loop that reloaded the same atlases thousands of times.
@@ -3328,7 +3327,7 @@ Files: new `TerrainRenderer.RockBake.cs`; `TerrainShaders.cs` (`RockBakeFragment
 `Impostors/ImpostorBaker.cs`, `Impostors/ImpostorDraw.cs`, `FoliageRenderer.cs` / `.Impostors.cs` (variants per biome row, segments, work list), `FoliageShaders.cs` (cull and compact: biome row, dither lane), `WorldFrame.cs` (one line, `f.Terrain`).
 
 - **Verified** (Faithful ten views 0 px against `C:\Temp\base-87c7857\faithful`; `--faithful impostors` 0 px against the base viewer with the same flag): the terrain mesh shader's new `vFade` input is 0 unless a rock is in its crossfade band, so nothing changes outside Meitou rocks. The golden SPIR-V hashes of "terrain mesh" were updated (`GpuApiTests`, `LegacySpirvGoldenTests`).
-- **Verified**: `MEITOU_IMPOSTOR_ROCKS=0` gives 0 px in all ten Meitou views against `C:\Temp\mi\meitou`; with it on, the differing views are the far rocks only (forest, rock, zone14_30 at 13:00: mean 0.67-0.73, max 95-219; Hub 0.018; Port North 0).
+- **Verified**: `MEITOU_IMPOSTOR_ROCKS=0` (since removed) gave 0 px in all ten Meitou views against `C:\Temp\mi\meitou`; with it on, the differing views are the far rocks only (forest, rock, zone14_30 at 13:00: mean 0.67-0.73, max 95-219; Hub 0.018; Port North 0).
 - **Verified**: `MEITOU_VK_VALIDATION=sync`, empty cache (canyon view and a 900-frame Hub flight): 0 errors.
 - Gate: `dotnet build` 0 warnings; `dotnet test` all passed.
 
@@ -3340,7 +3339,7 @@ Files: `Impostors/ImpostorBaker.cs`, `ImpostorTextures.cs`, `ImpostorShaders.cs`
 `tools/Meitou.ModelViewer/ImpostorApp.cs`; `NativeProg.cs` (moved out of `FoliageRenderer`); `FoliageRenderer.cs` and new
 `FoliageRenderer.Impostors.cs`, `FoliageCull.cs`, `FoliageShaders.cs`, `FoliageGpuCull.cs`; `Enhancements.cs`, the option, switch and
 slider lines of `WorldFrame.cs` / `WorldApp.cs`; `WorldTextureCache.cs` and `Gpu/GlBridge.cs` (impostor parts removed);
-`WorldApp.Benchmark.cs` (VRAM lines, `MEITOU_BENCH_SHADOW_RANGE`).
+`WorldApp.Benchmark.cs` (VRAM lines; the `MEITOU_BENCH_SHADOW_RANGE` override was removed).
 
 - **Ported** (from the code): the baker records each row into the frame's pre-frame list and reads it back after the frame completes
   (`ImpostorBakeJob`, stepped per frame); the atlas textures are native `Texture`s ("impostor atlas albedo/normal/depth", GENERAL,
@@ -3348,7 +3347,7 @@ slider lines of `WorldFrame.cs` / `WorldApp.cs`; `WorldTextureCache.cs` and `Gpu
   with native passes (4× MSAA, resolve, readback). Impostor files no longer use `IGl`.
 - **Verified**: native atlases byte-identical to the base GL baker's (BushTree01), `--impostor-preview` pictures 0 px, `BakerVersion`
   unchanged; the ten parity views 0 px with `--faithful all` and with Meitou and `--faithful impostors`; the GPU split bit-identical to
-  the CPU (test and verify mode; impostors.md 7); `MEITOU_GPU_CULL=0` and `MEITOU_RECORD_THREADS=0` 0 px from the default; sync
+  the CPU (test and the since removed verify mode; impostors.md 7); `MEITOU_GPU_CULL=0` (since removed) and `MEITOU_RECORD_THREADS=0` 0 px from the default; sync
   validation 0 errors in the forest (13:00, impostors on) and Port North (13:00, `--water-reflection 4`).
 - **IGl count**: `FoliageRenderer.cs` 0 → 1. `Settle` (offscreen loading) waits in a loop without frames, but a bake's rows are read
   after their frame completes, so it calls `IGl.Finish` (end the frame, wait, begin the next) while a bake needs one. Stage 3 replaces it
@@ -3388,7 +3387,7 @@ Files: `Landmarks.cs` (new: `LandmarkClass`), `ObjectStreamer.cs` (`LandmarkZone
   `--object-distance`, `--terrain-error` and `--landmark-distance` given on the command line win in both modes, in any order with `--faithful`. "Reset to defaults" needed no
   code: the panel snapshots its sliders when it is made, so it returns to the values of the mode the viewer started in.
 - **Landmarks** (Meitou only): a placement is a landmark when its world bounding radius (mesh bounds radius times the largest scale of its transform) is at least
-  **2000** (`LandmarkClass.MinRadius`). A whole-world survey (`MEITOU_LANDMARK_SURVEY=1`, base game: 26 444 placements in 913 zones, 817 meshes, laid out and measured in 0.7-0.9 s) gives
+  **2000** (`LandmarkClass.MinRadius`). A whole-world survey (`MEITOU_LANDMARK_SURVEY=1`, since removed, base game: 26 444 placements in 913 zones, 817 meshes, laid out and measured in 0.7-0.9 s) gives
   world radius p50 84 / p90 255 / p99 1085 / p99.9 3027 / max 38181; placements at or above 1000: 326 (73 meshes), 1500: 144 (44), 2000: **90 (31)**, 3000: 33 (15), 5000: 1. The largest
   building part of an ordinary building is the Ancient Factory shed at 1488; every placement from 2000 up is a map feature (**Verified** by the survey). The qualifying meshes
   (placements at 2000+ of the mesh's total, world radius range): `Ashland_Skylink` 1/1 (38181, the satellite), `Bones_Town_Ribs` 3/3 (2140-4928), `Canyon-Dangler05Z` 3/3 (3479-4288), `AshlandRibs` 14/19
@@ -3481,7 +3480,7 @@ inside a copy, the driver's memory calls (`vkAllocateMemory`, `vkFreeMemory`, `v
 8 MB shore field written in one frame up to four times a second, and atlas levels written in one piece. The memory calls now run off the
 render thread, the big writes are cut into slabs, and every queue defers a step whose kind has been costing more than what is left of its budget.*
 
-**How it was found.** `MEITOU_STREAM_LOG=1` now also prints, for every slow step and slow foliage update, where the thread's time went
+**How it was found.** The slow-step log (now `--log-spikes`) also prints, for every slow step and slow foliage update, where the thread's time went
 (`UploadProfile`, `src/Meitou.Rendering/Gpu/UploadProfile.cs`: per-thread ticks of the frame begin, the fence wait, a new or freed memory block,
 a staging chunk, the copy into staging, image and buffer creation and the collector's pauses since the previous step; a line
 `alloc new|freed block ... on a worker|main thread` for any block call of 1 ms or more). **Observed** (instrumented master e814965, fast flight,
@@ -3522,7 +3521,7 @@ command below, 2026-10-10):
 
 **Result.** **Observed**, 2026-10-10, Release, 1600 x 900, RTX 4070 shared with other agents' viewers (so noisy; judged on counts and
 maxima, base and new runs alternated, the baseline built from the same commit e814965; seven base runs, eight new):
-`MEITOU_STREAM_LOG=1 MEITOU_BENCH_SKIP=60 meitou-viewer.exe --world --at -60564,-45142 --distance 1400 --pitch 25 --size 1600x900 --fly-benchmark 3600 --fly-speed 150 --fly-radius 60000 --log-spikes --particle-prewarm 0`
+`MEITOU_BENCH_SKIP=60 meitou-viewer.exe --log-spikes --world --at -60564,-45142 --distance 1400 --pitch 25 --size 1600x900 --fly-benchmark 3600 --fly-speed 150 --fly-radius 60000 --log-spikes --particle-prewarm 0`
 The first five new runs were made before the 1 ms slack (above), the last three with the committed build.
 
 | 3600-frame flight | base (7 runs) | new (8 runs) |
@@ -3562,7 +3561,7 @@ generation-2 collections ran, and single blocking pauses were 14 to 25 ms. This 
 
 **Method.** `MEITOU_JOB_STATS=1 MEITOU_BENCH_SKIP=60 meitou-viewer.exe --world --at -60564,-45142 --distance 1400 --pitch 25 --size 1600x900 --fly-benchmark 3600 --fly-speed 150
 --fly-radius 60000 --particle-prewarm 0`, Release, RTX 4070, Ryzen 5 5600X (12 threads), 4-heap server GC, warm caches; `--particle-prewarm 0` keeps the particle stall of the other fix out of it.
-`MEITOU_ALLOC_STATS=1` (new, `tools/Meitou.ModelViewer/AllocationLog.cs`, from the runtime's own event stream) prints every collection (generation, blocking or background, reason, time
+`MEITOU_ALLOC_STATS=1` (new then; it and `tools/Meitou.ModelViewer/AllocationLog.cs` were deleted in the 2026-10-12 cleanup; from the runtime's own event stream) printed every collection (generation, blocking or background, reason, time
 suspended, the frame it fell in, the heap sizes after it and what each generation promoted) and the sampled allocation by thread and type, with the large-object heap (LOH) and pinned object
 heap (POH) marked. `MEITOU_JOB_STATS` sees only `BackgroundWork` jobs: pool threads (the shore bake's `Parallel.For`) and the render thread are in the second tool only. **A run counts only
 when the VRAM guard had the whole 11,451 MB budget and never entered pressure** (another viewer on the card cuts the budget, the streaming then loads and reloads far more, and the

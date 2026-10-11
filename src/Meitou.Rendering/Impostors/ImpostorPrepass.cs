@@ -5,9 +5,9 @@ namespace Meitou.Rendering.Impostors;
 /// and bushes beyond the mesh distance: in the main colour view the billboards are drawn first with a fragment stage that only decides whether the pixel exists
 /// (<see cref="ImpostorShaders.PrepassFragment"/>, colour mask 0), then the lighting with no <c>discard</c> and the depth test EQUAL
 /// (<see cref="ImpostorShaders.FragmentAfterPrepass"/>), so a pixel is lit once however many billboards overlap it. The A/B <c>impostor-prepass</c>;
-/// <c>MEITOU_IMPOSTOR_PREPASS=0</c> starts it off. It needs the main view's prepass gate (<see cref="FoliagePrepass.Enabled"/>).
+/// It needs the main view's prepass gate (<see cref="FoliagePrepass.Enabled"/>).
 /// </summary>
 public static class ImpostorPrepass
 {
-    public static bool Enabled { get; set; } = Environment.GetEnvironmentVariable("MEITOU_IMPOSTOR_PREPASS") != "0";
+    public static bool Enabled { get; set; } = true;
 }

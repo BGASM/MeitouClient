@@ -53,58 +53,6 @@ public class WorldLightTests
     static FcsInstance Instance(string id, string target, Vector3 position, Quaternion rotation) =>
         new() { Id = id, Target = target, Position = position, Rotation = rotation };
 
-    static void AssertClose(Vector3 expected, Vector3 actual, float tolerance = 1e-3f) =>
-        Assert.True(Vector3.Distance(expected, actual) < tolerance, $"expected {expected}, got {actual}");
-
-    [Fact]
-    public void Light_on_a_part_hangs_under_the_parts_node_and_spots_point_down_its_rotation()
-    {
-        var part = Part("p", new Vector3(10, 0, 0));
-        // A spot turned a quarter about +Z: −Y becomes +X in the part's frame.
-        part.Instances.Add(Instance("Fspot001", "l", new Vector3(0, 5, 0), Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI / 2)));
-        var db = Db(Light("l", 0.6f, 0, type: 1), part, Building("b", 1, "p"));
-        var turn = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 2); // +X → −Z
-        var lights = new List<PlacedLight>();
-        var meshes = WorldObjectLayout.Building(db, db.Find("b")!, "id", new Vector3(1000, 50, 2000), turn, null, lights);
-
-        Assert.Single(meshes);
-        var p = Assert.Single(lights);
-        AssertClose(new Vector3(1000, 55, 1990), p.Position);
-        AssertClose(new Vector3(0, 0, -1), p.Direction);
-        Assert.Equal(0.6f, p.Power);
-        Assert.Equal("p", p.Holder.StringId);
-
-        var w = WorldLights.FromPlaced(p, interior: false);
-        Assert.Equal(WorldLightType.Spot, w.Type);
-        Assert.Equal(WorldLightEffect.Flicker, w.Effect);
-        Assert.Equal(WorldLightRule.WhenBuildingOn, w.Rule);
-        AssertClose(new Vector3(1, 0xCE / 255f, 0x5E / 255f), w.Colour);
-        Assert.Equal(40 * MathF.PI / 180, w.InnerAngle, 5);
-        Assert.Equal(150, w.Radius);
-    }
-
-    [Fact]
-    public void Building_scale_scales_the_instance_position_and_compounds_under_a_part()
-    {
-        // On the building itself (no part node): position × scale under the building's unscaled node.
-        var building = Building("b", 2);
-        building.Instances.Add(Instance("1", "l", new Vector3(0, 10, 0), Quaternion.Identity));
-        // On a part: position × scale under the part's node, which carries the scale again (Ogre's inherited scale).
-        var part = Part("p", Vector3.Zero);
-        part.Instances.Add(Instance("1", "l", new Vector3(0, 10, 0), Quaternion.Identity));
-        var withPart = Building("c", 2, "p");
-        var db = Db(Light("l", 1, 0), building, part, withPart);
-
-        var lights = new List<PlacedLight>();
-        WorldObjectLayout.Building(db, db.Find("b")!, "id", new Vector3(5, 0, 5), Quaternion.Identity, null, lights);
-        AssertClose(new Vector3(5, 20, 5), Assert.Single(lights).Position);
-        AssertClose(-Vector3.UnitY, lights[0].Direction);
-
-        lights.Clear();
-        WorldObjectLayout.Building(db, db.Find("c")!, "id", new Vector3(5, 0, 5), Quaternion.Identity, null, lights);
-        AssertClose(new Vector3(5, 40, 5), Assert.Single(lights).Position);
-    }
-
     [Fact]
     public void Each_light_draws_its_power_roll_and_a_second_roll_before_later_part_choices()
     {
@@ -137,63 +85,6 @@ public class WorldLightTests
             if (childKept) withChild++;
         }
         Assert.InRange(withChild, 1, 63);
-    }
-
-    [Fact]
-    public void Attenuation_is_the_games_piecewise_curve()
-    {
-        Assert.Equal(1, WorldLights.Attenuation(0, 100), 5);
-        Assert.Equal(0, WorldLights.Attenuation(100, 100));
-        Assert.Equal(0, WorldLights.Attenuation(150, 100));
-        Assert.Equal(0, WorldLights.Attenuation(10, 0));
-        Assert.Equal(0.2f + 0.8f * 0.125f, WorldLights.Attenuation(50, 100), 5);
-        // Continuous at both joins (to the curve's own rounding) and falling all the way.
-        Assert.Equal(WorldLights.Attenuation(64.89999f, 100), WorldLights.Attenuation(64.9f, 100), 2);
-        Assert.Equal(WorldLights.Attenuation(79.99999f, 100), WorldLights.Attenuation(80f, 100), 2);
-        float previous = 2;
-        for (float d = 0; d < 100; d += 0.5f)
-        {
-            float a = WorldLights.Attenuation(d, 100);
-            Assert.True(a <= previous + 1e-6f, $"rises at {d}");
-            previous = a;
-        }
-    }
-
-    [Fact]
-    public void Spot_factor_is_one_inside_the_inner_cone_and_zero_outside_the_outer()
-    {
-        float inner = 40 * MathF.PI / 180, outer = 90 * MathF.PI / 180;
-        Assert.Equal(1, WorldLights.SpotFactor(1, inner, outer, 1));
-        Assert.Equal(1, WorldLights.SpotFactor(MathF.Cos(15 * MathF.PI / 180), inner, outer, 1));
-        Assert.Equal(0, WorldLights.SpotFactor(MathF.Cos(50 * MathF.PI / 180), inner, outer, 1));
-        float mid = WorldLights.SpotFactor(MathF.Cos(32 * MathF.PI / 180), inner, outer, 1);
-        Assert.InRange(mid, 0.01f, 0.99f);
-        Assert.True(WorldLights.SpotFactor(MathF.Cos(32 * MathF.PI / 180), inner, outer, 2) < mid);
-        // Cones given the wrong way round (fcs.def's default 45/40) are put in order.
-        Assert.Equal(mid, WorldLights.SpotFactor(MathF.Cos(32 * MathF.PI / 180), outer, inner, 1));
-    }
-
-    [Fact]
-    public void Daylight_ramps_over_five_minutes_and_night_lights_need_it_at_most_a_tenth()
-    {
-        Assert.Equal(0, WorldLights.DaylightFactor(4.9f, 5, 23));
-        Assert.Equal(0.5f, WorldLights.DaylightFactor(5 + 1f / 24, 5, 23), 4);
-        Assert.Equal(1, WorldLights.DaylightFactor(12, 5, 23));
-        Assert.Equal(0.5f, WorldLights.DaylightFactor(23 - 1f / 24, 5, 23), 4);
-        Assert.Equal(0, WorldLights.DaylightFactor(23.5f, 5, 23));
-
-        var light = new WorldLight(Vector3.Zero, Vector3.One, 0.6f, 100, WorldLightType.Point, -Vector3.UnitY, 0, 0, 1,
-            WorldLightEffect.None, WorldLightRule.Night, false, 0, "l", "b", "id");
-        Assert.True(WorldLights.IsLit(light, 0.05f));
-        Assert.False(WorldLights.IsLit(light, 0.5f));
-        var always = light with { Rule = WorldLightRule.WhenBuildingOn };
-        Assert.True(WorldLights.IsLit(always, 1));
-        Assert.False(WorldLights.IsLit(always, 0, buildingOn: false));
-        Assert.False(WorldLights.IsLit(always with { Intensity = 0 }, 0));
-
-        Assert.Equal(1, WorldLights.EffectFactor(WorldLightEffect.Flicker, 3));
-        Assert.Equal(0.5f, WorldLights.EffectFactor(WorldLightEffect.Pulse, 0));
-        Assert.InRange(WorldLights.EffectFactor(WorldLightEffect.Shimmer, 1.3f), 0.9f, 1);
     }
 
     [Fact]

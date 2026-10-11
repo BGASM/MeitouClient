@@ -344,15 +344,15 @@ options screen reads `Full Screen` and `Border` from the render system's current
 
 | Setting | Viewer |
 | --- | --- |
-| `view distance` | Emulated: the sky haze uses the constant 5000 (`KenshiHaze.ViewDistanceSetting`); the heat haze's depth scale uses 12000 (`HeatHaze.ViewDistanceSetting`, the install's value since 2026-10-06, `--heat-haze-view-distance`); the camera's far plane is the viewer's own (`--view-distance`, raised with the haze at height) |
-| `shadow quality`, `Shadow Range` | Honoured as options: `--shadow-quality` (index into the same table), `--shadow-range` (clamped 1000 … 9000 in Faithful; Meitou shadows default to 10000 and accept 1000 … 15000); `--no-shadows` |
+| `view distance` | Emulated: the sky haze uses the constant 5000 (`KenshiHaze.ViewDistanceSetting`); the heat haze's depth scale uses 12000 (`HeatHaze.ViewDistanceSetting`, the install's value since 2026-10-06; the `--heat-haze-view-distance` option was removed); the camera's far plane is the viewer's own (a constant 450000, raised with the haze at height; the `--view-distance` option was removed) |
+| `shadow quality`, `Shadow Range` | Honoured as options: `--shadow-quality` (index into the same table), `--shadow-range` (clamped 1000 … 9000 in Faithful; Meitou shadows default to 10000 and accept 1000 … 15000); `--shadow-range 0` (or the Tab slider's left end) turns the sun shadows off |
 | `shadow mode` | Not honoured: the viewer always runs its CSM-style pass (Faithful or Meitou), never RTW |
-| `foliage range`, `grass range`, `grass density` | Emulated with sliders / environment variables (`MEITOU_FOLIAGE_RANGE`, `MEITOU_GRASS_RANGE`, `MEITOU_GRASS_DENSITY`); default foliage range ×4 and grass range ×8, not the game's 1 |
-| `objects view range`, `feature range`, `distant town range` | Constants in `ObjectRanges`; the viewer's own `--object-distance` (default 20000 in Meitou, 12000 in Faithful), `--landmark-distance` (Meitou) and `--distant-range` replace them |
-| `FXAA`, `HeatHaze` | Honoured as options (`--fxaa` / `--no-fxaa`, `--heat-haze` / `--no-heat-haze`; Faithful switches) |
+| `foliage range`, `grass range`, `grass density` | Emulated with sliders / environment variables (`MEITOU_FOLIAGE_RANGE`, `MEITOU_GRASS_RANGE`, `--grass-density`); default foliage range ×4 and grass range ×8, not the game's 1 |
+| `objects view range`, `feature range`, `distant town range` | Constants in `ObjectRanges`; the viewer's own `--object-distance` (default 20000 in Meitou, 12000 in Faithful; the landmark distance is a fixed 7.5 times it in Meitou) and `--distant-range` replace them |
+| `FXAA`, `HeatHaze` | Honoured as options (`--no-fxaa`, `--no-heat-haze`; Faithful switches) |
 | `camera speed`, `camera zoom` | Constants in `KenshiCamera` / `CameraSettings` (500, 125) |
-| `water reflection`, `reflection range` | Honoured as options (2026-10-06): `--water-reflection <0..4>` (viewer default 4; the game's missing-key default is 2) and `--reflection-range <x>` (viewer default 3; the game's 0.6), Tab sliders for both; `--no-reflections` / `R` stay as the on/off switch. See "Viewer: water reflection" below |
-| `terrain detail`, `terrain distant`, `terrain threshold`, `terrain patch size` | Not honoured, deliberately (2026-10-06): the viewer does not replicate the game's per-node rule above. Its CDLOD (64-quad patches) uses its own resolution-aware screen-space error, measured in pixels of the picture actually rendered (after the upscaler's render scale): `--terrain-error <px>` (default 10, Tab slider "Terrain detail"), optionally a far ramp like the game's (`--terrain-far-error`, `--terrain-ramp`; off by default). See [terrain.md](terrain.md#in-the-viewer-terrainquadtree-terrainlod-terrainrenderer-terrainshaders) |
+| `water reflection`, `reflection range` | Honoured as options (2026-10-06): `--water-reflection <0..4>` (viewer default 4; the game's missing-key default is 2) and the reflection range (viewer default 3; the game's 0.6; Tab slider only, the `--reflection-range` option was removed); `--water-reflection 0` / `R` are the on/off switch (`--no-reflections` was removed). See "Viewer: water reflection" below |
+| `terrain detail`, `terrain distant`, `terrain threshold`, `terrain patch size` | Not honoured, deliberately (2026-10-06): the viewer does not replicate the game's per-node rule above. Its CDLOD (64-quad patches) uses its own resolution-aware screen-space error, measured in pixels of the picture actually rendered (after the upscaler's render scale): `--terrain-error <px>` (default 10, Tab slider "Terrain detail"), no far ramp (the `--terrain-far-error` and `--terrain-ramp` options were removed). See [terrain.md](terrain.md#in-the-viewer-terrainquadtree-terrainlod-terrainrenderer-terrainshaders) |
 | `texture resolution gimping` | Honoured as `--texture-quality <0..4>` (viewer default 0, full size; the game's missing-key default is 1; restart to change, like the game). See "Viewer: texture quality" below |
 | `Decal Range`, `Decal Resolution`, `Blood`, `harpoonLimit` | Not implemented (no decals) |
 | `generate distant towns` | Not honoured: towns without a baked mesh are drawn from their buildings' distant meshes |
@@ -360,7 +360,7 @@ options screen reads `Full Screen` and `Border` from the render system's current
 
 ### Viewer: texture quality
 
-`--texture-quality <0..4>` (default **1**, the game's value for a missing key; `TextureQuality` in `Meitou.Data.Textures`). Like the game it
+`--texture-quality <0..4>` (viewer default **0**, full size; the game's value for a missing key is 1; `TextureQuality` in `Meitou.Data.Textures`). Like the game it
 is read when textures load, so it needs a restart; it is set from the options before the world loads.
 
 - **Object and foliage textures** (`WorldTextureCache`): the DDS is rewritten as in "Mip skipping" above (`TextureQuality.LevelsToDrop`
@@ -370,7 +370,7 @@ is read when textures load, so it needs a restart; it is set from the options be
   442 `_HI.` / `_LO.` files exist in the install (mostly `animal`, `characters`), so those branches are live.
 - **Terrain layers** (**Observed** approximation): the game's biome textures are in the `Landscape` group (see
   [terrain.md](terrain.md#biomes-fields-and-shader-parameters-verified-kenshi_x64exe)), so at 1 and above they lose `level` mips: 2048² becomes
-  1024² at the default. The viewer's layer arrays have one size (`--layer-size`, 2048), so the size is lowered to `min(--layer-size, 2048 >> drop)` for all
+  1024² at the default. The viewer's layer arrays have one size (2048; the `--layer-size` option was removed), so the size is lowered to `2048 >> drop` for all
   layers instead of per file. **This halves the terrain texture resolution against earlier builds at the default**; `--texture-quality 0` restores it.
   Sources smaller than 2048² (a few 1024² and one 512²) are not given a further drop, so they differ from the game slightly.
 - **Memory budget**: the game sets the TextureManager to 2 GiB / 1.5 GiB / 1 GiB (above). The viewer's two texture caches (objects, foliage)
@@ -381,8 +381,8 @@ is read when textures load, so it needs a restart; it is set from the options be
 
 ### Viewer: water reflection
 
-`--water-reflection <0..4>` (default **2**, the game's value for a missing key; Tab slider "Water reflection 0-4 (game)", which shows the level's name beside it: 0 off (no reflection pass at all, the low-end setting), 1 landscape, 2 characters, 3 buildings, 4 everything) and `--reflection-range <x>`
-(default 0.6; Tab slider). `ReflectionPass.Level` / `Range`. What the levels draw, in the viewer's terms (the sky and terrain always come first; the
+`--water-reflection <0..4>` (viewer default **4**; the game's value for a missing key is 2; Tab slider "Water reflection 0-4 (game)", which shows the level's name beside it: 0 off (no reflection pass at all, the low-end setting), 1 landscape, 2 characters, 3 buildings, 4 everything) and the reflection range
+(viewer default 3, the game's 0.6; Tab slider only). `ReflectionPass.Level` / `Range`. What the levels draw, in the viewer's terms (the sky and terrain always come first; the
 viewer's own cut-downs from [render-foliage.md](../render-foliage.md) "Reflections" stay and say *how much*, the level says *what*):
 
 | Level | Game | Viewer |
@@ -395,12 +395,12 @@ viewer's own cut-downs from [render-foliage.md](../render-foliage.md) "Reflectio
 
 - **Reflection range**: the mirrored scene's far clip is `Sky.HazeDistance × range` (the game's view distance × 10 × value; 30000 with the defaults),
   set each frame (the intended value: the game's quirk that it only applies once the View Distance or Terrain Detail slider has moved, before which Ogre's
-  default far clip applies, is **not** reproduced). The viewer's previous constant was 150000, which `--reflection-range 3` reproduces.
+  default far clip applies, is **not** reproduced). The viewer's previous constant was 150000, which the range 3 (now the default) reproduces.
 - **Not done**: the "only when more than 100 water pixels are visible" occlusion query. The Vulkan GL layer's `BeginQuery` supports only elapsed-time queries
   (`QueryTarget` has no samples-passed), and that layer is not part of this change. Town display state 4 at levels 3 and 4 is not reproduced either (**Unknown**).
 - **Checked** (**Observed**, Release, Port North from the west at 1280x720): levels 0 to 1 differ by the mirrored terrain and sky on the sea (mean 0.15 of 255), 1 to 3 add the
   mirrored town (mean 0.53, 1.5% of pixels over 12), 3 to 4 are identical there (a desert: no foliage; the foliage path is unchanged from before and
-  `--water-reflection 4 --reflection-range 3` reproduces the old pictures exactly). Range 0.6 against 3 in the default (Meitou) haze: no difference in that view, no hard edge seen.
+  the defaults, `--water-reflection 4` with range 3, reproduce the old pictures exactly). Range 0.6 against 3 in the default (Meitou) haze: no difference in that view, no hard edge seen.
 - **Default changed**: the viewer used to draw sky, terrain, objects and foliage (level 4) out to 150000; the default is now the game's level 2 and
   range 0.6, so objects and foliage no longer appear in reflections unless `--water-reflection 3` / `4` is given.
 

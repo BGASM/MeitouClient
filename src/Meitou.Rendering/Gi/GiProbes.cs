@@ -16,8 +16,8 @@ namespace Meitou.Rendering.Gi;
 internal sealed unsafe class GiProbes : IDisposable
 {
     public const int Columns = 32, Layers = 8, IrradianceTexels = 8, DistanceTexels = 16, Cascades = 2;
-    /// <summary>Rays per probe by default (32 or 64: the trace's workgroup size; <c>MEITOU_GI_RAYS</c>).</summary>
-    public static readonly int DefaultRays = int.TryParse(Environment.GetEnvironmentVariable("MEITOU_GI_RAYS"), out var rayCount) ? (rayCount == 64 ? 64 : 32) : 32;
+    /// <summary>Rays per probe by default (32 or 64: the trace's workgroup size).</summary>
+    public const int DefaultRays = 32;
     /// <summary>The most rays per probe (the ray buffer's stride).</summary>
     public const int MaxRays = 64;
     public const int ProbesPerCascade = Columns * Columns * Layers, Probes = ProbesPerCascade * Cascades;
@@ -45,8 +45,6 @@ internal sealed unsafe class GiProbes : IDisposable
     readonly float[] baseHeights = new float[Columns * Columns * Cascades];
     readonly (int X, int Z)[] placed = new (int, int)[Cascades];
     readonly bool[] basesPlaced = new bool[Cascades];
-    /// <summary>True (default; `MEITOU_GI_BASES_FULL=1` off): when a grid scrolls only the columns that scrolled in have their base heights sampled again (the result is the same as sampling them all).</summary>
-    public bool IncrementalBases { get; set; } = Environment.GetEnvironmentVariable("MEITOU_GI_BASES_FULL") != "1";
     object? placedHeights;
     readonly Random random = new(1);
     int slot;
@@ -62,8 +60,8 @@ internal sealed unsafe class GiProbes : IDisposable
     public int Phases { get; set; } = 4;
     /// <summary>Rays each probe traces per update (32 or 64; the bench's gi-rays switch). The hysteresis is scaled with it so that the noise stays the same (<see cref="UpdateHysteresis"/>).</summary>
     public int Rays { get; set; } = DefaultRays;
-    /// <summary>The probes of the far cascade are traced and blended on one of every this many of their rounds, with the hysteresis of that many updates in one (1: every round; <c>MEITOU_GI_FAR_PERIOD</c>; the bench's gi-far switch).</summary>
-    public int FarPeriod { get; set; } = int.TryParse(Environment.GetEnvironmentVariable("MEITOU_GI_FAR_PERIOD"), out var farPeriod) ? Math.Max(farPeriod, 1) : 2;
+    /// <summary>The probes of the far cascade are traced and blended on one of every this many of their rounds, with the hysteresis of that many updates in one (1: every round; the bench's gi-far switch).</summary>
+    public int FarPeriod { get; set; } = 2;
     public long Updates { get; private set; }
 
     /// <summary>How much the probes replace the sky's light (1: fully, 0: not at all; <c>--gi-strength</c>).</summary>
@@ -84,10 +82,9 @@ internal sealed unsafe class GiProbes : IDisposable
     public int SleepPeriod { get; set; } = 8;
     /// <summary>
     /// A probe that no surface the fog leaves visible can read (<see cref="GiFogHide"/>) is traced and blended only every <c>HiddenPeriod</c>-th of its
-    /// updates, with the hysteresis of that many updates in one (0: every probe at its normal rate; the bench's gi-fog switch;
-    /// <c>MEITOU_GI_HIDDEN_PERIOD</c> sets the default).
+    /// updates, with the hysteresis of that many updates in one (0: every probe at its normal rate; the bench's gi-fog switch).
     /// </summary>
-    public int HiddenPeriod { get; set; } = int.TryParse(Environment.GetEnvironmentVariable("MEITOU_GI_HIDDEN_PERIOD"), out var hiddenPeriod) ? Math.Max(hiddenPeriod, 0) : 16;
+    public int HiddenPeriod { get; set; } = 16;
     /// <summary>Probes this frame's list holds, and those the fog hides (all of them, not only the share of this frame) at the last list.</summary>
     public int Listed { get; private set; }
     public int[] Hidden { get; } = new int[Cascades];
@@ -258,7 +255,7 @@ internal sealed unsafe class GiProbes : IDisposable
             if (placed[c] == (ox, oz) && sameHeights) continue;
             // A column that stays in the window keeps its tile (toroidal) and its height (the snapshot is immutable): only the columns that scrolled in are sampled.
             var (oldX, oldZ) = placed[c];
-            bool keep = IncrementalBases && sameHeights && basesPlaced[c];
+            bool keep = sameHeights && basesPlaced[c];
             placed[c] = (ox, oz);
             basesPlaced[c] = true;
             moved = true;

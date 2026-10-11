@@ -146,8 +146,8 @@ coverage table is recomputed from the shipped textures and must match the one ab
 
 - **Order**: sky, stars, the planets, **clouds**, all in the one sky pass; the clouds are alpha-blended in HDR (`mix(sky, cloud, alpha)`).
 - **Inputs on `SkyRenderer`**: cloud density c (`CloudDensityInput`, else the forced `--weather` record's; `--clouds <0..1>` overrides
-  both, a test flag), sky colour multiplier (`SkyColourMultiplierInput`, else the record's), cloud wind velocity xz (`CloudWind`,
-  `--cloud-wind <x>,<z>`). c is clamped to 0..1. The same c gives `horizonClouds` (colour and pull), so the band and the haze meet.
+  both, a test flag), sky colour multiplier (`SkyColourMultiplierInput`, else the record's), cloud wind velocity xz (`CloudWind`;
+  the `--cloud-wind` override was removed). c is clamped to 0..1. The same c gives `horizonClouds` (colour and pull), so the band and the haze meet.
 - **Light**: `sunColour.rgb` = `KenshiLighting.SunColour(sun)` and `zenithLight = max(getColorAt(+Z) · skyMult, floor) · sunColour.g`
   with `getColorAt` = `SkyXModel.Colour(+Z, sun, skydome: false)` (the HDR scattering colour, without the dome's night factor); both
   computed on the CPU when the sun or the multiplier changes.

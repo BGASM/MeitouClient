@@ -897,7 +897,6 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// <summary>Reads the attachment texel size limits and the listed rates once the device exists; the feature stays off when no usable texel size or square rate comes out.</summary>
     void QueryShadingRate(PhysicalDevice pd)
     {
-        if (Environment.GetEnvironmentVariable("MEITOU_NO_VRS") == "1") return;   // test and safety switch: the device is used as one without the extension
         var rateProps = new PhysicalDeviceFragmentShadingRatePropertiesKHR { SType = StructureType.PhysicalDeviceFragmentShadingRatePropertiesKhr };
         var p2 = new PhysicalDeviceProperties2 { SType = StructureType.PhysicalDeviceProperties2, PNext = &rateProps };
         Vk.GetPhysicalDeviceProperties2(pd, &p2);

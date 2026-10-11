@@ -38,12 +38,4 @@ public class MeshSimplifierTests
             for (int t = 0; t < level.Length; t += 3) Assert.True(level[t] != level[t + 1] && level[t + 1] != level[t + 2] && level[t] != level[t + 2]);
         }
     }
-
-    [Fact]
-    public void Stops_at_the_floor()
-    {
-        var (vertices, indices) = Grid(6);
-        var chain = MeshSimplifier.Chain(vertices, indices, [0.01f], 30);
-        Assert.True(chain[0].Length / 3 >= 20);
-    }
 }

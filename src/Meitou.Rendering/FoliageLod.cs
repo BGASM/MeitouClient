@@ -260,8 +260,7 @@ public static class FoliageLodCache
 {
     const uint Magic = 0x444F4C4D;   // "MLOD"
 
-    public static string Root { get; set; } = Environment.GetEnvironmentVariable("MEITOU_LOD_CACHE")
-        ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Meitou", "lods");
+    public static string Root { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Meitou", "lods");
 
     public static string PathFor(string name, byte[] fileBytes, string? root = null, int version = FoliageLodBuilder.Version)
     {

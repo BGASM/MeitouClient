@@ -2,6 +2,44 @@
 
 Two parts: [Part 1, tests](#part-1-tests) and [Part 2, launch options and env vars](#part-2-launch-options-and-env-vars).
 
+
+## Status (2026-10-12)
+
+Both parts are applied on branch `cleanup`. The build is clean (0 warnings) and 287 test methods
+remain (436 cases with the Theory rows), against 1,103 before. The full run passed except two
+`SaveWriteTests` cases on the current quicksave, which fail on master too.
+
+What wasn't applied:
+- **Extra cuts to 20%:** the "Getting to 20%" section names no specific tests, so it wasn't applied.
+- **Merges that need a new option:** these were left for a follow-up, and the options they would
+  replace still work:
+  - `MEITOU_CACHE_DIR`, to replace `MEITOU_IMPOSTOR_CACHE` and `MEITOU_OBJECT_LOD_CACHE`;
+  - `--debug-view`, to replace `--debug`, `--wireframe`, `--debug-shadows`, `--gi-debug` and
+    `MEITOU_LOD_DEBUG`;
+  - one bench skip-frames setting, for `MEITOU_PASS_STATS_SKIP`;
+  - the bench-motion consolidation, for `--fly-pipelined`, `--orbit-step`, `MEITOU_BENCH_ORBIT` and
+    `MEITOU_FLY_TURN`;
+  - the VRAM family (`MEITOU_VRAM_KILL`);
+  - `--particle-divisor`;
+  - `MEITOU_FOLIAGE_RANGE` and `MEITOU_GRASS_RANGE`;
+  - one switch for `MEITOU_SHAFT_STAMPS` and `MEITOU_SSAO_STAMPS`;
+  - `MEITOU_STREAM_LOG` in the viewer.
+
+Changes in behaviour or interface:
+- **Camera far plane:** fixed at 450000.
+- **Now constants:** the `PostOptions` tuning knobs and a few renderer settings (`GiProbes.DefaultRays`,
+  the `ShadowLod` texel values, `TerrainLayerSkip.CliffEps`, the `SpikeLog` thresholds).
+- **`navmesh --verbose`:** replaces `NAV_VERBOSE` and `NAV_DUMP`.
+- **`MEITOU_UPSCALER_LOG`:** replaces `MEITOU_FFX_DEBUG` and `MEITOU_STREAMLINE_LOG`.
+- **Folded flags:** `--select-player` into `--move-to`, and `--sandbox-speed`/`--sandbox-patrol` into
+  `--sandbox-mode`.
+- **`--low-end`:** sets the values directly; later options still override it.
+
+Docs still to tidy:
+- Some measurement logs in the docs name flags and tests that no longer exist. They were left as
+  records.
+- `sky.md` still describes the `physical` haze branch, which can no longer be selected.
+
 # Part 1: tests
 
 An audit of every test file in `tests/Meitou.Tests`: 147 files with 1,103 `[Fact]`/`[Theory]` methods

@@ -23,7 +23,7 @@ Dependencies point one way: Core ← Data ← Engine / Rendering ← Game / view
 ## The game loop (`meitou`, `Meitou.Engine.Time`)
 
 - **Two clocks** (stage 0 of [simulation.md](simulation.md)). The **control tick** (`FixedStepClock`, 30 Hz of real time by default,
-  `--tick-rate` or `tickRate` in the user config) consumes the input, handles pause and speed and moves the camera, so the camera
+  `tickRate` in the user config) consumes the input, handles pause and speed and moves the camera, so the camera
   keeps moving while the game is paused and at every speed. Each displayed frame adds the real time since the last one to an
   accumulator and runs as many control ticks as it holds, at most 10 (a long stall drops the rest; `DroppedTicks` counts them). The
   tick count depends only on the summed time, not on how it was split into frames (tests `TimeTests`).
@@ -52,7 +52,7 @@ Dependencies point one way: Core ← Data ← Engine / Rendering ← Game / view
   worker pool, the stateless seeded randomness and the state hash described in [simulation.md](simulation.md#threading).
   After each tick it publishes a `WorldSnapshot`; the session keeps the last two (`PreviousSnapshot`, `CurrentSnapshot`) and
   `SimulationAlpha` (the simulation clock's fraction of a tick) so the host can interpolate characters like the camera. Worker
-  threads: `--sim-threads` or `simThreads` in the user config (default half the cores, 1 to 8); `--seed` sets the world seed.
+  threads: `simThreads` in the user config (default half the cores, 1 to 8); `--seed` sets the world seed.
 - **Input** (`Meitou.Engine.Input`): the host feeds an `InputState` (keys, buttons, mouse movement and wheel) from the
   windowing library's events; each tick consumes it once, so a press is seen by exactly one tick however frames and ticks fall.
   `InputBindings` maps keys and buttons to `InputAction`s; defaults below, overridable in the user config.
@@ -138,15 +138,15 @@ The renderers still state their resources in GL's vocabulary where that decides 
 compare functions, wrap modes, swizzles, vertex formats) and `SamplerDesc.FromGl` translate it, and the enumerations they take (`GLEnum`,
 `InternalFormat`, `TextureMinFilter`, ... ten in all) are ours, at the end of `Gpu/GlConventions.cs`: the GL specification's names and
 token values, only the members the code uses. **Vulkan is the only backend**: OpenGL was removed ([../DECISIONS.md](../DECISIONS.md) 18).
-`--renderer vulkan` is accepted and ignored; `--renderer gl` prints a line saying OpenGL is gone and is ignored; an old `renderer` key in
+There is no `--renderer` option any more (Vulkan is the only backend; it was removed in the 2026-10-12 cleanup); an old `renderer` key in
 `meitou.user.json` is ignored.
 
 The window and the device come from `VulkanDisplay` (`Meitou.Rendering.Display`): windowed (swapchain through
 `VulkanPresenter`, MAILBOX without vsync, FIFO with) for `meitou` and the viewer's interactive modes, headless (no window) for
 `--screenshot` and `--fly-benchmark`. `MEITOU_VK_VALIDATION=1` turns on the validation layer for any of them and prints the error
 count on exit; `=sync` adds synchronisation validation and `=gpu` GPU-assisted validation (bindless indices), both through
-`VK_EXT_layer_settings`. Pipelines are cached on disk in `%LOCALAPPDATA%\Meitou\pipeline-cache.bin` (`MEITOU_PIPELINE_CACHE=<file>`
-elsewhere, `=0` off).
+`VK_EXT_layer_settings`. Pipelines are cached on disk in `%LOCALAPPDATA%\Meitou\pipeline-cache.bin` (`--no-load-cache`
+turns it off).
 
 ### Vulkan backend
 
@@ -197,7 +197,7 @@ elsewhere, `=0` off).
 ## Upscaling
 
 `--upscaler off|taa|fsr|dlss`, `--render-scale <0.25..1|native|ultra-quality|quality|balanced|performance|ultra>` (1, 0.83, 1/1.5, 1/1.7, 1/2, 1/3 per
-axis; Meitou temporal default 0.83, Ultra Quality; off defaults to 1, native; explicit native gives DLAA / FSR native AA), `--sharpness <0..1>`; in the game also the Tab panel (kept in `meitou.user.json`,
+axis; Meitou temporal default 0.83, Ultra Quality; off defaults to 1, native; explicit native gives DLAA / FSR native AA; the `--sharpness` option was removed, the sharpness is 0.3); in the game also the Tab panel (kept in `meitou.user.json`,
 command-line values win). Off draws the scene at the display size (the default) and smooths the edges with the game's FXAA (the Faithful anti-aliasing; the scene is never multisampled). Off also honours the render scale (2026-10-09): below 1 the scene, SSAO and Hi-Z run at the render size and the composite scales the picture up to the display size (Catmull-Rom, five bilinear taps) before FXAA and the heat haze, which run at the display size; no jitter, motion vectors or history (`Temporal` stays false), texture LOD bias 0. Scale 1 is the same picture as before (**Verified**: byte-identical PNGs against the previous build). The Tab slider keeps its label "Render scale (upscaler)" (it is the key in `meitou.user.json`) and adds "(FXAA: plain scaling)" below 1; a scale saved while using an upscaler now also applies after switching to FXAA. With an upscaler (`PostProcess`, DECISIONS 14):
 
 - **Render size and jitter.** The scene is drawn at the display size × scale, single-sampled, its projection moved each frame by a
@@ -210,9 +210,9 @@ command-line values win). Off draws the scene at the display size (the default) 
 - **Grass motion.** The swaying grass moves on its own, which camera motion misses (trails under every upscaler). After the velocity
   pass, `FoliageRenderer.DrawGrassMotion` (through `PostProcess.ObjectMotion`) redraws the near slice's blades of layers with wind
   into the motion texture (red and green only), placing each now and with last frame's sway phase and camera, where its depth matches
-  the depth buffer's (read in the shader, so the scene's depth is untouched). Only with an upscaler on; `MEITOU_GRASS_MOTION=0` turns it
-  off for comparisons; only blades within the distance where their own motion is half a pixel a frame or more are drawn (`grass-velocity`, [render-foliage.md](render-foliage.md)). Checked (rock view, sway at real speed, `--sway-step 0.016667` against a still picture at the same sway time,
-  `--sway-start`): mean difference without / with: TAA 0.173 / 0.129, FSR 0.589 / 0.519, DLSS 0.438 / 0.349.
+  the depth buffer's (read in the shader, so the scene's depth is untouched). Only with an upscaler on; the `MEITOU_GRASS_MOTION=0` switch
+  for comparisons was removed; only blades within the distance where their own motion is half a pixel a frame or more are drawn (`grass-velocity`, [render-foliage.md](render-foliage.md)). Checked (rock view, sway at real speed, `--sway-step 0.016667` against a still picture at the same sway time,
+  and the since-removed `--sway-start`): mean difference without / with: TAA 0.173 / 0.129, FSR 0.589 / 0.519, DLSS 0.438 / 0.349.
 - **TAA** (`UpscaleShaders.Taa`, both backends): each display pixel takes a Gaussian of the 3 × 3 jittered render samples around
   it, the history reprojected with Catmull-Rom and clipped to the neighbourhood's colour spread (YCoCg variance clipping), blended
   in a tone-mapped space; the result (display size, HDR) is the history and the input of the exposure and the composite.
@@ -221,9 +221,9 @@ command-line values win). Off draws the scene at the display size (the default) 
   `MEITOU_FFX_PATH` (the DLL or its folder) or next to the executable; never in the repository. Without it, TAA runs
   (one line says so). Inputs: the scene colour (HDR, FSR's auto exposure), the R32F depth, the motion texture with motion-vector scale
   (−render width, −render height) (FSR wants render pixels towards the previous position), the jitter as is (both conventions move the
-  picture by +jitter along image columns and rows), sharpening = `--sharpness`. Images stay in GENERAL (declared COMMON /
-  UNORDERED_ACCESS, which the backend maps to GENERAL and restores). `MEITOU_FFX_DEBUG=1` turns on FSR's input checks and messages,
-  `MEITOU_FFX_DEBUGVIEW=1` its debug overlay (its rows appear upside down in our bottom-up picture). Checked: the jitter and motion
+  picture by +jitter along image columns and rows), sharpening = `UpscaleOptions.Sharpness` (0.3; the `--sharpness` option was removed). Images stay in GENERAL (declared COMMON /
+  UNORDERED_ACCESS, which the backend maps to GENERAL and restores). `MEITOU_UPSCALER_LOG=1` turns on FSR's input checks and messages
+  (and Streamline's info lines). Checked: the jitter and motion
   conventions by flipping each (rock view, quality: still picture vs the native reference 5.2 mean, flipped jitter 6.4-8.5; orbiting
   camera vs a still picture at the end angle 4.8, flipped motion 7.9).
 - **DLSS** (`--upscaler dlss`, Vulkan, NVIDIA; `Upscalers/Streamline` + `DlssUpscaler`; DECISIONS 17): NVIDIA DLSS Super Resolution
@@ -233,7 +233,7 @@ command-line values win). Off draws the scene at the display size (the default) 
   the constants (the fixed-plane projection and the clip-to-previous-clip matrix with y flipped, jitter as is, motion scale (−1, −1),
   camera vectors), four tags (depth, motion, colour in and out, all in GENERAL) and the evaluation; the water mask as a fifth tag (`kBufferTypeBiasCurrentColorHint`, NGX's "Bias.Current.Color.Mask"). Observed: with
   DLSS 310's default (transformer) preset the hint changes nothing; with a CNN preset (`MEITOU_DLSS_PRESET=5`, E) it changes the water
-  edges. `MEITOU_DLSS_PRESET=<n>` sets Streamline's preset for every mode (0 default, 1..15 = A..O). `MEITOU_STREAMLINE_LOG=1` shows
+  edges. `MEITOU_DLSS_PRESET=<n>` sets Streamline's preset for every mode (0 default, 1..15 = A..O). `MEITOU_UPSCALER_LOG=1` shows
   Streamline's info lines. Checked on an RTX 4070 (driver 596.49, DLSS 310.9.1): validation clean; rock view at quality: still picture
   vs the native reference 4.7 mean (FSR 5.2), orbiting vs still 3.9 (FSR 4.8).
 - **Reactive mask (water).** Water is blended over the seabed without writing depth, so its moving surface has no motion vectors of
@@ -246,7 +246,7 @@ command-line values win). Off draws the scene at the display size (the default) 
   DECISIONS 15).
 - **Offscreen pictures** draw `WarmupFrames` frames first so the history converges; `--orbit-step <degrees>` turns the camera every
   frame of them (a check of the motion vectors: the picture should match a still one at the end angle but for edge differences).
-  `--sway-step <seconds>` advances the grass sway every frame of them and `--sway-start <seconds>` sets where it starts (a check of the
+  `--sway-step <seconds>` advances the grass sway every frame of them (the `--sway-start` option, which set where it starts, was removed; a check of the
   grass motion).
 
 ## Frame time
@@ -254,10 +254,9 @@ command-line values win). Off draws the scene at the display size (the default) 
 The render thread is above normal priority, the streaming threads below normal (`BackgroundWork`), and its parallel loops (foliage culling)
 run on a few above-normal job threads (`RenderJobs`). The game and the viewer run server GC on four heaps without tiered compilation
 (DECISIONS 19). The flight benchmark (`--fly-benchmark`) prints the stage means, the shadow casters' means, GC totals and the worst frames
-with their stages and GC pauses; `MEITOU_JOB_STATS=1` adds what each streaming call site allocated and cost (only the `BackgroundWork` jobs: pool threads such as
-the shore bake's are not in it), and `MEITOU_ALLOC_STATS=1` lists every GC (generation, blocking or background, reason, time suspended, frame, heap sizes after) and the allocation by thread
+with their stages and GC pauses; `MEITOU_ALLOC_STATS=1` (since removed) listed every GC (generation, blocking or background, reason, time suspended, frame, heap sizes after) and the allocation by thread
 (render / other) and type, large-object-heap (LOH) and pinned-heap (POH) allocations marked, how long the threads took to stop for each pause, and the generation sizes after it, from the
-runtime's own events (`AllocationLog`, allocation sampled every 100 KB; docs/renderer-native.md 8.22).
+runtime's own events (`AllocationLog`, deleted in the 2026-10-12 cleanup; allocation sampled every 100 KB; docs/renderer-native.md 8.22).
 A draw through `VkGl` cost 1.5-2.3 µs of CPU in Release and 3.9-5.3 µs in Debug (measured before the native port, "Frame cost breakdown" below; VkGl is gone since phase 8), so draw counts matter more than triangles: meshes that repeat are drawn instanced (the
 TERRAIN-mode rocks were one draw each and cost ~23 ms of shadow pass in a forest; docs/render-shadows.md, "Shadow pass cost").
 
@@ -266,11 +265,10 @@ branch through the `PublishWithSatoriGC` MSBuild SDK (`<Sdk Name="PublishWithSat
 csproj), which swaps `coreclr`, `clrjit` and `System.Private.CoreLib` for Satori's on a self-contained publish only (`-p:UseSatoriGC=false`
 publishes the stock runtime from the same commit). Not adopted: shorter pauses, but the same frames (below), and a modified runtime to ship.
 The branch is deleted; the SDK line above brings it back. What stayed: the startup `gc` line names the collector and the latency mode (`GcName`:
-`satori` when `GC.GetConfigurationVariables()` has `SatoriGC`, else server or workstation), and `MEITOU_GC_LATENCY=low|interactive|batch`
-replaces SustainedLowLatency. Satori reports `LowLatency` whatever is asked for, so its two modes were not told apart.
+`satori` when `GC.GetConfigurationVariables()` has `SatoriGC`, else server or workstation). The GC latency mode is fixed at SustainedLowLatency (the `MEITOU_GC_LATENCY=low|interactive|batch` override was removed in the 2026-10-12 cleanup). Satori reports `LowLatency` whatever is asked for, so its two modes were not told apart.
 **Observed** (RTX 4070 idle, Release published twice from the branch (master `99ee299` + the GC switch and the SDK line), stock .NET 10.0.12 against Satori 10.0.13, three interleaved pairs of the fast flight
 `--world --at -60564,-45142 --distance 1400 --pitch 25 --size 1600x900 --fly-benchmark 3600 --fly-speed 150 --fly-radius 60000`,
-`MEITOU_BENCH_SKIP=60 MEITOU_ALLOC_STATS=1`, the memory guard never in pressure; stock / Satori): GC pause total 47, 52, 47 / 31, 11, 9 ms;
+`MEITOU_BENCH_SKIP=60`, with the since removed `MEITOU_ALLOC_STATS=1`, the memory guard never in pressure; stock / Satori): GC pause total 47, 52, 47 / 31, 11, 9 ms;
 longest pause 15, 21, 19 / 18, 4.5, 1.2 ms; pauses over 5 ms 4, 3, 2 / 3, 0, 0; gen2 4 / 2 each; working set 7.1-7.6 / 6.7-6.9 GB;
 render-thread CPU median 4.7-5.1 / 4.8-5.0 ms. The frames did not change: p99 18.5-19.4 ms and 14-24 frames over 20 ms in both, worst frame
 28-36 / 25-38 ms. Since the 2026-10-10 allocation work the long frames are no longer GC: they are slow foliage updates and the like
@@ -290,7 +288,7 @@ compilation in both, see the runtimeconfig). The user runs Debug.
 
 **How it was measured** (all off by default):
 - `StageClock.OnClose/OnStart` (hook, null = one compare) plus `StageClock.Sub/Phase` marks at the shadow cascades, the foliage steps, the reflection
-  pass and the post stages. The viewer's `PassMeter` (`MEITOU_PASS_STATS=1`, `MEITOU_PASS_STATS_SKIP=<frames>`, `MEITOU_PASS_TAG=<label>`) takes at
+  pass and the post stages. The viewer's `PassMeter` (`MEITOU_PASS_STATS=1`, `MEITOU_PASS_STATS_SKIP=<frames>`; the `MEITOU_PASS_TAG` label was removed) takes at
   every mark the Stopwatch time, the difference of the `VkGlStats` counters (now cumulative; new: pipeline binds, dynamic-state commands, set-1 binds,
   uniform-ring copies, descriptor writes, pushed textures, skipped pushes, vertex/index buffer binds, barriers, the GL state / uniform / texture-bind /
   bind / attrib calls the renderers made, pipeline-creation, fence-wait, submit, acquire and present ticks) and a GPU timestamp. A stage is a row;
@@ -302,8 +300,8 @@ compilation in both, see the runtimeconfig). The user runs Debug.
   once per depth slice (terrain, objects, foliage, water) and cascades drawn every second or fourth frame showed per run
   ([render-distance-benchmark.md](render-distance-benchmark.md) section 1).
 - `MEITOU_VKGL_PHASES=1` (removed with VkGl in phase 8 stage 3): Stopwatch around the nine parts of `PrepareDraw` and, separately, around the `vkCmd*` calls themselves
-  (`VkGlStats.PhaseTicks/NativeTicks`; ~0.05 µs per read, so the sums read a little high). `MEITOU_VK_MICRO=1`: 100 000 `vkCmdSetScissor` / `vkCmdSetCullMode`
-  recorded through Silk.NET and through the raw function pointer.
+  (`VkGlStats.PhaseTicks/NativeTicks`; ~0.05 µs per read, so the sums read a little high). A micro-benchmark (`MEITOU_VK_MICRO=1`, removed in the 2026-10-12 cleanup) recorded 100 000 `vkCmdSetScissor` / `vkCmdSetCullMode`
+  through Silk.NET and through the raw function pointer.
 - Benchmark runs: `set KENSHI_PATH=<Kenshi install>`, `set MEITOU_PASS_STATS=1`, `set MEITOU_PASS_STATS_SKIP=80`, then
   `meitou-viewer.exe --world <view> [--faithful shadows] --time 13 --size 1600x900 --fly-benchmark 300 --fly-speed 0` (serialised: the GPU is waited
   for after each frame; 220 measured frames). Views: `hub` = `--town "The Hub" --distance 40000 --pitch 3`; `rock` = `--at -51468,-14324 --yaw 95 --pitch 2 --distance 300`;
@@ -481,7 +479,7 @@ are not in them.
 So a draw's preparation is 1.5-2.3 µs in Release and 3.9-5.3 µs in Debug (the "~4 µs" the docs gave is the Debug figure), of which only 0.5-0.8 µs (Release) /
 0.7-1.0 µs (Debug) is inside the `vkCmd*` calls; the rest is C# in VkGl. Debug adds 2.5-3 µs per draw and nearly all of it in the dictionary key
 (0.3 + 0.3 µs), the sampler/buffer compare loop of set 0 (1.4-2.0 µs against 0.3-0.5) and the loose-uniform copy. The calls themselves are cheap:
-`MEITOU_VK_MICRO=1` (Release, 100 000 calls each, recorded outside a render pass): `vkCmdSetScissor` 23.4 ns through Silk.NET, 20.9 ns through the raw function pointer;
+`MEITOU_VK_MICRO=1` (since removed; Release, 100 000 calls each, recorded outside a render pass): `vkCmdSetScissor` 23.4 ns through Silk.NET, 20.9 ns through the raw function pointer;
 `vkCmdSetCullMode` 22.2 / 16.1 ns; an empty loop 0.5 ns. Silk.NET's dispatch costs 2-6 ns a call (the same in Debug, it is a NuGet assembly); the driver's recording
 is ~16-21 ns for a state command; per draw the pipeline-bind, push, vertex-buffer and draw calls together are 0.03-0.2 µs each in the table (averages over all draws, including draws that skip them).
 Whole-draw all-in cost, for scale: the forest's grass (298 draws a frame, 9 GL calls each) is 0.68 ms Release / 1.87 ms Debug = 2.3 / 6.3 µs per draw.

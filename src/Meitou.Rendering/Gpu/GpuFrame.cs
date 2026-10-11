@@ -27,8 +27,8 @@ public sealed unsafe class GpuFrame : IDisposable
         pools = new List<DescriptorPool>[n];
         for (int i = 0; i < n; i++)
         {
-            constants[i] = new LinearAllocator(device, $"frame constants {i}", ctx.HostMemory);
-            staging[i] = new LinearAllocator(device, $"upload staging {i}", ctx.HostMemory);
+            constants[i] = new LinearAllocator(device, $"frame constants {i}");
+            staging[i] = new LinearAllocator(device, $"upload staging {i}");
             pools[i] = [];
         }
         Stats = new GpuStats();
@@ -137,13 +137,6 @@ public sealed unsafe class GpuFrame : IDisposable
         States.AssumeFullBarrier();
         Stats.Reset();
         ctx.Bindless?.BeginFrame(Slot);
-        // The draw log records one chosen frame.
-        if (DrawLog.RequestedPath(Number) is { } path && ctx.Log is null)
-        {
-            ctx.Log = new DrawLog(new StreamWriter(path), ctx.HostMemory);
-            ctx.Log.Note($"frame {Number}");
-        }
-        Commands.Log = ctx.Log;
         Open = true;
     }
 
@@ -153,13 +146,6 @@ public sealed unsafe class GpuFrame : IDisposable
         Timestamps.End();
         ctx.Bindless?.EndFrame();   // what was registered during the frame, into its set before the submit
         Open = false;
-        if (ctx.Log is { } log)
-        {
-            log.Note($"end of frame {Number}: {log.Draws} draws");
-            log.Dispose();
-            ctx.Log = null;
-            Commands.Log = null;
-        }
     }
 
     /// <summary>A descriptor set from this frame's pools (sets that cannot be pushed); freed when the slot comes round.</summary>

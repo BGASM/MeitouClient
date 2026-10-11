@@ -175,7 +175,7 @@ there.
   2026-10-06 ([settings.md](settings.md)), so D = 120000: the amplitude reaches full at **20000** units instead of 8333, and at 5000 it
   is 0.25 instead of 0.6. Everything in the 2000 to 15000 range, which is all that a normal camera sees of a settlement, shimmers
   2.4 times less. (The sky haze still uses 5000, which keeps the parity baseline; its own D is a separate, unchanged question, see
-  [sky.md](sky.md).) `--heat-haze-view-distance 5000` brings the earlier look back.
+  [sky.md](sky.md).) A depth scale of 5000 (the former `--heat-haze-view-distance 5000`, removed) gave the earlier look.
 - **Unknown**: the game's `heatHaze` in its own screenshots. At the edge against the sky the amplitude is `0.002 · heatHaze` whatever D is
   (the sky counts as depth 1): image 4 shows about 3 px of tearing there (so `heatHaze` near 1), image 5 (Ashlands, a floating rock and
   pillars against the sky) shows none. The two disagree at the same claimed weather, so either the in-game hour or the weather differed
@@ -188,7 +188,7 @@ there.
 two maps loaded from the install at start (BC1 uploaded with the files' own 12 mips; trilinear, anisotropy 16, repeat), run last,
 after FXAA (when no temporal upscaler runs) or after the composite (with TAA / FSR / DLSS: on the upscaled, exposed LDR picture,
 the game's input; before the upscaler its history would reject or smear the shimmer, and the game has no such stage). Depth: the
-near depth slice's depth buffer, linearised and turned into the distance along the view ray, over D (10 × `--heat-haze-view-distance`, default 12000, so 120000);
+near depth slice's depth buffer, linearised and turned into the distance along the view ray, over D (10 × the install's view distance setting 12000, so 120000);
 beyond the near slice (20000+) and on the sky the amplitude is 1, as in the game (8333 < 20000, so the clear hides no ramp). The
 lookups use the game's screen orientation (v from the top), the offset is flipped back. Differences: a zero direction sum leaves
 the pixel in place, and the viewer's water writes depth, so over water the amplitude follows the water surface's distance, not the
@@ -209,8 +209,7 @@ composite applies Kenshi's exposure: the scene's mean Rec. 601 luminance (a 4×4
 mip chain to 1×1: a plain linear mean like the game's, by a different reduction), adapted at rate 0.5 per second, clamped
 to this frame's `[MIN_LUMINANCE, MAX_LUMINANCE]` from the CONSTANTS record, and `0.55 / adapted` multiplies the image
 (`PostProcess.AutoExposure`). Screenshots adapt at once (`InstantAdaptation`) and print the mean, the adapted value and the
-scale. `--exposure` multiplies on top (default 1). With `--simple-sky` the old display-referred shaders are back and the
-exposure is the constant `--exposure` alone. Nothing is clamped before the composite (RGBA16F scene buffer).
+scale. The exposure multiplier (Tab slider and the `-` / `=` keys, default 1) multiplies on top; the `--exposure` option and the `--simple-sky` mode with its display-referred shaders were removed. Nothing is clamped before the composite (RGBA16F scene buffer).
 The band is the game's at every camera height; the viewer adds no guard of its own. The white overview shots from far above the
 game's camera heights were not the exposure's doing: the game's haze formula gave values in the thousands there (a mean luminance
 of 715, the band then holds the scale at its floor ×0.46), fixed at the source ([sky.md](sky.md#haze-distance-fog-how-vanilla-does-it));
@@ -220,13 +219,13 @@ Details, options and costs: [render-post.md](../render-post.md).
 | Stage | Faithful (`--post kenshi`, `--faithful all`) | Meitou (the default) | Basis |
 | --- | --- | --- | --- |
 | Scene buffer | RGBA16F, single-sample | none | Kenshi: R11G11B10F, no FSAA |
-| Exposure | Kenshi's auto exposure (game sky); x1 with `--simple-sky` | `--exposure` multiplier | Kenshi: 0.55 / adapted, band from CONSTANTS |
-| Curve | clamp at 1 | clamp at 1; `--tonemap shoulder` or `aces` (or the Tab slider) as options (not a switch) | Kenshi: none (clip) |
+| Exposure | Kenshi's auto exposure (game sky) | exposure multiplier (Tab slider, keys) | Kenshi: 0.55 / adapted, band from CONSTANTS |
+| Curve | clamp at 1 | clamp at 1; shoulder or aces (the Tab slider; the `--tonemap` options were removed) as options (not a switch) | Kenshi: none (clip) |
 | SSAO | off | on (12 taps, half resolution, from depth) | Kenshi: shipped, disabled |
-| SSAO on characters | n/a (no SSAO) | the occlusion is scaled to 0.25 on the characters' own pixels (`--ssao-character-strength`; Meitou feature, no game counterpart; **Observed** on a `--crowd` view, no game reference) | Kenshi: none |
+| SSAO on characters | n/a (no SSAO) | the occlusion is scaled to 0.25 on the characters' own pixels (`PostOptions.SsaoCharacterStrength`, a constant; Meitou feature, no game counterpart; **Observed** on a `--crowd` view, no game reference) | Kenshi: none |
 | Bloom | off | none (removed) | Kenshi: magnitude 0 |
-| Grading, vignette | none | grading optional (`--grade`, Tab slider: saturation 1.12, contrast 1.06; off by default); no vignette | Kenshi: none |
+| Grading, vignette | none | grading (Tab slider; saturation 1.06, contrast 1.05 as constants; the `--grade`, `--saturation` and `--contrast` options were removed); no vignette | Kenshi: none |
 | FXAA | FXAA 3.11 quality, green as luma, subpix 0.75, thresholds 0.166 / 0.0833, preset-12 search steps, on the LDR composite (Faithful anti-aliasing; `--no-fxaa`) | TAA, FSR or DLSS instead (Meitou anti-aliasing) | Kenshi: FXAA 3.11, 0.75 |
 | Dither | off | on | not in Kenshi |
-| Night grading | none (the game has no grading; night is the day's colours at the exposure's night floor, see [render-post.md](../render-post.md) "Night grading" for why the ground reads orange) | scotopic blue shift by the scene's mean luminance (`nightgrade` switch, `--night-grade`); the viewer's own | Kenshi: none (**Verified**: the composite is exposure only) |
-| Heat haze | the game's, after FXAA (`--no-heat-haze`; `--heat-haze <x>` replaces the weather's field) | at half strength (`heathaze` switch, `--heat-haze-strength`), after the composite when a temporal upscaler runs | Kenshi: `HeatHaze` node, on by default |
+| Night grading | none (the game has no grading; night is the day's colours at the exposure's night floor, see [render-post.md](../render-post.md) "Night grading" for why the ground reads orange) | scotopic blue shift by the scene's mean luminance (`nightgrade` switch, Tab slider; the `--night-grade` options were removed); the viewer's own | Kenshi: none (**Verified**: the composite is exposure only) |
+| Heat haze | the game's, after FXAA (`--no-heat-haze`) | at half strength (`heathaze` switch, Tab slider), after the composite when a temporal upscaler runs | Kenshi: `HeatHaze` node, on by default |

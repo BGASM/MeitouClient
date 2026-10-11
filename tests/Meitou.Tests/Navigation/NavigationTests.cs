@@ -78,24 +78,6 @@ public class NavigationTests
     }
 
     [Fact]
-    public void Open_ground_is_one_walkable_surface_and_paths_are_straight()
-    {
-        var s = new Scene(new(32, 32));
-        s.G.Seeds.Add(new(s.X0 + 500, 10, s.Z0 + 500));
-        var mesh = s.Build();
-        Assert.True(mesh.PolygonCount > 0);
-        Assert.True(CoversPoint(mesh, s.X0 + 2000, s.Z0 + 3000));
-        var world = NavWorld.Empty.With(mesh);
-        var a = new Vector3(s.X0 + 300, 10, s.Z0 + 300);
-        var b = new Vector3(s.X0 + 4000, 10, s.Z0 + 3500);
-        var path = Route(world, a, b);
-        Assert.True(path.Found);
-        // The corridor of polygons is chosen by edge midpoints, so the path can be a little longer than the straight line.
-        Assert.InRange(Length(path.Points), Vector3.Distance(a, b) - 0.5f, Vector3.Distance(a, b) * 1.03f);
-        Assert.All(path.Points, p => Assert.InRange(p.Y, 9, 11));
-    }
-
-    [Fact]
     public void An_obstacle_is_cut_out_and_paths_go_around_it()
     {
         var s = new Scene(new(32, 32));
@@ -121,64 +103,6 @@ public class NavigationTests
     }
 
     [Fact]
-    public void Only_regions_near_a_seed_survive()
-    {
-        var s = new Scene(new(32, 32));
-        float cx = s.X0 + 2300, cz = s.Z0 + 2300;
-        // A closed yard: four walls 20 thick around a 300 x 300 square.
-        s.Box(new(cx - 170, 0, cz - 170), new(cx + 170, 80, cz - 150));
-        s.Box(new(cx - 170, 0, cz + 150), new(cx + 170, 80, cz + 170));
-        s.Box(new(cx - 170, 0, cz - 150), new(cx - 150, 80, cz + 150));
-        s.Box(new(cx + 150, 0, cz - 150), new(cx + 170, 80, cz + 150));
-        s.G.Seeds.Add(new(s.X0 + 500, 10, s.Z0 + 500));
-        var pruned = s.Build();
-        Assert.True(CoversPoint(pruned, s.X0 + 1000, s.Z0 + 1000));
-        Assert.False(CoversPoint(pruned, cx, cz), "the closed yard has no seed and is dropped");
-
-        s.G.Seeds.Add(new(cx, 10, cz));
-        var seeded = s.Build();
-        Assert.True(CoversPoint(seeded, cx, cz));
-        // The two regions are not connected: no path from outside into the yard.
-        var world = NavWorld.Empty.With(seeded);
-        Assert.False(Route(world, new(s.X0 + 500, 10, s.Z0 + 500), new(cx, 10, cz)).Found);
-    }
-
-    [Fact]
-    public void Without_any_seed_the_largest_region_is_kept()
-    {
-        var s = new Scene(new(32, 32));
-        float cx = s.X0 + 2300, cz = s.Z0 + 2300;
-        s.Box(new(cx - 170, 0, cz - 170), new(cx + 170, 80, cz - 150));
-        s.Box(new(cx - 170, 0, cz + 150), new(cx + 170, 80, cz + 170));
-        s.Box(new(cx - 170, 0, cz - 150), new(cx - 150, 80, cz + 150));
-        s.Box(new(cx + 150, 0, cz - 150), new(cx + 170, 80, cz + 150));
-        s.G.Seeds.Add(new(s.X0 + 4000, 500, s.Z0 + 4000)); // far above the ground: matches nothing
-        var mesh = s.Build();
-        Assert.True(CoversPoint(mesh, s.X0 + 1000, s.Z0 + 1000));
-        Assert.False(CoversPoint(mesh, cx, cz));
-    }
-
-    [Fact]
-    public void A_gap_narrower_than_the_footprint_is_not_a_passage()
-    {
-        var s = new Scene(new(32, 32));
-        float cx = s.X0 + 2300, cz = s.Z0 + 2300;
-        // A long wall across the way with one gap of 10 units.
-        s.Box(new(cx - 1000, 0, cz - 10), new(cx - 5, 80, cz + 10));
-        s.Box(new(cx + 5, 0, cz - 10), new(cx + 1000, 80, cz + 10));
-        s.G.Seeds.Add(new(s.X0 + 500, 10, s.Z0 + 500));
-        var world = NavWorld.Empty.With(s.Build());
-        var a = new Vector3(cx, 10, cz - 100);
-        var b = new Vector3(cx, 10, cz + 100);
-        var slim = Route(world, a, b, new NavAgent { Radius = 4 });   // needs 8 of 10
-        Assert.True(slim.Found);
-        Assert.True(Length(slim.Points) < 260, $"slim {Length(slim.Points)}");
-        var fat = Route(world, a, b, new NavAgent { Radius = 7 });    // needs 14 of 10: round the end of the wall
-        Assert.True(fat.Found);
-        Assert.True(Length(fat.Points) > 1500, $"fat {Length(fat.Points)}");
-    }
-
-    [Fact]
     public void Paths_cross_a_zone_border()
     {
         var left = new Scene(new(31, 32));
@@ -198,77 +122,6 @@ public class NavigationTests
         Assert.False(alone.Contains(new ZoneCoordinate(32, 32)));
         Assert.False(Route(alone, a, b).Found);
         Assert.True(Route(alone, a, new Vector3(left.X0 + 100, 10, left.Z0 + 100)).Found);
-    }
-
-    [Fact]
-    public void Removing_a_zone_renumbers_the_slots_and_keeps_the_links_between_the_others()
-    {
-        var a = new Scene(new(31, 32));
-        var b = new Scene(new(32, 32));
-        var c = new Scene(new(33, 32));
-        foreach (var s in new[] { a, b, c }) s.G.Seeds.Add(new(s.X0 + 500, 10, s.Z0 + 500));
-        var world = NavWorld.Empty.With(a.Build()).With(b.Build()).With(c.Build());
-        var inA = new Vector3(a.X0 + 3000, 10, a.Z0 + 2000);
-        var inB = new Vector3(b.X0 + 2000, 10, b.Z0 + 2500);
-        var inC = new Vector3(c.X0 + 1000, 10, c.Z0 + 2000);
-        Assert.True(Route(world, inA, inC).Found);
-
-        // The first zone goes: the other two move down one slot and stay linked to each other.
-        var withoutFirst = world.Without(new ZoneCoordinate(31, 32));
-        Assert.Equal(2, withoutFirst.ZoneCount);
-        var path = Route(withoutFirst, inB, inC);
-        Assert.True(path.Found);
-        Assert.InRange(Length(path.Points), Vector3.Distance(inB, inC) - 0.5f, Vector3.Distance(inB, inC) * 1.03f);
-        Assert.False(Route(withoutFirst, inA, inC).Found);
-
-        // The middle one goes: the outer two are no longer connected, each still works alone.
-        var withoutMiddle = world.Without(new ZoneCoordinate(32, 32));
-        Assert.False(Route(withoutMiddle, inA, inC).Found);
-        Assert.True(Route(withoutMiddle, inC, new Vector3(c.X0 + 3000, 10, c.Z0 + 3000)).Found);
-    }
-
-    [Fact]
-    public void TryHighestAt_agrees_with_PolygonsAt_and_HeightAt()
-    {
-        var s = new Scene(new(32, 32));
-        s.Quad(new(s.X0 + 1000, 25, s.Z0 + 1000), new(s.X0 + 1400, 25, s.Z0 + 1400), NavArea.Ground); // a platform over the ground
-        s.G.Seeds.Add(new(s.X0 + 500, 10, s.Z0 + 500));
-        s.G.Seeds.Add(new(s.X0 + 1200, 25, s.Z0 + 1200));
-        var mesh = s.Build();
-        var polygons = new List<int>();
-        int hits = 0;
-        for (float x = s.X0 - 5; x < s.X0 + 4700; x += 97)
-            for (float z = s.Z0 - 5; z < s.Z0 + 4700; z += 89)
-            {
-                polygons.Clear();
-                mesh.PolygonsAt(x, z, polygons);
-                bool found = mesh.TryHighestAt(x, z, out float h);
-                Assert.Equal(polygons.Count > 0, found);
-                if (!found) continue;
-                hits++;
-                Assert.Equal(polygons.Max(p => mesh.HeightAt(p, x, z)), h);
-            }
-        Assert.True(hits > 1000);
-    }
-
-    [Fact]
-    public void Water_costs_more_and_a_high_factor_makes_paths_go_round()
-    {
-        var s = new Scene(new(32, 32));
-        float cx = s.X0 + 2300, cz = s.Z0 + 2300;
-        // A lake 600 across, its surface above the ground.
-        s.Quad(new(cx - 300, 10.5f, cz - 300), new(cx + 300, 10.5f, cz + 300), NavArea.Water);
-        s.G.Seeds.Add(new(s.X0 + 500, 10, s.Z0 + 500));
-        var mesh = s.Build();
-        Assert.Contains(NavArea.Water, mesh.Areas);
-        var world = NavWorld.Empty.With(mesh);
-        var a = new Vector3(cx - 500, 10, cz);
-        var b = new Vector3(cx + 500, 10, cz);
-        var wader = Route(world, a, b, new NavAgent { WaterFactor = 1 });
-        var avoider = Route(world, a, b, new NavAgent { WaterFactor = 20 });
-        Assert.True(wader.Found && avoider.Found);
-        Assert.Equal(1000, Length(wader.Points), 1);
-        Assert.True(Length(avoider.Points) > 1000 + 100, $"avoider length {Length(avoider.Points)}");
     }
 
     [Fact]
@@ -380,85 +233,5 @@ public class NavigationTests
         {
             if (Directory.Exists(dir)) Directory.Delete(dir, true);
         }
-    }
-
-    [Fact]
-    public void Walkability_answers_from_the_mesh_and_falls_back_where_a_zone_is_missing()
-    {
-        var s = new Scene(new(32, 32));
-        float cx = s.X0 + 2300, cz = s.Z0 + 2300;
-        s.Box(new(cx - 100, 0, cz - 100), new(cx + 100, 80, cz + 100));
-        s.G.Seeds.Add(new(s.X0 + 500, 10, s.Z0 + 500));
-        var w = new NavmeshWalkability((x, z) => 123);
-        // Not loaded: the open-ground stand-in (everything above the water at height 123).
-        Assert.True(w.IsWalkable(cx, cz));
-        Assert.Equal(123, w.GroundHeight(cx, cz));
-        w.SetWorld(NavWorld.Empty.With(s.Build()));
-        Assert.False(w.IsWalkable(cx, cz));
-        Assert.True(w.IsWalkable(cx + 300, cz));
-        Assert.InRange(w.GroundHeight(cx + 300, cz), 9, 11);
-        var path = w.FindPath(new(cx - 400, 10, cz), new(cx + 400, 10, cz));
-        Assert.True(path.Found);
-        Assert.True(Length(path.Points) > 840);
-        // A zone that is not loaded keeps the stand-in.
-        Assert.True(w.IsWalkable(s.X0 + 5000, s.Z0));
-    }
-
-    [Fact]
-    public void Cache_round_trips_and_rejects_other_keys()
-    {
-        var s = new Scene(new(32, 32));
-        s.Box(new(s.X0 + 2000, 0, s.Z0 + 2000), new(s.X0 + 2100, 80, s.Z0 + 2100));
-        s.G.Painters.Add(new NavVolume([new(s.X0 + 1000, s.Z0 + 1000), new(s.X0 + 1040, s.Z0 + 1000), new(s.X0 + 1040, s.Z0 + 1010), new(s.X0 + 1000, s.Z0 + 1010)], 0, 40) { Owner = "door-7" });
-        s.G.Seeds.Add(new(s.X0 + 500, 10, s.Z0 + 500));
-        var mesh = s.Build();
-        var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "meitou-nav-test-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            var cache = new NavMeshCache(dir);
-            uint settings = NavMeshCache.SettingsHash(Settings);
-            Assert.Null(cache.TryLoad(32, 32, 7, settings));
-            cache.Save(mesh, 7, settings);
-            var back = cache.TryLoad(32, 32, 7, settings)!;
-            Assert.Equal(mesh.PolygonCount, back.PolygonCount);
-            Assert.Equal(mesh.Vertices, back.Vertices);
-            Assert.Equal(mesh.Areas, back.Areas);
-            Assert.Equal(mesh.Polygons, back.Polygons);
-            Assert.Equal(mesh.Neighbours, back.Neighbours);
-            Assert.Equal(mesh.Links, back.Links);
-            Assert.Equal(["door-7"], back.DoorIds!);
-            Assert.Equal(mesh.DoorOf, back.DoorOf);
-            Assert.Null(cache.TryLoad(32, 32, 8, settings));
-            Assert.Null(cache.TryLoad(32, 32, 7, settings + 1));
-            Assert.Null(cache.TryLoad(31, 32, 7, settings));
-            File.WriteAllBytes(cache.PathOf(32, 32), [1, 2, 3]);
-            Assert.Null(cache.TryLoad(32, 32, 7, settings));
-        }
-        finally
-        {
-            if (Directory.Exists(dir)) Directory.Delete(dir, true);
-        }
-    }
-
-    [Fact]
-    public void The_funnel_pulls_the_path_tight_round_a_corner_and_keeps_clear_of_it()
-    {
-        var s = new Scene(new(32, 32));
-        float cx = s.X0 + 2300, cz = s.Z0 + 2300;
-        s.Box(new(cx - 300, 0, cz - 20), new(cx + 100, 80, cz + 20));
-        s.G.Seeds.Add(new(s.X0 + 500, 10, s.Z0 + 500));
-        var world = NavWorld.Empty.With(s.Build());
-        var a = new Vector3(cx - 200, 10, cz - 150);
-        var b = new Vector3(cx - 200, 10, cz + 150);
-        var path = Route(world, a, b, new NavAgent { Radius = 4 });
-        Assert.True(path.Found);
-        // Round the nearer end of the wall (cx - 300), at least about the radius away from it.
-        Assert.Contains(path.Points, p => p.X < cx - 300);
-        foreach (var p in path.Points)
-            Assert.False(p.X > cx - 300 - 2f && p.X < cx + 100 + 2f && Math.Abs(p.Z - cz) < 20 + 2f, $"{p} is too close to the wall");
-        float plain = Length(path.Points);
-        var fat = Route(world, a, b, new NavAgent { Radius = 20 });
-        Assert.True(fat.Found);
-        Assert.True(Length(fat.Points) > plain);
     }
 }

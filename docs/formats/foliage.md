@@ -363,7 +363,7 @@ FUN_140843920, its TERRAIN branch, and the functions it calls; decompiled output
 
 ## Occlusion culling in the viewer (Meitou, 2026-10-08)
 
-Meitou's own cull (the game has none for foliage); the picture does not change, `--no-occlusion-cull` turns it off. Foliage instances (meshes, TERRAIN-mode
+Meitou's own cull (the game has none for foliage); the picture does not change, and it is always on (the `--no-occlusion-cull` option was removed). Foliage instances (meshes, TERRAIN-mode
 rocks, impostors) that the previous frame's depth hides are left out of the main camera's colour views by the GPU cull kernel; the shadow cascades and the
 water reflection are not touched (a hidden caster still shadows what is seen).
 
@@ -390,7 +390,7 @@ foliage: a character that has just walked away from an instance that lay wholly 
 changed detail by more than the margin.
 
 **Cost and effect** (**Observed**, 2026-10-08, RTX 4070 shared with other viewers, 1280 x 960 at DLSS, Shark swamp rain `--radius 1 --distance 3000 --pitch 10 --yaw 300 --time 12`,
-`MEITOU_OCC_ALT=1 MEITOU_PASS_STATS=1 --fly-benchmark 800 --fly-speed 0`, which runs the cull on even frames only and names those frames' stages `+occ`, so both
+`MEITOU_OCC_ALT=1 MEITOU_PASS_STATS=1 --fly-benchmark 800 --fly-speed 0` (`MEITOU_OCC_ALT` was removed later), which ran the cull on even frames only and names those frames' stages `+occ`, so both
 come from one run under the same load): the foliage mesh draws take 0.89 ms without it and 0.66 ms with it, the TERRAIN-mode rocks 0.36 / 0.36 ms (they are near the
 eye, inside the 40-unit skip or in plain view), the cull kernel's own time per main view 48.4 / 47.7 us, and the pyramid costs 0.04 ms a frame (`post cost ... hiz`; two dispatches).
 Net about 0.2 ms of an 8 ms frame. 22213 foliage instances are left out of the two main colour views (the stat line `occlusion`, F11 and `--screenshot`; a frame ring late).
@@ -422,8 +422,8 @@ start reads it back instead of placing it again. In the Shark swamp view (`--vie
   when patches share it), the zone's flags (`Complete`, `Resources`), the 129² ground heights the grass blades are built from, and the milliseconds the placement took (for the saving
   reported at start-up). Meshes, layers and grass types are looked up by id in the catalog of the start that reads the file; an id the catalog does not have makes the entry unusable.
   The zone's overlay tile, blend file, biome map and heightmap are not opened at all for a hit.
-- **Where**: `%LOCALAPPDATA%\Meitou\foliage\<key>\z<X>.<Y>.<w|f>.mfl` (`MEITOU_FOLIAGE_CACHE` overrides the folder; never in the repository). 89 MB for the 414 zones above (about 215 KB a zone).
-  Capped at 2 GB (`MEITOU_FOLIAGE_CACHE_MB`, 0 = no cap): over it, the folders of other keys go whole, least recently used first, then this key's oldest files, down to 90%; keys unused
+- **Where**: `%LOCALAPPDATA%\Meitou\foliage\<key>\z<X>.<Y>.<w|f>.mfl` (`FoliageLayoutCache`'s `Root` is set by tests; the `MEITOU_FOLIAGE_CACHE` env override was removed; never in the repository). 89 MB for the 414 zones above (about 215 KB a zone).
+  Capped at 2 GB (`MaxBytes`, a constructor argument; the env override was removed; 0 = no cap): over it, the folders of other keys go whole, least recently used first, then this key's oldest files, down to 90%; keys unused
   for 30 days and temporary files an hour old are deleted. A pass runs once per start (in the background, on the first hit or write).
 - **Key** (SHA-256, 16 hex digits in the folder name, all 32 bytes echoed in each file): the format version; a hash of the SOURCE of Meitou.Data and Meitou.Core (every `.cs` file and the two
   project files, line endings normalised, sorted by path relative to `src`; `LayoutCodeHash.targets` computes it at every build into `obj/.../LayoutCodeHash.g.cs`, 126 files). Meitou.Data references only
@@ -440,13 +440,13 @@ start reads it back instead of placing it again. In the Shark swamp view (`--vie
 - **Safety**: a file is written under a temporary name and moved into place, so a killed viewer leaves no half file. A file carries magic, format version, key, zone, kind, counts and a
   64-bit checksum, and is read whole; anything that fails any check (truncated, flipped byte, another key, zone or kind, an unknown id) counts as a miss and the zone is placed again
   and the entry rewritten. The checksum is for damage, not tampering.
-- **Switch**: `--no-load-cache` (or `MEITOU_NO_LOAD_CACHE=1`) neither reads nor writes it. The start-up log has a line `foliage   layout cache N hits, M misses ...; saved about X s of
+- **Switch**: `--no-load-cache` (the `MEITOU_NO_LOAD_CACHE` env form was removed) neither reads nor writes it. The start-up log has a line `foliage   layout cache N hits, M misses ...; saved about X s of
   worker time` (the stored placement times of the hits less the time to load them) and a `busy until` line: when each kind of work (layouts, grass pages, mesh decode and upload, textures,
   impostors) was last still going during the foliage settle.
 - **Pictures**: **Verified** (2026-10-09): `--view swamp --screenshot` is byte-identical (`cmp`) before the change, on the cold start that fills the cache, and on the warm start that reads it.
   The layout is independent of the order zones are placed in (three workers place them in a different order every start): **Observed**, same comparison.
 - **Grouped read (2026-10-10)**: the viewer's zone job used to read a zone back whole (a `FoliageInstance[]` of 56-byte structs, then a `GroupBy` and the renderer's 96-byte
-  `FoliageInstanceRecord`s: 3.4 GB a minute of large-object garbage while travelling, `FoliageRenderer.cs:492` in `MEITOU_JOB_STATS`). `FoliageLayoutCache.TryLoadGrouped` reads the file into a
+  `FoliageInstanceRecord`s: 3.4 GB a minute of large-object garbage while travelling, `FoliageRenderer.cs:492` in the since removed `MEITOU_JOB_STATS`). `FoliageLayoutCache.TryLoadGrouped` reads the file into a
   pooled buffer (`ArrayPool<byte>.Shared`, returned when the read ends: nothing decoded refers to it) and `GroupDisk` goes over the 40-byte disk records twice, counting each (mesh, layer) and
   then writing the records straight into exact-size arrays; `FoliageWorld.LoadGrouped` is the entry the renderer calls (a miss places the zone and writes the entry as before, then
   groups it with `FoliageGrouping.Group`). Groups come in the order each pair first appears, instances in the order placed, the same as before. **Verified**:
@@ -482,23 +482,22 @@ a level's deviation on screen is `relative × sphere.w × pixels per radian / di
 **Choosing a level** (kernel 1 of the GPU cull, `LodSelected` in `FoliageShaders.CullCompute`, chunks with `FoliageCullChunk.Lod`). A group's level `k` is its own batch: the same chunks
 (instances) as level 0, each carrying the level's relative deviation and the next coarser level's (`LodError`, `LodNextError`; infinite for the last). A view gives the kernel its
 tolerance and scale (`FoliageLodView`, the sixteen bytes after the view data): an instance belongs to the coarsest level whose deviation is at most the tolerance,
-`relative_k × sphere.w × pixelsPerRadian / (|centre − eye| − sphere.w) ≤ 4` pixels of the render (the same units as the terrain's pixel error; `MEITOU_LOD_PIXELS`), and in a shadow
-cascade `relative_k × sphere.w / texel ≤ 2` texels (`MEITOU_LOD_TEXELS`; the cascade's texel is passed by `WorldFrame.DrawShadows`, `DrawDepth(texel:)`). Exactly one level takes an
+`relative_k × sphere.w × pixelsPerRadian / (|centre − eye| − sphere.w) ≤ 4` pixels of the render (the same units as the terrain's pixel error; the Tab slider's value, no env override any more), and in a shadow
+cascade `relative_k × sphere.w / texel ≤ 2` texels (fixed; the cascade's texel is passed by `WorldFrame.DrawShadows`, `DrawDepth(texel:)`). Exactly one level takes an
 instance (the errors never decrease), so no instance is drawn twice or lost; a level that is not selectable has no instance. The test is made before the fog and occlusion counts, so
 those count each instance once. The scan kernel's draw record gained a first index (`FoliageCullDraw.FirstIndex`, the level's place in the part's level buffer), the rest of the cull is
 unchanged; `PrepareRocks` makes one indirect draw per (part, level), `TerrainRenderer.DrawMeshesIndirect` draws them like any rock. A batch of a level that no instance of the view's groups
 can pick (from each group's box, least and greatest radius, and the level's thresholds: `LevelNeeded`) is not drawn at all: without that, the extra empty indirect draws made the Hub's
 rocks slower than without levels. The levels in a frame's work list are fixed when it is built (`MeshAsset.WorkLod`), so a level uploaded between the shadow cascades and the colour view
-cannot make instances vanish from one of them. Not with the CPU cull (`MEITOU_GPU_CULL=0`) or `MEITOU_GPU_CULL_VERIFY=1` (they draw full detail); a cascade without a known texel draws full detail.
+cannot make instances vanish from one of them. Not with the CPU cull (the reference path, `GpuCull` off; it draws full detail); a cascade without a known texel draws full detail.
 
-**Disk cache** (`FoliageLodCache`): `%LOCALAPPDATA%\Meitou\lods\<mesh>_<key>_v2.mlod` (`MEITOU_LOD_CACHE` overrides; never in the repository, `*.mlod` is git-ignored), the key the
+**Disk cache** (`FoliageLodCache`): `%LOCALAPPDATA%\Meitou\lods\<mesh>_<key>_v2.mlod` (the `MEITOU_LOD_CACHE` override was removed; never in the repository, `*.mlod` is git-ignored), the key the
 SHA-256 of the mesh file's bytes (24 hex digits) and `FoliageLodBuilder.Version` in the name. The file holds the deviations, the triangle counts and the level index lists (16 bit when the
 part's indices fit; a mesh with no level is a file too, so it is not worked out again). Written to a temporary name and moved into place. It is never trimmed (the files are small).
-`MEITOU_LOD_LOG=1` prints one line per mesh file: its levels' triangles and deviations. `MEITOU_LOD_ALT=1` draws levels on even frames only (stage names of those frames end in `+lod`) for
-timing both in one run, as `MEITOU_OCC_ALT`; the F11 and `--fly-benchmark` foliage line reports the work (built, cached, written).
+The per-mesh log line (`MEITOU_LOD_LOG`, levels' triangles and deviations) and the even-frames-only level alternation (`MEITOU_LOD_ALT`) were removed; the F11 and `--fly-benchmark` foliage line reports the work (built, cached, written).
 
 **Shading term.** The deviation also includes the 97th-percentile angle between the level's interpolated normal and the original's at the level's triangle centres; a level's relative error is
-`max(geometric / radius, 0.02 × angle in radians)` (`MEITOU_LOD_NORMAL`). Without it the Hub's low-poly cliffs differed in shading (mean 0.277/255, max 175); with it and the 500-triangle
+`max(geometric / radius, 0.02 × angle in radians)` (a constant; the `MEITOU_LOD_NORMAL` override was removed). Without it the Hub's low-poly cliffs differed in shading (mean 0.277/255, max 175); with it and the 500-triangle
 floor, mean 0.127, max 163 (**Observed**, Hub radius 2). Weak point: the angle is not weighted by triangle area.
 
 **Measured** (**Observed**, radius 2, `--distance 3000`, DLSS, 600-frame `--fly-benchmark` standing still; the levels are built before the screenshot).
@@ -520,10 +519,10 @@ read in 82 ms. Faithful is byte-identical to the build without this work (swamp 
 **Rougher levels and a tolerance that grows with distance (2026-10-09, the `lod-far` A/B switch, A = on).** Two changes that take the far swamp plants to coarser levels:
 - The shading-angle limit for keeping a level went from 0.6 to 1.7 rad (`FoliageLodBuilder.MaxNormalAngle`; `Version` 3, so the 46 meshes are rebuilt once, about 8 s of worker time). `FOLIAGE_Plant_Swamp-TwigLarger`
   (r 396, 4996 triangles) had a 50 % level only; it now has 50 / 25 / 10 % (2498 / 1248 / 498 triangles, geometric deviation 0.49 / 2.0 / 7.5 % of r, shading angle 21 / 38 / 94 degrees) and `Foliage_GungeTree` gets a 25 % level
-  (**Observed**, `MEITOU_LOD_LOG=1`). A rough level is reached only far away: the cull weighs the angle by 0.02 radii a radian. With the switch off, levels above 0.6 rad are left out again (`RockLod.Capped`), so one A/B shows the whole change.
-- Past `MEITOU_LOD_FAR` units (default 2500, `FoliageRenderer.LodFarDistance`; 0 turns only the growth off) the pixel tolerance of a colour view grows in proportion to the distance from the sphere's near point (4 px at 2500, 8 at 5000,
+  (**Observed**, with the since removed `MEITOU_LOD_LOG=1`). A rough level is reached only far away: the cull weighs the angle by 0.02 radii a radian. With the switch off, levels above 0.6 rad are left out again (`RockLod.Capped`), so one A/B shows the whole change.
+- Past 2500 units (`FoliageRenderer.LodFarDistance`; the `MEITOU_LOD_FAR` override was removed; 0 turns only the growth off) the pixel tolerance of a colour view grows in proportion to the distance from the sphere's near point (4 px at 2500, 8 at 5000,
   16 at 10000; `LodSelected`; the view vector's w carries minus the distance, `FoliageLodView.FarDistance`; shadow cascades unchanged). `LevelNeeded` follows it with margins on the safe side, so no instance loses its level's draw.
-- `FOLIAGE_Plant_Swamp-TwigLarger` is nearly the whole case: 1099 k of the swamp view's 1641 k colour-view rock triangles. **Observed** (`MEITOU_FOLIAGE_TRIS=1 --fly-benchmark 200 --fly-speed 0 --view swamp`, 1920x1080): rock triangles
+- `FOLIAGE_Plant_Swamp-TwigLarger` is nearly the whole case: 1099 k of the swamp view's 1641 k colour-view rock triangles. **Observed** (draw tally, then `MEITOU_FOLIAGE_TRIS=1`, since removed, `--fly-benchmark 200 --fly-speed 0 --view swamp`, 1920x1080): rock triangles
   1641 k -> 1200 k (the new levels alone) -> 1068 k (with the growth). `Foliage_Metal_Tower_Melted-Piece01..05` (about 400 k triangles a frame) still get no level: their 50 % step moves the shading 2.2-2.6 rad although the geometric deviation is
   only 3-21 % (hard-edged metal), so they stay at full detail (**Observed**; not tried with an even looser limit).
 - **Measured** (**Observed**, 2026-10-09, RTX 4070, 1920x1080 DLSS native, `--ab lod-far`, A - B, +-95 %): target view (`--view swamp`, 768 frames, period 16): GPU total -0.40 +-0.17 ms (7.52 against 7.92), foliage stage -0.26 +-0.05,
@@ -536,7 +535,7 @@ read in 82 ms. Faithful is byte-identical to the build without this work (swamp 
 
 **Not done.** Ordinary (non-TERRAIN) foliage meshes have no levels: their UVs and alpha cutouts need a UV-aware simplifier, and their shadows (0.6 ms for 755 k triangles in the swamp)
 are fragment-bound (**Observed**). Tolerances (4 px, 2 texels, 0.02) were tuned on two views and a short fly-through only; popping is bounded by the tolerance but not measured
-(**Unknown**). `MEITOU_LOD_ALT` skews the cascade counts (cascades 1 to 3 draw on one frame parity).
+(**Unknown**). The removed `MEITOU_LOD_ALT` skewed the cascade counts (cascades 1 to 3 drew on one frame parity).
 
 ## How the viewer draws it
 

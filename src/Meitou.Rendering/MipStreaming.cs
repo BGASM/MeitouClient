@@ -18,7 +18,7 @@ public sealed class MipStreaming
     /// <summary>Levels held back against the bound: the anisotropic tap rounding (up to 1), derivative estimates that differ from the exact footprint, the
     /// few triangles more stretched than the part's texel scale, and an approaching object has to be
     /// refined before it needs to be.</summary>
-    public static readonly float Margin = float.TryParse(Environment.GetEnvironmentVariable("MEITOU_MIP_MARGIN"), System.Globalization.CultureInfo.InvariantCulture, out float m) ? m : 2f;
+    public const float Margin = 2f;
     /// <summary>Never drop to a top level whose larger side is smaller than this (also keeps the level the normal-map swizzle test reads, the first within 256, in the chain).</summary>
     public const int MinSize = 512;
 
@@ -30,8 +30,6 @@ public sealed class MipStreaming
     public float Bias { get; private set; }
     /// <summary>Extra levels dropped (the memory guard under pressure).</summary>
     public int Extra { get; set; }
-    /// <summary><c>MEITOU_MIP_STREAM=0</c> turns it off, for comparisons.</summary>
-    public static readonly bool Allowed = Environment.GetEnvironmentVariable("MEITOU_MIP_STREAM") != "0";
 
     /// <param name="height">Height in pixels of the picture the scene is drawn into (the render size, before an upscaler).</param>
     /// <param name="lodBias">The sampler bias the upscaler adds (<c>GpuContext.LodBias</c>); with the display size instead of the render size, without the part from the render scale.</param>
@@ -43,7 +41,7 @@ public sealed class MipStreaming
         PixelsPerDistance = cos2 / focal;
         // The sampler adds -0.25 on NVIDIA with anisotropic filtering (Samplers.cs); counted everywhere.
         Bias = Math.Min(lodBias, 0) - 0.25f;
-        Enabled = Allowed && height > 0 && float.IsFinite(PixelsPerDistance);
+        Enabled = height > 0 && float.IsFinite(PixelsPerDistance);
     }
 
     /// <summary>How many top levels a texture of <paramref name="width"/> x <paramref name="height"/> texels (as in its file) can do without, at most.</summary>

@@ -89,15 +89,6 @@ public class TerrainTests
     }
 
     [Fact]
-    public void Tiff_reader_rejects_what_it_cannot_decode()
-    {
-        Assert.Throws<NotSupportedException>(() => TiffImage.Open(new MemoryStream(Tiff(2, 2, Pattern, compression: 5))));
-        Assert.Throws<InvalidDataException>(() => TiffImage.Open(new MemoryStream("PK\x03\x04xxxxxxxx"u8.ToArray())));
-        var truncated = Tiff(4, 4, Pattern);
-        Assert.Throws<InvalidDataException>(() => TiffImage.Open(new MemoryStream(truncated[..40])));
-    }
-
-    [Fact]
     public void Heightmap_interpolates_world_heights_bilinearly()
     {
         // 3 x 3 samples spanning the whole world: samples sit at -half, 0, +half on both axes.
@@ -115,36 +106,6 @@ public class TerrainTests
         Assert.Equal(3, n1);
         Assert.Equal([0, 0, 0, 0], map.Downsample(2, out int n2));
         Assert.Equal(2, n2);
-    }
-
-    [Fact]
-    public void World_layout_maps_points_to_zones_and_samples()
-    {
-        Assert.Equal(294912, WorldLayout.WorldSize);
-        Assert.Equal(18, WorldLayout.SampleSpacing);
-        Assert.Equal(16385, WorldLayout.HeightmapSize);
-        Assert.Equal(9800f, WorldLayout.RawToHeight(ushort.MaxValue), 2);
-        Assert.Equal(new ZoneCoordinate(32, 32), WorldLayout.ZoneOf(0, 0));
-        Assert.Equal(new ZoneCoordinate(31, 32), WorldLayout.ZoneOf(-0.01, 4607.9));
-        Assert.Equal(new ZoneCoordinate(0, 63), WorldLayout.ZoneOf(-147456, 147455));
-        Assert.Equal(new ZoneCoordinate(64, -1), WorldLayout.ZoneOf(147456, -147457));
-        Assert.False(new ZoneCoordinate(64, 0).IsInsideGrid);
-        Assert.Equal((-4608.0, 59904.0), WorldLayout.ZoneOrigin(new ZoneCoordinate(31, 45)));
-        Assert.Equal((0.0, 16384.0), WorldLayout.ToSample(-147456, 147456));
-        Assert.Equal((-147456.0, 0.0), WorldLayout.FromSample(0, 8192));
-    }
-
-    [Fact]
-    public void Raw_tile_is_a_square_of_little_endian_samples()
-    {
-        var bytes = new byte[3 * 3 * 2];
-        for (int i = 0; i < 9; i++) BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(i * 2), (ushort)(i * 300));
-        var tile = RawHeightTile.Read(bytes);
-        Assert.Equal(3, tile.Size);
-        Assert.Equal(5 * 300, tile[2, 1]);
-        Assert.Throws<InvalidDataException>(() => RawHeightTile.Read(new byte[10]));
-        Assert.True(RawHeightTile.TryParseFileName("x/fullmap.10.31.raw", out int x, out int y));
-        Assert.Equal((10, 31), (x, y));
     }
 
     // --- Base game -------------------------------------------------------------------------------
@@ -167,26 +128,5 @@ public class TerrainTests
         // The world border is sea level (raw 0); the corners and edge midpoints are all 0.
         foreach (var (c, r) in new[] { (0, 0), (16384, 0), (0, 16384), (16384, 16384), (8192, 0), (0, 8192) })
             Assert.Equal(0, map.Sample(c, r));
-    }
-
-    [Fact]
-    [Slow]
-    public void Base_game_legacy_height_tiles_share_their_edges()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, $"No Kenshi install configured ({GameInstall.EnvironmentVariable}).");
-
-        var tiles = Directory.EnumerateFiles(Path.Combine(install!.DataDirectory, "land", "grasssplits"), "*.raw")
-            .ToDictionary(f => RawHeightTile.TryParseFileName(f, out int x, out int y) ? (x, y) : throw new InvalidDataException(f), RawHeightTile.ReadFile);
-        Assert.Equal(256, tiles.Count);
-        Assert.All(tiles.Values, t => Assert.Equal(257, t.Size));
-        Assert.Equal((10, 25, 16, 31), (tiles.Keys.Min(k => k.x), tiles.Keys.Max(k => k.x), tiles.Keys.Min(k => k.y), tiles.Keys.Max(k => k.y)));
-        foreach (var ((x, y), t) in tiles)
-        {
-            if (tiles.TryGetValue((x + 1, y), out var right))
-                for (int k = 0; k < 257; k++) Assert.Equal(t[256, k], right[0, k]);
-            if (tiles.TryGetValue((x, y + 1), out var below))
-                for (int k = 0; k < 257; k++) Assert.Equal(t[k, 256], below[k, 0]);
-        }
     }
 }

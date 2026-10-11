@@ -157,14 +157,12 @@ sealed unsafe class ObjectMeshCache(GpuContext gpuContext, AssetLocator assets, 
     public float PixelsPerRadian { get; set; } = 1080 / (2 * MathF.Tan(25 * MathF.PI / 180));
     /// <summary>How far ahead of the camera a mesh is kept ready for (the renderer's <c>MeshMargin</c>: the camera's speed over 1.5 s), taken off the distance a new mesh is made for.</summary>
     public float LookAhead { get; set; }
-    /// <summary><c>MEITOU_MESH_STREAM=0</c> loads every level of every mesh, for comparisons.</summary>
-    public static readonly bool FarForms = Environment.GetEnvironmentVariable("MEITOU_MESH_STREAM") != "0";
 
     /// <summary>The nearest user's LOD value <paramref name="near"/> (before the LOD bias) of a resident mesh in this mark pass: remakes it with finer levels
     /// when it needs them, or, after a while, without the finer ones nothing needs.</summary>
     public void Rebalance(ObjectMesh m, float near)
     {
-        if (!FarForms || m.Status != ObjectMesh.State.Resident || m.Gpu is not { } gpu || m.Reshape is not null || m.Distant) return;
+        if (m.Status != ObjectMesh.State.Resident || m.Gpu is not { } gpu || m.Reshape is not null || m.Distant) return;
         if (m.KeepLevelIndices)
         {
             // A map feature drawn through the terrain shader wants every level (it was marked after the mesh was made for farther users).
@@ -190,7 +188,7 @@ sealed unsafe class ObjectMeshCache(GpuContext gpuContext, AssetLocator assets, 
     /// <summary>Starts a decode of a resident mesh that keeps the levels a user at LOD value <paramref name="near"/> can draw; false when not started (jobs busy, memory pressure, not resident).</summary>
     public bool Retarget(ObjectMesh m, float near)
     {
-        if (!FarForms || m.Status != ObjectMesh.State.Resident || m.Reshape is not null || m.Distant) return false;
+        if (m.Status != ObjectMesh.State.Resident || m.Reshape is not null || m.Distant) return false;
         if (reshaping.Count >= MaxReshapes || Guard is { Streaming: false } && m.Gpu!.MinLevel < m.Gpu.Curve.LevelFor(near * LodBias)) return false;
         string key = m.Key;
         float bias = LodBias;
@@ -266,7 +264,7 @@ sealed unsafe class ObjectMeshCache(GpuContext gpuContext, AssetLocator assets, 
             string key = m.Key;
             bool distant = m.Distant;
             bool keep = m.KeepLevelIndices;
-            float near = FarForms ? Math.Max(m.WantedNear - LookAhead, 0) : float.PositiveInfinity, bias = LodBias;
+            float near = Math.Max(m.WantedNear - LookAhead, 0), bias = LodBias;
             m.WantedNear = float.PositiveInfinity;
             m.Job = BackgroundWork.Run(() => Decode(key, distant, 0, keep, near, true, bias));
             running.Add(m);
@@ -516,9 +514,9 @@ sealed unsafe class ObjectMeshCache(GpuContext gpuContext, AssetLocator assets, 
     public int Unloads { get; private set; }
     public int Reloads { get; private set; }
     /// <summary>Unused for this long: unloaded.</summary>
-    public double IdleSeconds { get; set; } = StreamingTuning.IdleSeconds;
+    public double IdleSeconds { get; set; } = 60;
     /// <summary>Above this the least recently used meshes unused for <see cref="PressureIdleSeconds"/> go too, down to three quarters of it.</summary>
-    public double HighWaterMb { get; set; } = StreamingTuning.IdleSeconds > 1e8 ? double.MaxValue : 768;
+    public double HighWaterMb { get; set; } = 768;
     public double PressureIdleSeconds { get; set; } = 8;
     /// <summary>The high-water mark as a share of the driver's video memory budget (<see cref="WorldTextureCache.HighWaterShare"/>): 768 MB on the 11.4 GB card it was tuned on.</summary>
     public double HighWaterShare { get; set; } = 768 / 11453.0;

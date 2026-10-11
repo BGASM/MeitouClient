@@ -103,13 +103,11 @@ public sealed unsafe class VulkanDisplay : IDisposable
 
     /// <summary>
     /// <c>%LOCALAPPDATA%\Meitou\pipeline-cache.bin</c> (the driver checks the header and ignores a cache from another device or driver);
-    /// <c>MEITOU_PIPELINE_CACHE</c> overrides the path, <c>MEITOU_PIPELINE_CACHE=0</c> turns it off. Null when there is no place for it.
+    /// <c>--no-load-cache</c> turns it off. Null when there is no place for it.
     /// </summary>
     static string? PipelineCacheFile()
     {
-        var env = Environment.GetEnvironmentVariable("MEITOU_PIPELINE_CACHE");
-        if (env == "0") return null;
-        if (!string.IsNullOrEmpty(env)) return env;
+        if (Meitou.Data.World.LoadCaches.Disabled) return null;
         var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrEmpty(root)) return null;
         try

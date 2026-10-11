@@ -48,39 +48,4 @@ public class FogSkyTests
         }
         Assert.True(hidden > 30 && shown > 30, $"{hidden} hidden, {shown} shown: the test does not exercise both sides");
     }
-
-    [Fact]
-    public void The_exit_bound_is_below_every_rays_exit_and_close_to_the_nearest()
-    {
-        var f = FogCullTests.Block();
-        var block = FogVolumes.Build(f)!;
-        var rng = new Random(5);
-        for (int trial = 0; trial < 300; trial++)
-        {
-            var eye = new Vector3(rng.Next(-40000, 40000), rng.Next(-1500, 2900), rng.Next(-40000, 40000));
-            var forward = Forward(rng.Next(0, 360), rng.Next(-80, 80));
-            float bound = FogVolumes.SkyExit(block, eye, forward, Fov, Aspect);
-            float nearest = float.PositiveInfinity;
-            foreach (var d in Rays(forward, 64))
-                foreach (var p in f.Planes)
-                {
-                    var n = new Vector3(p.X, p.Y, p.Z);
-                    float rate = Vector3.Dot(n, d);
-                    if (rate > 0) nearest = MathF.Min(nearest, (p.W - Vector3.Dot(n, eye)) / rate);
-                }
-            Assert.True(bound <= nearest * 1.0001f, $"bound {bound} above the sampled exit {nearest} (eye {eye}, forward {forward})");
-            if (float.IsFinite(nearest)) Assert.True(bound >= nearest * 0.9f, $"bound {bound} far below the sampled exit {nearest} (eye {eye}, forward {forward})");
-        }
-    }
-
-    [Fact]
-    public void Looking_up_at_a_near_ceiling_the_sky_shows()
-    {
-        var v = new FogVolumes([FogCullTests.Block()]) { SolveInline = true };
-        v.Update(new Vector3(0, 2500, 0), Forward(0, 20), Fov, Aspect, 50000, 0.5f, on: true);
-        Assert.NotNull(v.CullBlock);
-        Assert.False(v.SkyHidden);
-        v.Update(new Vector3(0, 1000, 0), Forward(0, 0), Fov, Aspect, 50000, 0.5f, on: true);   // level: 2000 to the ceiling, 3000 to the floor
-        Assert.True(v.SkyHidden, $"exit {v.SkyExitDistance}, radius {v.CullRadius}");
-    }
 }

@@ -92,13 +92,4 @@ public class FightWiringTests
         }
         return hashes;
     }
-
-    [Fact]
-    public void A_wired_fight_does_not_depend_on_the_thread_count()
-    {
-        var one = Hashes(1);
-        Assert.Equal(one, Hashes(4));
-        Assert.Equal(one, Hashes(16));
-        Assert.Equal(one.Count, one.Distinct().Count());
-    }
 }

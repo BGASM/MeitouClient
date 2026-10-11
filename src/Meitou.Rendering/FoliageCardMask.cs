@@ -20,11 +20,11 @@ public sealed class FoliageCardMask
     /// <summary>The grid's largest side in cells.</summary>
     public const int MaxCells = 512;
 
-    /// <summary>The mip chain stops at this many pixels on the longer side (<c>MEITOU_TRIM_COARSEST</c>): the mask has a level for each mip down to it.</summary>
-    public static int CoarsestSize { get; } = int.TryParse(Environment.GetEnvironmentVariable("MEITOU_TRIM_COARSEST"), NumberStyles.Integer, CultureInfo.InvariantCulture, out int c) && c >= 1 ? c : 16;
+    /// <summary>The mip chain stops at this many pixels on the longer side: the mask has a level for each mip down to it.</summary>
+    public const int CoarsestSize = 16;
 
-    /// <summary>How far below the threshold (0-1) a texel still counts: the alpha-to-coverage ramp of the multisampled targets lets pixels a little under it through (<c>MEITOU_TRIM_SLACK</c>).</summary>
-    public static float Slack { get; } = float.TryParse(Environment.GetEnvironmentVariable("MEITOU_TRIM_SLACK"), NumberStyles.Float, CultureInfo.InvariantCulture, out float s) && s >= 0 ? s : 0.1f;
+    /// <summary>How far below the threshold (0-1) a texel still counts: the alpha-to-coverage ramp of the multisampled targets lets pixels a little under it through.</summary>
+    public const float Slack = 0.1f;
 
     /// <param name="levels">Per level the cells, row-major, row 0 at v = 0 (the top row of the decoded image); each level contains the one before.</param>
     public FoliageCardMask(int width, int height, bool[][] levels)
@@ -123,9 +123,8 @@ public sealed class FoliageCardMask
 
     // ---- the disk cache and the in-process memo ----
 
-    /// <summary>Where the masks are kept (<c>MEITOU_TRIM_CACHE</c>).</summary>
-    public static string CacheRoot { get; set; } = Environment.GetEnvironmentVariable("MEITOU_TRIM_CACHE")
-        ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Meitou", "cardtrim");
+    /// <summary>Where the masks are kept.</summary>
+    public static string CacheRoot { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Meitou", "cardtrim");
 
     const uint Magic = 0x4D52544D;   // "MTRM"
     static readonly ConcurrentDictionary<(string Path, byte Cutoff), Lazy<FoliageCardMask?>> Memo = new();

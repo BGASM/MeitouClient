@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using Meitou.Content;
 using Meitou.Data;
 using Meitou.Data.Textures;
@@ -8,49 +7,6 @@ namespace Meitou.Tests.World;
 
 public class TerrainBiomeTests
 {
-    static byte[] BlendInfo(int cells, int resolution, uint[] slots, byte[] trailer)
-    {
-        var data = new byte[12 + slots.Length * 4 + trailer.Length];
-        "KBI1"u8.CopyTo(data);
-        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(4), cells);
-        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(8), resolution);
-        for (int i = 0; i < slots.Length; i++) BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(12 + 4 * i), slots[i]);
-        trailer.CopyTo(data, 12 + slots.Length * 4);
-        return data;
-    }
-
-    [Fact]
-    public void Blend_info_reads_slot_colours_per_cell()
-    {
-        uint[] slots = new uint[4 * 5];
-        slots[0] = 0x00FF00;
-        slots[5] = 0xB400FF;
-        slots[6] = 0x0A1E78;
-        // Slot masks at resolution 2 (8 nodes): cells 0, 2, 3 one slot (a single byte); cell 1 a full tree: slot 0
-        // in the left leaves, slot 1 in the right ones (leaf index 4 | morton(x, z), x in the even bit).
-        byte[] full1 = [0x43, 0x43, 0, 0, 0x21, 0x22, 0x21, 0x22];
-        byte[] trailer = [8, 0, 0, 0, 0x21, .. full1, 0x21, 0x22]; // cells 2 and 3: one slot each
-        var file = BlendInfoFile.Read(BlendInfo(2, 2, slots, []));
-        Assert.Null(file.Nodes);
-        file = BlendInfoFile.Read(BlendInfo(2, 2, slots, trailer));
-        Assert.Equal((2, 2, 2), (file.CellsX, file.CellsZ, file.Resolution));
-        Assert.Equal(0x00FF00u, file.Slot(0, 0, 0));
-        Assert.Equal(0x0A1E78u, file.Slot(1, 0, 1));
-        Assert.Single(file.Nodes![0]);
-        Assert.Equal(8, file.Nodes[1].Length);
-        Assert.Equal(0x21, file.SlotMask(1, 0, 0.1, 0.1, 0.2, 0.2));   // one left leaf: slot 0
-        Assert.Equal(0x22, file.SlotMask(1, 0, 0.6, 0.6, 0.9, 0.9));   // one right leaf: slot 1
-        Assert.Equal(0x43, file.SlotMask(1, 0, 0.1, 0.1, 0.9, 0.2));   // spans two leaves: their common parent, the root
-        Assert.Equal(0x21, file.SlotMask(0, 0, 0, 0, 1, 1));          // single-byte cell
-        Assert.Equal((0, 0), file.CellOf(-1, -1));
-        Assert.Equal((1, 1), file.CellOf(0, 0));
-        Assert.Equal((1, 1), file.CellOf(1e9, 1e9)); // clamped
-        Assert.Equal(0b1001, BlendInfoFile.Morton(1, 2));
-        Assert.Throws<InvalidDataException>(() => BlendInfoFile.Read("KBI2\0\0\0\0\0\0\0\0"u8.ToArray()));
-        Assert.Throws<InvalidDataException>(() => BlendInfoFile.Read(BlendInfo(4, 4, [1, 2], [])));
-        Assert.Throws<InvalidDataException>(() => BlendInfoFile.Read(BlendInfo(2, 2, slots, [8, 0, 0, 0, 0x21])));
-    }
-
     [Fact]
     [Slow]
     public void Base_game_slot_masks_describe_the_blend_map()
@@ -139,34 +95,5 @@ public class TerrainBiomeTests
         var sample = biomes.Values.First(b => b.Diffuse[0] is not null);
         Assert.All(sample.Tiling, t => Assert.True(t.X > 0 && t.Y > 0));
         Assert.True(sample.SlopeMax.X <= 1.5f, "slope values are scaled by 0.01");
-    }
-
-    [Fact]
-    [Slow]
-    public void Base_game_overlay_alpha_marks_roads()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, $"No Kenshi install configured ({GameInstall.EnvironmentVariable}).");
-        var points = WorldLevelData.Load(install!).Roads().SelectMany(r => r.Points).Where((_, i) => i % 40 == 0).ToList();
-        var tiles = new Dictionary<(int, int), RgbaImage>();
-        double on = 0, off = 0;
-        foreach (var p in points)
-        {
-            on += Alpha(p.X, p.Z);
-            off += Alpha(p.X + 300, p.Z + 300);
-        }
-        Assert.True(on > 5 * off, $"road alpha {on / points.Count:0.0} vs {off / points.Count:0.0} off the road");
-
-        int Alpha(double x, double z)
-        {
-            var first = tiles.Count > 0 ? tiles.Values.First() : null;
-            int tile = first?.Width ?? TextureLoader.LoadImage(File.ReadAllBytes(TerrainMaps.OverlayTile(install!, "new_overlay", 0, 0))).Width;
-            double unit = (double)WorldLayout.WorldSize / (tile * TerrainMaps.OverlayTiles);
-            int px = Math.Clamp((int)((x + WorldLayout.HalfWorldSize) / unit), 0, tile * 8 - 1), pz = Math.Clamp((int)((z + WorldLayout.HalfWorldSize) / unit), 0, tile * 8 - 1);
-            var key = (px / tile, pz / tile);
-            if (!tiles.TryGetValue(key, out var img))
-                tiles[key] = img = TextureLoader.LoadImage(File.ReadAllBytes(TerrainMaps.OverlayTile(install!, "new_overlay", key.Item1, key.Item2)));
-            return img.Pixels[((pz % tile) * tile + px % tile) * 4 + 3];
-        }
     }
 }

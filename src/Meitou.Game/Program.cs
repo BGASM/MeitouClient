@@ -8,8 +8,6 @@ static class Program
 {
     static int Main(string[] args)
     {
-        args = Meitou.Rendering.Display.JitSwitches.Apply(args, out int? relaunchedExit);
-        if (relaunchedExit is { } exit) return exit;
         RenderJobs.RaiseRenderThread();
         GameOptions game;
         WorldOptions? world;
@@ -42,7 +40,7 @@ static class Program
         {
             // The animation sandbox: no world, a flat floor (docs/simulation.md "Sandbox"). The real game data is still loaded for the characters and animations.
             db = Meitou.Data.GameDatabase.Load(Meitou.Data.LoadOrder.FromInstall(install));
-            (world.NoTextures, world.NoObjects, world.NoFoliage, world.NoWater, world.NoReflections, world.NoDistant) = (true, true, true, true, true, true);
+            (world.NoTextures, world.NoObjects, world.NoFoliage, world.NoWater, world.WaterReflection, world.DistantZones) = (true, true, true, true, 0, 0);
             world.Post.Ssao = false;   // SSAO bands a perfectly flat floor; the Tab panel can turn it back on
             world.Distance ??= 70;
             world.Pitch ??= 22;
@@ -86,7 +84,6 @@ static class Program
         }
         using var scene = WorldFrame.Load(install, world, db);
         if (scene is null) return 1;
-        if (world.Info) return 0;
         return new GameHost(install, scene, new AssetLocator(install), world, game, config, start).Run();
     }
 }

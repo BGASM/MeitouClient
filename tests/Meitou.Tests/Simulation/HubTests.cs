@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Numerics;
 using Meitou.Content;
 using Meitou.Data;
@@ -91,39 +90,5 @@ public class HubTests
             else { lo += e.V0; hi += Math.Max(e.V0, e.V1); }
         }
         return (0, hi);   // gated or missing records can only lower the count
-    }
-
-    [Fact]
-    public void The_hubs_residents_do_not_depend_on_the_thread_count()
-    {
-        var (_, data, hub) = Load();
-        var hashes = new List<ulong>();
-        foreach (int threads in new[] { 1, 4, 16 })
-        {
-            using var world = Make(data, hub, threads);
-            world.RunTicks(300);
-            hashes.Add(world.StateHash());
-        }
-        Assert.Single(hashes.Distinct());
-    }
-
-    [Fact]
-    [Bench]
-    public void Tick_cost_of_the_hub_is_recorded()
-    {
-        var (_, data, hub) = Load();
-        foreach (var (threads, multiplier) in new[] { (1, 1f), (4, 1f), (1, 10f), (4, 10f), (8, 10f) })
-        {
-            using var world = Make(data, hub, threads, 1, multiplier);
-            world.RunTicks(60);   // load and settle
-            var watch = Stopwatch.StartNew();
-            const int ticks = 600;
-            world.RunTicks(ticks);
-            double ms = watch.Elapsed.TotalMilliseconds / ticks;
-            // 30 ticks per real second at 1x, 150 at 5x.
-            TestContext.Current.TestOutputHelper!.WriteLine($"BENCH hub x{multiplier}: {world.Characters.Count} characters, {world.Squads.Count} squads, {threads} thread(s): {ms:0.000} ms/tick, " +
-                $"1x {ms * 30:0.0} ms per real second, 5x {ms * 150:0.0} ms per real second");
-            Assert.True(ms < 50, $"{ms} ms per tick");   // a loose bound: the machine is shared with the other tests
-        }
     }
 }

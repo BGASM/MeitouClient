@@ -56,11 +56,23 @@ sealed partial class GameHost
         if (g.Sandbox == 2) sandboxFoe = population.SpawnSandbox(world, record, new Vector2(half, 0), player: false, yaw: -MathF.PI / 2);
         playerSquad = world.Squads.Find(world.Player.Squad);
         world.Commands.Enqueue(new SelectCommand([sandboxHero]) { Tick = world.Tick });
-        if (g.SandboxMode is { } modeName)
-            sandboxMode = modeName.ToLowerInvariant() switch { "walk" => SpeedMode.Walk, "run" => SpeedMode.Run, "free" => SpeedMode.Free, _ => throw new ArgumentException("--sandbox-mode: walk, run or free") };
-        sandboxSpeed = g.SandboxSpeed;
+        bool patrol = false;
+        // --sandbox-mode: comma-separated walk, run or free, a fixed speed in units/s, and patrol.
+        foreach (string token in (g.SandboxMode ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (float.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out float speed)) sandboxSpeed = speed;
+            else
+                switch (token.ToLowerInvariant())
+                {
+                    case "walk": sandboxMode = SpeedMode.Walk; break;
+                    case "run": sandboxMode = SpeedMode.Run; break;
+                    case "free": sandboxMode = SpeedMode.Free; break;
+                    case "patrol": patrol = true; break;
+                    default: throw new ArgumentException("--sandbox-mode: walk, run, free, a speed in units/s, or patrol (comma-separated)");
+                }
+        }
         SandboxSendMovement();
-        if (g.SandboxPatrol) SandboxTogglePatrol();
+        if (patrol) SandboxTogglePatrol();
         session.Ticked += _ => SandboxTick();
         Console.WriteLine($"sandbox   {record}{(g.Sandbox == 2 ? ", two facing each other 30 units apart (G fights)" : "")}; flat floor {2 * SandboxHalf:0} x {2 * SandboxHalf:0}, grid {SandboxMinor:0} / {SandboxMajor:0}");
         return new Vector3(0, scene.FlatHeight, 0);

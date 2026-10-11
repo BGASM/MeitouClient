@@ -67,7 +67,7 @@ public sealed unsafe class FsrUpscaler : IUpscaler
         createContext = (delegate* unmanaged<nint*, void*, void*, uint>)NativeLibrary.GetExport(library, "ffxCreateContext");
         destroyContext = (delegate* unmanaged<nint*, void*, uint>)NativeLibrary.GetExport(library, "ffxDestroyContext");
         dispatch = (delegate* unmanaged<nint*, void*, uint>)NativeLibrary.GetExport(library, "ffxDispatch");
-        debug = Environment.GetEnvironmentVariable("MEITOU_FFX_DEBUG") == "1";
+        debug = Environment.GetEnvironmentVariable("MEITOU_UPSCALER_LOG") == "1";
         createDesc = (CreateUpscaleDesc*)NativeMemory.AllocZeroed((nuint)sizeof(CreateUpscaleDesc));
         backendDesc = (BackendVkDesc*)NativeMemory.AllocZeroed((nuint)sizeof(BackendVkDesc));
     }
@@ -194,7 +194,7 @@ public sealed unsafe class FsrUpscaler : IUpscaler
             CameraNear = i.Near,
             CameraFar = i.Far,
             CameraFovAngleVertical = i.FieldOfView,
-            Flags = Environment.GetEnvironmentVariable("MEITOU_FFX_DEBUGVIEW") == "1" ? 1u : 0,
+            Flags = 0,
             ViewSpaceToMetersFactor = 0.1f,   // Kenshi units taken as decimetres (docs/formats/terrain.md "Unit size"; DECISIONS 16)
         };
         var list = ctx.BeginNative("fsr upscale");

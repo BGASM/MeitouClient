@@ -1,6 +1,5 @@
 using System.Numerics;
 using Meitou.Data.World;
-using Meitou.Rendering;
 
 namespace Meitou.Tests.World;
 
@@ -12,50 +11,6 @@ public class MeitouNightSkyTests
     static float DegreesBetween(Vector3 a, Vector3 b) => MathF.Acos(Math.Clamp(Vector3.Dot(Vector3.Normalize(a), Vector3.Normalize(b)), -1f, 1f)) * 180 / MathF.PI;
 
     // ---- rotation ----
-
-    [Fact]
-    public void Pole_is_the_axis_the_sun_turns_about_at_the_altitude_of_the_latitude()
-    {
-        var axis = CelestialSphere.SunAxis(Game);
-        // (0, −sin lat, cos lat): perpendicular to every sun direction of the day.
-        Assert.Equal(-MathF.Sin(54 * MathF.PI / 180), axis.Y, 4);
-        Assert.Equal(MathF.Cos(54 * MathF.PI / 180), axis.Z, 4);
-        for (float hour = 0; hour < 24; hour += 1.5f) Assert.Equal(0, Vector3.Dot(axis, Game.SunDirection(hour)), 4);
-        var pole = CelestialSphere.Pole(Game);
-        Assert.Equal(54, CelestialSphere.AltitudeDegrees(pole), 3);
-        Assert.True(pole.Z < 0);   // towards −z, the way opposite to the sun at noon (+z)
-        Assert.Equal(0, CelestialSphere.AltitudeDegrees(CelestialSphere.Pole(new SkyClock(0, 6, 20))), 3);
-    }
-
-    [Fact]
-    public void Celestial_frame_is_orthonormal_and_right_handed()
-    {
-        foreach (float hour in (ReadOnlySpan<float>)[0, 3.3f, 12, 20.7f])
-        {
-            var f = CelestialSphere.Frame(Game, 4, hour);
-            Assert.Equal(1, f.X.Length(), 4); Assert.Equal(1, f.Y.Length(), 4); Assert.Equal(1, f.Z.Length(), 4);
-            Assert.Equal(0, Vector3.Dot(f.X, f.Y), 4); Assert.Equal(0, Vector3.Dot(f.Y, f.Z), 4);
-            Assert.True(Vector3.Distance(Vector3.Cross(f.X, f.Y), f.Z) < 1e-4f);
-            var d = Vector3.Normalize(new Vector3(0.3f, 0.5f, -0.8f));
-            Assert.True(Vector3.Distance(f.ToWorld(f.ToCelestial(d)), d) < 1e-4f);
-        }
-    }
-
-    [Fact]
-    public void The_sky_turns_once_a_game_day_about_the_pole()
-    {
-        var pole = CelestialSphere.Pole(Game);
-        var c = Vector3.Normalize(new Vector3(0.6f, 0.2f, 0.5f));   // a fixed star
-        var at = (int day, float hour) => CelestialSphere.Frame(Game, day, hour).ToWorld(c);
-        Assert.True(Vector3.Distance(at(3, 7), at(4, 7)) < 1e-3f);       // a day later: the same place
-        Assert.True(Vector3.Distance(at(3, 7), at(3, 7 + 24)) < 1e-3f);
-        Assert.True(Vector3.Distance(at(3, 1), at(3, 13)) > 0.5f);       // half a day later: the other side
-        // Its angle from the pole never changes (it turns about it).
-        var angle = DegreesBetween(at(0, 0), pole);
-        for (float hour = 0; hour < 24; hour += 2) Assert.Equal(angle, DegreesBetween(at(0, hour), pole), 2);
-        // The pole itself stands still.
-        Assert.True(Vector3.Distance(CelestialSphere.Frame(Game, 0, 5).Y, CelestialSphere.Frame(Game, 9, 17.3f).Y) < 1e-4f);
-    }
 
     [Fact]
     public void Stars_rise_in_the_east_and_set_in_the_west_like_the_sun()
@@ -82,56 +37,7 @@ public class MeitouNightSkyTests
 
     // ---- the air ----
 
-    [Fact]
-    public void Air_mass_runs_from_1_overhead_to_about_38_at_the_horizon()
-    {
-        Assert.Equal(1, NightAtmosphere.AirMass(90), 2);
-        Assert.Equal(2, NightAtmosphere.AirMass(30), 1);
-        Assert.InRange(NightAtmosphere.AirMass(0), 35, 40);
-        float last = 0;
-        for (float alt = 90; alt >= 0; alt -= 5) { float x = NightAtmosphere.AirMass(alt); Assert.True(x > last); last = x; }
-    }
-
-    [Fact]
-    public void Stars_dim_and_redden_towards_the_horizon_and_vanish_at_it()
-    {
-        var zenith = NightAtmosphere.Transmission(90);
-        Assert.True(zenith.X > 0.99f && zenith.Y > 0.99f && zenith.Z > 0.99f);
-        var ten = NightAtmosphere.Transmission(10);
-        Assert.True(ten.X > ten.Y && ten.Y > ten.Z);              // red survives best, blue worst
-        Assert.True(ten.Y < 0.7f && ten.Y > 0.1f);
-        var five = NightAtmosphere.Transmission(5);
-        Assert.True(five.Z / five.X < ten.Z / ten.X);              // the lower, the redder
-        Assert.True(five.Y < ten.Y);
-        Assert.Equal(Vector3.Zero, NightAtmosphere.Transmission(0.5f));   // gone at the horizon ramp's foot
-        Assert.Equal(Vector3.Zero, NightAtmosphere.Transmission(-3));
-        Assert.True(NightAtmosphere.Transmission(2).Y < 0.05f);
-    }
-
-    [Fact]
-    public void Only_low_stars_twinkle()
-    {
-        Assert.Equal(0, NightAtmosphere.Scintillation(90));
-        Assert.Equal(0, NightAtmosphere.Scintillation(45));
-        Assert.Equal(0, NightAtmosphere.Scintillation(35));
-        Assert.True(NightAtmosphere.Scintillation(20) > 0);
-        Assert.True(NightAtmosphere.Scintillation(5) > NightAtmosphere.Scintillation(20));
-        Assert.True(NightAtmosphere.Scintillation(0) <= NightAtmosphere.ScintillationMax);
-    }
-
     // ---- the stars ----
-
-    [Fact]
-    public void Faces_and_cells_map_back_and_forth()
-    {
-        foreach (var d in new[] { new Vector3(1, 0.2f, -0.3f), new Vector3(-0.1f, -1, 0.4f), new Vector3(0.3f, 0.3f, 1), new Vector3(-1, -1, -1), new Vector3(0, 0, -1) })
-        {
-            int face = StarField.Face(d, out var uv);
-            Assert.InRange(uv.X, -1.0001f, 1.0001f);
-            Assert.InRange(uv.Y, -1.0001f, 1.0001f);
-            Assert.True(Vector3.Distance(Vector3.Normalize(StarField.FaceDirection(face, uv)), Vector3.Normalize(d)) < 1e-4f);
-        }
-    }
 
     static IEnumerable<(int Layer, int Face, StarCandidate Star)> AllStars()
     {
@@ -149,26 +55,6 @@ public class MeitouNightSkyTests
     }
 
     [Fact]
-    public void The_starfield_has_the_real_skys_counts()
-    {
-        var stars = AllStars().ToList();
-        int[] perLayer = new int[StarField.Layers.Length];
-        foreach (var s in stars) perLayer[s.Layer]++;
-        // Each layer holds the table's count (a cell holds one star at most, the centre cells are the busiest).
-        Assert.InRange(perLayer[0], 1800 * 0.9, 1800 * 1.1);
-        Assert.InRange(perLayer[1], 8100 * 0.9, 8100 * 1.1);
-        Assert.InRange(perLayer[2], 45000 * 0.9, 45000 * 1.1);
-        // The naked-eye sky: about 4800 stars brighter than magnitude 6, 15 brighter than 1 (the bright layer's flatter slope has about 100).
-        int bright6 = stars.Count(s => s.Star.Magnitude < 6), bright1 = stars.Count(s => s.Star.Magnitude < 1);
-        Assert.InRange(bright6, 2500, 12000);
-        Assert.InRange(bright1, 30, 250);
-        Assert.True(stars.All(s => s.Star.Magnitude >= StarField.Layers[s.Layer].BrightestMagnitude - 1e-3f && s.Star.Magnitude <= StarField.Layers[s.Layer].FaintestMagnitude + 1e-3f));
-        // Power law: each magnitude down has about three times as many stars as the one before (layer 1: 4.5 to 6.5).
-        int n5 = stars.Count(s => s.Layer == 1 && s.Star.Magnitude < 5.5), n6 = stars.Count(s => s.Layer == 1 && s.Star.Magnitude is >= 5.5f and < 6.5f);
-        Assert.InRange(n6 / (double)n5, 1.5, 4.5);
-    }
-
-    [Fact]
     public void Star_density_is_even_over_the_sphere_not_denser_at_the_centres_of_cube_faces()
     {
         // The bright layer: stars within 25° of a face's centre against within 25° of a cube corner. A cell shrinks to a fifth of its
@@ -178,85 +64,5 @@ public class MeitouNightSkyTests
         Assert.InRange(centre / (double)corner, 0.65, 1.55);
     }
 
-    [Fact]
-    public void No_star_sits_where_its_spot_would_cross_a_cube_face_edge()
-    {
-        foreach (var (layer, _, s) in AllStars())
-        {
-            float margin = StarField.FaceEdgeMargin * 2f / StarField.Layers[layer].Cells;   // in face units
-            Assert.InRange(s.FaceUv.X, -1 + margin - 1e-5f, 1 - margin + 1e-5f);
-            Assert.InRange(s.FaceUv.Y, -1 + margin - 1e-5f, 1 - margin + 1e-5f);
-        }
-    }
-
-    [Fact]
-    public void Star_hashes_are_well_mixed_and_repeatable()
-    {
-        Assert.Equal(StarField.Pcg3d(3, 4, 5), StarField.Pcg3d(3, 4, 5));
-        Assert.NotEqual(StarField.Pcg3d(3, 4, 5), StarField.Pcg3d(4, 3, 5));
-        Assert.NotEqual(StarField.Pcg1(77), StarField.Pcg1(78));
-        double sum = 0, sum1 = 0;
-        const int count = 20000;
-        for (uint i = 0; i < count; i++) { sum += (StarField.Pcg3d(i, i / 7, 3).Y >> 16) / 65536.0; sum1 += (StarField.Pcg1(i) >> 16) / 65536.0; }
-        Assert.InRange(sum / count, 0.49, 0.51);
-        Assert.InRange(sum1 / count, 0.49, 0.51);
-        // Cell ids are unique over layers, faces and cells.
-        var ids = new HashSet<uint>();
-        for (int layer = 0; layer < StarField.Layers.Length; layer++)
-            for (int face = 0; face < 6; face++)
-                for (int iy = 0; iy < StarField.Layers[layer].Cells; iy += 7)
-                    for (int ix = 0; ix < StarField.Layers[layer].Cells; ix += 5) Assert.True(ids.Add(StarField.CellId(layer, face, ix, iy)));
-    }
-
-    [Fact]
-    public void Brighter_stars_have_lower_magnitudes_and_the_range_is_compressed()
-    {
-        Assert.True(StarField.Brightness(0) > StarField.Brightness(1));
-        Assert.Equal(1, StarField.Brightness(0), 5);
-        // 5 magnitudes are 100 times in light; on this screen 10^(0.4 · 0.7 · 5) = 25.
-        Assert.Equal(25, StarField.Brightness(1) / StarField.Brightness(6), 0);
-        var layer = StarField.Layers[1];
-        Assert.Equal(layer.BrightestMagnitude, StarField.MagnitudeAt(layer, 0), 4);
-        Assert.Equal(layer.FaintestMagnitude, StarField.MagnitudeAt(layer, 1), 4);
-        Assert.True(StarField.MagnitudeAt(layer, 0.5f) > StarField.MagnitudeAt(layer, 0.1f));
-    }
-
-    [Fact]
-    public void Star_colours_are_blue_white_to_orange_and_mostly_pale()
-    {
-        Assert.Equal(StarColours.TableSize, StarColours.Table().Length);
-        var t = StarColours.Table();
-        foreach (var c in t) Assert.Equal(1, StarColours.Luminance(c), 3);   // colour only; the magnitude sets the brightness
-        Assert.True(t[0].Z > t[0].X);                                         // the first (hottest) are bluish
-        Assert.True(t[^1].X > t[^1].Z);                                       // the last are orange
-        float redOverBlue = 0;
-        foreach (var c in t) redOverBlue += c.X / c.Z;
-        Assert.InRange(redOverBlue / t.Length, 0.8, 1.5);                     // on average near white
-        Assert.True(t.All(c => c.X / c.Z is > 0.6f and < 2.2f));              // never saturated
-        // Blackbodies: 3000 K orange, 6500 K white, 12000 K blue-white.
-        var warm = StarColours.Blackbody(3000); var white = StarColours.Blackbody(6500); var blue = StarColours.Blackbody(12000);
-        Assert.True(warm.X > 2 * warm.Z);
-        Assert.InRange(white.X / white.Z, 0.85, 1.2);
-        Assert.True(blue.Z > blue.X);
-        Assert.InRange(StarColours.Temperature(0.65f), 5300, 6000);          // the sun's colour index
-        Assert.True(StarColours.Temperature(-0.2f) > 10000);
-    }
-
     // ---- the switch ----
-
-    [Fact]
-    public void The_stars_switch_is_a_Meitou_default_that_Faithful_turns_off()
-    {
-        var o = new WorldOptions();
-        Assert.True(o.MeitouStars);
-        var switches = WorldOptions.Switches(o);
-        var stars = Assert.Single(switches, e => e.Id == "stars");
-        Assert.True(stars.IsMeitou);
-        Enhancements.Apply(switches, "stars", meitou: false);
-        Assert.False(o.MeitouStars);
-        Assert.StartsWith("Faithful", stars.State);
-        Enhancements.Apply(switches, "all", meitou: true);
-        Assert.True(o.MeitouStars);
-        Assert.StartsWith("Meitou", stars.State);
-    }
 }

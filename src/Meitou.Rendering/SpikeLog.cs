@@ -5,19 +5,19 @@ using System.Text;
 namespace Meitou.Rendering;
 
 /// <summary>
-/// <c>--log-spikes</c> (or <c>MEITOU_LOG_SPIKES=1</c>): for every frame whose GPU time is over <see cref="Factor"/> times the median of the last
+/// <c>--log-spikes</c>: for every frame whose GPU time is over <see cref="Factor"/> times the median of the last
 /// frames, one line with the stage breakdown (GPU and render thread) and what the frame uploaded, rebuilt or baked (the places call
 /// <see cref="Note"/>; the uploader notes every copy under the allocation's name). Off, a note costs one static read. The notes of a frame
 /// are taken when the <see cref="FrameProfiler"/> ends it and printed when its GPU times arrive (a few frames later).
 /// </summary>
 public static class SpikeLog
 {
-    public static bool Enabled { get; set; } = Environment.GetEnvironmentVariable("MEITOU_LOG_SPIKES") == "1";
+    public static bool Enabled { get; set; }
     /// <summary>A frame is a spike when its GPU time exceeds this many medians (and <see cref="MinMs"/>).</summary>
-    public static double Factor { get; set; } = double.TryParse(Environment.GetEnvironmentVariable("MEITOU_SPIKE_FACTOR"), CultureInfo.InvariantCulture, out double f) ? f : 1.5;
-    /// <summary>Frames at the start that print nothing (streaming settles: MEITOU_SPIKE_SKIP, else MEITOU_BENCH_SKIP).</summary>
-    public static int SkipFrames { get; set; } = int.TryParse(Environment.GetEnvironmentVariable("MEITOU_SPIKE_SKIP") ?? Environment.GetEnvironmentVariable("MEITOU_BENCH_SKIP"), out int k) ? k : 0;
-    public static double MinMs { get; set; } = double.TryParse(Environment.GetEnvironmentVariable("MEITOU_SPIKE_MIN_MS"), CultureInfo.InvariantCulture, out double m) ? m : 2;
+    public const double Factor = 1.5;
+    /// <summary>Frames at the start that print nothing (streaming settles: MEITOU_BENCH_SKIP).</summary>
+    public static int SkipFrames { get; set; } = int.TryParse(Environment.GetEnvironmentVariable("MEITOU_BENCH_SKIP"), out int k) ? k : 0;
+    public const double MinMs = 2;
 
     sealed class Tally { public int Count; public long Bytes; public double Ms; }
 

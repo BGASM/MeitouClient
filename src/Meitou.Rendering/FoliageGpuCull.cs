@@ -259,29 +259,19 @@ public sealed unsafe class FoliageGpuCull : IDisposable
         if (scratchFrame == frame.Number) return;
         if (scratchSlot >= 0) (visibleWritten[scratchSlot], fogWritten[scratchSlot], occWritten[scratchSlot]) = (viewIndex, fogIndex, occIndex);   // what the slot's buffer holds when it comes round
         (scratchFrame, scratchSlot, viewIndex, fogIndex, occIndex) = (frame.Number, frame.Slot, 0, 0, 0);
-        if (DrawTally) CollectTally();
+        if (CountTriangles) CollectTally();
     }
 
-    // ---- MEITOU_FOLIAGE_TRIS=1: what the indirect draws drew, by view kind (benchmark statistics; the arguments are copied after the
+    // ---- what the indirect draws drew, by view kind (the viewer's F11 statistics and --bench-tris; the arguments are copied after the
     // kernels, read a frame ring later; nothing else changes) ----
 
-    /// <summary><c>MEITOU_FOLIAGE_TRIS=1</c>: tally each view's indirect arguments (triangles and instances of the meshes, the TERRAIN-mode rocks
-    /// and the impostors) into <see cref="Tally"/>, read a frame ring later (docs/render-distance-benchmark.md).</summary>
-    public static readonly bool NamedTally = Environment.GetEnvironmentVariable("MEITOU_FOLIAGE_TRIS") == "1";
-    /// <summary>The viewer's F11 statistics: the same tally without the per-mesh names, for the total triangles (set while they are shown).</summary>
+    /// <summary>Tally each view's indirect arguments (triangles and instances of the meshes, the TERRAIN-mode rocks and the impostors)
+    /// into <see cref="Tally"/>, read a frame ring later (set while the viewer's F11 statistics are shown and by <c>--bench-tris</c>); when set the dispatches copy their indirect arguments.</summary>
     public static bool CountTriangles { get; set; }
-    /// <summary>Whether the dispatches copy their indirect arguments for <see cref="Tally"/>: <see cref="NamedTally"/> or <see cref="CountTriangles"/>.</summary>
-    public static bool DrawTally => NamedTally || CountTriangles;
 
     /// <summary>What the next <see cref="Dispatch(in FoliageCullWork, FoliageCullView, Vector2, in FoliageRockView, float)"/> is, for the tally:
     /// the view kind (0 colour, 1 shadow cascade, 2 reflection) and where the rock draws and the impostor draws begin among its draws.</summary>
     public (int Kind, int Rocks, int Impostors) TallyView;
-    /// <summary>The next dispatch's draws by name (one per draw), for <see cref="TallyByName"/>; null: not named.</summary>
-    public string[]? TallyNames;
-    /// <summary>The colour views' triangles and instance-draws (impostors: quads) per drawn mesh name, summed since <see cref="ResetTally"/>.</summary>
-    public readonly Dictionary<string, (long Triangles, long Instances)> TallyByName = [];
-    /// <summary>The same for the shadow cascades (all cascades summed).</summary>
-    public readonly Dictionary<string, (long Triangles, long Instances)> TallyShadowByName = [];
 
     /// <summary>Per view kind (0 colour, 1 shadow, 2 reflection): mesh triangles, mesh instance-draws (one per part), rock triangles, rock
     /// instance-draws, impostor quads, views; summed since the start (or <see cref="ResetTally"/>).</summary>
@@ -290,11 +280,11 @@ public sealed unsafe class FoliageGpuCull : IDisposable
     public readonly long[,] TallyHistogram = new long[3, 4];
     public long TallyFrames { get; private set; }
 
-    public void ResetTally() { Array.Clear(Tally); Array.Clear(TallyHistogram); TallyByName.Clear(); TallyShadowByName.Clear(); TallyFrames = 0; }
+    public void ResetTally() { Array.Clear(Tally); Array.Clear(TallyHistogram); TallyFrames = 0; }
 
     const ulong TallyBytes = 4ul << 20;
     ReadbackBuffer?[]? tallyBuffers;
-    List<(int Kind, int Rocks, int Impostors, int Count, ulong Offset, string[]? Names)>[]? tallyViews;
+    List<(int Kind, int Rocks, int Impostors, int Count, ulong Offset)>[]? tallyViews;
     long[]? tallyFrame;
     ulong[]? tallyUsed;
 
@@ -302,26 +292,20 @@ public sealed unsafe class FoliageGpuCull : IDisposable
     {
         int slots = ctx.Device.Frames.Count;
         tallyBuffers ??= new ReadbackBuffer?[slots];
-        tallyViews ??= [.. Enumerable.Range(0, slots).Select(_ => new List<(int, int, int, int, ulong, string[]?)>())];
+        tallyViews ??= [.. Enumerable.Range(0, slots).Select(_ => new List<(int, int, int, int, ulong)>())];
         tallyFrame ??= Enumerable.Repeat(-1L, slots).ToArray();
         tallyUsed ??= new ulong[slots];
         int s = scratchSlot;
         var views = tallyViews[s];
         if (views.Count > 0 && tallyBuffers[s] is { } rb && ReadbackBuffer.Completed(ctx, tallyFrame[s]))
         {
-            foreach (var (kind, rocks, impostors, count, offset, names) in views)
+            foreach (var (kind, rocks, impostors, count, offset) in views)
             {
                 var args = MemoryMarshal.Cast<byte, uint>(rb.Read(offset, (ulong)count * 20));
                 for (int i = 0; i < count; i++)
                 {
                     long indices = args[i * 5], instances = args[i * 5 + 1];
                     TallyHistogram[kind, instances == 0 ? 0 : instances <= 2 ? 1 : instances <= 15 ? 2 : 3]++;
-                    if (kind <= 1 && names is not null && i < names.Length && instances > 0)
-                    {
-                        var byName = kind == 0 ? TallyByName : TallyShadowByName;
-                        byName.TryGetValue(names[i], out var t);
-                        byName[names[i]] = (t.Triangles + indices / 3 * instances, t.Instances + instances);
-                    }
                     if (i < rocks) { Tally[kind, 0] += indices / 3 * instances; Tally[kind, 1] += instances; }
                     else if (i < impostors) { Tally[kind, 2] += indices / 3 * instances; Tally[kind, 3] += instances; }
                     else Tally[kind, 4] += instances;
@@ -343,8 +327,7 @@ public sealed unsafe class FoliageGpuCull : IDisposable
         if (tallyUsed![s] + bytes > TallyBytes) return;
         var rb = tallyBuffers![s] ??= ReadbackBuffer.Create(ctx, TallyBytes, $"foliage draw tally {s}");
         cmd.CopyBuffer(args, rb.Handle, new BufferCopy(argsOffset, tallyUsed[s], bytes));
-        tallyViews[s].Add((TallyView.Kind, TallyView.Rocks, TallyView.Impostors, count, tallyUsed[s], TallyNames));
-        TallyNames = null;
+        tallyViews[s].Add((TallyView.Kind, TallyView.Rocks, TallyView.Impostors, count, tallyUsed[s]));
         tallyUsed[s] += (bytes + 15) / 16 * 16;
     }
 
@@ -479,7 +462,7 @@ public sealed unsafe class FoliageGpuCull : IDisposable
             cmd.CopyBuffer(offsets.Buffer, counter.Handle, new BufferCopy(offsets.Offset + (ulong)(2 * n + 4) * 4, (ulong)viewIndex * 4, 4));   // the visible total (solid and fading)
             viewIndex++;
         }
-        if (DrawTally) CopyTally(cmd, args.Buffer, args.Offset, work.DrawCount);
+        if (CountTriangles) CopyTally(cmd, args.Buffer, args.Offset, work.DrawCount);
         cmd.EndLabel();
         FrameProfiler.PreStamp(cmd, StageClock.Cull);
         if (stamps.Item1.IsValid && stamps.Item2.IsValid) pendingTimes.Add((stamps.Item1, stamps.Item2, TimingClass));
@@ -515,7 +498,7 @@ public sealed unsafe class FoliageGpuCull : IDisposable
     }
 
     /// <summary>Copies a result (offsets, arguments, rows) into <paramref name="target"/> at 0, (ChunkCount + 1) × 4 and then the arguments' end
-    /// (16-aligned), after the dispatches (the verify mode). Returns the bytes needed when <paramref name="target"/> is null.</summary>
+    /// (16-aligned), after the dispatches (the tests read them back). Returns the bytes needed when <paramref name="target"/> is null.</summary>
     public static ulong ReadbackBytes(in FoliageCullResult r) => Align16((ulong)(r.ChunkCount + 1) * 4) + Align16((ulong)r.DrawCount * 20) + r.RowsBytes;
 
     public static ulong Align16(ulong v) => (v + 15) / 16 * 16;

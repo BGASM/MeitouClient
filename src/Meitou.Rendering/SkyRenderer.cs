@@ -664,9 +664,8 @@ public sealed unsafe partial class SkyRenderer : IDisposable
         simple = new SkyProg(gpu, Vertex, SimpleFragment, "sky simple");
         sky = new SkyProg(gpu, Vertex, SkyFragment, "sky");
         skyTimer = new PassTimer(gpu);
-        // MEITOU_FORCE_INTEGRATED=1 (VulkanDevice.IsIntegrated) shows the integrated GPU's star layers on any card; MEITOU_STAR_LAYERS=0..3 sets them.
+        // MEITOU_FORCE_INTEGRATED=1 (VulkanDevice.IsIntegrated) shows the integrated GPU's star layers on any card.
         if (gpu.Device.IsIntegrated) StarLayers = StarField.IntegratedLayers;
-        if (Environment.GetEnvironmentVariable("MEITOU_STAR_LAYERS") is { } layers && int.TryParse(layers, out int count)) StarLayers = Math.Clamp(count, 0, StarField.Layers.Length);
         if (assets is not null)
         {
             LoadTextures(assets);
@@ -1068,19 +1067,6 @@ public sealed unsafe partial class SkyRenderer : IDisposable
         if (cloudsSmooth is not null) p.Bind(program.CloudsSmooth, cloudsSmooth.Sampled());
         if (cloudsTileSmooth is not null) p.Bind(program.CloudsTileSmooth, cloudsTileSmooth.Sampled());
         if (!volumeImage.IsNull) p.Bind(program.VolumeImage, volumeImage);
-    }
-
-    /// <summary>
-    /// Records <paramref name="count"/> sky passes back to back and returns the CPU time each took to record (ms; no table any more), for the
-    /// screenshot mode's cost report (<c>MEITOU_SKY_BENCH</c>). The GL version waited for the GPU (<c>Finish</c>); the native API has no such
-    /// wait inside a frame, so the GPU's share shows in <see cref="GpuMs"/> instead.
-    /// </summary>
-    public (double SkyPassMs, double TableMs) Benchmark(Matrix4x4 viewProjection, int count = 100)
-    {
-        var colours = state.Colours;
-        var watch = Stopwatch.StartNew();
-        for (int i = 0; i < count; i++) Draw(viewProjection, colours);
-        return (watch.Elapsed.TotalMilliseconds / count, 0);
     }
 
     /// <summary>Collects finished GPU timings: native timestamps, read once their frame's slot comes round. Nothing waits, also with

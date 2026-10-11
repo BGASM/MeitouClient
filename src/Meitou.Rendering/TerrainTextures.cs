@@ -290,7 +290,7 @@ public sealed unsafe class TerrainTextures : IDisposable
         }
         catch (Meitou.Rendering.Gpu.Core.VulkanException e)
         {
-            Messages.Add($"terrain layer array allocation: {e.Message}; try a smaller --layer-size");
+            Messages.Add($"terrain layer array allocation: {e.Message}; try a higher --texture-quality");
             return null;
         }
     }

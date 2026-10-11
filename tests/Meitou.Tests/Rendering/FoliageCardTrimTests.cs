@@ -38,22 +38,6 @@ public class FoliageCardTrimTests
     }
 
     [Fact]
-    public void A_simplified_hull_still_contains_the_hull_with_at_most_the_cap_vertices()
-    {
-        // A circle of 40 points.
-        var circle = FoliageCardTrimmer.ConvexHull([.. Enumerable.Range(0, 40).Select(i => new Vector2(MathF.Cos(i * MathF.Tau / 40), MathF.Sin(i * MathF.Tau / 40)) * 20 + new Vector2(30, 30))]);
-        foreach (int cap in new[] { 3, 4, 6, 8 })
-        {
-            var simple = FoliageCardTrimmer.Simplify(circle, cap);
-            Assert.True(simple.Length <= cap, $"cap {cap} gave {simple.Length}");
-            foreach (var p in circle) Assert.True(Inside(simple, p, 1e-2f), $"cap {cap}: {p} outside");
-            Assert.True(FoliageCardTrimmer.SignedArea(simple) >= FoliageCardTrimmer.SignedArea(circle) - 1e-3f);
-        }
-        // More vertices never mean more area.
-        Assert.True(FoliageCardTrimmer.SignedArea(FoliageCardTrimmer.Simplify(circle, 8)) <= FoliageCardTrimmer.SignedArea(FoliageCardTrimmer.Simplify(circle, 4)));
-    }
-
-    [Fact]
     public void A_clip_stays_inside_the_card_whichever_way_either_winds()
     {
         Vector2[] card = [new(0, 0), new(10, 0), new(10, 10), new(0, 10)];
@@ -66,64 +50,6 @@ public class FoliageCardTrimTests
             Assert.True(Math.Abs(FoliageCardTrimmer.SignedArea(clipped)) <= 100f + 1e-3f);
         }
         Assert.Empty(FoliageCardTrimmer.Clip([new(20, 20), new(30, 20), new(25, 30)], card));
-    }
-
-    [Fact]
-    public void The_hull_of_a_mask_holds_the_set_cells_under_the_card_and_grows_by_the_margin()
-    {
-        var mask = Mask(64, (x, y) => x is >= 20 and < 40 && y is >= 10 and < 50);   // a bar
-        Vector2[] card = [new(0, 0), new(64, 0), new(64, 64), new(0, 64)];
-        var hull = FoliageCardTrimmer.Hull(card, mask, 0, 0);
-        Assert.Equal(20 * 40, Math.Abs(FoliageCardTrimmer.SignedArea(hull)), 1e-2);
-        var grown = FoliageCardTrimmer.Hull(card, mask, 0, 1);
-        Assert.Equal(22 * 42, Math.Abs(FoliageCardTrimmer.SignedArea(grown)), 1e-2);
-        // A card over a bit of the texture with nothing set has no hull at all.
-        Assert.Empty(FoliageCardTrimmer.Hull([new(0, 0), new(10, 0), new(10, 5), new(0, 5)], mask, 0, 0));
-    }
-
-    [Fact]
-    public void A_card_over_a_part_of_the_texture_only_sees_the_cells_it_overlaps()
-    {
-        // Two bars; the card covers the left half: the right bar is not in its hull.
-        var mask = Mask(64, (x, y) => (x is >= 5 and < 10 || x is >= 50 and < 60) && y is >= 10 and < 30);
-        Vector2[] card = [new(0, 0), new(32, 0), new(32, 64), new(0, 64)];
-        var hull = FoliageCardTrimmer.Hull(card, mask, 0, 0);
-        Assert.Equal(5 * 20, Math.Abs(FoliageCardTrimmer.SignedArea(hull)), 1e-2);
-    }
-
-    [Fact]
-    public void Coarser_mask_levels_contain_the_finer_and_a_single_opaque_texel_spreads_with_the_mips()
-    {
-        var alpha = new byte[64 * 64];
-        for (int y = 30; y < 34; y++) for (int x = 30; x < 34; x++) alpha[y * 64 + x] = 255;   // a 4 x 4 blob
-        var mask = FoliageCardMask.FromAlpha(alpha, 64, 64, 128, coarsest: 4);
-        Assert.True(mask.LevelCount >= 4);
-        for (int l = 1; l < mask.LevelCount; l++)
-            for (int i = 0; i < mask.Levels[l].Length; i++) Assert.True(!mask.Levels[l - 1][i] || mask.Levels[l][i]);
-        Assert.True(mask.Coverage(0) < mask.Coverage(2));
-        // Level 0: the blob and one texel around it (6 x 6); its centre is set, a texel two away is not.
-        Assert.True(mask.Levels[0][32 * 64 + 32]);
-        Assert.True(mask.Levels[0][29 * 64 + 29]);
-        Assert.False(mask.Levels[0][27 * 64 + 27]);
-        // Each mip is the average of 2 x 2: the blob keeps 255 at mip 1 (2 x 2 inside), and level 1 holds it with its texel around.
-        Assert.True(mask.Levels[1][27 * 64 + 27 + 1] || mask.Levels[1][28 * 64 + 28]);
-    }
-
-    [Fact]
-    public void A_mask_survives_the_disk_cache()
-    {
-        var mask = Mask(48, (x, y) => (x * 7 + y * 3) % 5 == 0, levels: 3);
-        var path = Path.Combine(Path.GetTempPath(), $"meitou-trim-{Guid.NewGuid():N}.mtrm");
-        try
-        {
-            Assert.True(FoliageCardMask.Write(path, mask) > 0);
-            var back = FoliageCardMask.TryRead(path);
-            Assert.NotNull(back);
-            Assert.Equal((mask.Width, mask.Height, mask.LevelCount), (back.Width, back.Height, back.LevelCount));
-            for (int l = 0; l < mask.LevelCount; l++) Assert.Equal(mask.Levels[l], back.Levels[l]);
-        }
-        finally { File.Delete(path); }
-        Assert.Null(FoliageCardMask.TryRead(path));
     }
 
     /// <summary>A leaf quad in the x-y plane, 10 x 10 units, facing +z, with the texture over it (the quad's two triangles share the diagonal).</summary>
@@ -202,52 +128,5 @@ public class FoliageCardTrimTests
         Assert.NotNull(clear);
         Assert.Equal(1, clear.Stats.Removed);
         Assert.Empty(clear.Indices);
-    }
-
-    [Fact]
-    public void A_triangle_pair_that_is_not_one_affine_card_is_trimmed_triangle_by_triangle()
-    {
-        // A kite: the second triangle's far corner is not where the first one's map puts it (its position is lifted), so they are two cards.
-        var part = Quad();
-        var vertices = (Vertex[])part.Vertices.Clone();
-        vertices[3].Position += new Vector3(0, 0, 5);
-        var kite = new ModelPart { SubMeshIndex = 0, MaterialName = "m", Vertices = vertices, Indices = part.Indices, HasUv = true, HasColours = true, HasTangents = true };
-        var result = FoliageCardTrimmer.Trim(kite, Mask(64, (x, y) => x is >= 8 and < 20 && y is >= 40 and < 56), Plain);
-        Assert.NotNull(result);
-        Assert.Equal(2, result.Stats.Units);
-        Assert.All(result.Indices, i => Assert.True(i < result.Vertices.Length));
-    }
-
-    [Fact]
-    public void A_card_in_another_repeat_of_the_texture_is_trimmed_and_keeps_its_coordinates()
-    {
-        var mask = Mask(64, (x, y) => x is >= 16 and < 48 && y is >= 16 and < 48);
-        var part = Quad();
-        var vertices = part.Vertices.Select(v => { var w = v; w.Uv += new Vector2(-2, 3); return w; }).ToArray();
-        var shifted = new ModelPart { SubMeshIndex = 0, MaterialName = "m", Vertices = vertices, Indices = part.Indices, HasUv = true, HasColours = true, HasTangents = true };
-        var result = FoliageCardTrimmer.Trim(shifted, mask, Plain);
-        Assert.NotNull(result);
-        Assert.Equal(1, result.Stats.Trimmed);
-        foreach (var v in result.Vertices.Skip(4))
-        {
-            Assert.InRange(v.Uv.X, -2 + 0.2, -2 + 0.8);
-            Assert.InRange(v.Uv.Y, 3 + 0.2, 3 + 0.8);
-        }
-    }
-
-    [Fact]
-    public void Bigger_cards_may_use_a_coarser_mask_level_than_small_ones()
-    {
-        // Level 0 holds a bar; level 1 holds it fatter. A card 512 cells across picks a coarser level than one 16 across.
-        var fine = new bool[512 * 512];
-        var coarse = new bool[512 * 512];
-        for (int y = 100; y < 400; y++)
-            for (int x = 200; x < 300; x++) { fine[y * 512 + x] = true; for (int d = -20; d <= 20; d++) coarse[y * 512 + Math.Clamp(x + d, 0, 511)] = true; }
-        var mask = new FoliageCardMask(512, 512, [fine, coarse, coarse, coarse, coarse, coarse]);
-        var big = FoliageCardTrimmer.Outline([new(0, 0), new(512, 0), new(512, 512), new(0, 512)], mask, level: 3, Plain, 2);
-        var near = FoliageCardTrimmer.Outline([new(0, 0), new(512, 0), new(512, 512), new(0, 512)], mask, level: 0, Plain, 2);
-        Assert.NotNull(big);
-        Assert.NotNull(near);
-        Assert.True(Math.Abs(FoliageCardTrimmer.SignedArea(near)) < Math.Abs(FoliageCardTrimmer.SignedArea(big)));
     }
 }

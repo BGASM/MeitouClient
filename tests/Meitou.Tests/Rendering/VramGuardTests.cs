@@ -24,21 +24,6 @@ public class VramGuardTests
     }
 
     [Fact]
-    public void Stays_idle_below_the_high_mark()
-    {
-        var r = new Rig();
-        r.Run(30, 0.35);
-        r.Run(30, 0.89);
-        Assert.False(r.Guard.Pressure);
-        Assert.True(r.Guard.Streaming);
-        Assert.Equal(1f, r.Guard.RangeScale);
-        Assert.Equal(0, r.Guard.Activations);
-        Assert.False(r.Guard.Active);
-        Assert.Empty(r.Log);
-        Assert.StartsWith("guard: ok", r.Guard.Status);
-    }
-
-    [Fact]
     public void Enters_pressure_at_90_percent_pauses_streaming_and_clamps_ranges_step_by_step()
     {
         var r = new Rig();
@@ -56,21 +41,6 @@ public class VramGuardTests
         r.Run(60, 0.95);
         Assert.Equal(VramGuard.MinScale, r.Guard.RangeScale, 4);
         Assert.Equal(VramGuard.MinScale, r.Guard.LowestScale, 4);
-    }
-
-    [Fact]
-    public void Logs_once_however_often_it_triggers()
-    {
-        var r = new Rig();
-        for (int i = 0; i < 3; i++)
-        {
-            r.Run(1, 0.95);
-            r.Run(1, 0.5);
-        }
-        Assert.Equal(3, r.Guard.Activations);
-        var line = Assert.Single(r.Log);
-        Assert.Contains("guard", line);
-        Assert.Contains("streaming paused", line);
     }
 
     [Fact]
@@ -99,67 +69,5 @@ public class VramGuardTests
         r.Run(120, 0.60);
         Assert.Equal(1f, r.Guard.RangeScale);
         Assert.False(r.Guard.Active);
-    }
-
-    [Fact]
-    public void A_relapse_while_recovering_clamps_again()
-    {
-        var r = new Rig();
-        r.Run(2, 0.95);
-        r.Run(5.5, 0.5);   // four seconds of calm, then a step or two up
-        float recovering = r.Guard.RangeScale;
-        Assert.InRange(recovering, 0.01f, 0.99f);
-        r.Run(1, 0.93);
-        Assert.True(r.Guard.Pressure);
-        Assert.True(r.Guard.RangeScale < recovering);
-        Assert.Equal(2, r.Guard.Activations);
-    }
-
-    [Fact]
-    public void Samples_a_few_times_a_second_not_every_frame()
-    {
-        int samples = 0;
-        double now = 0;
-        var guard = new VramGuard(() => { samples++; return (100, 1000); }, () => now, _ => { });
-        for (; now < 10; now += 1.0 / 60) guard.Tick();
-        Assert.InRange(samples, 38, 41);
-    }
-
-    [Fact]
-    public void An_unknown_budget_does_nothing()
-    {
-        var guard = new VramGuard(() => (5, 0), () => 100, _ => { });
-        guard.Tick();
-        Assert.False(guard.Pressure);
-        Assert.Equal(1f, guard.RangeScale);
-    }
-
-    [Fact]
-    public void Scratch_is_granted_past_the_ceiling_up_to_the_priority_ceiling_while_ordinary_allocations_are_refused()
-    {
-        var r = new Rig();
-        r.Run(1, 0.915);
-        Assert.False(r.Guard.Allows(100));            // 91.5% + 1% is past the 92% ceiling
-        Assert.True(r.Guard.AllowsPriority(100));     // under the 94.5% priority ceiling
-        Assert.Equal(1, r.Guard.PriorityGrants);
-        Assert.False(r.Guard.AllowsPriority(400));    // 91.5% + 1% + 4% is past it
-        Assert.Contains("scratch grants", r.Guard.Status);
-    }
-
-    [Fact]
-    public void A_refused_scratch_squeezes_the_ranges_at_once_but_paced()
-    {
-        var r = new Rig();
-        r.Run(1, 0.93);
-        float before = r.Guard.RangeScale;
-        Assert.False(r.Guard.AllowsPriority(900));
-        float after = r.Guard.RangeScale;
-        Assert.True(after < before, $"{before} -> {after}");
-        Assert.False(r.Guard.AllowsPriority(900));     // in the same instant: no second step
-        Assert.Equal(after, r.Guard.RangeScale);
-        r.Now += 0.06;
-        Assert.False(r.Guard.AllowsPriority(900));
-        Assert.True(r.Guard.RangeScale < after);
-        Assert.True(r.Guard.Squeezes >= 2);
     }
 }

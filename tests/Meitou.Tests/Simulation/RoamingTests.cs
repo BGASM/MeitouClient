@@ -18,49 +18,6 @@ public class RoamingTests
         return (world, population);
     }
 
-    static int SquadsOf(SimWorld w, string template) => w.Squads.All.Count(s => s.TemplateId == template && s.PlatoonId < 0);
-
-    [Fact]
-    public void Bar_squads_come_from_the_town_and_for_towns_of_type_Town_from_the_faction_too()
-    {
-        var db = SyntheticTown.Database(roaming: true);
-        var town = TownData.From(db.Find("30-t")!);
-        var faction = FactionData.From(db.Find("20-t")!);
-        Assert.Equal(2, PopulationSystem.BarEntries(town, faction).Count);
-        Assert.Equal(2, PopulationSystem.BarEntries(town with { Type = TownType.Village }, faction).Count);   // the faction here lists none
-        var withFactionList = faction with { BarSquads = [new RecordLink("12-t", 1, 100, 0)] };
-        Assert.Equal(3, PopulationSystem.BarEntries(town, withFactionList).Count);
-        Assert.Equal(2, PopulationSystem.BarEntries(town with { Type = TownType.Village }, withFactionList).Count);
-        Assert.Empty(PopulationSystem.BarEntries(town with { BarSquads = [new RecordLink("12-t", 0, 100, 0)] }, faction));   // v0 = 0 dropped
-    }
-
-    [Fact]
-    public void A_loaded_town_adds_its_bar_squads_to_the_residents()
-    {
-        var (w, _) = Start();
-        using var world = w;
-        w.RunTicks(2);
-        // Residents: 3 patrols, the gated one missing, the faction's folk (1); bars: 2 folk and 1 patrol, all certain.
-        Assert.Equal(1 + 2, SquadsOf(w, "12-t"));
-        Assert.Equal(3 + 1, SquadsOf(w, "10-t"));
-    }
-
-    [Fact]
-    public void The_roaming_pool_fills_to_its_cap_one_squad_per_look_and_never_past_it()
-    {
-        var (w, _) = Start();
-        using var world = w;
-        w.RunTicks(5);
-        Assert.Single(w.Platoons.All);   // the first look at the pools (the town loaded in the same tick)
-        w.RunTicks(60);
-        Assert.Equal(2, w.Platoons.Count);
-        w.RunTicks(600);
-        // Cap floor(0.7 x 10) = 7 members: two squads of 3, a third would make 9.
-        Assert.Equal(2, w.Platoons.Count);
-        Assert.All(w.Platoons.All, p => Assert.Equal(3, p.Size));
-        Assert.All(w.Platoons.All, p => Assert.Equal(1, p.Target));   // the other town is the only place to go
-    }
-
     [Fact]
     public void Roaming_squads_leave_the_active_zones_as_stand_ins_and_come_back_loaded_when_a_zone_near_them_is_active()
     {
@@ -87,26 +44,6 @@ public class RoamingTests
         Assert.All(travellers, p => Assert.Equal(PlatoonState.Loaded, p.State));
         Assert.All(travellers, p => Assert.Equal(3, w.Squads.Find(p.SquadId)!.Members.Count));
         Assert.All(travellers, p => Assert.Contains(Meitou.Data.World.WorldLayout.ZoneOf(p.Position.X, p.Position.Y), population.ActiveZones));
-    }
-
-    [Fact]
-    public void After_a_visit_the_stand_in_waits_then_heads_home_and_goes_out_again()
-    {
-        var (w, _) = Start();
-        using var world = w;
-        w.RunTicks(700);
-        var first = w.Platoons.All.First();
-        bool reachedFar = false, wentHome = false, outAgain = false;
-        for (int i = 0; i < 160 && !outAgain; i++)
-        {
-            w.RunTicks(300);
-            if (first.Target == 1 && first.WaitLeft > 0) reachedFar = true;
-            if (reachedFar && first.GoingHome && first.Target == first.Origin) wentHome = true;
-            if (wentHome && !first.GoingHome && first.Target == 1) outAgain = true;
-        }
-        Assert.True(reachedFar, "it arrived at the other town and waits there");
-        Assert.True(wentHome, "after the wait the target is the town it came from");
-        Assert.True(outAgain, "at home it picks a town again");
     }
 
     internal static List<ulong> Scripted(int threads)

@@ -619,7 +619,7 @@ static class PostProcessShaders
         out vec4 fragColour;
         uniform sampler2D uScene, uAo, uAdapted;   // uAo: the occlusion, the characters' share taken off already (SsaoBlur)
         uniform float uExposure;
-        uniform int uUseAo, uDither, uDebug, uAuto, uTone, uGrade;
+        uniform int uUseAo, uDither, uAuto, uTone, uGrade;
         uniform float uToneMix;    // hybrid (uTone 3): 0 the clamp, 1 ACES
         uniform float uSaturation, uContrast;
         uniform float uNight;      // Meitou night grading strength (the `nightgrade` switch): 0 off; needs the auto exposure's mean (uAuto)
@@ -687,7 +687,6 @@ static class PostProcessShaders
                 c = mix(vec3(dot(c, vec3(0.299, 0.587, 0.114))), c, uSaturation);
                 c = clamp((c - 0.5) * uContrast + 0.5, 0.0, 1.0);
             }
-            if (uDebug == 1) c = vec3(ao);
             if (uDither != 0) c += (ign(gl_FragCoord.xy) + ign(gl_FragCoord.xy + 17.0) - 1.0) / 255.0;
             fragColour = vec4(c, 1.0);
         }

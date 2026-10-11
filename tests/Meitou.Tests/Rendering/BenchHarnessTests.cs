@@ -6,75 +6,6 @@ namespace Meitou.Tests.Rendering;
 public class BenchHarnessTests
 {
     [Fact]
-    public void ViewExpandsInPlaceAndLaterOptionsWin()
-    {
-        var args = NamedViews.Expand(["--view", "swamp", "--distance", "500"]);
-        Assert.Contains("--town", args);
-        Assert.Equal("Shark", args[Array.IndexOf(args, "--town") + 1]);
-        var o = WorldOptions.Parse(["--view", "swamp", "--distance", "500"])!;
-        Assert.Equal(500f, o.Distance);
-        Assert.Equal("swamp", o.View);
-        Assert.Equal(2f, o.Radius);
-        Assert.Equal("orbit", o.BenchMotion);
-        var dust = WorldOptions.Parse(["--view", "dust"])!;
-        Assert.Equal("Dust Storm Approach", dust.Weather);
-        Assert.Equal("The Hub", WorldOptions.Parse(["--view", "hub"])!.Town);
-    }
-
-    [Fact]
-    public void LowEndExpandsInPlaceAndLaterOptionsWin()
-    {
-        var o = WorldOptions.Parse(["--world", "--low-end", "--object-distance", "8000"])!;
-        Assert.Equal(8000f, o.ObjectDistance);
-        Assert.Equal(5000f, o.LandmarkDistance);
-        Assert.False(o.VSync);
-        Assert.True(o.ShadowsOff);
-        Assert.Equal(15000f, o.MaterialDistance);
-        Assert.Equal((0.25f, 0.1f, 0, 1, 3), (o.ObjectLod, o.GrassDensity, o.WaterReflection, o.Anisotropy, o.TextureQuality));
-        Assert.Equal((false, false, false), (o.Post.Ssao, o.Post.Fxaa, o.MeitouWater));
-        Assert.Equal((UpscalerKind.Off, 0.83f), (o.Post.Upscale.Kind, o.Post.Upscale.Scale));
-        Assert.Equal((true, 4), (o.Post.LowResParticles, o.Post.ParticleDivisor));
-        var plain = WorldOptions.Parse(["--world"])!;
-        Assert.Equal((true, false, 1f), (plain.VSync, plain.ShadowsOff, plain.ObjectLod));
-    }
-
-    [Fact]
-    public void UnknownViewIsRejected() => Assert.Throws<ArgumentException>(() => WorldOptions.Parse(["--view", "nowhere"]));
-
-    [Fact]
-    public void BenchOptionsParse()
-    {
-        var o = WorldOptions.Parse(["--view", "swamp", "--ab", "shadows", "--ab-period", "64", "--bench-frames", "300", "--bench-motion", "turn", "--no-gpu-lock", "--bench-out", "x.json"])!;
-        Assert.Equal(("shadows", 64, 300, "turn", true, "x.json"), (o.Ab, o.AbPeriod, o.BenchFrames, o.BenchMotion, o.NoGpuLock, o.BenchOut));
-        Assert.Throws<ArgumentException>(() => WorldOptions.Parse(["--bench-motion", "spin"]));
-        Assert.Equal(("a.json", "b.json"), WorldOptions.Parse(["--bench-compare", "a.json", "b.json"])!.BenchCompare);
-    }
-
-    [Fact]
-    public void BenchSizeDefaultsSmaller()
-    {
-        var bench = WorldOptions.Parse(["--view", "swamp", "--bench-frames", "300"])!;
-        Assert.Equal((1280, 720), (bench.Width, bench.Height));
-        var ab = WorldOptions.Parse(["--view", "swamp", "--ab", "shadows"])!;
-        Assert.Equal((1280, 720), (ab.Width, ab.Height));
-        var sized = WorldOptions.Parse(["--view", "swamp", "--bench-frames", "300", "--size", "2560x1440"])!;
-        Assert.Equal((2560, 1440), (sized.Width, sized.Height));
-        var shot = WorldOptions.Parse(["--view", "swamp", "--screenshot", "x.png"])!;
-        Assert.Equal((1280, 960), (shot.Width, shot.Height));
-    }
-
-    [Fact]
-    public void SummaryHasMeanMedianAndTail()
-    {
-        var s = BenchStats.Summarize(Enumerable.Range(1, 100).Select(i => (double)i).Append(double.NaN))!;
-        Assert.Equal(100, s.N);
-        Assert.Equal(50.5, s.Mean, 6);
-        Assert.Equal(50.5, s.Median, 6);
-        Assert.Equal(96, s.P95);
-        Assert.Equal(100, s.Max);
-    }
-
-    [Fact]
     public void PairedDifferenceFindsAStepThroughDrift()
     {
         // A costs 1 ms more than B, on top of a drift that is far larger than the step; blocks of 4 frames.
@@ -108,6 +39,22 @@ public class BenchHarnessTests
     }
 
     [Fact]
+    public void LowEndAppliesWhereItStandsAndLaterOptionsWin()
+    {
+        var o = WorldOptions.Parse(["--world", "--low-end", "--object-distance", "8000"])!;
+        Assert.Equal(8000f, o.ObjectDistance);
+        Assert.False(o.VSync);
+        Assert.True(o.ShadowsOff);
+        Assert.Equal(15000f, o.MaterialDistance);
+        Assert.Equal((0.25f, 0.1f, 0, 1, 3), (o.ObjectLod, o.GrassDensity, o.WaterReflection, o.Anisotropy, o.TextureQuality));
+        Assert.Equal((false, false, false), (o.Post.Ssao, o.Post.Fxaa, o.MeitouWater));
+        Assert.Equal((UpscalerKind.Off, 0.83f), (o.Post.Upscale.Kind, o.Post.Upscale.Scale));
+        Assert.Equal((true, 4), (o.Post.LowResParticles, o.Post.ParticleDivisor));
+        var plain = WorldOptions.Parse(["--world"])!;
+        Assert.Equal((true, false, 1f), (plain.VSync, plain.ShadowsOff, plain.ObjectLod));
+    }
+
+    [Fact]
     public void PictureDiffCountsThresholds()
     {
         int w = 4, h = 2;
@@ -122,91 +69,5 @@ public class BenchHarnessTests
         Assert.Equal(46 / (3.0 * w * h), r.MeanDiff, 9);
         Assert.Equal((0, 0, 0), (heat[12], heat[13], heat[14]));   // equal pixels are black
         Assert.NotEqual((0, 0, 0), (heat[8], heat[9], heat[10]));
-    }
-
-    [Fact]
-    public void TogglesFlipAndUnknownNamesAreMissing()
-    {
-        AbToggles.Clear();
-        bool on = false;
-        AbToggles.Register("thing", () => on, v => on = v);
-        Assert.True(AbToggles.TryGet("THING", out var t));
-        t.Set(true);
-        Assert.True(on);
-        Assert.False(AbToggles.TryGet("other", out _));
-        AbToggles.Clear();
-    }
-
-    [Fact]
-    public void EnhancementsRegisterUnderTheirIds()
-    {
-        var o = new WorldOptions();
-        AbToggles.Clear();
-        AbToggles.RegisterEnhancements(WorldOptions.Switches(o));
-        foreach (var id in new[] { "ao", "shadows", "lod", "particles", "water", "impostors" }) Assert.True(AbToggles.TryGet(id, out _), id);
-        AbToggles.TryGet("lod", out var lod);
-        lod.Set(false);
-        Assert.False(o.FoliageLod);
-        lod.Set(true);
-        Assert.True(o.FoliageLod);
-        AbToggles.Clear();
-    }
-
-    [Fact]
-    public async Task GpuLockQueuesAndTakesOverAStaleOne()
-    {
-        string path = Path.Combine(Path.GetTempPath(), "meitou-gpu-test-" + Guid.NewGuid().ToString("N") + ".lock");
-        GpuLock.PathOverride = path;
-        try
-        {
-        File.Delete(path);
-        File.WriteAllText(path, "2147483000");   // a PID that is not running
-        using (var first = GpuLock.Acquire(TextWriter.Null))
-        {
-            Assert.Equal(2147483000, first.StaleHolder);
-            Assert.Equal(Environment.ProcessId.ToString(), ReadHolder(path));
-            // A second taker waits until the first lets go.
-            var second = Task.Run(() => GpuLock.Acquire(TextWriter.Null));
-            await Task.Delay(600, TestContext.Current.CancellationToken);
-            Assert.False(second.IsCompleted);
-            first.Dispose();
-            using var taken = await second;
-            Assert.True(taken.Waited >= TimeSpan.FromMilliseconds(400));
-        }
-        Assert.False(File.Exists(path));
-        }
-        finally { GpuLock.PathOverride = null; }
-    }
-
-    static string ReadHolder(string path)
-    {
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        return new StreamReader(fs).ReadToEnd().Trim();
-    }
-
-    [Fact]
-    public void ResultRoundTripsAndCompares()
-    {
-        BenchResult Make(double gpu)
-        {
-            var r = new BenchResult { Meta = { ["view"] = "swamp", ["commit"] = "abc" } };
-            r.Configs["A"] = new BenchConfig { Label = "A", Frames = 100, Metrics = { ["gpu:total"] = new MetricStats(100, gpu, gpu, gpu + 1, gpu + 2, gpu + 3, 0.5), ["frame"] = new MetricStats(100, gpu + 2, gpu + 2, gpu + 3, gpu + 4, gpu + 5, 0.5) } };
-            return r;
-        }
-        string dir = Path.Combine(Path.GetTempPath(), "meitou-bench-test-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            Make(4).Save(Path.Combine(dir, "a.json"));
-            Make(5).Save(Path.Combine(dir, "b.json"));
-            var loaded = BenchResult.Load(Path.Combine(dir, "a.json"));
-            Assert.Equal(4, loaded.Configs["A"].Metrics["gpu:total"].Mean);
-            var text = new StringWriter();
-            BenchResult.Compare(Path.Combine(dir, "a.json"), Path.Combine(dir, "b.json"), text);
-            Assert.Contains("+1.00", text.ToString());
-            var table = new StringWriter();
-            loaded.Print(table);
-            Assert.Contains("total", table.ToString());
-        }
-        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
     }
 }

@@ -79,27 +79,19 @@ public sealed unsafe partial class ShadowPass
 
     /// <summary>
     /// Frames between the redraws of each cascade when nothing makes it stale (Meitou): the nearest every frame, the others less often the
-    /// farther they are, since a far cascade's casters hardly move and its texels are big. <c>MEITOU_SHADOW_CADENCE=1,2,4,4</c> sets them (A/B tests;
-    /// 1,2,4,4 was the schedule before 2026-10-08). The phases below put the default redraws on different frames (the override may collide).
+    /// farther they are, since a far cascade's casters hardly move and its texels are big (1,2,4,4 was the schedule before 2026-10-08).
+    /// The phases below put the redraws on different frames.
     /// </summary>
-    public static readonly int[] Cadence = ParseCadence(Environment.GetEnvironmentVariable("MEITOU_SHADOW_CADENCE"));
+    public static readonly int[] Cadence = [1, 4, 16, 32];
     static readonly int[] Phase = Enumerable.Range(0, 4).Select(i => i * 5 % Cadence[i]).ToArray();
-
-    static int[] ParseCadence(string? text)
-    {
-        int[] fallback = [1, 4, 16, 32];
-        if (text?.Split(',') is not { Length: 4 } parts) return fallback;
-        var values = parts.Select(p => int.TryParse(p, out int v) && v >= 1 ? v : 0).ToArray();
-        return values.Contains(0) ? fallback : values;
-    }
 
     /// <summary>How far (radians) the sun may turn before a cascade is redrawn: a caster 150 units tall shifts its shadow by half a texel; at most 2°, at least 0.25°.</summary>
     static float SunTolerance(ShadowCascade c) => (float)Math.Clamp(0.5 * c.Texel / 150, 0.25 * Math.PI / 180, 2 * Math.PI / 180);
     /// <summary>
     /// How many far cascades (1 and up, 1.1 to 1.8 ms each on the swamp) one frame may draw; the other redraws wait, the longest first, and are forced after
-    /// <see cref="MaxWait"/> frames. 0: no limit (the schedule before 2026-10-09, where up to three coincided in one frame). <c>MEITOU_SHADOW_BUDGET</c> sets the default.
+    /// <see cref="MaxWait"/> frames. 0: no limit (the schedule before 2026-10-09, where up to three coincided in one frame); the <c>shadow-spread</c> A/B switch.
     /// </summary>
-    public int FarBudget { get; set; } = int.TryParse(Environment.GetEnvironmentVariable("MEITOU_SHADOW_BUDGET"), out int b) ? b : ShadowSchedule.DefaultBudget;
+    public int FarBudget { get; set; } = ShadowSchedule.DefaultBudget;
     /// <summary>The most frames a deferred redraw waits.</summary>
     public int MaxWait { get; set; } = ShadowSchedule.DefaultMaxWait;
     readonly bool[] owed = new bool[4];
@@ -277,7 +269,6 @@ public sealed unsafe partial class ShadowPass
     /// </summary>
     bool UpdateBlockers(ReadOnlySpan<bool> drawn, int count)
     {
-        long timing = StepTiming.Now();
         int size = atlasSize / 2;
         bool fresh = false;   // a new map: every tile
         if (blocker is null || blocker.Desc.Width != size)
@@ -295,8 +286,7 @@ public sealed unsafe partial class ShadowPass
             (blockerAtlasSlot, blockerSizeHandle) = (p.Sampler("uAtlas"), p.Uniform("uAtlasSize"));
         }
         int tile = Settings.TileSize / 2, grid = Settings.Grid;
-        RecordBlockers(drawn, count, fresh, tile, grid, out int tiles);
-        StepTiming.Add(StepTiming.Blocker, timing, tiles);
+        RecordBlockers(drawn, count, fresh, tile, grid);
         return true;
     }
 
@@ -305,9 +295,8 @@ public sealed unsafe partial class ShadowPass
         BlendState.Off, ColorComponentFlags.RBit | ColorComponentFlags.GBit | ColorComponentFlags.BBit | ColorComponentFlags.ABit,
         Silk.NET.Vulkan.PolygonMode.Fill, false, false);
 
-    void RecordBlockers(ReadOnlySpan<bool> drawn, int count, bool fresh, int tile, int grid, out int tiles)
+    void RecordBlockers(ReadOnlySpan<bool> drawn, int count, bool fresh, int tile, int grid)
     {
-        tiles = 0;
         var p = blockerNative!;
         var map = blocker!;
         p.Set(blockerSizeHandle, (float)atlasSize);
@@ -326,7 +315,6 @@ public sealed unsafe partial class ShadowPass
             if (!drawn[i] && !fresh) continue;
             cmd.SetViewport(new Viewport(i % grid * tile, i / grid * tile, tile, tile, 0, 1));
             cmd.Draw(3);
-            tiles++;
         }
         cmd.EndRendering();
         Gpu.EndNative(cmd);

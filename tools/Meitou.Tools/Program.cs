@@ -21,8 +21,6 @@ return args switch
     ["weather", .. var weatherArgs] => WithInstall(i => WeatherTool.Run(i, weatherArgs)),
     ["image-diff", var a, var b] =>ImageDiff.Run(a, b, null),
     ["image-diff", var a, var b, var d] => ImageDiff.Run(a, b, d),
-    ["draw-log-diff", var a, var b] => DrawLogDiff.Run(a, b),
-    ["draw-log-diff", var a, var b, "--keep-handles"] => DrawLogDiff.Run(a, b, keepHandles: true),
     ["world-map", var png] => WithInstall(i => WorldSurvey.RenderMap(i, png)),
     ["world-map", var png, var step] => WithInstall(i => WorldSurvey.RenderMap(i, png, int.Parse(step))),
     _ => Usage(),
@@ -39,16 +37,15 @@ static int Usage()
         meitou-tools materials     compile every material script and cross-check mesh materials and textures
         meitou-tools fcs-types     match record type numbers to fcs.def type names
         meitou-tools fcs-records N show the fields of the first records of type N in the base game
-        meitou-tools navmesh [--zone x,z | --town name] [--around n] [--geometry] [--obj f.obj] [--png f.png] [--scale u] [--box x0,z0,x1,z1] [--hide-pruned]
-                           [--path x0,z0,x1,z1 [--from-y y] [--to-y y] [--closed]] [--near x,z,radius] [--no-interiors] [--no-neighbour-seeds]
-                           [--cell u] [--tile cells] [--watershed] [--threads n] [--repeat n] [--fingerprint]
+        meitou-tools navmesh [--zone x,z | --town name] [--around n] [--geometry] [--obj f.obj] [--png f.png] [--scale u] [--box x0,z0,x1,z1]
+                           [--path x0,z0,x1,z1 [--from-y y] [--to-y y] [--closed]] [--near x,z,radius] [--no-interiors]
+                           [--repeat n] [--fingerprint] [--verbose]
                            gather and build a zone's navmesh, write debug files; --fingerprint prints SHA-256 of the cache files of The Hub (or --zone) and the Hub path points
         meitou-tools particles [effects]  read every ParticleUniverse script and particle material and count what they use; "effects" lists the EFFECT records with their systems
         meitou-tools particles warmup [weather...]  what changing to a weather costs: the schedule, the simulation of the warm-up on one thread and in parallel, and a frame
         meitou-tools world         read the heightmap, zone/level files and features.dat and cross-check them
-        meitou-tools weather [--region name | --at x,z] [--days d0 d1] [--seed n] [--list] [--cells]  print a region's season and weather timeline (--list: the regions and their calendars)
+        meitou-tools weather [--region name | --at x,z] [--days d0 d1] [--seed n] [--list] [--extents]  print a region's season and weather timeline (--list: the regions and their calendars)
         meitou-tools image-diff <a.png> <b.png> [diff.png]  compare two screenshots: mean difference, share of pixels over 12/255
-        meitou-tools draw-log-diff <a> <b> [--keep-handles]  compare two MEITOU_DRAW_LOG files draw by draw (handles renamed by first use)
         meitou-tools world-map <png> [step]  render a top-down world map (every step-th height sample, default 16)
         """);
     return 2;

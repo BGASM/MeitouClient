@@ -315,7 +315,7 @@ public sealed unsafe class FoliageGrassGpu : IDisposable
     /// <summary>Bytes <see cref="CopyForReadback"/> writes: the counters (16), then the draws.</summary>
     public static ulong ReadbackBytes(in GrassResult r) => 16 + (ulong)r.MaxDraws * 16;
 
-    /// <summary>Copies a result (counters, then every draw slot) into <paramref name="target"/>, after the kernels (the verify mode).</summary>
+    /// <summary>Copies a result (counters, then every draw slot) into <paramref name="target"/>, after the kernels (the tests read them back).</summary>
     public void CopyForReadback(in GrassResult r, ReadbackBuffer target)
     {
         var cmd = ctx.Frame.PreFrame;

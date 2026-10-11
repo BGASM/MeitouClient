@@ -218,7 +218,7 @@ mostly hidden below it. Checked with a probe outside the repo, plus top-down scr
 ### In the viewer (`TerrainQuadtree`, `TerrainLod`, `TerrainRenderer`, `TerrainShaders`)
 
 CDLOD in our own implementation. Heights live in two R16 textures that the vertex shader samples: the whole map
-every 8th sample (2049², 144 units), and a `HeightWindow` of the finest samples (every `--step`-th) around the
+every 8th sample (2049², 144 units), and a `HeightWindow` of the finest samples (every step-th; the step is the smallest power of two keeping at most 2048 cells per side, and the `--step` option was removed) around the
 camera, re-read from the file when the camera leaves its middle (docs/render-terrain.md, Streaming). The fine one fades in over
 a band at its border. A 64 × 64 grid patch is drawn per selected node. Bounds come from a min/max pyramid of the heights. Normals
 are computed per pixel from the height textures, so shading does not depend on the LOD; only silhouettes, occlusion and where the
@@ -238,8 +238,7 @@ resolution-aware screen-space error (`TerrainLod`), one rule for all of its Fait
   rendered**: render height / (2 tan(fov / 2)), the render height after the upscaler's render scale (so DLSS / FSR at 0.67 draw about
   half the triangles, and the Tab render-scale slider re-tessellates the terrain). `E = 2 × vertex spacing of level l + 1` is the
   height error of the coarser grid, in the game's sense (above). `T` is `--terrain-error` (default **16 px** in Meitou, **10 px** in Faithful, the `reach` switch; Tab slider "Terrain
-  detail"). Optionally `T` grows like the game's ramp to `--terrain-far-error` between `--terrain-ramp` (7500) and twice it; the
-  default has no ramp (see "Choosing the defaults").
+  detail"). There is no far ramp like the game's (`T` growing between 7500 and twice it; the `--terrain-far-error` and `--terrain-ramp` options were removed; see "Choosing the defaults").
 - **Why one error per level** (`TerrainLod.Roughness` = 2): CDLOD needs one range per level, not per node (neighbouring nodes of a
   level must morph alike or their shared edge cracks), so the game's per-node error becomes one number per level. **Observed**
   (fullmap.tif, every 64-cell node over land at each level from 18 to 2304 units of spacing, the game's error definition): the

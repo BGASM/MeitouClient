@@ -1,6 +1,6 @@
 # Light shafts (Meitou)
 
-Status: **first version** (2026-10-10). A Meitou switch, `shafts` (on by default, `--no-shafts` / `--faithful shafts` turn it off). It has no
+Status: **first version** (2026-10-10). A Meitou switch, `shafts` (on by default, `--faithful shafts` turns it off; the `--no-shafts` option was removed in the 2026-10-12 cleanup, which also made the tuning options below constants of `PostOptions`). It has no
 counterpart in the game. Kenshi lights its haze and its weather fog the same everywhere (`atmoKenshiHaze` in `AtmosphereShaders`,
 [formats/sky.md](formats/sky.md)), so shadows end at the ground and the air above a shadowed valley glows like the air in the sun.
 This is engine work, so each claim says where it comes from: *from the code*, *measured* (how), or *open*.
@@ -16,13 +16,13 @@ the haze's part by the share `L` of the haze that the sun reaches along the ray:
     result = colour · (1 − α) + rgb · α · (1 − k · (1 − L))
 
 So the pass subtracts `k · (1 − L) · rgb · α`. It gets `rgb · α` from `atmoApplyHaze(vec3(0), eye, point)`, the same function every
-world shader ends with. Air in the sun keeps the game's haze exactly. `k` (*darkening*) is the strength (`--shafts-strength`, default 0.8,
+world shader ends with. Air in the sun keeps the game's haze exactly. `k` (*darkening*) is the strength (`PostOptions.ShaftStrength`, default 0.8, Tab slider; the `--shafts-strength` option was removed,
 a Tab slider) times the sun's share of the light the air scatters: luminance of the sun colour over sun plus sky ambient
 (`WorldFrame.ShaftDarkening`). It fades to nothing as the sun goes below the horizon, so the sky's own light keeps shadowed air from
 going black, and night is untouched.
 
 The sky has no haze over it (the skydome is drawn as it is), so it is scaled instead: `1 − k · (1 − L) · sky weight · α(far)`, with sky
-weight 0.5 (`--shafts-sky`). That gives the dark wedge a ridge casts into the sky when you look into a low sun.
+weight 0.5 (`PostOptions.ShaftSky`, a constant). That gives the dark wedge a ridge casts into the sky when you look into a low sun.
 
 ## The grid (`LightShaftShaders`, `PostProcess.Shafts.cs`)
 
@@ -30,9 +30,9 @@ weight 0.5 (`--shafts-sky`). That gives the dark wedge a ridge casts into the sk
 blend over the hazed scene, so the correction has to come first):
 
 1. **Inject** (atlas, RG16F). A froxel grid of `cells across × (cells across × aspect) × slices` (default 160 × 90 × 64), with
-   exponential slices along the ray from `--shafts-near` (50) to where the haze alpha stops growing (`SkyRenderer.HazeCompleteDistance`: the ramp's end
+   exponential slices along the ray from `PostOptions.ShaftNear` (50) to where the haze alpha stops growing (`SkyRenderer.HazeCompleteDistance`: the ramp's end
    stretched by the haze strength, or a full weather fog's completion; at most the view distance). The
-   slices are tiled 8 per row into one 2D atlas, so no 3D images are needed. Each cell takes `--shafts-grid`'s sample count (default 2)
+   slices are tiled 8 per row into one 2D atlas, so no 3D images are needed. Each cell takes `PostOptions.ShaftSamples` (2) samples (the grid is the constants `ShaftCells` 160 and `ShaftSlices` 64; the `--shafts-grid` option was removed)
    of shadow lookups, stratified over the slice's depth and jittered within the cell (interleaved gradient noise, seeded
    by the frame under a temporal upscaler, fixed without one), and writes `(Δα · lit, Δα)` with `Δα` the haze alpha gained across the slice.
 2. **Integrate** (atlas, R32F; since 2026-10-11 part of the scan kernel, see "Scan kernel"). For each cell, the sums over its slice and every nearer one: `L = Σ Δα·lit / Σ Δα`, or 1 where no
@@ -49,7 +49,7 @@ is no filter, and there is no surface to offset along its normal. The Meitou rec
 
 ## Scan kernel (integrate and scatter as one compute dispatch)
 
-*From the code* (2026-10-11, `LightShaftShaders.Scan`, `PostProcess.ShaftScanRun`; `shafts-scan` A/B switch, `MEITOU_SHAFT_SCAN=0` starts with it off). The integrate and scatter
+*From the code* (2026-10-11, `LightShaftShaders.Scan`, `PostProcess.ShaftScanRun`; `shafts-scan` A/B switch). The integrate and scatter
 passes above are fragment passes that, for a cell in slice `k`, loop over slices `0..k`: slices squared reads per column (64 x 65 / 2 = 2080 reads for 64 slices),
 and for the air layer the same again with three `exp()` per step. Both are running sums along the same ray, so one thread per cell column now walks the slices front to back
 once (8 x 8 threads a group, 20 x 12 groups at 160 x 90 cells): the running sums of the inject atlas's two channels give the light atlas (`L`, R32F), and
@@ -75,7 +75,7 @@ So the integrate is the biggest of the three while the air is off, and the scatt
 | Hub (`--view hub --time 22.5 --no-particles --lights off`), 160 frames, air on | 0.10 | 0.43 | -0.33 +-0.00 |
 
 The rest is the inject pass (0.06 to 0.07: 920 000 cells, two shadow compares each) and the scan (0.02 to 0.03).
-**Picture** (the harness's A vs B stills, `--upscaler off --bench-motion still`): with `--shafts-debug` (red = `L`, green = the haze alpha, blue = its brightness; no noise from the scene)
+**Picture** (the harness's A vs B stills, `--upscaler off --bench-motion still`): with the since-removed `--shafts-debug` (red = `L`, green = the haze alpha, blue = its brightness; no noise from the scene)
 at Shark `--time 7` and the Hub `--time 18` the two sides are identical, 0 pixels differ by 1/255 or more. The air layer has no debug view, so it is judged against a same-build control:
 Hub `--time 22.5 --no-particles --lights off`: scan against passes 335 671 pixels differ by 1/255 or more, 1014 by 4, 73 by 12, max 24; a control run with a switch that changes nothing
 (`--ab object-sort`) gives 335 678, 1018, 75, max 58, so the scan adds nothing over the still-to-still noise (water and wind, which the frozen clock does not hold). At Shark in the rain
@@ -105,7 +105,7 @@ that is too strong under the swamp's rain clouds is **open**: the darkening comp
 *Observed* 2026-10-10: in the swamp's heavy rain the trees cast crisp, dark shafts across the whole sky through the rain haze, which reads wrong
 under a full overcast. The game's weather never touches the sun ([formats/weather.md](formats/weather.md) "Sky and clouds"), so the sun colour
 alone cannot tell. *From the code.* `WorldFrame.ShaftCloudFade` scales the darkening `k` by `1 − shade · smoothstep(from, 1, o)`, with `shade` 0.85
-(`--shafts-clouds`), `from` 0.3 (`--shafts-clouds-from`) and `o` how overcast the sky is (`WorldFrame.Overcast`): the sky's cloud density after the
+(`PostOptions.ShaftCloudShade`), `from` 0.3 (`ShaftCloudFrom`) and `o` how overcast the sky is (`WorldFrame.Overcast`): the sky's cloud density after the
 weather's 30 s transition (`SkyRenderer.CloudDensity`, so `--clouds` wins), or the game's `rainAmount` = saturate(rain / 50) where that is more,
 since rain falls from a covered sky whatever density the weather lists. So `Heavy_Rain` (c 1, rain 100) keeps 15 % of the shafts, `swamp rain no
 wind` (c 0.5, rain 40, so o 0.8) about 32 %, and clear weathers (c 0 to 0.3, no rain) all of them. The ground shadows are not touched (that would be
@@ -113,16 +113,16 @@ a separate switch). *Observed* 2026-10-10: at Shark in `Heavy_Rain` at 16:00 the
 
 ## Air layer
 
-*From the code.* `--shafts-air <x>` (default 1, Tab slider "Light shafts air", 0 for none): a medium of density `x · 1.5e-5` per world unit at the
-ground under the eye, falling off exponentially above it (scale height `--shafts-air-height`, 800). A fourth pass (`LightShaftShaders.Scatter`, RGBA16F, run by the scan kernel since 2026-10-11, see "Scan kernel"
+*From the code.* `PostOptions.ShaftAir` (default 1, Tab slider "Light shafts air", 0 for none; the `--shafts-air` option was removed): a medium of density `x · 1.5e-5` per world unit at the
+ground under the eye, falling off exponentially above it (scale height `PostOptions.ShaftAirHeight`, 800). A fourth pass (`LightShaftShaders.Scatter`, RGBA16F, run by the scan kernel since 2026-10-11, see "Scan kernel"
 atlas) marches each cell's slices front to back. Per slice it adds `T · (1 − e^(−σΔ)) · S · (1 − α)`, where `T` is the transmittance so far, σ the
 density at the slice's middle, Δ its length and α the game's haze alpha there (the layer sits in front of the haze, not on top of it). The radiance
 `S` is the sun's irradiance `π² · sunLight` (what a white Lambert surface lit by `kenshiLight` receives) times the slice's sun visibility times a
-Henyey-Greenstein phase with `g = --shafts-air-phase` (0.6, bright towards the sun), plus the sky's ambient radiance from above. The apply pass
+Henyey-Greenstein phase with `g = PostOptions.ShaftAirPhase` (0.6, bright towards the sun), plus the sky's ambient radiance from above. The apply pass
 then gives `(scene − dark · haze) · T + S`, and `T · (sky factor)` on the sky.
 
-**By the time of day** (`WorldFrame.ShaftAirByTime`, added 2026-10-10): the density is also multiplied by a morning-mist ramp, `--shafts-air-dawn`
-(1, Tab slider) at sunrise and at sunset, easing (smoothstep) to `--shafts-air-day` (0: no air layer at midday) over `--shafts-air-ramp` (5.5) hours after sunrise and
+**By the time of day** (`WorldFrame.ShaftAirByTime`, added 2026-10-10): the density is also multiplied by a morning-mist ramp, `PostOptions.ShaftAirDawn`
+(1, Tab slider) at sunrise and at sunset, easing (smoothstep) to `ShaftAirDay` (0: no air layer at midday) over `ShaftAirRamp` (5.5) hours after sunrise and
 before sunset, using the clock's `sunrise` and `sunset` (5 and 23 in the base game). At night it holds the dawn value, which does not matter
 because the shafts need the sun. The stats line prints the factor (`x0.97 by the hour` at 05:36). Defaults chosen by the owner 2026-10-10 after trying 2.5 and 0.3.
 
@@ -137,15 +137,15 @@ with a glow round the sun. With the sun high it only adds a light haze in the di
 | Grid | Shafts, mean (p99) |
 |---|---|
 | 160 × 90 × 64, 2 samples (default) | 0.28 ms (0.47) |
-| 96 × 54 × 32, 1 sample (`--shafts-grid 96,32,1`) | 0.14 ms (0.50) |
+| 96 × 54 × 32, 1 sample (the former `--shafts-grid 96,32,1`) | 0.14 ms (0.50) |
 
 The full-resolution apply pass is most of the floor. At 960 × 540 the default grid took 0.23 ms.
 
 **What it looks like.** In clear weather the effect is slight. The game's haze barely starts within shadow range (it ramps in from
 0.06 D, 3000 units at the default D), so there is little air to shadow. In the weather fog (dust storms, the shek desert storm, fog
 complete at 15000 to 35000 units), with a low sun (sunset is 23:00, `GLOBAL CONSTANTS`), hills and buildings throw clear shadows into
-the fog, and ridges cast dark wedges into the sky toward the sun. A debug view, `--shafts-debug`, writes red = `L`, green = the haze
-alpha at the pixel, blue = the haze colour's brightness.
+the fog, and ridges cast dark wedges into the sky toward the sun. A debug view, `--shafts-debug`
+(removed in the 2026-10-12 cleanup), wrote red = `L`, green = the haze alpha at the pixel, blue = the haze colour's brightness.
 
 With the fog volume shadow and the air layer (same command, same day, nothing else on the GPU): `shafts` 0.54 ms mean (p99 0.72), the fog volumes pass +0.11 ms (0.29 against 0.18); the whole GPU frame +0.50 ms (6.02 against 5.52).
 

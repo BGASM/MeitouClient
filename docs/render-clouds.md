@@ -126,8 +126,8 @@ the additional dense-fog comparison also passed independently.
   rendering validation reports zero errors. The Release build and 1,012-check validation run pass.
 ## Fog early-out (2026-10-11)
 
-Meitou's own optimisation; the picture is meant not to change. `SkyRenderer.CloudFogSkip` (on by default; `MEITOU_CLOUD_FOG_SKIP=0` starts
-with it off, `--ab cloud-fog-skip` compares it with every upward ray marched). The march runs before the scene, and two later steps can hide
+Meitou's own optimisation; the picture is meant not to change. `SkyRenderer.CloudFogSkip` (on by default;
+`--ab cloud-fog-skip` compares it with every upward ray marched). The march runs before the scene, and two later steps can hide
 its result completely:
 
 - **Weather fog over the sky.** The sky shader blends the game's fog term over every pixel with no geometry after the clouds: the
@@ -178,7 +178,7 @@ The per-texel rule still dispatches the march and the sky pass still shades ever
 before the scene, without a depth test, so most of it is drawn over). When the fog cull's block hides the sky in **every** direction of the
 view, `WorldFrame` leaves out both: no cloud march (only the main view's history is reset, `VolumetricCloudRenderer.InvalidateMain`; the
 reflection keeps its own) and no sky draw. The scene's clear colour (the fog colour) stands in, and the fog volume pass covers it.
-`SkyRenderer.SkyFogSkip` (on by default; `MEITOU_SKY_FOG_SKIP=0` starts with it off; `--ab sky-fog-skip`); the bench's `sky` metadata and
+`SkyRenderer.SkyFogSkip` (on by default; `--ab sky-fog-skip`); the bench's `sky` metadata and
 the F11 sky line say "sky and clouds not drawn" when it applies, and the fog cull line gives the exit distance below.
 
 The test (`FogVolumes.SkyHidden`, `SkyExit`): the cull's bound (`HideDistance`, docs/formats/fogfeatures.md "In Meitou") says a ray from the
@@ -213,7 +213,7 @@ load ops of the rendering, not separate commands, there is no extra barrier, no 
 
 The 0.2 to 0.3 figure came from `--fly-benchmark ... --fly-speed 0` **not skipping**: the flight's `CameraMotion.Step` reset the camera's target onto the
 terrain every frame even at speed 0, which lowered the eye so that `FogVolumes.SkyExit` read 4404 (debug print, 300 of 300 frames) against the hide
-radius 4455, `SkyHidden` was false and the sky was drawn (`passes sky-draw` 2 draws, with or without `MEITOU_SKY_FOG_SKIP=0`). A speed of 0 now leaves the camera
+radius 4455, `SkyHidden` was false and the sky was drawn (`passes sky-draw` 2 draws, with or without `--ab sky-fog-skip` side B). A speed of 0 now leaves the camera
 where `--camera-code` put it (exit distance 7401, `SkyHidden` true, `sky-draw` 0 draws). The still `--ab sky-fog-skip` bench was never affected (A 0.01, B 0.25
 ms). Nothing is left to save in the skipped stage; the drawn sky (a full-screen triangle drawn before the scene without a depth test, most of it
 overdrawn) is the part that costs, and only matters where the fog block does not hide the whole view.

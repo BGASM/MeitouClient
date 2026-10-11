@@ -52,7 +52,7 @@ internal sealed unsafe partial class CharacterRenderer
         motionCamera = false;
         var previous = havePreviousCamera ? previousUnjittered : motionUnjittered;
         (previousUnjittered, havePreviousCamera) = (motionUnjittered, true);
-        if (liveCount == 0 || !CharacterSwitches.MotionVectors) return;
+        if (liveCount == 0) return;
         motionCalls++;
         if (motionDepthIndex is { } known && known.Texture == targets.NearDepth) motionDepth = known.Index;
         else

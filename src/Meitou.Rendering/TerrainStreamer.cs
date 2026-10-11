@@ -18,9 +18,6 @@ public sealed class UploadQueue
     readonly StepCosts costs = new();
     readonly Func<double> clock;
 
-    /// <summary>Set MEITOU_STREAM_LOG=1 to print every step that takes more than 3 ms.</summary>
-    static readonly bool Log = Environment.GetEnvironmentVariable("MEITOU_STREAM_LOG") == "1";
-
     /// <param name="clockMs">Milliseconds on any scale that only moves forward (tests pass their own); the real time by default.</param>
     public UploadQueue(Func<double>? clockMs = null) => clock = clockMs ?? (() => Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency);
 
@@ -46,13 +43,12 @@ public sealed class UploadQueue
             if (ran > 0 && (elapsed >= budgetMs || !costs.Fits(next.Label, elapsed, budgetMs))) break;
             var item = steps.Dequeue();
             double began = clock();
-            if (Log) Gpu.UploadProfile.Take();
             item.Step();
             double ms = clock() - began;
             costs.Learn(item.Label, ms);
             ran++;
             LastRun += item.Label + ", ";
-            if (Log) { string parts = Gpu.UploadProfile.Take(); if (ms > 3) Console.WriteLine($"slow step {item.Label}: {ms:0.0} ms [{parts}]"); }
+            if (ms > 3) SpikeLog.Note($"slow terrain step {item.Label}", ms: ms);   // with --log-spikes
         }
     }
 }

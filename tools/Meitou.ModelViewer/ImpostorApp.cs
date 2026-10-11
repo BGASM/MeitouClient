@@ -27,7 +27,6 @@ static class ImpostorApp
           --out <dir>        where the pictures go (default C:\Temp\meitou-impostors)
           --size <W>x<H>     the field pictures' size (default 1600x900)
           --rebake           ignore the cache (the new atlas is written to it)
-          --blend            blend the three frames (default: one frame per pixel, ordered dither)
           --debug <n>        unlit impostor: 1 albedo, 2 normal, 3 coverage
           --class <medium|large>   force the size class
         Pictures: <name>-sheet-<sun>.png (rows: elevation -8..85 degrees; columns: mesh | impostor at four azimuths, seen from 1500 units),
@@ -38,7 +37,7 @@ static class ImpostorApp
     sealed class Options
     {
         public string? Mesh;
-        public bool BakeAll, Rebake, Blend;
+        public bool BakeAll, Rebake;
         public int Debug;
         public string Out = @"C:\Temp\meitou-impostors";
         public int Width = 1600, Height = 900;
@@ -65,10 +64,8 @@ static class ImpostorApp
                         o.Height = int.Parse(parts[1], CultureInfo.InvariantCulture);
                         break;
                     case "--rebake": o.Rebake = true; break;
-                    case "--blend": o.Blend = true; break;
                     case "--debug": o.Debug = int.Parse(Next(), CultureInfo.InvariantCulture); break;
                     case "--class": o.Class = Next(); break;
-                    case "--renderer": WorldOptions.IgnoreRenderer(Next()); break;
                     case "-h" or "--help": Console.WriteLine(Usage); return 2;
                     default: throw new ArgumentException($"unknown option {a}");
                 }
@@ -170,8 +167,6 @@ static class ImpostorApp
             if (ImpostorClass.For(worldRadius, meshes.Triangles) is not { } size)
             {
                 small++;
-                if (Environment.GetEnvironmentVariable("MEITOU_IMPOSTOR_SURVEY") == "1")
-                    Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"skipped  r {worldRadius,7:0.0} {meshes.Triangles,7} triangles, scale {mesh.MinScale:0.##}-{mesh.MaxScale:0.##}, mode {mesh.MaterialType}  {source.Name}"));
                 continue;
             }
             var one = Stopwatch.StartNew();
@@ -253,7 +248,7 @@ static class ImpostorApp
         }
 
         frames.Open();
-        using var preview = new ImpostorPreview(frames.Gpu, assets) { Blend = o.Blend, Debug = o.Debug };
+        using var preview = new ImpostorPreview(frames.Gpu, assets) { Debug = o.Debug };
         preview.SetMesh(source, meshes);
         preview.SetAtlas(atlas);
         var suns = new (string Name, Vector3 Direction)[]

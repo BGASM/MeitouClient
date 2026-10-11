@@ -48,8 +48,6 @@ public static class SaveSamples
         }
     }
 
-    public static GameDatabase? BaseDatabase() => InstallData.BaseGame;
-
     public static string Temp(string name)
     {
         string path = Path.Combine(Path.GetTempPath(), "meitou-save-tests", name + "-" + Guid.NewGuid().ToString("N")[..8]);

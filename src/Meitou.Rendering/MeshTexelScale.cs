@@ -15,7 +15,7 @@ static class MeshTexelScale
 {
     const int PerOctave = 4, MinOctave = -10, MaxOctave = 24;
     const int Buckets = (MaxOctave - MinOctave) * PerOctave;
-    static readonly double TopShare = double.TryParse(Environment.GetEnvironmentVariable("MEITOU_MIP_TOP"), System.Globalization.CultureInfo.InvariantCulture, out double s) ? s : 0.005;
+    const double TopShare = 0.005;
 
     public static float Of(ModelPart part)
     {

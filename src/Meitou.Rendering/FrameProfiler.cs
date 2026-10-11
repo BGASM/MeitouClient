@@ -43,8 +43,6 @@ public sealed class FrameProfiler : IDisposable
     readonly int[,] preStage = new int[Slots, MaxPre];
     readonly int[] preCount = new int[Slots];
     readonly QuerySlot[] slotPreEnd = new QuerySlot[Slots];
-    /// <summary>MEITOU_PROFILER_PRE=0: no stamps inside the pre-frame command buffer (its time is then the "uploads" stage whole); to measure what they cost.</summary>
-    static readonly bool PreStamps = Environment.GetEnvironmentVariable("MEITOU_PROFILER_PRE") != "0";
 
     readonly float[][] cpu = NewHistory(), gpu = NewHistory();
     int cpuHead, cpuCount, gpuHead, gpuCount;
@@ -60,7 +58,7 @@ public sealed class FrameProfiler : IDisposable
     readonly long[] slotTag = new long[Slots];
     readonly List<double> medianScratch = new(History);
 
-    /// <summary>What the chart shows; F12 cycles it. <c>MEITOU_PROFILER=gpu|cpu</c> starts it on.</summary>
+    /// <summary>What the chart shows; F12 cycles it.</summary>
     public Mode Showing { get; set; }
 
     /// <summary>The benchmark harness's frame number: copied at <see cref="BeginFrame"/> and handed back with the frame's GPU times by <see cref="OnGpuFrame"/>, which arrive a few frames later.</summary>
@@ -87,7 +85,6 @@ public sealed class FrameProfiler : IDisposable
         this.gpuFrameMs = gpuFrameMs;
         native = gpu;
         GpuContext.ProfilePreFrame = true;
-        Showing = Environment.GetEnvironmentVariable("MEITOU_PROFILER")?.ToLowerInvariant() switch { "gpu" => Mode.Gpu, "cpu" => Mode.Cpu, _ => Mode.Off };
         recordStamp = cmd => cmd.Timestamp(native.Frame.Timestamps, pendingStamp);
     }
 
@@ -157,7 +154,7 @@ public sealed class FrameProfiler : IDisposable
     void RecordPre(CommandList cmd, int stage)
     {
         int n = preCount[slot];
-        if (!PreStamps || n >= MaxPre) return;
+        if (n >= MaxPre) return;
         var q = native.Frame.Timestamps.Allocate();
         if (!q.IsValid) return;
         cmd.Timestamp(native.Frame.Timestamps, q);

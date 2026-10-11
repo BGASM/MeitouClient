@@ -51,15 +51,8 @@ static partial class WorldApp
         }
         using var scene = Load(install, options);
         if (scene is null) return 1;
-        if (options.Info) return 0;
         RenderJobs.RaiseRenderThread();
         var assets = new AssetLocator(install);
-        if (Environment.GetEnvironmentVariable("MEITOU_LANDMARK_SURVEY") == "1" && scene.Objects is not null)
-        {
-            // The whole world's placements by world bounding radius (docs/renderer-native.md 8.19): picks the landmark threshold.
-            LandmarkClass.Survey(scene.Objects, assets, Console.Out);
-            return 0;
-        }
         return options.Screenshot is not null || options.FlyBenchmark > 0 || options.BenchFrames > 0 || options.Ab is not null ? Screenshot(install, scene, assets, options) : Interactive(install, scene, assets, options);
     }
 
@@ -103,19 +96,19 @@ static partial class WorldApp
         if (gpu.Streamer is { } streamer)
         {
             var streamWatch = Stopwatch.StartNew();
-            streamer.Settle(gpu.Anchor ?? camera.Eye);
+            streamer.Settle(camera.Eye);
             Console.WriteLine($"streamed  {streamer.Describe()} ({streamWatch.ElapsedMilliseconds} ms)");
         }
         if (gpu.Objects is { } objectRenderer)
         {
             var objectWatch = Stopwatch.StartNew();
-            objectRenderer.Settle(gpu.Anchor ?? camera.Eye);
+            objectRenderer.Settle(camera.Eye);
             Console.WriteLine($"objects   {objectRenderer.Describe()} ({objectWatch.ElapsedMilliseconds} ms)");
         }
         if (gpu.Foliage is { } foliageRenderer)
         {
             var foliageWatch = Stopwatch.StartNew();
-            foliageRenderer.Settle(gpu.Anchor ?? camera.Eye);
+            foliageRenderer.Settle(camera.Eye);
             Console.WriteLine($"foliage   {foliageRenderer.Describe()} ({foliageWatch.ElapsedMilliseconds} ms)");
             Console.WriteLine(foliageRenderer.LayoutCache is { } layoutCache ? $"foliage   {layoutCache.Stats.Describe()} (key {layoutCache.KeyName})" : "foliage   layout cache off (--no-load-cache)");
             Console.WriteLine($"foliage   {foliageRenderer.SettleTimeline}");
@@ -215,13 +208,12 @@ static partial class WorldApp
         if (gpu.Post.AutoExposure is { } band && gpu.Post.ReadExposure() is var (adapted, mean) && float.IsFinite(adapted))
             Console.WriteLine($"exposure  mean luminance {mean:0.000}, band {band.Min:0.###}..{band.Max:0.###}, adapted {adapted:0.000}: x{KenshiLighting.ExposureKey / adapted:0.000}");
         if (gpu.Particles is { } particles) Console.WriteLine($"particles {particles.ParticleCount} alive in {particles.Groups.Count} groups and {particles.PlacerGroups.Count} placer groups, {particles.ActiveUnits} units simulated, {particles.DrawnUnits} drawn ({particles.DrawnParticles} particles) in the last frame; simulation {particles.SimulationMilliseconds:0.00} ms, main thread waited {particles.WaitMilliseconds:0.00} ms; mean per frame: simulation {particles.MeanMilliseconds.Simulation:0.00} ms, wait {particles.MeanMilliseconds.Wait:0.00} ms; main thread per frame: update {particles.MeanMainThreadMilliseconds.Update:0.00} ms, draw {particles.MeanMainThreadMilliseconds.Draw:0.00} ms (with the wait)");
-        if (gpu.Particles is { } described && Environment.GetEnvironmentVariable("MEITOU_PARTICLE_LIST") == "1") foreach (var line in described.Describe(camera.Eye, 100000)) Console.WriteLine(line);
-        Console.WriteLine($"haze      {(gpu.Sky.KenshiHaze ? "kenshi" : "physical")}, eye {camera.Eye.X:0}, {camera.Eye.Y:0}, {camera.Eye.Z:0}, {gpu.Sky.EyeClearance:0} above the ground within {KenshiCamera.MaxDistance:0}: altitude weight {gpu.Sky.AltitudeWeight:0.###}, strength {gpu.Sky.HazeStrength:0.##}");
-        if (gpu.FogVolumes is { } fogVolumes) Console.WriteLine($"fog vols  {fogVolumes.Active.Count} in view ({fogVolumes.EffectVolumesDrawn} of {fogVolumes.EffectVolumes} weather effect volumes), {fogVolumes.UsedData} of {FogVolumeShaders.MaxData} vec4s{(fogVolumes.Dropped > 0 ? $", {fogVolumes.Dropped} left out" : "")}, farthest first: {(fogVolumes.Active.Count == 0 ? "none" : string.Join("; ", fogVolumes.Active))}{(fogVolumes.Enabled ? "" : " (off: --no-fog-volumes)")}");
-        if (gpu.FogVolumes is { } fogCulled) Console.WriteLine($"fog cull  {(fogCulled.DescribeCull() ?? "off for this view")}{(fogCulled.CullEnabled ? "" : " (off: --no-fog-cull)")}");
+        Console.WriteLine($"haze      eye {camera.Eye.X:0}, {camera.Eye.Y:0}, {camera.Eye.Z:0}, {gpu.Sky.EyeClearance:0} above the ground within {KenshiCamera.MaxDistance:0}: altitude weight {gpu.Sky.AltitudeWeight:0.###}, strength {gpu.Sky.HazeStrength:0.##}");
+        if (gpu.FogVolumes is { } fogVolumes) Console.WriteLine($"fog vols  {fogVolumes.Active.Count} in view ({fogVolumes.EffectVolumesDrawn} of {fogVolumes.EffectVolumes} weather effect volumes), {fogVolumes.UsedData} of {FogVolumeShaders.MaxData} vec4s{(fogVolumes.Dropped > 0 ? $", {fogVolumes.Dropped} left out" : "")}, farthest first: {(fogVolumes.Active.Count == 0 ? "none" : string.Join("; ", fogVolumes.Active))}");
+        if (gpu.FogVolumes is { } fogCulled) Console.WriteLine($"fog cull  {(fogCulled.DescribeCull() ?? "off for this view")}");
         if (gpu.Gi is { } gi) Console.WriteLine($"gi         {gi.Describe()}");
         if (gpu.Probes is { } probeInfo) Console.WriteLine($"gi probes  {probeInfo.Describe()}");
-        if (gpu.Post is { } occlusionPost && gpu.Foliage is { } occlusionFoliage) Console.WriteLine($"occlusion  {(occlusionPost.OcclusionCull ? $"depth pyramid {occlusionPost.Hiz?.Describe ?? "none"}: {occlusionFoliage.OccludedInstances} foliage instances left out of the main view" : "off (--no-occlusion-cull)")}");
+        if (gpu.Post is { } occlusionPost && gpu.Foliage is { } occlusionFoliage) Console.WriteLine($"occlusion  {(occlusionPost.OcclusionCull ? $"depth pyramid {occlusionPost.Hiz?.Describe ?? "none"}: {occlusionFoliage.OccludedInstances} foliage instances left out of the main view" : "off")}");
         if (gpu.Post is { } shaftsPost) Console.WriteLine($"shafts     {shaftsPost.ShaftsDescribe}");
         if (o.ShowKeys && DebugOverlay.TryCreate(context) is { } keysOverlay)
         {
@@ -235,13 +227,6 @@ static partial class WorldApp
         }
         FramebufferCapture.SavePng(context, target, o.Screenshot!, w, h);
         Console.WriteLine($"saved     {Path.GetFullPath(o.Screenshot!)}");
-        if (Environment.GetEnvironmentVariable("MEITOU_SKY_BENCH") == "1")
-        {
-            // Sky cost, back to back after the picture is saved (the passes draw over the framebuffer): MEITOU_SKY_BENCH=1.
-            var rotation = camera.View with { M41 = 0, M42 = 0, M43 = 0 };
-            var (pass, table) = gpu.Sky.Benchmark(rotation * camera.Projection(w / (float)Math.Max(h, 1), 1, 1000));
-            Console.WriteLine($"skybench  sky pass {pass:0.000} ms, sky-view table rebuild {table:0.000} ms ({w}x{h})");
-        }
         return 0;
     }
 
@@ -349,7 +334,6 @@ static partial class WorldApp
                 "V" => render.Debug switch { 0 => "off", 1 => "blend weights", 2 => "layer weights", _ => "plain shading" },
                 "G" => OnOff(render.Water),
                 "R" => OnOff(render.Reflections),
-                "B" => gpu is null ? null : gpu.Sky.Physical ? "atmosphere" : "simple",
                 "," => TimeText(hour),
                 "[" => $"day {day}",
                 "\\" => gpu?.Weather is { } w ? (w.World.ForcedWeather is { } forced ? forced.Name : "auto") : null,
@@ -395,7 +379,6 @@ static partial class WorldApp
                 case Key.V: render.Debug = (render.Debug + 1) % 4; break;
                 case Key.G: render.Water = !render.Water; break;
                 case Key.R: render.Reflections = !render.Reflections; break;
-                case Key.B when gpu is not null: gpu.Sky.Physical = !gpu.Sky.Physical; Console.WriteLine(gpu.Sky.Physical ? "sky      atmosphere" : "sky      simple colour model"); break;
                 case Key.Comma: if (hour < 1) day = Math.Max(day - 1, 0); hour = (hour + 23) % 24; Console.WriteLine($"time {TimeText(hour)}, day {day}"); break;
                 case Key.Period: if (hour + 1 >= 24) day++; hour = (hour + 1) % 24; Console.WriteLine($"time {TimeText(hour)}, day {day}"); break;
                 // The weather schedule only moves forward (it catches up through a jump hour by hour); going back changes the clock, not the weather already rolled.
@@ -463,7 +446,7 @@ static partial class WorldApp
                     stats.Add($"  {name,-26} {bytes / 1048576.0,7:0} MB  x{count}");
                 if (gpu.Reflection is { Valid: true } refl && render.Reflections) stats.Add($"reflection  cpu {refl.CpuMs:0.00} ms, gpu {refl.GpuMs:0.00} ms");
                 gpu.Sky.Poll();
-                stats.Add(gpu.Sky.Physical ? $"sky         cpu {gpu.Sky.PrepareMs:0.00} ms, gpu {gpu.Sky.GpuMs:0.00} ms" : "sky         simple");
+                stats.Add($"sky         cpu {gpu.Sky.PrepareMs:0.00} ms, gpu {gpu.Sky.GpuMs:0.00} ms");
                 if (gpu.Post is { } post) stats.Add($"post gpu    {post.DescribeCosts()}");
                 if (gpu.Post is { } hazy && (hazy.HeatHazeAmount > 0 || gpu.HeatHazeTarget > 0))
                     stats.Add($"heat haze   {hazy.HeatHazeAmount:0.00} (target {gpu.HeatHazeTarget:0.00}, weather {WorldStats.WeatherName(gpu)})" + (hazy.HeatHazeRuns ? "" : hazy.HasHeatHaze ? ", off" : ", no textures"));

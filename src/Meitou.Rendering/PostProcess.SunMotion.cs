@@ -9,8 +9,8 @@ namespace Meitou.Rendering;
 /// </summary>
 public sealed partial class PostProcess
 {
-    /// <summary>Meitou: the sky round the sun moves with the sun in the motion vectors (default on; <c>MEITOU_SUN_MOTION=0</c>, <c>--ab sun-motion</c>).</summary>
-    public bool SunMotion { get; set; } = Environment.GetEnvironmentVariable("MEITOU_SUN_MOTION") != "0";
+    /// <summary>Meitou: the sky round the sun moves with the sun in the motion vectors (default on; <c>--ab sun-motion</c>).</summary>
+    public bool SunMotion { get; set; } = true;
 
     /// <summary>The angles from the sun's centre (degrees) within which the sky takes all of the sun's motion, and past which none: the disc and its glow.</summary>
     public const float SunMotionInner = 10, SunMotionOuter = 16;

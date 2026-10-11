@@ -102,13 +102,12 @@ public readonly record struct ImpostorClass(string Name, int FramePixels, int Gr
     /// <see cref="SmallMinimumRadius"/> and that have at least <see cref="SmallMinimumTriangles"/> triangles (a few triangles cost less than the
     /// impostor's quad). Small frames (<see cref="SmallFrame"/>), and a transition distance of its own, proportional to the size
     /// (<see cref="Transition"/>): the largest instance is <c>27.8</c> pixels across at its transition whatever its size, as the smallest
-    /// medium mesh (radius 48) is at 4000. <c>MEITOU_IMPOSTOR_SMALL=0</c> switches the class off (the meshes stay meshes, as before).
+    /// medium mesh (radius 48) is at 4000.
     /// </summary>
-    public static readonly bool SmallEnabled = Environment.GetEnvironmentVariable("MEITOU_IMPOSTOR_SMALL") != "0";
-    public static readonly float SmallMinimumRadius = EnvFloat("MEITOU_IMPOSTOR_SMALL_MIN_RADIUS", 2, 0);
-    public static readonly int SmallMinimumTriangles = (int)EnvFloat("MEITOU_IMPOSTOR_SMALL_MIN_TRIANGLES", 100, 0);
-    public static readonly int SmallFrame = (int)EnvFloat("MEITOU_IMPOSTOR_SMALL_FRAME", 32, 8);
-    public static readonly int SmallGrid = (int)EnvFloat("MEITOU_IMPOSTOR_SMALL_GRID", 12, 2);
+    public const float SmallMinimumRadius = 2;
+    public const int SmallMinimumTriangles = 100;
+    public const int SmallFrame = 32;
+    public const int SmallGrid = 12;
 
     /// <summary>The small class.</summary>
     public bool IsSmall => Name == "small";
@@ -129,15 +128,10 @@ public readonly record struct ImpostorClass(string Name, int FramePixels, int Gr
     public const float ReferenceHeight = 1080, ReferenceDistance = 4000;
     static readonly float HalfFovTan = MathF.Tan(25 * MathF.PI / 180);
 
-    static float EnvFloat(string name, float fallback, float min) =>
-        float.TryParse(Environment.GetEnvironmentVariable(name), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float v) && v >= min ? v : fallback;
-
-    /// <summary>Frames per atlas side (<c>MEITOU_IMPOSTOR_GRID</c> overrides, for experiments; it is part of the cache key through the atlas).</summary>
-    public static readonly int DefaultGrid = (int)EnvFloat("MEITOU_IMPOSTOR_GRID", 12, 2);
-    /// <summary>How much larger than its frame an instance may look on the screen at the reference distance (<c>MEITOU_IMPOSTOR_MAGNIFY</c>).</summary>
-    public static readonly float Magnification = EnvFloat("MEITOU_IMPOSTOR_MAGNIFY", 1.4f, 0.5f);
-    /// <summary>Scales the bake's LOD bias (<c>MEITOU_IMPOSTOR_BIAS</c>, 1 by default; 0 turns it off, for comparisons).</summary>
-    public static readonly float BiasScale = EnvFloat("MEITOU_IMPOSTOR_BIAS", 1f, 0f);
+    /// <summary>Frames per atlas side (part of the cache key through the atlas).</summary>
+    public const int DefaultGrid = 12;
+    /// <summary>How much larger than its frame an instance may look on the screen at the reference distance.</summary>
+    public const float Magnification = 1.4f;
     public const int MinFrame = 64, MaxFrame = 256;
 
     public static readonly ImpostorClass Medium = new("medium", 128, DefaultGrid);
@@ -153,9 +147,9 @@ public readonly record struct ImpostorClass(string Name, int FramePixels, int Gr
     /// </summary>
     public static ImpostorClass? For(float worldRadius, int triangles = int.MaxValue) => For(worldRadius, triangles, MaxFrame);
 
-    /// <summary>The largest frame of a TERRAIN-mode rock's atlas (<c>MEITOU_IMPOSTOR_ROCK_MAX_FRAME</c>, 256 by default; docs/impostors.md section 13): the rocks that
+    /// <summary>The largest frame of a TERRAIN-mode rock's atlas (256; docs/impostors.md section 13): the rocks that
     /// are mountains define the skyline, and at the transition distance a radius of 600 to 1000 units is 350 to 580 pixels across, more than a 256 pixel frame magnifies well.</summary>
-    public static readonly int RockMaxFrame = (int)EnvFloat("MEITOU_IMPOSTOR_ROCK_MAX_FRAME", 256, 64);
+    public const int RockMaxFrame = 256;
 
     /// <summary>
     /// <see cref="For"/> for a TERRAIN-mode rock (docs/impostors.md section 13): the same size rule, except that a rock too large for <see cref="RockMaxFrame"/>
@@ -167,7 +161,7 @@ public readonly record struct ImpostorClass(string Name, int FramePixels, int Gr
     static ImpostorClass? For(float worldRadius, int triangles, int maxFrame, bool rock = false)
     {
         if (worldRadius < MinimumRadius)
-            return SmallEnabled && worldRadius >= SmallMinimumRadius && triangles >= SmallMinimumTriangles
+            return worldRadius >= SmallMinimumRadius && triangles >= SmallMinimumTriangles
                 ? new ImpostorClass("small", SmallFrame, SmallGrid, ReferenceDistance * worldRadius / MinimumRadius) : null;
         float need = ScreenDiameter(worldRadius) / Magnification;
         int frame = MinFrame;
@@ -186,7 +180,7 @@ public readonly record struct ImpostorClass(string Name, int FramePixels, int Gr
     /// and the impostor fuller and brighter than the mesh at the same distance. The bias is log2 of the ratio of the bake's texel density to the
     /// screen's at the reference distance for an instance of <paramref name="meanWorldRadius"/> (mesh radius x the mean scale).
     /// </summary>
-    public float LodBias(float meanWorldRadius) => Math.Clamp(MathF.Log2(2 * FramePixels / Math.Max(ScreenDiameter(meanWorldRadius, BakeDistance), 1e-3f)), 0, 4) * BiasScale;
+    public float LodBias(float meanWorldRadius) => Math.Clamp(MathF.Log2(2 * FramePixels / Math.Max(ScreenDiameter(meanWorldRadius, BakeDistance), 1e-3f)), 0, 4);
 
     /// <summary>Mip levels baked per frame: down to 4 x 4 pixels, so every level stays aligned to the 4 x 4 blocks of the compressed formats.</summary>
     public int Levels => BitOperations.Log2((uint)FramePixels) - 1;

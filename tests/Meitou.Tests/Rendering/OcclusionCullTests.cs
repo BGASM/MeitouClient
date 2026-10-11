@@ -158,23 +158,6 @@ public class OcclusionCullTests
         }
     }
 
-    [Fact]
-    public void Levels_halve_to_one_texel_and_cover_every_pixel()
-    {
-        var levels = HizPyramid.Levels(1280, 720);
-        Assert.Equal((320, 180), levels[0]);
-        Assert.Equal((160, 90), levels[1]);
-        Assert.Equal((1, 1), levels[^1]);
-        Assert.Equal(10, levels.Count);
-        for (int i = 1; i < levels.Count; i++)
-        {
-            Assert.Equal((levels[i - 1].W + 1) / 2, levels[i].W);
-            Assert.Equal((levels[i - 1].H + 1) / 2, levels[i].H);
-        }
-        Assert.Equal((1, 1), HizPyramid.Levels(3, 2)[0]);
-        Assert.Single(HizPyramid.Levels(4, 4));
-    }
-
     /// <summary>
     /// Random scenes: spheres in front of the camera and the ground, the depth drawn with a jitter, a sphere behind them. Whenever the rule says hidden, rays
     /// from the drawing eye and from eyes up to the step away to points of the sphere (its centre, its box's near corner side and random points) hit the scene first.
@@ -223,24 +206,6 @@ public class OcclusionCullTests
         }
         Assert.True(hiddenCalls > 100, $"{hiddenCalls} of {decided} spheres called hidden: the scenes do not exercise the rule");
         Assert.True(rays > 10000);
-    }
-
-    [Fact]
-    public void Nothing_is_hidden_near_the_eye_by_the_sky_or_when_the_step_is_large()
-    {
-        var scene = new List<Occluder> { new(new Vector3(0, 100, 800), 300) };
-        var cam = Camera.Look(new Vector3(0, 60, 0), 0, 0);
-        var z = new float[H, W];
-        for (int y = 0; y < H; y++)
-            for (int x = 0; x < W; x++)
-                z[y, x] = DepthAt(scene, cam, x, y, 0, 0);
-        var pyramid = new Pyramid(z);
-        Assert.True(pyramid.Occluded(cam, new Vector3(0, 100, 3000), 20, 0));          // behind the sphere, the eye still
-        Assert.False(pyramid.Occluded(cam, new Vector3(0, 100, 3000), 20, 2000));      // a big step: parallax outgrows the rectangle
-        Assert.False(pyramid.Occluded(cam, new Vector3(1200, 100, 1500), 20, 0));      // beside it: the sky
-        Assert.False(pyramid.Occluded(cam, new Vector3(0, 100, 500), 20, 0));          // in front of it
-        Assert.False(pyramid.Occluded(cam, new Vector3(0, 60, 30), 5, 0));             // within 40 units of the eye
-        Assert.False(pyramid.Occluded(cam, new Vector3(0, 100, -3000), 20, 0));        // behind the eye
     }
 }
 

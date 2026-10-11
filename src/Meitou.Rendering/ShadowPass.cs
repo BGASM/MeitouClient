@@ -54,7 +54,7 @@ public sealed unsafe partial class ShadowPass : IDisposable
 
     /// <summary>
     /// The shadow blocks and maps as frame globals (docs/renderer-native.md 4.3), native: they replace what <see cref="ShadowShaders"/> publishes
-    /// from GL's binding points and units (still the source without a ShadowPass: --no-shadows, the model viewer). A texture appears where the GL
+    /// from GL's binding points and units (still the source without a ShadowPass: the model viewer). A texture appears where the GL
     /// code bound it to its unit (the atlas with the receiver block, the noise from the first frame, the terrain and blocker maps with the Meitou
     /// block when they are on); before that the readers get the stand-in.
     /// </summary>
@@ -85,7 +85,7 @@ public sealed unsafe partial class ShadowPass : IDisposable
     /// <summary>The distance past which the weather fog hides everything (<see cref="FogVolumes.AtmosphereDistance"/>), set each frame by the caller; shortens the range in Meitou mode.</summary>
     public float? RangeCap { get; set; }
     /// <summary>On: the range is also capped at the placed fog block's hide distance (<see cref="SetFogHide"/>); the <c>shadow-fogcap</c> A/B switch.</summary>
-    public bool FogCapEnabled { get; set; } = Environment.GetEnvironmentVariable("MEITOU_SHADOW_FOGCAP") != "0";
+    public bool FogCapEnabled { get; set; } = true;
     readonly ShadowFogCap fogCapState = new();
     /// <summary>The cap from the placed fog block this frame (<see cref="ShadowFogCap"/>), null for none.</summary>
     public float? FogCap { get; private set; }

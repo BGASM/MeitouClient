@@ -5,7 +5,7 @@ using Meitou.Simulation.Combat;
 
 namespace Meitou.Tests.Combat;
 
-/// <summary>Shared inputs of the combat tests: base-game constants, a katana as dumped from the install, a club, some armour, and the techniques the duel uses.</summary>
+/// <summary>Shared inputs of the combat tests: base-game constants, a katana as dumped from the install, some armour, and the techniques the duel uses.</summary>
 static class CombatFixtures
 {
     public static CombatConstants Constants { get; } = CombatConstants.BaseGame;
@@ -16,19 +16,6 @@ static class CombatFixtures
         StringId = "476-gamedata.base", Name = "Katana", SkillCategory = (int)WeaponCategory.Katanas,
         CutDamageMultiplier = 1, BluntDamageMultiplier = 0, MinCutDamageMult = 1, PierceDamageMultiplier = 0, ArmourPenetration = -0.3f, BleedMult = 1.2f,
         AttackMod = 4, DefenceMod = -4, Length = 21, WeightKg = 2, WeightMult = 1, CanBlock = true, HumanDamageMult = 1.1f, AnimalDamageMult = 1, RobotDamageMult = 0.6f,
-    };
-
-    /// <summary>A club-like blunt weapon: cut 0.5, blunt 1.5, penetration +0.2, 3 kg.</summary>
-    public static WeaponData Club { get; } = new()
-    {
-        StringId = "club-t", Name = "Club", SkillCategory = (int)WeaponCategory.Blunt,
-        CutDamageMultiplier = 0.5f, BluntDamageMultiplier = 1.5f, MinCutDamageMult = 1, ArmourPenetration = 0.2f, BleedMult = 0.5f, WeightKg = 3, WeightMult = 1, CanBlock = true,
-    };
-
-    /// <summary>A creature weapon with pierce damage (like the bull's or the spider's).</summary>
-    public static WeaponData Horn { get; } = new()
-    {
-        StringId = "horn-t", Name = "Horn", SkillCategory = 12, CutDamageMultiplier = 1, PierceDamageMultiplier = 1, BleedMult = 1, WeightKg = 1,
     };
 
     public static WeaponInstance KatanaAt(float quality, WeaponManufacturer? m = null) => WeaponInstance.Create(quality, Katana, m, null, Constants);
@@ -43,7 +30,6 @@ static class CombatFixtures
     public static ArmourData BodyPlate { get; } = Plate("plate-body", ArmourClass.Heavy, ArmourType.MetalPlate, 1, 0.4f,
         ("101-t", 100), ("100-t", 100), ("28-t", 100), ("29-t", 100));
     public static ArmourData Helmet { get; } = Plate("plate-hat", ArmourClass.Medium, ArmourType.MetalPlate, 3, 0.5f, ("32-t", 100));
-    public static ArmourData Rags { get; } = Plate("rags", ArmourClass.Cloth, ArmourType.Cloth, 8, 0, ("101-t", 90), ("100-t", 90));
 
     /// <summary>A COMBAT_TECHNIQUE written out: a katana cut of one blow.</summary>
     public static CombatTechnique Cut(string name = "cut", float chance = 1, float strike = 0.6f, float animSpeed = 1.2f, int direction = 2, int blows = 1, float strike2 = 0.8f) => new()

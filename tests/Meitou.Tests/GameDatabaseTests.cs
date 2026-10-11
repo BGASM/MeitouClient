@@ -41,60 +41,6 @@ public class GameDatabaseTests
     }
 
     [Fact]
-    public void Renaming_record_changes_the_name()
-    {
-        var db = new GameDatabase();
-        db.Apply(File(Record("1-a.mod", New)), "a.mod");
-        db.Apply(File(Record("1-a.mod", Renamed, name: "better thing")), "b.mod");
-        Assert.Equal("better thing", db.Find("1-a.mod")!.Name);
-    }
-
-    [Fact]
-    public void Rename_bit_alone_renames()
-    {
-        var db = new GameDatabase();
-        db.Apply(File(Record("1-a.mod", New)), "a.mod");
-        db.Apply(File(Record("1-a.mod", 0x12, name: "better thing")), "b.mod");
-        Assert.Equal("better thing", db.Find("1-a.mod")!.Name);
-    }
-
-    [Fact]
-    public void Removed_flag_deletes_record_and_a_later_file_starts_it_fresh()
-    {
-        var keep = Record("2-a.mod", New);
-        keep.Bools[FcsRecord.RemovedKey] = false;
-        var baseRecord = Record("1-a.mod", New);
-        baseRecord.Ints["value"] = 10;
-        var remove = Record("1-a.mod", Modified);
-        remove.Bools[FcsRecord.RemovedKey] = true;
-
-        var db = new GameDatabase();
-        db.Apply(File(baseRecord, keep), "a.mod");
-        db.Apply(File(remove), "b.mod");
-        Assert.Null(db.Find("1-a.mod"));
-        Assert.False(db.Find("2-a.mod")!.Bools[FcsRecord.RemovedKey]);
-
-        db.Apply(File(Record("1-a.mod", Modified)), "c.mod");
-        var fresh = db.Find("1-a.mod")!;
-        Assert.Equal("c.mod", fresh.DefinedBy);
-        Assert.Empty(fresh.Ints);
-    }
-
-    [Fact]
-    public void Modified_record_without_base_is_created()
-    {
-        var change = Record("9-x.mod", Modified, name: "orphan");
-        change.Ints["value"] = 3;
-        var db = new GameDatabase();
-        db.Apply(File(change), "b.mod");
-
-        var r = db.Find("9-x.mod")!;
-        Assert.Equal("orphan", r.Name);
-        Assert.Equal(3, r.GetInt("value"));
-        Assert.Equal(GameDataIssueKind.ModifiedRecordNotFound, Assert.Single(db.Issues).Kind);
-    }
-
-    [Fact]
     public void References_are_added_overwritten_and_removed_per_target()
     {
         var baseRecord = Record("1-a.mod", New);
@@ -140,73 +86,11 @@ public class GameDatabaseTests
     }
 
     [Fact]
-    public void Each_value_kind_is_its_own_table()
-    {
-        var baseRecord = Record("1-a.mod", New);
-        baseRecord.Filenames["mesh"] = "a.mesh";
-        var change = Record("1-a.mod", Modified);
-        change.Strings["mesh"] = "b.mesh";
-
-        var db = new GameDatabase();
-        db.Apply(File(baseRecord), "a.mod");
-        db.Apply(File(change), "b.mod");
-
-        var r = db.Find("1-a.mod")!;
-        Assert.Equal("a.mesh", r.GetPath("mesh"));
-        Assert.Equal("b.mesh", r.GetString("mesh"));
-    }
-
-    [Fact]
-    public void Problems_are_reported_without_stopping()
-    {
-        var db = new GameDatabase();
-        db.Apply(File(Record("1-a.mod", New)), "a.mod");
-        db.Apply(File(Record("9-x.mod", Modified), Record("1-a.mod", New), Record("1-a.mod", Modified, type: FcsRecordType.WEAPON)), "b.mod");
-
-        Assert.Equal(
-            [GameDataIssueKind.ModifiedRecordNotFound, GameDataIssueKind.RecordAlreadyDefined, GameDataIssueKind.ChangedRecordType],
-            db.Issues.Select(i => i.Kind));
-        Assert.Equal(FcsRecordType.ITEM, db.Find("1-a.mod")!.Type);
-    }
-
-    [Fact]
     public void Mods_cfg_follows_the_game_rules()
     {
         Assert.Equal(
             ["A", "B.x", "A"],
             LoadOrder.ParseModsCfg(["A.mod", "", " B.mod ", "B.x.mod", "#C.mod", "/C.mod", ";C.mod", "C.MOD", "C", "rebirth.mod", "Dialogue.mod", "A.mod"]));
-    }
-
-    /// <summary>
-    /// "Iron Rock" is defined in gamedata.base and changed by rebirth.mod. Expectations are derived from the
-    /// two raw records, so the test needs no copied game data.
-    /// </summary>
-    [Fact]
-    [Slow]
-    public void Iron_rock_merges_rebirth_changes_over_gamedata_base()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, $"No Kenshi install configured ({GameInstall.EnvironmentVariable}).");
-
-        const string id = "14520-rebirth.mod";
-        var order = LoadOrder.BaseGame(install!);
-        var db = GameDatabase.Load(order);
-        var baseRecord = FcsReader.ReadFile(Path.Combine(install!.DataDirectory, "gamedata.base")).Records.Single(r => r.StringId == id);
-        var change = FcsReader.ReadFile(Path.Combine(install.DataDirectory, "rebirth.mod")).Records.Single(r => r.StringId == id);
-        Assert.True(change.IsModified);
-
-        var merged = db.Find(id)!;
-        Assert.Equal(baseRecord.Name, merged.Name);
-        Assert.Equal("gamedata.base", merged.DefinedBy);
-        Assert.Contains("rebirth.mod", merged.ModifiedBy);
-
-        foreach (var (key, value) in change.Floats) Assert.Equal(value, merged.GetFloat(key));
-        foreach (var (key, value) in change.Ints) Assert.Equal(value, merged.GetInt(key));
-        foreach (var (key, value) in change.Bools) Assert.Equal(value, merged.GetBool(key));
-        foreach (var (key, value) in baseRecord.Floats.Where(kv => !change.Floats.ContainsKey(kv.Key)))
-            Assert.Equal(value, merged.GetFloat(key));
-        foreach (var (list, refs) in baseRecord.References)
-            Assert.Equal(refs.Select(r => r.TargetStringId), merged.GetReferences(list).Select(r => r.TargetStringId));
     }
 
     [Fact]

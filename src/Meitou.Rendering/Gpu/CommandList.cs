@@ -94,8 +94,6 @@ public sealed unsafe class CommandList
 
     public CommandBuffer Handle { get; internal set; }
     public GpuStats Stats { get; }
-    /// <summary>The draw log, when a tool turned it on (docs/renderer-native.md 7.6).</summary>
-    public DrawLog? Log { get; internal set; }
     /// <summary>Counts seam crossings and new command buffers: state a caller cached (pushed descriptors, bound sets) is valid only within one epoch.</summary>
     public long Epoch { get; private set; }
     /// <summary>The legacy program whose set 0 / set 1 are bound in this epoch (<see cref="LegacyProgram.Flush"/>).</summary>
@@ -157,7 +155,6 @@ public sealed unsafe class CommandList
         lastPipeline = default;
         lastIndex = default;
         vertexValid = 0;
-        Log?.BeginRendering(in d);
     }
 
     public void EndRendering()
@@ -222,7 +219,6 @@ public sealed unsafe class CommandList
     public void BindPipeline(GraphicsPipeline pipeline)
     {
         if (PipelineSubstitute is { } substitute) pipeline = substitute(pipeline);
-        Log?.Pipeline(pipeline);
         if (pipeline.Handle.Handle == lastPipeline.Handle && lastPoint == PipelineBindPoint.Graphics) return;
         cmdBindPipeline(Handle, PipelineBindPoint.Graphics, pipeline.Handle);
         (lastPipeline, lastPoint) = (pipeline.Handle, PipelineBindPoint.Graphics);
@@ -232,27 +228,23 @@ public sealed unsafe class CommandList
     public void SetViewport(in Viewport v)
     {
         fixed (Viewport* p = &v) cmdSetViewport(Handle, 0, 1, p);
-        Log?.Viewport(in v);
     }
 
     public void SetScissor(in Rect2D r)
     {
         fixed (Rect2D* p = &r) cmdSetScissor(Handle, 0, 1, p);
-        Log?.Scissor(in r);
     }
 
     public void SetRaster(CullModeFlags cull, FrontFace front)
     {
         cmdSetCullMode(Handle, cull);
         cmdSetFrontFace(Handle, front);
-        Log?.Raster(cull, front);
     }
 
     /// <summary>The front face alone (a draw that turns the winding round, the cull mode left as set).</summary>
     public void SetFrontFace(FrontFace front)
     {
         cmdSetFrontFace(Handle, front);
-        Log?.Front(front);
     }
 
     public void SetDepth(bool test, bool write, CompareOp op)
@@ -260,19 +252,16 @@ public sealed unsafe class CommandList
         cmdSetDepthTestEnable(Handle, test);
         cmdSetDepthWriteEnable(Handle, write);
         cmdSetDepthCompareOp(Handle, op);
-        Log?.Depth(test, write, op);
     }
 
     public void SetDepthBias(bool enable, float constant, float slope)
     {
         cmdSetDepthBiasEnable(Handle, enable);
         cmdSetDepthBias(Handle, constant, 0, slope);
-        Log?.Bias(enable, constant, slope);
     }
 
     public void BindVertexBuffers(uint first, ReadOnlySpan<BufferBinding> bindings)
     {
-        Log?.VertexBuffers(first, bindings);
         int n = bindings.Length;
         var buffers = stackalloc Buffer[n];
         var offsets = stackalloc ulong[n];
@@ -310,7 +299,6 @@ public sealed unsafe class CommandList
 
     public void BindIndexBuffer(BufferBinding binding, IndexType type)
     {
-        Log?.IndexBuffer(binding, type);
         if (binding.Buffer.Handle == lastIndex.Buffer.Handle && binding.Offset == lastIndex.Offset && type == lastIndexType && lastIndex.Buffer.Handle != 0) return;
         cmdBindIndexBuffer(Handle, binding.Buffer, binding.Offset, type);
         (lastIndex, lastIndexType) = (binding, type);
@@ -321,7 +309,6 @@ public sealed unsafe class CommandList
         fixed (DescriptorSet* ps = sets)
         fixed (uint* po = dynamicOffsets)
             cmdBindDescriptorSets(Handle, point, layout, first, (uint)sets.Length, ps, (uint)dynamicOffsets.Length, po);
-        Log?.Sets(first, sets, dynamicOffsets);
     }
 
     /// <summary>Pushes descriptors of set <paramref name="set"/> (legacy layout and compute; VK_KHR_push_descriptor).</summary>
@@ -330,32 +317,27 @@ public sealed unsafe class CommandList
         if (push is null) throw new InvalidOperationException("VK_KHR_push_descriptor is not available");
         fixed (WriteDescriptorSet* pw = writes) push.CmdPushDescriptorSet(Handle, point, layout, set, (uint)writes.Length, pw);
         Stats.DescriptorPushes++;
-        Log?.Push(set, writes);
     }
 
     public void PushConstants<T>(PipelineLayout layout, ShaderStageFlags stages, in T value, uint offset = 0) where T : unmanaged
     {
         fixed (T* p = &value) cmdPushConstants(Handle, layout, stages, offset, (uint)sizeof(T), p);
-        Log?.PushConstants(offset, new ReadOnlySpan<byte>(Unsafe.AsPointer(ref Unsafe.AsRef(in value)), sizeof(T)));
     }
 
     public void Draw(uint vertices, uint instances = 1, uint firstVertex = 0, uint firstInstance = 0)
     {
-        Log?.Draw(false, vertices, instances, firstVertex, 0, firstInstance);
         cmdDraw(Handle, vertices, instances, firstVertex, firstInstance);
         Stats.Draws++;
     }
 
     public void DrawIndexed(uint indices, uint instances = 1, uint firstIndex = 0, int vertexOffset = 0, uint firstInstance = 0)
     {
-        Log?.Draw(true, indices, instances, firstIndex, vertexOffset, firstInstance);
         cmdDrawIndexed(Handle, indices, instances, firstIndex, vertexOffset, firstInstance);
         Stats.Draws++;
     }
 
     public void DrawIndexedIndirect(Buffer args, ulong offset, uint count, uint stride = 20)
     {
-        Log?.Indirect(args, offset, count, stride);
         cmdDrawIndexedIndirect(Handle, args, offset, count, stride);
         Stats.Draws++;
         Stats.IndirectDraws++;
@@ -363,7 +345,6 @@ public sealed unsafe class CommandList
 
     public void DrawIndexedIndirectCount(Buffer args, ulong offset, Buffer count, ulong countOffset, uint maxCount, uint stride = 20)
     {
-        Log?.Indirect(args, offset, maxCount, stride);
         vk.CmdDrawIndexedIndirectCount(Handle, args, offset, count, countOffset, maxCount, stride);
         Stats.Draws++;
         Stats.IndirectDraws++;
@@ -374,7 +355,6 @@ public sealed unsafe class CommandList
     /// one call. Needs <c>drawIndirectCount</c> (Vulkan 1.2) and <c>drawIndirectFirstInstance</c> for a non-zero firstInstance.</summary>
     public void DrawIndirectCount(Buffer args, ulong offset, Buffer countBuffer, ulong countOffset, uint maxCount, uint stride = 16)
     {
-        Log?.Indirect(args, offset, maxCount, stride);
         vk.CmdDrawIndirectCount(Handle, args, offset, countBuffer, countOffset, maxCount, stride);
         Stats.Draws++;
         Stats.IndirectDraws++;
@@ -530,7 +510,6 @@ public sealed unsafe class CommandList
     /// <summary>A debug label (VK_EXT_debug_utils; no-op without it).</summary>
     public void BeginLabel(string name)
     {
-        Log?.Label(name);
         if (debug is null) return;
         if (!labels.TryGetValue(name, out var p)) labels[name] = p = Marshal.StringToCoTaskMemUTF8(name);
         var info = new DebugUtilsLabelEXT { SType = StructureType.DebugUtilsLabelExt, PLabelName = (byte*)p };
@@ -539,7 +518,6 @@ public sealed unsafe class CommandList
 
     public void EndLabel()
     {
-        Log?.Label(null);
         debug?.CmdEndDebugUtilsLabel(Handle);
     }
 }

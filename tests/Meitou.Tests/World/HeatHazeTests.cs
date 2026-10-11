@@ -10,25 +10,6 @@ namespace Meitou.Tests.World;
 public class HeatHazeTests
 {
     [Fact]
-    public void Target_is_field_times_strength_times_the_sun_factor()
-    {
-        Assert.Equal(0.6f, HeatHaze.Target(0.6f, 1, 0.9f), 5);          // full from sunY 1/6 (about 10 degrees)
-        Assert.Equal(0.3f, HeatHaze.Target(0.6f, 1, 1f / 12), 5);       // half way up the ramp
-        Assert.Equal(0.42f, HeatHaze.Target(0.6f, 0.7f, 0.5f), 5);      // the weather strength scales it
-        Assert.Equal(0f, HeatHaze.Target(1, 1, -0.2f));                 // none at night
-    }
-
-    [Fact]
-    public void Step_moves_a_third_per_second()
-    {
-        Assert.Equal(1f / 3, HeatHaze.Step(0, 1, 1), 5);
-        Assert.Equal(1f, HeatHaze.Step(0.9f, 1, 1), 5);                 // lands on the target when closer than a step
-        Assert.Equal(0.5f - 0.1f / 3, HeatHaze.Step(0.5f, 0, 0.1f), 5);
-        // The animation's time base: 0.01 game hours per cycle, 1.09 real seconds at game speed 1.
-        Assert.Equal(1.0909, 0.01 / HeatHaze.HoursPerSecond, 3);
-    }
-
-    [Fact]
     [Slow]
     public void Base_game_weathers_and_textures()
     {
