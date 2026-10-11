@@ -45,7 +45,6 @@ internal static class GiFogHide
             return n;
         }
         // The layers are a multiple of the phases, so a column's probes of this phase are its layers phase, phase + phases, ... (ascending probe order).
-        int shift = System.Numerics.BitOperations.Log2((uint)phases);
         for (int c = 0; c < GiProbes.Cascades; c++)
         {
             int offX = (int)offsets[c * 2], offZ = (int)offsets[c * 2 + 1];
@@ -61,7 +60,8 @@ internal static class GiFogHide
                         int p = first + layer;
                         if (layer < hidden)
                         {
-                            if ((round + (uint)(p >> shift)) % (uint)period != 0) continue;
+                            // Keyed on the probe's tile, as the sleep rule is (giAsleep): a hidden sleeper is then listed only on rounds where it is awake (period a multiple of 8).
+                            if ((round + (uint)(((c * columns + colZ) * columns + colX) * layers + layer)) % (uint)period != 0) continue;
                             into[n++] = (uint)p | SlowBit;
                         }
                         else into[n++] = (uint)p;

@@ -279,9 +279,17 @@ round. `--ab gi-fog` (side B: every probe at its normal rate), `MEITOU_GI_HIDDEN
   enumeration (`GiFogHideTests`), so clear views are unchanged by construction. The blend gives a slow update the hysteresis of 16 updates in one
   (`pow(h, 16)`); a probe that moved starts over as before.
 - **Hidden probes are not frozen and not invalid**: they keep their last irradiance, valid, and are refreshed every 16th round (64 frames at the
-  default four phases). Bounces from visible probes that land on a hidden surface read them. A probe that comes out of the hidden zone has at most
-  that much stale light until its next normal update; a probe whose position changed (a column that scrolled in) is invalid until its first update,
-  which comes within 16 rounds, long before the eye is near enough (the zone's inner edge is at least the hide distance away).
+  default four phases). The round is keyed on the probe's tile, as the sleep rule is (`giAsleep`, every 8th round), so with a period that is a multiple
+  of 8 a hidden sleeper is listed only on rounds where it is awake. (The first version keyed it on the window index: a probe both hidden and asleep was
+  then mostly listed on rounds where the trace returned at once, and its tile went stale; that was the max 22 in the first fly-through picture check.)
+  The price is that the updates come in bursts, a quarter of the hidden probes on four rounds of the sixteen (about 220 extra probes on a
+  burst round of a list of 3400). Bounces from visible probes that land on a hidden surface read them. A probe that comes out of the hidden zone has
+  at most that much stale light until its next normal update; a probe whose position changed (a column that scrolled in) is invalid until its first
+  update, which comes within 16 rounds, long before the eye is near enough (the zone's inner edge is at least the hide distance away).
+- **Hysteresis of a slow update**: `pow(0.97^4, 16)` = 0.14, so a slow update is mostly its own 64 rays (the sleepers keep the normal 0.885 per update).
+  Reason: a hidden probe's light is 16 times older than a normal one's, so it should track the light 16 times as fast per update to reach the same time
+  constant in frames. The cost is that it is noisier (about a single sample, 64 rays), and bounces off hidden surfaces read that noise. Not
+  compared against the normal hysteresis in a picture (**Unknown**: the pictures below show no difference at all with this one).
 - **The water reflection** reads the probes only with the `gi-reflection` switch's side B; its mirrored camera is not the main view's, so the
   hidden set (the main camera's) does not hold for it. Off by default.
 
@@ -326,17 +334,16 @@ on the GPU at times, so read the deltas, not the absolute times):
 | `--view swamp-rain` (orbiting Shark at 2000), two runs | -0.04, -0.04 (+-0.01) | -0.10, -0.10 (+-0.03) | -0.17, -0.11 (+-0.09, +-0.04) | +0.03, +0.02 (+-0.01) |
 | `--view hub` (no fog block, nothing hidden, the lists are equal: the harness's own bias) | -0.02 (+-0.01) | -0.06 | -0.05 | 0.00 |
 
-So the GI stage gets about 0.04 to 0.06 ms cheaper (of 0.5 to 0.65) where the swamp fog is on and the eye is inside its reach, 8 to 12 %. The
+So the GI stage gets about 0.04 to 0.06 ms cheaper (of 0.5 to 0.65) where the swamp fog is on and the eye is inside its reach, 8 to 12 %; the Hub row shows the method reads -0.02 with identical lists, so the true figure may be nearer -0.04. The
 listing costs +0.01 ms of render thread with the eye still and 0.02 to 0.03 at walking speed (a solve every third frame); at 135 units a frame it is +0.05.
 
 **Pictures** (**Observed**, `--screenshot --upscaler off --no-particles` at 1920 x 1080 so that nothing else moves; two shots of one build are identical, mean
-0.0000): hidden probes at 16 against off: mean 0.0001, max 4 of 255 at the Shark camera. After flying through the zone (`--fly-to`): max 1 at an arrival
-point inside the fog (6000 units away), and max 22 on a handful of pixels (mean 0.001) at one just outside the block, where probes that had been hidden on the way
-are up to 64 frames stale. The Hub and the desert (`--world --town Heft --radius 2 --distance 3000 --pitch 10 --yaw 300 --time 12`): 0 and 1 against off, and 0 and 1 for two
-shots of the same build. The harness's own A/B stills cannot show this: two stills of one build differ in 650 k pixels (rain and lamps), the same as A against B.
-**Popping**: none seen in those pictures; the stale light is the light of up to 64 frames ago, and the sun and the lamps hardly change in that time. A fast time of day
-(`--time-speed`) or a flight so fast that the zone's inner edge reaches a probe before its next update would show it first. **Unknown**: lamp flicker in the hidden zone
-(not looked at).
+0.0000): hidden probes at 16 against off: mean 0.0000, max 1 of 255 at the Shark camera. After flying through the zone (`--fly-to` three arrival points, 3000 to 6000
+units away, one inside the fog and two where the block does not hide anything any more): max 1, 0 and 0. The Hub and the desert (`--world --town Heft --radius 2 --distance 3000 --pitch 10 --yaw 300
+--time 12`): 0 and 1 against off, and 0 and 1 for two shots of the same build. The harness's own A/B stills cannot show this: two stills of one build differ in 650 k pixels (rain and
+lamps), the same as A against B. **Popping**: none seen in those pictures; the stale light is the light of up to 64 frames ago, and the sun and the lamps hardly change in that
+time. A fast time of day (`--time-speed`) or a flight so fast that the zone's inner edge reaches a probe before its next update would show it first. **Unknown**: lamp flicker
+in the hidden zone (not looked at).
 
 ## Resolve (`--gi-resolve <n>`, `Gi/GiResolveShaders.cs`, `PostProcess.RunGiResolve`)
 
