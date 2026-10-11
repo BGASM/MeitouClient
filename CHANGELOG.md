@@ -3,6 +3,27 @@
 What changed in each release, newest first. The release workflow copies the section of the version it builds into the GitHub release
 notes and refuses to release a version without one: add a `## vX.Y.Z` section with one `- ` line per change before running it.
 
+## v0.7.0
+
+- Night sky: Kenshi's two planets in the sky, and a new star field that twinkles and fades towards the horizon (Faithful keeps the game's)
+- Planetshine: at night the big planet lights the land, and shadows and water reflections follow its light
+- Night grading: at night dim colours shift towards a moonlit blue-grey, while lamps keep their colour
+- Night air: a faint glow and planet-lit haze near the horizon; the planets are seen through the mist instead of cutting dark holes in it
+- Volumetric clouds with cloud shadows that drift over land and water
+- Clouds lit by the sun and the planet through their depth, with smoother cloud textures
+- Light shafts and the sun's glint on water fade under heavy cloud and rain
+- Water: see-through distance and clarity sliders, glint only where the reflection shows sky, swamp fog in the reflections, swamp ponds no longer turn teal
+- No more straight band across distant water at sunrise and sunset
+- No more DLSS streaks beside the sun while the clock runs, and shadows no longer shimmer as the sun moves
+- Weather dust keeps up with the camera and blows with the wind; particle sizes match the game's
+- Faster: global illumination, ambient occlusion, fog, light shafts, foliage and water all cost less, and the sky is skipped when fog hides it
+- Fewer stutters while travelling: weather changes, uploads and memory are handled in the background (worst frame of a test flight 229 ms to 30 ms)
+- The viewer starts in borderless full screen (Alt+Enter toggles it, --windowed for a window)
+- Cinematic camera: numpad shots, an F2 timeline editor with timed keys and path recording, smooth flights, letterbox and fixed-rate video recording
+- F9 shows an fps counter; grass reaches further
+- The Meitou DLLs ship beside the exes, for code mods
+- Many unused launch options removed
+
 ## v0.6.1
 
 - Tab panel: sliders and checkboxes spread over three columns, so the panel no longer runs off the bottom of the screen
