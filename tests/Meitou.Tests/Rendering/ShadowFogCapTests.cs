@@ -62,6 +62,19 @@ public class ShadowFogCapTests
     }
 
     [Fact]
+    public void A_pending_radius_keeps_the_cap_until_it_lands_however_long_it_takes_within_the_guard()
+    {
+        var cap = new ShadowFogCap();
+        float held = cap.Update(4455)!.Value;
+        for (int i = 0; i < ShadowFogCap.PendingFrames; i++) Assert.Equal(held, cap.Update(null, isPending: true));   // past the 12 frames of a missing radius
+        Assert.Equal(held, cap.Update(4455));
+        Assert.Null(Release(cap, pending: true));   // a solve that never lands is given up
+        Assert.Equal(ShadowFogCap.Quantise(4455), cap.Update(4455));
+
+        static float? Release(ShadowFogCap c, bool pending) { float? v = c.Current; for (int i = 0; i < ShadowFogCap.PendingFrames + 2; i++) v = c.Update(null, pending); return v; }
+    }
+
+    [Fact]
     public void The_hide_distance_is_given_only_where_the_block_hides_the_whole_view_and_then_every_ray_is_opaque_past_it()
     {
         var f = FogCullTests.Block();

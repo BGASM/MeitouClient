@@ -69,6 +69,10 @@ internal sealed class FogVolumes
     /// distance has a view depth under it.
     /// </summary>
     public float? ShadowHideDistance => occluder is not null && SkyHidden ? CullRadius : null;
+    /// <summary>True when the eye is inside a placed block but its hide radius is not known this frame because the by-direction solve is still running in the background (it takes a few frames after the eye leaves its margin):
+    /// <see cref="ShadowHideDistance"/> is null then, but the block still hides the view, so the shadow cap waits for the radius instead of being released.</summary>
+    public bool ShadowHidePending { get; private set; }
+
 
     /// <summary>The F11 / log text of the cull (null when it is off for this view): what hides things and from how far, and the counts left out.</summary>
     public string? DescribeCull()
@@ -278,6 +282,7 @@ internal sealed class FogVolumes
         cullEye = eye;
         picked.Clear();
         occluder = null;
+        ShadowHidePending = false;
         Array.Clear(Culled);
         used = 0;
         Dropped = 0;
@@ -436,7 +441,7 @@ internal sealed class FogVolumes
         float? plain = HideDistance(last.Data[1].W, last.Data[2].W, inside, far);
         float? byDirection = DirectionRadius(last, eye, far);
         // Both bounds are proven: the smaller is used.
-        if ((plain, byDirection) is (null, null)) return;
+        if ((plain, byDirection) is (null, null)) { ShadowHidePending = solving is not null; return; }   // no radius yet: a solve in flight will give one (the shadow cap waits for it)
         float radius = Math.Min(plain ?? float.MaxValue, byDirection ?? float.MaxValue);
         occluder = last;
         hideRadiusSquared = radius * radius;

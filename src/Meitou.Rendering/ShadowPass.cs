@@ -90,11 +90,11 @@ public sealed unsafe partial class ShadowPass : IDisposable
     /// <summary>The cap from the placed fog block this frame (<see cref="ShadowFogCap"/>), null for none.</summary>
     public float? FogCap { get; private set; }
 
-    /// <summary>Called once a frame with <see cref="FogVolumes.ShadowHideDistance"/> (null: none).</summary>
-    internal void SetFogHide(float? hide)
+    /// <summary>Called once a frame with <see cref="FogVolumes.ShadowHideDistance"/> (null: none) and <see cref="FogVolumes.ShadowHidePending"/>.</summary>
+    internal void SetFogHide(float? hide, bool pending = false)
     {
         if (!FogCapEnabled) { fogCapState.Reset(); FogCap = null; return; }
-        FogCap = fogCapState.Update(hide);
+        FogCap = fogCapState.Update(hide, pending);
     }
     /// <summary>The range the cascades are fitted to and the casters are culled by: <see cref="Settings"/>' range, clamped by the guard.</summary>
     public float EffectiveRange
