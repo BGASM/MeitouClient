@@ -1,5 +1,6 @@
 using Meitou.Data.World;
 using Meitou.Rendering;
+using Meitou.Rendering.Gpu.Shaders;
 
 namespace Meitou.Tests.Rendering;
 
@@ -44,5 +45,19 @@ public class LightShaftTests
         Assert.Equal(0.8f, WorldFrame.Overcast(0.5f, 40), 4);    // swamp rain no wind: rainAmount 40 / 50
         Assert.Equal(1f, WorldFrame.Overcast(1f, 100), 4);       // Heavy_Rain
         Assert.Equal(1f, WorldFrame.Overcast(0.2f, 100), 4);     // Heavy_Rain sonorous: c 0.2 but pouring
+    }
+
+    [Fact]
+    [Slow]
+    public void The_scan_kernel_binds_the_atlases_the_cube_and_a_block_of_sixteen_slots_in_the_order_PostProcess_writes()
+    {
+        var r = SpirvReflection.Parse(new GlslProgramCompiler(new ShaderCompileOptions { UseDiskCache = false }).CompileCompute(LightShaftShaders.Scan));
+        Assert.Equal([0, 3], r.Samplers.Select(s => s.Binding).Order().ToArray());
+        Assert.Equal([1, 2], r.StorageImages.Select(i => i.Binding).Order().ToArray());
+        var block = r.Blocks.Single(b => b.Binding == 4 && b.Kind == BlockKind.Uniform);
+        Assert.Equal(256, block.Size);
+        string[] order = ["uShaftGrid", "uShaftRange", "uShaftEye", "uShaftRight", "uShaftUp", "uShaftBack", "uShaftTan", "uShaftAir", "uAtmoParams", "uAtmoSimple",
+            "uAtmoHaze", "uAtmoAltitude", "uAtmoFog", "uAtmoSun", "uAtmoSunLight", "uAtmoMaps"];
+        for (int i = 0; i < order.Length; i++) Assert.Equal(i * 16, block.Members.Single(m => m.Name == order[i]).Offset);
     }
 }

@@ -1,3 +1,7 @@
+using System.Globalization;
+
+using Meitou.Data.World;
+
 namespace Meitou.Rendering;
 
 /// <summary>
@@ -13,13 +17,23 @@ static class LightShaftShaders
     /// <summary>Slices per row of the atlas.</summary>
     public const int AtlasColumns = 8;
 
+    static readonly string IrradianceLevel = KenshiLighting.IrradianceLevel.ToString("0.0##", CultureInfo.InvariantCulture);
+
     /// <summary>The grid, the slices' distances and the camera.</summary>
-    internal const string Common = """
+    internal const string Common = CommonUniforms + CommonFunctions;
+
+    /// <summary>The grid and camera uniforms of <see cref="Common"/> (the scan kernel declares the same names in a uniform block).</summary>
+    internal const string CommonUniforms = """
 
         uniform vec4 uShaftGrid;    // x cells across, y cells down, z slices, w slices per atlas row
         uniform vec4 uShaftRange;   // x where the first slice starts, y where the last ends (distance along the ray), z ln(y / x), w the frame (the jitter's seed)
         uniform vec3 uShaftEye, uShaftRight, uShaftUp, uShaftBack;
         uniform vec2 uShaftTan;     // tan(fov/2) * aspect, tan(fov/2)
+        """;
+
+    /// <summary>The slices' distances and the view ray of <see cref="Common"/>.</summary>
+    internal const string CommonFunctions = """
+
 
         // Slice s (continuous) <-> distance along the ray: exponential, as fine near the eye as far away in proportion.
         float shaftDistance(float s) { return uShaftRange.x * exp(s / uShaftGrid.z * uShaftRange.z); }
@@ -146,9 +160,16 @@ static class LightShaftShaders
         """;
 
     /// <summary>The Meitou air layer's density and light (the scatter pass and the apply pass).</summary>
-    internal const string Air = """
+    internal const string Air = AirUniform + AirFunctions;
+
+    /// <summary>The layer's uniform (<see cref="Air"/>).</summary>
+    internal const string AirUniform = """
 
         uniform vec4 uShaftAir;     // x density at the base (per world unit; 0: no layer), y the base height, z the scale height, w the phase's anisotropy g
+        """;
+
+    /// <summary>The layer's density (<see cref="Air"/>).</summary>
+    internal const string AirFunctions = """
 
         // The layer's density at a height: full up to the base (the ground under the eye), falling off exponentially above it.
         float shaftAirDensity(float y) { return uShaftAir.x * exp(-max(y - uShaftAir.y, 0.0) / uShaftAir.z); }
@@ -201,6 +222,97 @@ static class LightShaftShaders
         }
         """;
 
+
+    /// <summary>
+    /// The integrate pass and the scatter pass as one compute kernel (the <c>shafts-scan</c> switch; docs/render-shafts.md "Scan kernel"). One thread per cell column walks the
+    /// slices front to back once: the running sums of the first pass's two channels give the sun's share of the haze (the light atlas, R32F), and the same walk carries the air
+    /// layer's scattered light and transmittance (the scatter atlas, RGBA16F). The fragment passes made the same sums by looping from the eye to each slice in every cell
+    /// (slices squared reads, and for the air layer the same again with three exp() per step); this reads each cell once. The arithmetic is theirs, term for term (the
+    /// atmosphere's values come in a uniform block of the same names, so <see cref="Alpha"/> and the other functions are the fragment passes' text).
+    /// </summary>
+    public static readonly string Scan = $$"""
+        #version 450
+        layout(local_size_x = 8, local_size_y = 8) in;
+        layout(set = 0, binding = 0) uniform sampler2D uShaftInjected;
+        layout(set = 0, binding = 1, r32f) writeonly uniform image2D uLightOut;
+        layout(set = 0, binding = 2, rgba16f) writeonly uniform image2D uScatterOut;
+        layout(set = 0, binding = 3) uniform samplerCube uAtmoIrradiance;
+        layout(std140, set = 0, binding = 4) uniform ScanParams
+        {
+            vec4 uShaftGrid;
+            vec4 uShaftRange;
+            vec3 uShaftEye;
+            vec3 uShaftRight;
+            vec3 uShaftUp;
+            vec3 uShaftBack;
+            vec2 uShaftTan;
+            vec4 uShaftAir;
+            vec4 uAtmoParams;
+            vec4 uAtmoSimple;
+            vec4 uAtmoHaze;
+            vec4 uAtmoAltitude;
+            vec4 uAtmoFog;
+            vec4 uAtmoSun;
+            vec4 uAtmoSunLight;   // xyz the sun's light, w the environment light's factor (uAtmoLight.w)
+            vec4 uAtmoMaps;
+        };
+
+        const float ATMO_PI = 3.14159265358979;
+        {{CommonFunctions}}
+        {{Alpha}}
+        {{AirFunctions}}
+
+        float shaftPhase(float c)
+        {
+            float g = uShaftAir.w, g2 = g * g;
+            return (1.0 - g2) / (4.0 * ATMO_PI * pow(max(1.0 + g2 - 2.0 * g * c, 1e-4), 1.5));
+        }
+
+        void main()
+        {
+            ivec2 cell = ivec2(gl_GlobalInvocationID.xy);
+            ivec2 grid = ivec2(uShaftGrid.xy);
+            if (cell.x >= grid.x || cell.y >= grid.y) return;
+            int columns = int(uShaftGrid.w), slices = int(uShaftGrid.z);
+            bool air = uShaftAir.x > 0.0;
+            vec3 ray = shaftRay((vec2(cell) + 0.5) / uShaftGrid.xy);
+            vec3 sun = ATMO_PI * ATMO_PI * uAtmoSunLight.xyz * shaftPhase(dot(ray, uAtmoSun.xyz));
+            vec3 sky = vec3(0.0);
+            if (air)
+            {
+                if (uAtmoMaps.x < 0.5) sky = vec3(1.09, 1.2, 1.51);
+                else { vec4 t = textureLod(uAtmoIrradiance, vec3(0.0, 1.0, 0.0), {{IrradianceLevel}}); sky = t.rgb * t.a * 4.0; }
+                sky *= uAtmoSunLight.w;
+            }
+            vec2 sum = vec2(0.0);
+            vec3 scattered = vec3(0.0);
+            float trans = 1.0;
+            for (int k = 0; k < slices; k++)
+            {
+                ivec2 at = ivec2(k % columns, k / columns) * grid + cell;
+                vec4 v = texelFetch(uShaftInjected, at, 0);
+                sum += v.rg;
+                imageStore(uLightOut, at, vec4(sum.y > 1e-6 ? clamp(sum.x / sum.y, 0.0, 1.0) : 1.0, 0.0, 0.0, 1.0));
+                if (air)
+                {
+                    float d0 = shaftDistance(float(k)), d1 = shaftDistance(float(k + 1)), mid = 0.5 * (d0 + d1);
+                    float sigma = shaftAirDensity(uShaftEye.y + ray.y * mid);
+                    float absorbed = 1.0 - exp(-sigma * (d1 - d0));
+                    scattered += trans * absorbed * (sun * v.b + sky) * (1.0 - shaftAlpha(mid));
+                    trans *= 1.0 - absorbed;
+                    imageStore(uScatterOut, at, vec4(scattered, trans));
+                }
+            }
+            // The atlas's last row, past the last slice: what the fragment passes wrote there (nothing reads it).
+            int total = columns * ((slices + columns - 1) / columns);
+            for (int k = slices; k < total; k++)
+            {
+                ivec2 at = ivec2(k % columns, k / columns) * grid + cell;
+                imageStore(uLightOut, at, vec4(1.0));
+                if (air) imageStore(uScatterOut, at, vec4(0.0, 0.0, 0.0, 1.0));
+            }
+        }
+        """;
     /// <summary>
     /// The placed fog volumes' shadow (included by <see cref="PostProcessShaders.FogVolumes"/> before <see cref="FogVolumeShaders.Functions"/>, which
     /// calls it under <c>FOG_VOLUME_SHADOW</c>): the share of a volume's path from <c>near</c> to <c>far</c> the sun reaches, four reads of the first
