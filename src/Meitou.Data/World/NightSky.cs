@@ -232,6 +232,16 @@ public static class NightAir
     /// <summary>The glow's share at the direction's height <paramref name="y"/> (its sine of elevation): 1 at and below the horizon, <c>exp(−y / FalloffHeight)</c> above it.</summary>
     public static float HorizonFalloff(float y) => MathF.Exp(-MathF.Max(y, 0) / FalloffHeight);
 
+    /// <summary>
+    /// The height (sine of elevation) over which the air in front of a planet thins to 1/e above the horizon. The air hides all of a planet's light at the horizon
+    /// (times the haze's strength, as it does for far land) and less above it. Chosen by eye, no physical basis: a body low over the horizon fades into the glow as
+    /// far hazed ridges do, one 20 degrees up barely.
+    /// </summary>
+    public const float VeilHeight = 0.15f;
+
+    /// <summary>The share of a planet's light the night air in front of it hides, towards a direction of height <paramref name="y"/> at the sun's height <paramref name="sunY"/> (0 by day and in Faithful, where the planet is drawn as the game does).</summary>
+    public static float PlanetVeil(float sunY, float y, float hazeStrength = 1f) => Math.Clamp(Weight(sunY) * hazeStrength * MathF.Exp(-MathF.Max(y, 0) / VeilHeight), 0, 1);
+
     /// <summary>The night air's radiance towards a direction of height <paramref name="y"/> at the sun's height <paramref name="sunY"/>: what the haze adds to its colour and the sky to its own.</summary>
     public static Vector3 Radiance(Vector3 planetLight, float sunY, float y) => Colour(planetLight) * (Weight(sunY) * HorizonFalloff(y));
 }

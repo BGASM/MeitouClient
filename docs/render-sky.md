@@ -18,7 +18,7 @@ Part of the world view of `meitou-viewer` (and the game, which shares `src/Meito
   air a faint glow of its own instead (`NightAir` in `NightSky.cs`: airglow plus the planet's light scattered by the air, by the planet's phase): the haze, its ramp the game's,
   fades the far land into it (`hazeTarget`), and the sky pass adds the same colour above the horizon, falling off with the height (`atmoNightAir` in `atmoSky`, replacing SkyX's own
   night glow as it comes in, under the stars and planets), so hazed ridges and the sky meet without a seam; it comes in through deep twilight (the planetshine's window)
-  ([formats/sky.md](formats/sky.md), "Night air"; `--faithful night` for the game's black). The water's glint has its own light (`WorldLighting.Glint`), the planet's disc radiance
+  ([formats/sky.md](formats/sky.md), "Night air"; `--faithful night` for the game's black). The planets are drawn through it (`planet · (1 - veil) + air`: the dark side shows the glow, the foot fades into the horizon haze; Faithful and the day unchanged, [formats/sky.md](formats/sky.md) "Planets in the air"). The water's glint has its own light (`WorldLighting.Glint`), the planet's disc radiance
   at night, so it does not take the land's boosted planet light.
   The game's night land has only that flat ambient; the `planetshine` switch (Meitou, default; `--faithful planetshine` for the game's) makes the big planet the light
   once the sun is down: `Planetshine` in `NightSky.cs` gives its irradiance from its phase, size and mean albedo (times a strength, default 60), and
