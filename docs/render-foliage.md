@@ -1,5 +1,25 @@
 # Foliage rendering
 
+## Persistent CPU update cost (2026-10-11)
+
+`MEITOU_FOLIAGE_UPDATE_STATS=1` prints mean CPU milliseconds every 300 non-settling updates:
+zone scheduling, grass-page maintenance, meshes (including LOD/pruning/residency), textures,
+upload steps (including warning handling), impostors and timer collection. It excludes character
+updates, which `WorldFrame` also charges to `upd-foliage`. The 2 ms upload-loop budget is not
+a limit on the entire foliage update. The diagnostic is off by default.
+
+**Observed** (RTX 4070, Release build, camera
+`0139ABA7C75A698D45E769524743DF07C1A114133F00A00C46`, radius 2, 1920x1080,
+default foliage settings): after streaming became idle, a 900-frame `--bench-frames` run measured
+`upd-foliage` mean 0.33 ms, median 0.30 ms. A second run with the animation clock active
+(`--upscaler dlss --render-scale native --texture-quality 3 --fly-benchmark 1800
+--fly-speed 0 --fly-pipelined`) measured mean 0.18 ms; grass maintenance was 0.09–0.11 ms
+in the 300-update reports. These runs did not reproduce the user's persistent 4.39 ms CPU
+reading. **Unknown**: the cause of that reading; the original process's runtime slider values,
+build and scene state have not been matched. Do not attribute it to uploads without the breakdown.
+
+## Rendering and streaming
+
 Part of the world view of `meitou-viewer` (and the game, which shares `src/Meitou.Rendering`); options, keys and the rest of the world mode are in [viewer.md](viewer.md#world-mode). The game's foliage format and placement rules are in [formats/foliage.md](formats/foliage.md).
 
 

@@ -382,6 +382,10 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     /// <summary>Follows the eye: lays out zones, decodes meshes, makes grass pages and uploads, within a frame budget.</summary>
     public void Update(Vector3 eye) => Update(eye, settling: false);
 
+    readonly bool updateStats = Environment.GetEnvironmentVariable("MEITOU_FOLIAGE_UPDATE_STATS") == "1";
+    readonly double[] updateParts = new double[7];
+    int updateSamples;
+
     void Update(Vector3 eye, bool settling)
     {
         updates++;
@@ -517,6 +521,18 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         UpdateImpostors(eye, settling);
         double t4 = watch.Elapsed.TotalMilliseconds;
         PollTimers(wait: false);
+        if (updateStats && !settling)
+        {
+            double end = watch.Elapsed.TotalMilliseconds;
+            ReadOnlySpan<double> parts = [t0, t1 - t0, t2 - t1, t3 - t2, t35 - t3, t4 - t35, end - t4];
+            for (int i = 0; i < parts.Length; i++) updateParts[i] += parts[i];
+            if (++updateSamples == 300)
+            {
+                Console.WriteLine(FormattableString.Invariant($"foliage update avg: zones {updateParts[0] / updateSamples:F3}, grass {updateParts[1] / updateSamples:F3}, meshes {updateParts[2] / updateSamples:F3}, textures {updateParts[3] / updateSamples:F3}, steps {updateParts[4] / updateSamples:F3}, impostors {updateParts[5] / updateSamples:F3}, timers {updateParts[6] / updateSamples:F3} ms"));
+                Array.Clear(updateParts);
+                updateSamples = 0;
+            }
+        }
         if (!settling && watch.Elapsed.TotalMilliseconds > 8 && Environment.GetEnvironmentVariable("MEITOU_STREAM_LOG") == "1") Console.WriteLine($"slow foliage update {watch.Elapsed.TotalMilliseconds:0.0}: zones {t0:0.0}, grass {t1 - t0:0.0}, meshes {t2 - t1:0.0}, textures {t3 - t2:0.0}, steps {t35 - t3:0.0}, impostors {t4 - t35:0.0}{(GC.GetTotalPauseDuration() - gcPause0 is { TotalMilliseconds: >= 1 } gc ? $", GC pause {gc.TotalMilliseconds:0.0}" : "")}");
         LastUpdateMs = watch.Elapsed.TotalMilliseconds;
     }
