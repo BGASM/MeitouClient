@@ -1427,10 +1427,12 @@ static class WorldFrame
             StageClock.Lap(6);
             // Characters after the opaque geometry: they alone write the scene's alpha (SSAO's character mask), so nothing drawn later may cover them but water.
             if (gpu.Characters is { } fogCharacters) fogCharacters.FogCull = fogCull;
+            if (nearSlice) post.CharactersDrawn = false;   // none this frame unless the near slice draws some below
             if (nearSlice && gpu.Characters is { } characters)
             {
                 host.Stage(7);
                 characters.Draw(viewProjection, eye, frustum, light.SunDirection, light.FogColour, light.FogDistance);
+                post.CharactersDrawn = characters.DrawnCharacters > 0;
                 StageClock.Lap(7);
             }
             // The Meitou water refracts the slice's opaque scene: the pass ends for a copy of its colour and opens again for the water.

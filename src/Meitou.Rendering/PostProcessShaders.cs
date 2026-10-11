@@ -186,13 +186,16 @@ static class PostProcessShaders
         """;
 
     /// <summary>
-    /// The placed fog volumes at half the render size (<c>fog-half</c>, docs/render-post.md "Merged scene layers"): each texel is the full-size pixel at
-    /// twice its coordinates (not an average: the upsample in <see cref="SceneLayers"/> compares against that pixel's distance), written as
-    /// (colour, transmittance) without blending.
+    /// The scene layers at half the render size (<c>fog-half</c> for the fog volumes, <c>shafts-half</c> for the light shafts' apply; docs/render-post.md
+    /// "Merged scene layers"): each texel is the full-size pixel at twice its coordinates (not an average: the upsample in <see cref="SceneLayers"/> compares
+    /// against that pixel's distance). It holds the layers asked for in the order the merged pass applies them, the shafts' then the fog volumes', as one
+    /// (colour, factor) the scene is blended by, <c>scene * a + rgb</c>; without blending. A fog-only texel is the fog's (colour, transmittance).
     /// </summary>
-    public static readonly string FogVolumesHalf = "#version 330 core\n" + AtmosphereShaders.Functions + LightShaftShaders.FogVolumeShadow + FogVolumeShaders.Functions + SceneDistance + """
+    public static readonly string LayersHalf = "#version 330 core\n" + AtmosphereShaders.Functions + LightShaftShaders.FogVolumeShadow + FogVolumeShaders.Functions
+        + LightShaftShaders.Alpha + LightShaftShaders.Air + LightShaftShaders.ApplyFunctions + SceneDistance + """
 
         out vec4 fragColour;
+        uniform vec4 uLayers;   // x 1: the light shafts; y 1: the fog volumes
 
         void main()
         {
@@ -200,32 +203,31 @@ static class PostProcessShaders
             vec3 dir;
             bool sky;
             float dist = sceneDistance(p, dir, sky);
-            vec3 add;
-            float trans;
-            fogVolumesAccumulate(uFogVolumeEye.xyz, dir, dist, add, trans);
-            fragColour = vec4(add, trans);
+            vec4 layer = vec4(0.0, 0.0, 0.0, 1.0);
+            if (uLayers.x > 0.5) layer = shaftLayer((vec2(p) + 0.5) / uFullSize, dir, sky ? uShaftRange.y : dist, sky);
+            if (uLayers.y > 0.5)
+            {
+                vec3 add;
+                float trans;
+                fogVolumesAccumulate(uFogVolumeEye.xyz, dir, dist, add, trans);
+                layer = vec4(layer.rgb * trans + add, layer.a * trans);
+            }
+            fragColour = layer;
         }
         """;
 
     /// <summary>
-    /// The merged scene layers (<c>layer-merge</c>, docs/render-post.md "Merged scene layers"): the light shafts' apply, the fog volumes and the SSAO's
-    /// factor in one pass over the scene colour instead of three. Each is a (colour, factor) the scene is blended by as <c>scene * a + rgb</c>; in their
-    /// old order (shafts, fog, occlusion) they compose to <c>((scene * a1 + c1) * a2 + c2) * ao</c> = <c>scene * (a1 a2 ao) + (c1 a2 + c2) ao</c>, one
-    /// blend of the same state (the occlusion is grey). The fog is computed here, or upsampled from <see cref="FogVolumesHalf"/>: of the four nearest
-    /// half-size texels, weighted bilinearly and by how close the distance of the pixel each stands for is to this pixel's (relative difference r,
-    /// weight e^(−20 r)); where none is within 10 % (a thin edge no texel lies on: twigs against the far fog), computed here at full size.
+    /// The depth-aware upsample of <see cref="LayersHalf"/> (needs <see cref="SceneDistance"/> before it): of the four nearest half-size texels, weighted
+    /// bilinearly and by how close the distance of the pixel each stands for is to this pixel's (relative difference r, weight e^(−20 r)). False where no
+    /// texel is within 10 % (a thin edge no texel lies on: twigs against the far fog).
     /// </summary>
-    public static readonly string SceneLayers = "#version 330 core\n" + AtmosphereShaders.Functions + LightShaftShaders.FogVolumeShadow + FogVolumeShaders.Functions
-        + LightShaftShaders.Alpha + LightShaftShaders.Air + LightShaftShaders.ApplyFunctions + SceneDistance + """
+    const string HalfUpsample = """
 
-        in vec2 vUv;
-        out vec4 fragColour;
-        uniform sampler2D uFogHalf, uAo;
-        uniform vec4 uLayers;   // x 1: the light shafts; y 1: the fog volumes computed here, 2: upsampled from the half-size pass; z 1: the occlusion
+        uniform sampler2D uLayerHalf;
 
-        bool fogUpsampled(ivec2 p, float dist, out vec4 fog)
+        bool halfUpsampled(ivec2 p, float dist, out vec4 layer)
         {
-            ivec2 size = textureSize(uFogHalf, 0);
+            ivec2 size = textureSize(uLayerHalf, 0);
             ivec2 base = p / 2;
             vec2 f = vec2(p - base * 2) * 0.5;   // 0: the pixel a texel stands for, 0.5: between two
             vec4 sum = vec4(0.0);
@@ -240,15 +242,33 @@ static class PostProcessShaders
                     bool tSky;
                     float tDist = sceneDistance(min(t * 2, ivec2(uFullSize) - 1), tDir, tSky);
                     float r = abs(tDist - dist) / max(min(tDist, dist), 1.0);
-                    vec4 v = texelFetch(uFogHalf, t, 0);
+                    vec4 v = texelFetch(uLayerHalf, t, 0);
                     bestR = min(bestR, r);
                     float w = b * exp(-20.0 * r);
                     sum += v * w;
                     weights += w;
                 }
-            fog = sum / max(weights, 1e-6);
+            layer = sum / max(weights, 1e-6);
             return bestR <= 0.1;
         }
+        """;
+
+    /// <summary>
+    /// The merged scene layers (<c>layer-merge</c>, docs/render-post.md "Merged scene layers"): the light shafts' apply, the fog volumes and the SSAO's
+    /// factor in one pass over the scene colour instead of three. Each is a (colour, factor) the scene is blended by as <c>scene * a + rgb</c>; in their
+    /// old order (shafts, fog, occlusion) they compose to <c>((scene * a1 + c1) * a2 + c2) * ao</c> = <c>scene * (a1 a2 ao) + (c1 a2 + c2) ao</c>, one
+    /// blend of the same state (the occlusion is grey). The shafts' and the fog are computed here, or upsampled from <see cref="LayersHalf"/> (uHalf: which
+    /// of them that texture holds, <see cref="HalfUpsample"/>); where the upsample finds no texel, computed here at full size. With uHalf 0 (and the
+    /// <c>layers-lean</c> split, <see cref="SceneLayersLean"/>) it is the pass for the pixels the lean one left out.
+    /// </summary>
+    public static readonly string SceneLayers = "#version 330 core\n" + AtmosphereShaders.Functions + LightShaftShaders.FogVolumeShadow + FogVolumeShaders.Functions
+        + LightShaftShaders.Alpha + LightShaftShaders.Air + LightShaftShaders.ApplyFunctions + SceneDistance + HalfUpsample + """
+
+        in vec2 vUv;
+        out vec4 fragColour;
+        uniform sampler2D uAo;
+        uniform vec4 uLayers;   // x 1: the light shafts; y 1: the fog volumes; z 1: the occlusion
+        uniform vec4 uHalf;     // x 1: the half-size texture holds the shafts' layer; y 1: it holds the fog volumes'
 
         void main()
         {
@@ -257,20 +277,52 @@ static class PostProcessShaders
             bool sky;
             float dist = sceneDistance(p, dir, sky);
             vec4 layer = vec4(0.0, 0.0, 0.0, 1.0);   // scene * a + rgb
-            if (uLayers.x > 0.5) layer = shaftLayer(vUv, dir, sky ? uShaftRange.y : dist, sky);
-            if (uLayers.y > 0.5)
+            vec4 up = vec4(0.0, 0.0, 0.0, 1.0);
+            // Half size, unless no texel near this pixel shows a surface at its distance (a twig against the far fog): then here, at full size.
+            bool fromHalf = (uHalf.x > 0.5 || uHalf.y > 0.5) && halfUpsampled(p, dist, up);
+            bool shaftsHere = uLayers.x > 0.5 && !(fromHalf && uHalf.x > 0.5), fogHere = uLayers.y > 0.5 && !(fromHalf && uHalf.y > 0.5);
+            if (shaftsHere) layer = shaftLayer(vUv, dir, sky ? uShaftRange.y : dist, sky);
+            if (fromHalf) layer = uHalf.x > 0.5 ? up : vec4(layer.rgb * up.a + up.rgb, layer.a * up.a);   // the texture's own order: the shafts' first, then the fog
+            if (fogHere)
             {
-                vec4 fog;
-                // Half size, unless no texel near this pixel shows a surface at its distance (a twig against the far fog): then here, at full size.
-                if (uLayers.y < 1.5 || !fogUpsampled(p, dist, fog))
-                {
-                    vec3 add;
-                    float trans;
-                    fogVolumesAccumulate(uFogVolumeEye.xyz, dir, dist, add, trans);
-                    fog = vec4(add, trans);
-                }
-                layer = vec4(layer.rgb * fog.a + fog.rgb, layer.a * fog.a);
+                vec3 add;
+                float trans;
+                fogVolumesAccumulate(uFogVolumeEye.xyz, dir, dist, add, trans);
+                layer = vec4(layer.rgb * trans + add, layer.a * trans);
             }
+            if (uLayers.z > 0.5) layer *= texture(uAo, vUv).r;
+            fragColour = layer;
+        }
+        """;
+
+    /// <summary>
+    /// The lean half of the merged scene layers (<c>layers-lean</c>, docs/render-post.md "Merged scene layers"), for when <see cref="LayersHalf"/> holds
+    /// every pending layer: the upsample (<see cref="HalfUpsample"/>) and the occlusion, nothing else. Where no texel fits (a few hundredths of a percent
+    /// of the pixels) it leaves the scene as it is and writes depth 1 into the mask depth buffer, depth 0 elsewhere; <see cref="SceneLayers"/> then
+    /// draws those pixels alone (its full-screen triangle, at depth 0.5 in GL clip space, passes "less" only against the 1), computing everything at full size. The full pass carries the shafts' and the fog volumes' code,
+    /// which in one shader with the upsample more than doubled the time of the pass (registers: 0.08 against 0.17 ms with the fallback code removed).
+    /// </summary>
+    public static readonly string SceneLayersLean = "#version 330 core\n" + LightShaftShaders.CommonUniforms + SceneDistance + HalfUpsample + """
+
+        in vec2 vUv;
+        out vec4 fragColour;
+        uniform sampler2D uAo;
+        uniform vec4 uLayers;   // z 1: the occlusion
+
+        void main()
+        {
+            ivec2 p = ivec2(gl_FragCoord.xy);
+            vec3 dir;
+            bool sky;
+            float dist = sceneDistance(p, dir, sky);
+            vec4 layer;
+            if (!halfUpsampled(p, dist, layer))
+            {
+                gl_FragDepth = 1.0;
+                fragColour = vec4(0.0, 0.0, 0.0, 1.0);
+                return;
+            }
+            gl_FragDepth = 0.0;
             if (uLayers.z > 0.5) layer *= texture(uAo, vUv).r;
             fragColour = layer;
         }

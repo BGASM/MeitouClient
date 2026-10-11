@@ -659,7 +659,7 @@ public sealed unsafe partial class PostProcess : IDisposable
         // The final passes draw into Target (the window's backbuffer, or the caller's texture) with a viewport of the display size.
         var final = PassTargets.Of(Target ?? throw new InvalidOperationException("PostProcess.Target is not set"), null);
         bool needDepth = o.Ssao && haveNearSlice;
-        if (shaftsPending || fogPending > 0) ApplyLayers(false);   // a caller that drew the layers without ApplySsao: the occlusion stays the composite's
+        if (shaftsPending || fogPending) ApplyLayers(false);   // a caller that drew the layers without ApplySsao: the occlusion stays the composite's
 
         bool ao = needDepth;
         if (ao && !aoApplied) RunSsao();
@@ -1122,6 +1122,14 @@ public sealed unsafe partial class PostProcess : IDisposable
         CloseSegment();
     }
 
+    /// <summary>Whether any character was drawn into the scene this frame (set by the world frame after the near slice's characters): none means the scene colour's
+    /// alpha, the SSAO's character mask, is 0 everywhere, so with <see cref="MaskSkip"/> the blur does not read it.</summary>
+    public bool CharactersDrawn { get; set; } = true;
+    /// <summary>Meitou: the SSAO blur's read of the character mask left out when no character was drawn (<c>MEITOU_SSAO_MASK_SKIP=0</c>, <c>--ab ssao-mask-skip</c>).</summary>
+    public bool MaskSkip { get; set; } = Environment.GetEnvironmentVariable("MEITOU_SSAO_MASK_SKIP") != "0";
+
+    static readonly bool SsaoStamps = Environment.GetEnvironmentVariable("MEITOU_SSAO_STAMPS") == "1";
+
     void RunSsao()
     {
         var a = aoA!; var b = aoB!;
@@ -1144,6 +1152,7 @@ public sealed unsafe partial class PostProcess : IDisposable
         s.P.Set(s.Eye, eyeNow.X, eyeNow.Y, eyeNow.Z);
         s.P.ApplyGlobals();   // the atmosphere's and the fog volumes' uniforms, through the frame globals
         Draw(s.P, a);
+        if (SsaoStamps) Stamp("ssao gen");
 
         var bl = blur;
         Bind(bl.P, bl.Ao, a);
@@ -1151,13 +1160,15 @@ public sealed unsafe partial class PostProcess : IDisposable
         bl.P.Set(bl.Step, 1f / a.Width, 0f);
         bl.P.Set(bl.CharacterAo, 1f);
         Draw(bl.P, b);
+        if (SsaoStamps) Stamp("ssao blur x");
         // The second pass also takes the occlusion off the characters' pixels (the scene colour's alpha; only they write it), by SsaoCharacterStrength.
-        bool mask = Options.SsaoCharacterStrength < 1 && sceneColour is not null;
+        bool mask = Options.SsaoCharacterStrength < 1 && sceneColour is not null && (CharactersDrawn || !MaskSkip);
         Bind(bl.P, bl.Ao, b);
         Bind(bl.P, bl.Mask, mask ? sceneColour : null);
         bl.P.Set(bl.Step, 0f, 1f / a.Height);
         bl.P.Set(bl.CharacterAo, mask ? Options.SsaoCharacterStrength : 1f);
         Draw(bl.P, a);
+        if (SsaoStamps) Stamp("ssao blur y");
         // The composite reads aoB: swap so the finished result is there.
         (aoA, aoB) = (aoB, aoA);
     }
