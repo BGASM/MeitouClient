@@ -155,8 +155,7 @@ With the fog volume shadow and the air layer (same command, same day, nothing el
 (`--view hub --yaw 94 --pitch 3 --distance 40000 --weather Default`): a straight colour boundary crossed the distant water.
 Disabling water removed it. Disabling shafts reduced it, but did not close the water's own far edge.
 
-**Verified** against the renderer code and the Vulkan test
-`PostProcessNativeTests.Shafts_keep_sky_at_the_horizon_when_the_water_hit_is_past_the_far_clip`:
+**Verified** (2026-10-12) against the renderer code and a Vulkan test that read the shafts' debug view (both removed in the test and flag cleanup the same day):
 water does not write scene depth, so the shafts reconstruct its intersection analytically. Previously both the separate apply
 and merged scene-distance paths accepted hits beyond the rendered far clip, treating empty sky below the horizon as a hazed
 surface. Both now reject those hits using the active depth slices' furthest plane (converted to distance along the ray).
