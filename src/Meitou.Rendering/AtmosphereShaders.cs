@@ -14,6 +14,12 @@ static class AtmosphereShaders
     static string F(float v) => v.ToString("0.#########", CultureInfo.InvariantCulture) + (v == MathF.Floor(v) ? ".0" : "");
     static string V3(System.Numerics.Vector3 v) => $"vec3({F(v.X)}, {F(v.Y)}, {F(v.Z)})";
 
+    /// <summary>The water and shafts share the fade before the rendered water's far clip.</summary>
+    internal const string WaterHorizonFunctions = """
+
+        float atmoWaterWeight(float dist, float farClip) { return 1.0 - smoothstep(0.5, 0.9, dist / max(farClip, 1.0)); }
+        """;
+
     /// <summary>What every world shader includes (fragment stage, or the grass's vertex stage).</summary>
     public static readonly string Functions = $$"""
 
@@ -261,6 +267,10 @@ static class AtmosphereShaders
             }
             return lit;
         }
+
+        // The distant water fades out before its far clip, revealing the sky already behind it.
+        // The shafts use the same weight for their water correction, so it cannot leave a horizon band.
+        {{WaterHorizonFunctions}}
 
         // ---- haze ----
         // Integral of exp(-altitude / scale) along a ray: altitude a0 + slope * s, s in 0..len (scale heights).

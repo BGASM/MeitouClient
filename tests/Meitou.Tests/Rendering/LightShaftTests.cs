@@ -9,6 +9,15 @@ public class LightShaftTests
     static readonly SkyClock Clock = new(54, 5, 23);
 
     [Fact]
+    [Slow]
+    public void All_shaft_apply_paths_compile_with_the_water_horizon_fade()
+    {
+        var compiler = new GlslProgramCompiler(new ShaderCompileOptions { UseDiskCache = false, UseMemoryCache = false });
+        foreach (string fragment in new[] { LightShaftShaders.Apply, PostProcessShaders.LayersHalf, PostProcessShaders.SceneLayers, PostProcessShaders.SceneLayersLean })
+            Assert.NotEmpty(compiler.Compile(PostProcessShaders.Vertex, fragment).FragmentSpirv);
+    }
+
+    [Fact]
     public void Air_is_strongest_at_sunrise_and_sunset_and_eases_to_the_day_value()
     {
         var o = new PostOptions();

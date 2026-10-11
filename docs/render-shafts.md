@@ -149,6 +149,29 @@ alpha at the pixel, blue = the haze colour's brightness.
 
 With the fog volume shadow and the air layer (same command, same day, nothing else on the GPU): `shafts` 0.54 ms mean (p99 0.72), the fog volumes pass +0.11 ms (0.29 against 0.18); the whole GPU frame +0.50 ms (6.02 against 5.52).
 
+## Water horizon correction (2026-10-12)
+
+**Observed** in the owner's sunrise/sunset picture and reproduced looking west from the Hub at 22:30
+(`--view hub --yaw 94 --pitch 3 --distance 40000 --weather Default`): a straight colour boundary crossed the distant water.
+Disabling water removed it. Disabling shafts reduced it, but did not close the water's own far edge.
+
+**Verified** against the renderer code and the Vulkan test
+`PostProcessNativeTests.Shafts_keep_sky_at_the_horizon_when_the_water_hit_is_past_the_far_clip`:
+water does not write scene depth, so the shafts reconstruct its intersection analytically. Previously both the separate apply
+and merged scene-distance paths accepted hits beyond the rendered far clip, treating empty sky below the horizon as a hazed
+surface. Both now reject those hits using the active depth slices' furthest plane (converted to distance along the ray).
+The test exercises both paths with empty sky: rays beside the horizon remain sky, while steeper rays still receive water haze.
+
+**From the code:** the water's alpha also fades to zero between 50% and 90% of the view distance, revealing the sky behind it
+before the mesh clips. `atmoWaterWeight` is shared with the shafts, which blend the water's haze correction into their sky correction
+by that same weight. The fade is a viewer choice, not a claim about Kenshi. Both water styles use it; near water is unchanged.
+
+**Observed** in the same west-facing Hub view, 960 x 540, FXAA, without objects, foliage, particles, GI or reflections:
+the final fade removes the straight band; clipping the analytic hit alone only moves it down to the actual water's far edge.
+All four apply shaders compile in `LightShaftTests.All_shaft_apply_paths_compile_with_the_water_horizon_fade`.
+The corresponding sunrise view (`--yaw 274 --time 5.5`) was also checked with flat water (`--faithful water`)
+and the separate apply (`MEITOU_LAYER_MERGE=0`): no straight horizon band.
+
 ## Open
 
 - **No temporal reprojection of the grid itself.** Without a temporal upscaler (FXAA) the jitter is fixed, a still pattern rather than a shimmer.

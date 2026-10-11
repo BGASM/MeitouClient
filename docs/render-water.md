@@ -4,7 +4,11 @@ Part of the world view of `meitou-viewer` (and the game, which shares `src/Meito
 
 - **Water** (`WaterRenderer`; [formats/terrain.md](formats/terrain.md#water)): one surface at Y = 100, a
   quad centred on the eye and 1.5 times the view distance wide, so the sea reaches the horizon in every direction, past
-  the world's edge too (the game's own distant plane stops at the edge; the infinite sea is the viewer's choice). Beyond
+  the world's edge too (the game's own distant plane stops at the edge; the infinite sea is the viewer's choice).
+  50% of the view distance the rendered water gradually fades into the sky behind it, disappearing at 90% before the far clip;
+  the shafts' water correction uses the same fade ([render-shafts.md](render-shafts.md#water-horizon-correction-2026-10-12)).
+  This viewer choice removes the straight sunset/sunrise edge where the water's haze colour differs from the sky.
+  Beyond
   the edge the water colour and parameters fade over 30000 units from the edge pixels to the open sea (the most common
   parameters among the outer ring of the maps), so the last pixels do not stretch outwards, and the water counts as deep.
   It has colour from `watercolourmap.png`, flow from `flowmap.png`, the `water.png` normal map scrolled three

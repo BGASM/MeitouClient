@@ -161,7 +161,7 @@ static class PostProcessShaders
 
         float viewZ(float d, vec2 nf) { float zd = 2.0 * d - 1.0; return nf.x * nf.y / (nf.y - zd * (nf.y - nf.x)); }
 
-        float sceneDistance(ivec2 p, out vec3 dir, out bool sky)
+        float sceneDistance(ivec2 p, out vec3 dir, out bool sky, out float waterWeight)
         {
             float d = texelFetch(uNearDepth, p, 0).r;
             vec2 planes = uNearPlanes;
@@ -175,11 +175,19 @@ static class PostProcessShaders
             float len = length(perZ);
             dir = perZ / len;
             sky = d >= 1.0;
+            waterWeight = 1.0;
             float dist = sky ? 1e9 : viewZ(d, planes) * len;
             if (uWaterY > -1e30 && abs(dir.y) > 1e-6)
             {
                 float tw = (uWaterY - uShaftEye.y) / dir.y;
-                if (tw > 0.0 && tw < dist) { dist = tw; sky = false; }
+                // The water's analytic plane must stop at the same far clip as its rendered mesh.
+                float waterFar = (uHasFar != 0 ? uFarPlanes.y : uNearPlanes.y) * len;
+                if (tw > 0.0 && tw < waterFar && tw < dist)
+                {
+                    dist = tw;
+                    sky = false;
+                    waterWeight = atmoWaterWeight(tw, waterFar / len);
+                }
             }
             return dist;
         }
@@ -202,9 +210,10 @@ static class PostProcessShaders
             ivec2 p = min(ivec2(gl_FragCoord.xy) * 2, ivec2(uFullSize) - 1);
             vec3 dir;
             bool sky;
-            float dist = sceneDistance(p, dir, sky);
+            float waterWeight;
+            float dist = sceneDistance(p, dir, sky, waterWeight);
             vec4 layer = vec4(0.0, 0.0, 0.0, 1.0);
-            if (uLayers.x > 0.5) layer = shaftLayer((vec2(p) + 0.5) / uFullSize, dir, sky ? uShaftRange.y : dist, sky);
+            if (uLayers.x > 0.5) layer = shaftLayer((vec2(p) + 0.5) / uFullSize, dir, sky ? uShaftRange.y : dist, sky, waterWeight);
             if (uLayers.y > 0.5)
             {
                 vec3 add;
@@ -240,7 +249,8 @@ static class PostProcessShaders
                     ivec2 t = min(base + ivec2(i, j), size - 1);
                     vec3 tDir;
                     bool tSky;
-                    float tDist = sceneDistance(min(t * 2, ivec2(uFullSize) - 1), tDir, tSky);
+                    float tWaterWeight;
+                    float tDist = sceneDistance(min(t * 2, ivec2(uFullSize) - 1), tDir, tSky, tWaterWeight);
                     float r = abs(tDist - dist) / max(min(tDist, dist), 1.0);
                     vec4 v = texelFetch(uLayerHalf, t, 0);
                     bestR = min(bestR, r);
@@ -275,13 +285,14 @@ static class PostProcessShaders
             ivec2 p = ivec2(gl_FragCoord.xy);
             vec3 dir;
             bool sky;
-            float dist = sceneDistance(p, dir, sky);
+            float waterWeight;
+            float dist = sceneDistance(p, dir, sky, waterWeight);
             vec4 layer = vec4(0.0, 0.0, 0.0, 1.0);   // scene * a + rgb
             vec4 up = vec4(0.0, 0.0, 0.0, 1.0);
             // Half size, unless no texel near this pixel shows a surface at its distance (a twig against the far fog): then here, at full size.
             bool fromHalf = (uHalf.x > 0.5 || uHalf.y > 0.5) && halfUpsampled(p, dist, up);
             bool shaftsHere = uLayers.x > 0.5 && !(fromHalf && uHalf.x > 0.5), fogHere = uLayers.y > 0.5 && !(fromHalf && uHalf.y > 0.5);
-            if (shaftsHere) layer = shaftLayer(vUv, dir, sky ? uShaftRange.y : dist, sky);
+            if (shaftsHere) layer = shaftLayer(vUv, dir, sky ? uShaftRange.y : dist, sky, waterWeight);
             if (fromHalf) layer = uHalf.x > 0.5 ? up : vec4(layer.rgb * up.a + up.rgb, layer.a * up.a);   // the texture's own order: the shafts' first, then the fog
             if (fogHere)
             {
@@ -302,7 +313,7 @@ static class PostProcessShaders
     /// draws those pixels alone (its full-screen triangle, at depth 0.5 in GL clip space, passes "less" only against the 1), computing everything at full size. The full pass carries the shafts' and the fog volumes' code,
     /// which in one shader with the upsample more than doubled the time of the pass (registers: 0.08 against 0.17 ms with the fallback code removed).
     /// </summary>
-    public static readonly string SceneLayersLean = "#version 330 core\n" + LightShaftShaders.CommonUniforms + SceneDistance + HalfUpsample + """
+    public static readonly string SceneLayersLean = "#version 330 core\n" + LightShaftShaders.CommonUniforms + AtmosphereShaders.WaterHorizonFunctions + SceneDistance + HalfUpsample + """
 
         in vec2 vUv;
         out vec4 fragColour;
@@ -314,7 +325,8 @@ static class PostProcessShaders
             ivec2 p = ivec2(gl_FragCoord.xy);
             vec3 dir;
             bool sky;
-            float dist = sceneDistance(p, dir, sky);
+            float waterWeight;
+            float dist = sceneDistance(p, dir, sky, waterWeight);
             vec4 layer;
             if (!halfUpsampled(p, dist, layer))
             {

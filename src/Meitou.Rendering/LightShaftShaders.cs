@@ -383,12 +383,21 @@ static class LightShaftShaders
             vec3 dir = perZ / len;
             bool sky = d >= 1.0;
             float dist = sky ? uShaftRange.y : viewZ(d, planes) * len;
+            float waterWeight = 1.0;
             if (uWaterY > -1e30 && abs(dir.y) > 1e-6)
             {
                 float tw = (uWaterY - uShaftEye.y) / dir.y;
-                if (tw > 0.0 && (sky || tw < dist)) { dist = tw; sky = false; }
+                // Water does not write depth. Rebuild its hit only inside the rendered frustum;
+                // an infinite plane otherwise turns the sky below the horizon into a hazed surface.
+                float waterFar = (uHasFar != 0 ? uFarPlanes.y : uNearPlanes.y) * len;
+                if (tw > 0.0 && tw < waterFar && (sky || tw < dist))
+                {
+                    dist = tw;
+                    sky = false;
+                    waterWeight = atmoWaterWeight(tw, waterFar / len);
+                }
             }
-            fragColour = shaftLayer(vUv, dir, dist, sky);
+            fragColour = shaftLayer(vUv, dir, dist, sky, waterWeight);
         }
         """;
 
@@ -413,7 +422,7 @@ static class LightShaftShaders
         vec4 shaftScatter(vec2 cell, int k) { return textureLod(uShaftScatter, shaftAt(cell, k), 0.0); }
 
         // dist: to the surface, the water in front of it, or for the sky (sky true) the grid's end.
-        vec4 shaftLayer(vec2 vUv, vec3 dir, float dist, bool sky)
+        vec4 shaftLayer(vec2 vUv, vec3 dir, float dist, bool sky, float waterWeight)
         {
             // The far ends of the slices: s - 1 is where this distance lies between them (-1 the eye, where the share is 1).
             float s = shaftSlice(min(dist, uShaftRange.y)) - 1.0;
@@ -438,12 +447,14 @@ static class LightShaftShaders
             if (uShaftParams.z > 0.5)   // --shafts-debug: red the share, green the haze's alpha here, blue the haze colour's brightness, over everything
             {
                 vec3 h = sky ? vec3(0.0) : atmoApplyHaze(vec3(0.0), uShaftEye, uShaftEye + dir * dist);
-                return vec4(share, shaftAlpha(dist), dot(h, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+                return vec4(share, shaftAlpha(dist), dot(h, vec3(0.2126, 0.7152, 0.0722)) * waterWeight, 0.0);
             }
             if (sky) return vec4(air.rgb, (1.0 - dark * uShaftParams.y * shaftAlpha(uShaftRange.y)) * air.a);
             vec3 haze = atmoApplyHaze(vec3(0.0), uShaftEye, uShaftEye + dir * dist);
             // (scene − dark · haze) · T + S: the haze darkened where shadowed, then the air layer in front of it.
-            return vec4(air.rgb - dark * haze * air.a, air.a);
+            vec4 surface = vec4(air.rgb - dark * haze * air.a, air.a);
+            vec4 distantSky = vec4(air.rgb, (1.0 - dark * uShaftParams.y * shaftAlpha(uShaftRange.y)) * air.a);
+            return mix(distantSky, surface, waterWeight);
         }
         """;
 }

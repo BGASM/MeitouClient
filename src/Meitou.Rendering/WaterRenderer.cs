@@ -38,6 +38,7 @@ public sealed unsafe class WaterRenderer : IDisposable
         in vec3 vWorld;
         out vec4 fragColour;
         uniform vec3 uEye;
+        uniform float uWaterFar;
         uniform float uWaterHeight;
         uniform float uHalfWorld;
         uniform float uTime;
@@ -159,7 +160,7 @@ public sealed unsafe class WaterRenderer : IDisposable
             a *= clamp(depth / 2.0, 0.0, 1.0);
             a = mix(1.0, a, clamp((4000.0 - dist) / 400.0, 0.0, 1.0));
 
-            fragColour = vec4(atmoApply(colour, uEye, vWorld), a);   // aerial perspective (AtmosphereShaders)
+            fragColour = vec4(atmoApply(colour, uEye, vWorld), a * atmoWaterWeight(dist, uWaterFar));
         }
         """;
 
@@ -372,6 +373,7 @@ public sealed unsafe class WaterRenderer : IDisposable
         in vec2 vBase;
         out vec4 fragColour;
         uniform vec3 uEye;
+        uniform float uWaterFar;
         uniform float uTime;
         uniform vec3 uSunDir;
         uniform vec3 uSunColour;
@@ -823,7 +825,7 @@ public sealed unsafe class WaterRenderer : IDisposable
 
             if (uWaterDebug > 1.5) { fragColour = vec4(s.river * fade, s.flow * 0.5 + 0.5, 1.0); return; }   // MEITOU_WATER_DEBUG=2: the river weight and flow direction
             if (uWaterDebug > 0.5) { fragColour = vec4(clamp(s.dist / 400.0, 0.0, 1.0), s.g, s.open, 1.0); return; }   // MEITOU_WATER_DEBUG=1
-            fragColour = vec4(atmoApply(colour, uEye, vWorld), a);
+            fragColour = vec4(atmoApply(colour, uEye, vWorld), a * atmoWaterWeight(dist, uWaterFar));
         }
         """;
 
@@ -857,7 +859,7 @@ public sealed unsafe class WaterRenderer : IDisposable
         public readonly LegacyProgram P;
         public readonly UniformHandle Lean;
         public readonly NativeSegment Segment;
-        public readonly UniformHandle ViewProjection, WaterHeight, Centre, Extent, Eye, HalfWorld, SeaA, SeaB, SeaColour, Time, SunDir, SunColour, GlintDir, GlintColour,
+        public readonly UniformHandle ViewProjection, WaterHeight, Centre, Extent, Eye, WaterFar, HalfWorld, SeaA, SeaB, SeaColour, Time, SunDir, SunColour, GlintDir, GlintColour,
             FogColour, FogDistance, Reflect, ReflectionViewProjection, Ocean, ShoreRect, GridStep, Shore, WaveFade, Debug, Refract, Screen, Clarity;
         public readonly SkyColourHandles Sky;
         public readonly SamplerSlot[] Maps;
@@ -870,6 +872,7 @@ public sealed unsafe class WaterRenderer : IDisposable
             (ViewProjection, WaterHeight, Centre, Extent, Eye, HalfWorld) = (P.Uniform("uViewProjection"), P.Uniform("uWaterHeight"), P.Uniform("uCentre"),
                 P.Uniform("uExtent"), P.Uniform("uEye"), P.Uniform("uHalfWorld"));
             (GlintDir, GlintColour) = (P.Uniform("uGlintDir"), P.Uniform("uGlintColour"));
+            WaterFar = P.Uniform("uWaterFar");
             (SeaA, SeaB, SeaColour, Time, SunDir, SunColour) = (P.Uniform("uSeaA"), P.Uniform("uSeaB"), P.Uniform("uSeaColour"), P.Uniform("uTime"),
                 P.Uniform("uSunDir"), P.Uniform("uSunColour"));
             (FogColour, FogDistance, Reflect, ReflectionViewProjection) = (P.Uniform("uFogColour"), P.Uniform("uFogDistance"), P.Uniform("uReflect"),
@@ -1143,6 +1146,7 @@ public sealed unsafe class WaterRenderer : IDisposable
         p.Set(h.WaterHeight, WorldWater.Height);
         p.Set(h.Centre, eye.X, eye.Z);
         p.Set(h.Extent, extent);
+        p.Set(h.WaterFar, extent / 1.5f);
         p.Set(h.Eye, eye.X, eye.Y, eye.Z);
         p.Set(h.HalfWorld, (float)WorldLayout.HalfWorldSize);
         p.Set(h.SeaA, seaA.X, seaA.Y, seaA.Z, seaA.W);
