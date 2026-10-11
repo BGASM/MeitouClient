@@ -283,6 +283,7 @@ public static class ImpostorShaders
         uniform vec4 uImpostor;          // xyz: the baked sphere's centre (object space), w: its radius (object units)
         uniform float uImpostorGrid;
         uniform vec4 uImpostorView;      // w 1: a directional view (a shadow cascade), xyz towards its viewer (world); w 0: uEye
+        uniform uint uImpostorBox;       // the mesh's bounding box for a tight quad (ImpostorQuad.Pack): bits 0 to 29 its half extents as thousandths of the radius, bit 30 on; 0: the sphere's silhouette
         out vec3 vObjectPoint;
         flat out vec3 vObjectEye;
         flat out vec2 vCellA;
@@ -296,6 +297,8 @@ public static class ImpostorShaders
         flat out vec4 vModel3;
         flat out float vFadeKey;
         """ + Functions + """
+        // invariant: the depth prepass (ImpostorPrepass) and the colour pass compile this stage next to different fragment stages, and the colour pass tests depth EQUAL.
+        invariant gl_Position;
         void main()
         {
             mat4 model = mat4(vec4(aInstance0.xyz, 0.0), vec4(aInstance1.xyz, 0.0), vec4(aInstance2.xyz, 0.0), vec4(aInstance3.xyz, 1.0));
@@ -320,8 +323,17 @@ public static class ImpostorShaders
             vec2 c = vec2(float(cu[corner]), float(cv[corner])) * 2.0 - 1.0;
             vec3 right = normalize(cross(uCameraUp, v));
             vec3 up = cross(v, right);
-            float extent = radius * dist / sqrt(dist * dist - radius * radius);   // the sphere's silhouette at the centre's plane
-            vec3 p = centre + (right * c.x + up * c.y) * extent;
+            vec2 extent = vec2(radius * dist / sqrt(dist * dist - radius * radius));   // the sphere's silhouette at the centre's plane
+            if ((uImpostorBox >> 30u) != 0u && dist > 1.5 * radius)
+            {
+                // The mesh's bounding box seen from the eye: the rectangle in the centre's plane that holds its outline, grown by the depth the box has (a point a
+                // radius nearer the eye projects that much wider) and never wider than the sphere's; the quad is a fifth to two thirds of the sphere's square for a tree.
+                vec3 hs = vec3(float(uImpostorBox & 1023u), float((uImpostorBox >> 10u) & 1023u), float((uImpostorBox >> 20u) & 1023u)) * (uImpostor.w / 1023.0);
+                vec3 b0 = basis[0] * hs.x, b1 = basis[1] * hs.y, b2 = basis[2] * hs.z;
+                vec2 box = vec2(abs(dot(right, b0)) + abs(dot(right, b1)) + abs(dot(right, b2)), abs(dot(up, b0)) + abs(dot(up, b1)) + abs(dot(up, b2)));
+                extent = min(extent, box * (dist / (dist - radius)));
+            }
+            vec3 p = centre + right * (c.x * extent.x) + up * (c.y * extent.y);
             vObjectPoint = inverse * (p - translation);
             vObjectEye = inverse * (eye - translation);
             vModel0 = model[0]; vModel1 = model[1]; vModel2 = model[2]; vModel3 = model[3];
@@ -330,13 +342,8 @@ public static class ImpostorShaders
         """;
 
 
-    /// <summary>
-    /// The fragment shader (early depth testing stays on: the quad's own depth is written, the atlas has no depth). The mesh shader's lighting
-    /// on the sampled surface, the same fade dither as the meshes (complementary in the crossfade band), and one frame of the three per pixel by a
-    /// noise independent of the fade's (or the three blended with <c>uImpostorBlend</c>). The Meitou shadow receiver without its blocker search
-    /// (docs/impostors.md section 14).
-    /// </summary>
-    public static readonly string Fragment = "#version 330 core\n#define MS_NO_BLOCKER_SEARCH\n" + AtmosphereShaders.Functions + Functions + FragmentFunctions + """
+    /// <summary>The fragment stages' inputs and uniforms that the visibility test of <see cref="Fragment"/> and <see cref="PrepassFragment"/> reads (and the lighting's).</summary>
+    const string FragmentInputs = """
         in vec3 vObjectPoint;
         flat in vec3 vObjectEye;
         flat in vec2 vCellA;
@@ -357,29 +364,35 @@ public static class ImpostorShaders
         uniform bool uImpostorBlend;     // blend the three frames instead of picking one per pixel
         uniform int uImpostorDebug;      // 1: albedo, 2: normal (object space), 3: coverage, unlit
         uniform bool uCoverage;          // alpha to coverage (multisampled target), as the foliage meshes
-        uniform vec3 uLightDir;
-        uniform vec3 uEye;
-        uniform vec3 uFogColour;
-        uniform float uFogDistance;
-        out vec4 fragColour;
         float foliageDither() { return fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))); }
         float framePick() { return fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.00583715, 0.06711056)))); }
-        void main()
-        {
+        """;
+
+    /// <summary>
+    /// What decides whether a billboard pixel exists, shared by the colour program and the depth prepass (<see cref="PrepassFragment"/>) so that both make the same
+    /// decision: the fade, then the frame pick and the atlas sample (<c>s</c>), then the cut-out (<c>coverage</c>). <paramref name="discards"/> false (the colour after
+    /// the prepass, depth EQUAL): no fade and no cut-out, the prepass has taken both; the sample is still needed for the shading.
+    /// </summary>
+    static string FragmentVisible(bool discards) => """
             // The fade: as the meshes (a dither threshold, 2 = whole); negative = the complement of the mesh's dither (the crossfade).
             // The range fade (0 to 1) takes a threshold that follows the instance (vFadeKey) while the billboard is a few pixels across, and the
             // screen-door noise, shifted by the key, once it covers many (docs/impostors.md section 12); the crossfade keeps the mesh's own noise.
             float dither = foliageDither();
+            float pixels = 2.0 * uImpostor.w / max(length(dFdx(vObjectPoint)), 1e-9);   // the billboard's span on the screen
+
+    """ + (discards ? """
             if (vFade < 0.0) { if (dither < -vFade) discard; }
             else if (vFade < 1.0)
             {
-                float pixels = 2.0 * uImpostor.w / max(length(dFdx(vObjectPoint)), 1e-9);
                 if (fract(vFadeKey + smoothstep(3.0, 12.0, pixels) * dither) >= vFade) discard;
             }
+
+    """ : "") + """
             float pick = uImpostorBlend ? -1.0 : framePick();
             ImpostorSurface s = impostorSample(uImpostorAlbedo, uImpostorNormal, uImpostorGrid, uImpostor.xyz, uImpostor.w,
                 vObjectEye, vObjectPoint - vObjectEye, vCellA, vCellB, vCellC, vWeights, pick);
-            if (uImpostorDebug == 3) { fragColour = vec4(vec3(s.coverage), 1.0); return; }
+
+    """ + (discards ? """
             float coverage = 1.0;
             if (uCoverage)
             {
@@ -387,6 +400,14 @@ public static class ImpostorShaders
                 if (coverage <= 0.0) discard;
             }
             else if (s.coverage < 0.5) discard;
+
+    """ : """
+            float coverage = 1.0;
+
+    """);
+
+    /// <summary>The colour program's main, from the sampled surface on: the wetness, the mesh shader's lighting and the haze.</summary>
+    const string FragmentLighting = """
             mat4 model = mat4(vModel0, vModel1, vModel2, vModel3);
             vec3 world = (model * vec4(s.position, 1.0)).xyz;
             vec3 n = normalize(mat3(model) * s.normal);
@@ -417,6 +438,49 @@ public static class ImpostorShaders
             if (uFogDistance > 0.0) colour = atmoApply(colour, uEye, world);
             fragColour = vec4(colour, coverage);
         }
+
+        """;
+
+    static string ColourFragment(bool discards) => "#version 330 core\n#define MS_NO_BLOCKER_SEARCH\n" + AtmosphereShaders.Functions + Functions + FragmentFunctions + FragmentInputs + "\n" + """
+        uniform vec3 uLightDir;
+        uniform vec3 uEye;
+        uniform vec3 uFogColour;
+        uniform float uFogDistance;
+        out vec4 fragColour;
+        void main()
+        {
+
+        """ + FragmentVisible(discards) + """
+            if (uImpostorDebug == 3) { fragColour = vec4(vec3(s.coverage), 1.0); return; }
+
+        """ + FragmentLighting;
+
+    /// <summary>
+    /// The fragment shader (early depth testing stays on: the quad's own depth is written, the atlas has no depth). The mesh shader's lighting
+    /// on the sampled surface, the same fade dither as the meshes (complementary in the crossfade band), and one frame of the three per pixel by a
+    /// noise independent of the fade's (or the three blended with <c>uImpostorBlend</c>). The Meitou shadow receiver without its blocker search
+    /// (docs/impostors.md section 14).
+    /// </summary>
+    public static readonly string Fragment = ColourFragment(discards: true);
+
+    /// <summary>
+    /// <see cref="Fragment"/> for the colour pass that follows the depth prepass (<see cref="ImpostorPrepass"/>, depth test EQUAL, no depth write): the same lighting
+    /// without the fade's and the cut-out's <c>discard</c>s, which the prepass made; only the pixels it left in the depth buffer reach the lighting.
+    /// </summary>
+    public static readonly string FragmentAfterPrepass = ColourFragment(discards: false);
+
+    /// <summary>
+    /// The depth prepass of the billboards (<see cref="ImpostorPrepass"/>, the main colour view, colour mask 0): <see cref="Fragment"/>'s decision whether the pixel exists
+    /// (the fade, the frame pick, the cut-out) and nothing else, so the lighting runs once per visible pixel in the colour pass. The vertex stage is the same text
+    /// (<c>invariant gl_Position</c>), so the depths are equal.
+    /// </summary>
+    public static readonly string PrepassFragment = "#version 330 core\n" + Functions + FragmentFunctions + FragmentInputs + "\n" + """
+        void main()
+        {
+
+        """ + FragmentVisible(discards: true) + """
+        }
+
         """;
 
     /// <summary>
@@ -534,7 +598,7 @@ public static class ImpostorShaders
         ["uImpostor"] = "pc.sphere", ["uCameraUp"] = "pc.cameraUp", ["uImpostorGrid"] = "pc.grid",
         ["uImpostorAlbedo"] = "textures2D[pc.albedo]", ["uImpostorNormal"] = "textures2D[pc.normal]", ["uImpostorGloss"] = "pc.gloss",
         ["uImpostorBlend"] = "pc.blend", ["uImpostorDebug"] = "pc.debug", ["uCoverage"] = "pc.coverage",
-        ["uImpostorView"] = "pc.view",
+        ["uImpostorView"] = "pc.view", ["uImpostorBox"] = "pc.spare",
     };
 
     /// <summary><see cref="Vertex"/> in the native model.</summary>
@@ -542,6 +606,12 @@ public static class ImpostorShaders
 
     /// <summary><see cref="Fragment"/> in the native model.</summary>
     public static string FragmentNative() => Gi.GiResolveShaders.WithAlbedo(NativeShaders.Port(Fragment, NativeShaders.Map(NativeMap), PushMembers), inShader: true);
+
+    /// <summary><see cref="FragmentAfterPrepass"/> in the native model.</summary>
+    public static string FragmentAfterPrepassNative() => Gi.GiResolveShaders.WithAlbedo(NativeShaders.Port(FragmentAfterPrepass, NativeShaders.Map(NativeMap), PushMembers), inShader: true);
+
+    /// <summary><see cref="PrepassFragment"/> in the native model.</summary>
+    public static string PrepassFragmentNative() => NativeShaders.Port(PrepassFragment, NativeShaders.Map(NativeMap), PushMembers);
 
     // ---- TERRAIN-mode rocks (docs/impostors.md section 13) ----
 

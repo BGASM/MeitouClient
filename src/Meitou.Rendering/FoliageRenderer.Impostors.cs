@@ -1006,15 +1006,23 @@ public sealed partial class FoliageRenderer
         var state = Gpu.CurrentState() with { Cull = Silk.NET.Vulkan.CullModeFlags.None, AlphaToCoverage = coverage };
         impostorDraw.Pipeline(depth ? ImpostorProgram.Caster : ImpostorProgram.Plain, state, Gpu.CurrentTargets().Formats);
         if (!depth && RockImpostorsActive) impostorDraw.Pipeline(ImpostorProgram.Rock, state, Gpu.CurrentTargets().Formats);
+        if (!depth && PrepassView && ImpostorPrepass.Enabled && FoliagePrepass.Enabled && !coverage)
+        {
+            impostorDraw.Pipeline(ImpostorProgram.Prepass, state with { ColourMask = 0 }, Gpu.CurrentTargets().Formats);
+            impostorDraw.Pipeline(ImpostorProgram.AfterPrepass, state, Gpu.CurrentTargets().Formats);
+        }
     }
+
+    /// <summary>Which billboards an <see cref="AddImpostorDraws"/> call draws and with which program: the scene's (all, the colour program with its discards), the depth prepass (the plain ones), the colour after it (the plain ones, no discards) or the rocks' alone.</summary>
+    enum ImpostorPass { Scene, Prepass, AfterPrepass, RocksOnly }
 
     /// <summary>The impostor draws appended to a mesh segment's job (after its mesh draws; no culling, the rows already bound): a colour view's
     /// lit program, or a cascade's caster facing the sun (the direction towards it from the cascade's matrix).</summary>
-    void AddImpostorDraws(MeshJob job, bool depth, Matrix4x4 viewProjection, PassTargets targets, DrawState state, bool coverage, bool indirect, int argsFirst)
+    void AddImpostorDraws(MeshJob job, bool depth, Matrix4x4 viewProjection, PassTargets targets, DrawState state, bool coverage, bool indirect, int argsFirst, ImpostorPass pass = ImpostorPass.Scene)
     {
         impostorDraw ??= new ImpostorDraw(Gpu, nativeFrame);
         var drawState = state with { Cull = Silk.NET.Vulkan.CullModeFlags.None };
-        var program = depth ? ImpostorProgram.Caster : ImpostorProgram.Plain;
+        var program = depth ? ImpostorProgram.Caster : pass == ImpostorPass.Prepass ? ImpostorProgram.Prepass : pass == ImpostorPass.AfterPrepass ? ImpostorProgram.AfterPrepass : ImpostorProgram.Plain;
         var pipeline = impostorDraw.Pipeline(program, drawState, targets.Formats);
         var up = new Vector3(viewProjection.M12, viewProjection.M22, viewProjection.M32);
         up = up.LengthSquared() > 0 ? Vector3.Normalize(up) : Vector3.UnitY;
@@ -1025,9 +1033,12 @@ public sealed partial class FoliageRenderer
         // A TERRAIN-mode rock's colour draws fade to the ground colour with distance as the terrain's mesh shader does (its own program, the terrain's maps in the push).
         GraphicsPipeline? rockPipeline = null;
         (Vector4 Region, uint Ground, uint WorldColour, uint Colour, float HalfWorld, float FarStart, float FarEnd, uint Flags) far = default;
+        bool firstDraw = true;
         for (int k = 0; k < impostorDraws.Count; k++)
         {
             var d = impostorDraws[k];
+            bool rockDraw = d.Asset.RockOf is not null && !depth && rockTerrain is not null;
+            if (pass is ImpostorPass.Prepass or ImpostorPass.AfterPrepass ? rockDraw : pass == ImpostorPass.RocksOnly && !rockDraw) continue;   // the prepass draws the plain billboards, the rocks' go after it
             var t = d.Asset.Impostor!.Textures!;
             var atlas = t.Atlas;
             var push = new ImpostorPush
@@ -1035,12 +1046,13 @@ public sealed partial class FoliageRenderer
                 Sphere = new Vector4(atlas.Centre, atlas.Radius), CameraUp = up, Grid = atlas.Grid,
                 Albedo = t.Index(0, textureBias), Normal = t.Index(1, textureBias), Gloss = atlas.Gloss,
                 Coverage = coverage ? 1u : 0u, View = view,
+                Spare = depth || !ImpostorQuad.Enabled || Vector3.DistanceSquared(d.Asset.Centre, atlas.Centre) > 1e-4f * atlas.Radius * atlas.Radius ? 0 : ImpostorQuad.Pack(d.Asset.HalfExtent, atlas.Radius),
             };
             MeshPush bytes = default;
             var drawPipeline = pipeline;
-            if (d.Asset.RockOf is not null && !depth && rockTerrain is not null)
+            if (rockDraw)
             {
-                if (rockPipeline is null) { rockPipeline = impostorDraw.Pipeline(ImpostorProgram.Rock, drawState, targets.Formats); far = rockTerrain.RockFarView(drawMaterialDistance); }
+                if (rockPipeline is null) { rockPipeline = impostorDraw.Pipeline(ImpostorProgram.Rock, drawState, targets.Formats); far = rockTerrain!.RockFarView(drawMaterialDistance); }
                 var rockPush = new ImpostorRockPush
                 {
                     Sphere = push.Sphere, CameraUp = push.CameraUp, Grid = push.Grid, Albedo = push.Albedo, Normal = push.Normal, Gloss = push.Gloss, Coverage = push.Coverage, View = push.View,
@@ -1053,10 +1065,11 @@ public sealed partial class FoliageRenderer
             else System.Runtime.CompilerServices.Unsafe.As<MeshPush, ImpostorPush>(ref bytes) = push;
             job.Add(new MeshJob.Draw
             {
-                SetRaster = k == 0, Cull = drawState.Cull, Pipeline = drawPipeline, Vertices = none, Elements = quad, Push = bytes,
+                SetRaster = firstDraw, Cull = drawState.Cull, Pipeline = drawPipeline, Vertices = none, Elements = quad, Push = bytes,
                 Args = indirect ? gpuResult.Args : default, ArgsOffset = gpuResult.ArgsOffset + (ulong)(argsFirst + k) * 20,
                 IndexCount = 6, Instances = d.Instances, FirstInstance = d.FirstInstance,
             });
+            firstDraw = false;
         }
     }
 }
