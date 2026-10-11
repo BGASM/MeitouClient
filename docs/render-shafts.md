@@ -26,7 +26,7 @@ weight 0.5 (`--shafts-sky`). That gives the dark wedge a ridge casts into the sk
 
 ## The grid (`LightShaftShaders`, `PostProcess.Shafts.cs`)
 
-*From the code.* There are three full-screen fragment passes after the scene and the GI resolve, before the placed fog volumes (which
+*From the code.* There are three full-screen fragment passes (integrate, and the air layer's scatter below, have been one compute kernel since 2026-10-11) after the scene and the GI resolve, before the placed fog volumes (which
 blend over the hazed scene, so the correction has to come first):
 
 1. **Inject** (atlas, RG16F). A froxel grid of `cells across × (cells across × aspect) × slices` (default 160 × 90 × 64), with
@@ -35,7 +35,7 @@ blend over the hazed scene, so the correction has to come first):
    slices are tiled 8 per row into one 2D atlas, so no 3D images are needed. Each cell takes `--shafts-grid`'s sample count (default 2)
    of shadow lookups, stratified over the slice's depth and jittered within the cell (interleaved gradient noise, seeded
    by the frame under a temporal upscaler, fixed without one), and writes `(Δα · lit, Δα)` with `Δα` the haze alpha gained across the slice.
-2. **Integrate** (atlas, R32F). For each cell, the sums over its slice and every nearer one: `L = Σ Δα·lit / Σ Δα`, or 1 where no
+2. **Integrate** (atlas, R32F; since 2026-10-11 part of the scan kernel, see "Scan kernel"). For each cell, the sums over its slice and every nearer one: `L = Σ Δα·lit / Σ Δα`, or 1 where no
    haze has gathered yet.
 3. **Apply** over the scene colour, with the fog volumes' blend `scene · a + colour`. It rebuilds the pixel's distance the way the fog
    volumes pass does (near slice depth, then far slice depth, then the water plane where it is in front). It reads `L` bilinearly across
@@ -46,6 +46,44 @@ The temporal upscaler (TAA, FSR or DLSS) averages the per-frame jitter, because 
 **Shadow term of a point in the air** (`shaftShadow`). It is one hardware compare in the first cascade whose box holds the point. There
 is no filter, and there is no surface to offset along its normal. The Meitou receiver adds its fade at the shadow range, its terrain term
 (mountains out to the horizon, `msTerrain`) and its landmark map. The Faithful receiver's cascades end at the last split.
+
+## Scan kernel (integrate and scatter as one compute dispatch)
+
+*From the code* (2026-10-11, `LightShaftShaders.Scan`, `PostProcess.ShaftScanRun`; `shafts-scan` A/B switch, `MEITOU_SHAFT_SCAN=0` starts with it off). The integrate and scatter
+passes above are fragment passes that, for a cell in slice `k`, loop over slices `0..k`: slices squared reads per column (64 x 65 / 2 = 2080 reads for 64 slices),
+and for the air layer the same again with three `exp()` per step. Both are running sums along the same ray, so one thread per cell column now walks the slices front to back
+once (8 x 8 threads a group, 20 x 12 groups at 160 x 90 cells): the running sums of the inject atlas's two channels give the light atlas (`L`, R32F), and
+the same walk carries the air layer's `(scattered, T)` into the scatter atlas (RGBA16F; skipped when the air density is 0). 64 reads and writes a column.
+The arithmetic is the fragment passes' term for term: the kernel includes the same GLSL functions (`CommonFunctions`, `Alpha`, `AirFunctions`, split out of `Common` and
+`Air` for it) and takes the atmosphere's values (`uAtmoParams`, `uAtmoSimple`, `uAtmoHaze`, `uAtmoAltitude`, `uAtmoFog`, `uAtmoSun`, the sun's light, the environment factor and the
+irradiance cube for the sky's ambient) from the frame globals into a uniform block of the same names. The atlas's unused last-row tiles get what the passes wrote there. It needs the
+atlases as storage images (`ShaftScanSupported`: R32F and RGBA16F, as the merged post kernels); without them, or with the switch off, the two fragment passes run as before.
+Unit test: the kernel's bindings and block layout (`LightShaftTests`, Slow).
+
+*Observed* 2026-10-11, RTX 4070 shared with other sessions (so read the paired deltas), `--texture-quality 3` (lower texture mips so it fits beside other processes' video memory;
+it does not touch the post passes), Shark `--camera-code 018C6C25C7309B75C4723B5747D78075406DF4113E00A00C46 --radius 2 --size 1920x1080`.
+**Where the time went** (`MEITOU_SHAFT_STAMPS=1` stamps each grid pass as its own post section: `shafts-inject`, `shafts-integrate`, `shafts-scatter`; with the scan, `shafts-scan`;
+`--upscaler dlss --render-scale native --bench-frames 600`, GPU ms mean): at the camera's own time (noon, air layer off) inject 0.06, integrate 0.12 (0.18 in all);
+at `--time 7` (air layer on) inject 0.07, integrate 0.13, scatter 0.58 (median 0.81, p95 1.11; another process held the GPU lock just before, so this one is noisy), 0.78 in all.
+So the integrate is the biggest of the three while the air is off, and the scatter by far the biggest while it is on (the morning and evening mist).
+**After** (same views, A = scan, B = the fragment passes, `--ab shafts-scan --ab-period 16`, the `shafts` stage, A - B +-95%):
+
+| View | Scan (A) | Passes (B) | A - B |
+|---|---|---|---|
+| Shark, DLSS native, 768 frames, air off (noon) | 0.08 ms | 0.18 | -0.09 +-0.00 |
+| Shark, `--upscaler off --time 7`, 768 frames, air on | 0.10 | 0.46 | -0.36 +-0.01 |
+| Hub (`--view hub --time 22.5 --no-particles --lights off`), 160 frames, air on | 0.10 | 0.43 | -0.33 +-0.00 |
+
+The rest is the inject pass (0.06 to 0.07: 920 000 cells, two shadow compares each) and the scan (0.02 to 0.03).
+**Picture** (the harness's A vs B stills, `--upscaler off --bench-motion still`): with `--shafts-debug` (red = `L`, green = the haze alpha, blue = its brightness; no noise from the scene)
+at Shark `--time 7` and the Hub `--time 18` the two sides are identical, 0 pixels differ by 1/255 or more. The air layer has no debug view, so it is judged against a same-build control:
+Hub `--time 22.5 --no-particles --lights off`: scan against passes 335 671 pixels differ by 1/255 or more, 1014 by 4, 73 by 12, max 24; a control run with a switch that changes nothing
+(`--ab object-sort`) gives 335 678, 1018, 75, max 58, so the scan adds nothing over the still-to-still noise (water and wind, which the frozen clock does not hold). At Shark in the rain
+(`--time 7`, particles and lamps on) 478 058 / 6681 / 710 / max 34 against the 430 000 / 6600 / 764 / max 34 two stills of one build give. A run with `MEITOU_VK_VALIDATION=sync` reports 0 errors.
+
+**Tried and not done.** Skipping the inject's shadow compares where a slice gains no haze (`a1 == a0`) is not safe: the fog volumes' shadow reads each slice's sun share (blue)
+whether or not haze gathers there, and so does the air layer, and where the weather fog is on the alpha rises from the first unit anyway (Shark). The grid already ends where the haze is
+complete, so there are no slices beyond. Reusing the grid on still frames would drop the temporal upscaler's averaging of the per-frame jitter.
 
 ## Placed fog volumes
 
@@ -76,7 +114,7 @@ a separate switch). *Observed* 2026-10-10: at Shark in `Heavy_Rain` at 16:00 the
 ## Air layer
 
 *From the code.* `--shafts-air <x>` (default 1, Tab slider "Light shafts air", 0 for none): a medium of density `x · 1.5e-5` per world unit at the
-ground under the eye, falling off exponentially above it (scale height `--shafts-air-height`, 800). A fourth pass (`LightShaftShaders.Scatter`, RGBA16F
+ground under the eye, falling off exponentially above it (scale height `--shafts-air-height`, 800). A fourth pass (`LightShaftShaders.Scatter`, RGBA16F, run by the scan kernel since 2026-10-11, see "Scan kernel"
 atlas) marches each cell's slices front to back. Per slice it adds `T · (1 − e^(−σΔ)) · S · (1 − α)`, where `T` is the transmittance so far, σ the
 density at the slice's middle, Δ its length and α the game's haze alpha there (the layer sits in front of the haze, not on top of it). The radiance
 `S` is the sun's irradiance `π² · sunLight` (what a white Lambert surface lit by `kenshiLight` receives) times the slice's sun visibility times a
