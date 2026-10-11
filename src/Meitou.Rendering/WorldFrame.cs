@@ -1419,7 +1419,7 @@ static class WorldFrame
             host.Stage(8);
             if (gpu.Foliage is { } fogFoliage) { fogFoliage.FogCull = fogCull; fogFoliage.Occlusion = OcclusionAlternate && (fogFoliage.Gpu.Frame.Number & 1) == 1 ? default : post.OcclusionFor(eye); }
             if (gpu.Foliage is { } prepassFoliage) prepassFoliage.PrepassView = true;
-            gpu.Foliage?.Draw(viewProjection, eye, frustum, render, light.SunDirection, light.FogColour, light.FogDistance, gpu.Terrain, continuation: foliageDrawn);
+            if (nearSlice || FoliageFarSlice.Enabled) gpu.Foliage?.Draw(viewProjection, eye, frustum, render, light.SunDirection, light.FogColour, light.FogDistance, gpu.Terrain, continuation: foliageDrawn);
             if (gpu.Foliage is { } prepassDone) prepassDone.PrepassView = false;
             if (gpu.Foliage is { } fogFoliageDone) { fogFoliageDone.FogCull = null; fogFoliageDone.Occlusion = default; }
             foliageDrawn = true;

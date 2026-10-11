@@ -795,6 +795,8 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         public bool Terrain => Mesh.MaterialType == 2;
         public Vector3 Centre;
         public float Radius = 1;
+        /// <summary>The bounding box's half extents (main and leaves meshes), for the tight billboard quad (<see cref="Impostors.ImpostorQuad"/>).</summary>
+        public Vector3 HalfExtent;
         /// <summary>Radius × largest scale (<see cref="FoliageSizes.Size"/>), known with <see cref="HasBounds"/>: the shadow cascades skip meshes too small for their texels.</summary>
         public float Size;
         /// <summary><see cref="Centre"/>, <see cref="Radius"/> and <see cref="SizeClass"/> are known (the mesh was decoded once; they never change).</summary>
@@ -908,6 +910,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
             var max = main.Max;
             if (leaves is not null) { min = Vector3.Min(min, leaves.Min); max = Vector3.Max(max, leaves.Max); }
             a.Centre = (min + max) / 2;
+            a.HalfExtent = (max - min) / 2;
             a.Radius = Math.Max((max - min).Length() / 2, 1);
             a.Size = FoliageSizes.Size(a.Radius, a.Mesh);
             a.SizeClass = FoliageSizes.Classify(a.Size);
@@ -1222,7 +1225,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
             if (meshDraws.Count > 0 || impostorDraws.Count > 0)
             {
                 // The depth prepass (FoliagePrepass): the main colour view with the GPU cull only (the reflection and the multisampled targets keep the single colour pass).
-                bool prepass = FoliagePrepass.Enabled && PrepassView && !depthPass && !coverage && !gpuResult.IsEmpty && meshDraws.Count > 0 && !GpuCullVerify;
+                bool prepass = FoliagePrepass.Enabled && PrepassView && !depthPass && !coverage && !gpuResult.IsEmpty && (meshDraws.Count > 0 || ImpostorPrepass.Enabled && impostorDraws.Count > 0) && !GpuCullVerify;
                 if (prepass)
                 {
                     RecordMeshes(prepassMesh, MeshPass.Prepass, viewProjection, eye, light, fogColour, fogDistance, coverage);
@@ -2390,16 +2393,19 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
             });
             drawIndex++;
         }
+        // The billboards: in the colour segment as before, or (ImpostorPrepass) in the prepass and in the colour after it, the rocks' alone after that.
+        bool billboardPrepass = (prepass || equal) && ImpostorPrepass.Enabled;
         if (impostorDraws.Count > 0 && !prepass && !equal) AddImpostorDraws(job, depth, viewProjection, targets, state, coverage, indirect, meshDraws.Count + rockDraws.Count);
+        else if (impostorDraws.Count > 0 && billboardPrepass) AddImpostorDraws(job, false, viewProjection, targets, state, coverage, indirect, meshDraws.Count + rockDraws.Count, prepass ? ImpostorPass.Prepass : ImpostorPass.AfterPrepass);
         Gpu.Record(label, job);
-        if (equal && impostorDraws.Count > 0)
+        if (equal && impostorDraws.Count > 0 && (!billboardPrepass || impostorDraws.Exists(static d => d.Asset.RockOf is not null)))
         {
-            // The billboards are not in the prepass (their fragment stage has its own discard): their own segment, with the scene's depth test and write.
+            // The billboards are not in the prepass (their fragment stage has its own discard), or only the rocks' are not: their own segment, with the scene's depth test and write.
             var billboards = meshJobs.Rent();
             (billboards.Owner, billboards.Targets, billboards.State, billboards.Layout, billboards.Count) = (this, targets, sceneState, p.Layout, 0);
             billboards.Frame = job.Frame;
             for (int a = 0; a < 4; a++) billboards.Rows[a] = job.Rows[a];
-            AddImpostorDraws(billboards, false, viewProjection, targets, sceneState, coverage, indirect, meshDraws.Count + rockDraws.Count);
+            AddImpostorDraws(billboards, false, viewProjection, targets, sceneState, coverage, indirect, meshDraws.Count + rockDraws.Count, billboardPrepass ? ImpostorPass.RocksOnly : ImpostorPass.Scene);
             Gpu.Record("foliage billboards", billboards);
         }
     }
