@@ -607,7 +607,7 @@ public sealed unsafe partial class PostProcess : IDisposable
 
     /// <summary>One full-screen triangle with <paramref name="p"/> into <paramref name="target"/> (its uniforms and samplers set before), in a
     /// rendering of its own, followed by a full barrier (VkGl barriered before every pass).</summary>
-    readonly Dictionary<(LegacyProgram, Vk.Format), GraphicsPipeline> pipelines = [];
+    readonly Dictionary<(LegacyProgram, Vk.Format, Vk.Format, DrawState), GraphicsPipeline> pipelines = [];
 
     void Draw(LegacyProgram p, Target2D target) => Draw(p, target.Attachment, target.Format, target.Width, target.Height, target.Width, target.Height);
 
@@ -627,8 +627,8 @@ public sealed unsafe partial class PostProcess : IDisposable
         cmd.SetRaster(s.Cull, s.Front);
         cmd.SetDepth(s.DepthTest, s.DepthWrite, s.Compare);
         cmd.SetDepthBias(s.BiasEnable, s.BiasConstant, s.BiasSlope);
-        if (!pipelines.TryGetValue((p, format), out var pipeline))
-            pipelines[(p, format)] = pipeline = Gpu.Pipelines.Get(s.Pipeline(p.Program, p.VertexLayout([]), Vk.PrimitiveTopology.TriangleList,
+        if (!pipelines.TryGetValue((p, format, depthFormat, s), out var pipeline))
+            pipelines[(p, format, depthFormat, s)] = pipeline = Gpu.Pipelines.Get(s.Pipeline(p.Program, p.VertexLayout([]), Vk.PrimitiveTopology.TriangleList,
                 new AttachmentFormats(format, depthFormat), p.Name));
         cmd.BindPipeline(pipeline);
         p.Flush(cmd);
