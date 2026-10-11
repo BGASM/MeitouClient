@@ -28,6 +28,9 @@ internal static class GiFogHide
     /// <summary>Set in a list entry of a hidden probe: its update is one of every <c>period</c>, so the blend uses the hysteresis of that many updates in one.</summary>
     public const uint SlowBit = 0x80000000u;
 
+    /// <summary>Set in a list entry of a probe of the far cascade that is updated on one of every <c>farPeriod</c> rounds only (<see cref="GiProbes.FarPeriod"/>).</summary>
+    public const uint FarBit = 0x40000000u;
+
     /// <summary>
     /// A frame's probe list: every <paramref name="phases"/>-th probe from <paramref name="phase"/> in ascending order (the shaders' old
     /// <c>gid * phases + phase</c>), but a probe whose layer is below its column's entry of <paramref name="hiddenLayers"/> (per tile, cascade-major, the
@@ -35,11 +38,18 @@ internal static class GiFogHide
     /// phase's updates), with <see cref="SlowBit"/> set. <paramref name="period"/> 0: no probe is hidden and the list is the old one. Offsets are the
     /// cascades' toroidal offsets of window column 0 (x, z, in <paramref name="offsets"/> as x0, z0, x1, z1). Returns the entries written.
     /// </summary>
-    public static int List(Span<uint> into, int phases, int phase, uint round, int period, ReadOnlySpan<byte> hiddenLayers, params ReadOnlySpan<float> offsets)
+    public static int List(Span<uint> into, int phases, int phase, uint round, int period, ReadOnlySpan<byte> hiddenLayers, params ReadOnlySpan<float> offsets) =>
+        List(into, phases, phase, round, period, 0, hiddenLayers, offsets);
+
+    /// <summary>
+    /// As above, with the probes of the cascades after the first (<paramref name="farPeriod"/> above 1) listed only on one of every <paramref name="farPeriod"/> of their own rounds,
+    /// keyed on the tile like the sleep rule, with <see cref="FarBit"/> set; a probe both hidden and far is a hidden one.
+    /// </summary>
+    public static int List(Span<uint> into, int phases, int phase, uint round, int period, int farPeriod, ReadOnlySpan<byte> hiddenLayers, ReadOnlySpan<float> offsets)
     {
         const int columns = GiProbes.Columns, layers = GiProbes.Layers;
         int n = 0;
-        if (period <= 0)
+        if (period <= 0 && farPeriod <= 1)
         {
             for (int p = phase; p < GiProbes.Probes; p += phases) into[n++] = (uint)p;
             return n;
@@ -54,7 +64,7 @@ internal static class GiFogHide
                 for (int wx = 0; wx < columns; wx++)
                 {
                     int colX = offX + wx; if (colX >= columns) colX -= columns;
-                    int hidden = hiddenLayers[(c * columns + colZ) * columns + colX], first = ((c * columns + wz) * columns + wx) * layers;
+                    int hidden = period > 0 ? hiddenLayers[(c * columns + colZ) * columns + colX] : 0, first = ((c * columns + wz) * columns + wx) * layers;
                     for (int layer = phase; layer < layers; layer += phases)
                     {
                         int p = first + layer;
@@ -63,6 +73,11 @@ internal static class GiFogHide
                             // Keyed on the probe's tile, as the sleep rule is (giAsleep): a hidden sleeper is then listed only on rounds where it is awake (period a multiple of 8).
                             if ((round + (uint)(((c * columns + colZ) * columns + colX) * layers + layer)) % (uint)period != 0) continue;
                             into[n++] = (uint)p | SlowBit;
+                        }
+                        else if (c > 0 && farPeriod > 1)
+                        {
+                            if ((round + (uint)(((c * columns + colZ) * columns + colX) * layers + layer)) % (uint)farPeriod != 0) continue;
+                            into[n++] = (uint)p | FarBit;
                         }
                         else into[n++] = (uint)p;
                     }

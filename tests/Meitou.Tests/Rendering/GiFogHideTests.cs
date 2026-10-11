@@ -135,4 +135,34 @@ public class GiFogHideTests
         Assert.NotEmpty(seen);
         Assert.All(seen.Values, count => Assert.Equal(1, count));   // each hidden probe exactly once in the 16 rounds
     }
+    [Fact]
+    public void The_far_cascade_is_listed_once_in_each_far_period_of_its_rounds_and_a_hidden_probe_keeps_its_own_rule()
+    {
+        const int phases = 4, phase = 2, period = 16, farPeriod = 2;
+        var hidden = new byte[GiProbes.Cascades * GiProbes.Columns * GiProbes.Columns];
+        // Cascade 1's first toroidal row of columns (offsets 0): the lowest 3 layers hidden.
+        for (int colX = 0; colX < GiProbes.Columns; colX++) hidden[(1 * GiProbes.Columns + 0) * GiProbes.Columns + colX] = 3;
+        var into = new uint[GiProbes.Probes];
+        var far = new Dictionary<uint, int>();
+        var slow = new Dictionary<uint, int>();
+        int near = 0;
+        for (uint round = 0; round < period; round++)
+        {
+            int n = GiFogHide.List(into, phases, phase, round, period, farPeriod, hidden, [0, 0, 0, 0]);
+            for (int i = 0; i < n; i++)
+            {
+                bool isSlow = (into[i] & GiFogHide.SlowBit) != 0, isFar = (into[i] & GiFogHide.FarBit) != 0;
+                uint probe = into[i] & ~(GiFogHide.SlowBit | GiFogHide.FarBit);
+                int c = (int)(probe / GiProbes.Layers) / (GiProbes.Columns * GiProbes.Columns);
+                Assert.False(isSlow && isFar);
+                if (isSlow) slow[probe] = slow.GetValueOrDefault(probe) + 1;
+                else if (isFar) { Assert.Equal(1, c); far[probe] = far.GetValueOrDefault(probe) + 1; }
+                else { Assert.Equal(0, c); near++; }
+            }
+        }
+        Assert.Equal(GiProbes.Probes / GiProbes.Cascades / phases, near / period);   // cascade 0: every probe in every round
+        Assert.All(slow.Values, count => Assert.Equal(1, count));   // hidden: once in 16 rounds
+        Assert.All(far.Values, count => Assert.Equal(period / farPeriod, count));   // far: every second round
+        Assert.Equal(GiProbes.Probes / GiProbes.Cascades / phases - slow.Count, far.Count);
+    }
 }
