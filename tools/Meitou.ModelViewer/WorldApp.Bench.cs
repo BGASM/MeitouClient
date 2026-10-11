@@ -112,7 +112,6 @@ static partial class WorldApp
         if (gpu.Reflection is { } rp)
         {
             AbToggles.Register("refl-cull", () => rp.CullToWater, v => rp.CullToWater = rp.CropToWater = v, "the cheaper reflection: only what the water shows (crop, footprint, size), objects to 2000 and foliage to 2200 units (B: 3000)");
-            AbToggles.Register("refl-moving", () => rp.MovingLite, v => rp.MovingLite = v, "the reflection drawn lighter while the camera moves (smaller, see ReflectionPass.MovingLite; B: always the full picture)");
             AbToggles.Register("refl-shadows", () => rp.NoShadows, v => rp.NoShadows = v, "the reflection without sun shadows (A, Meitou; B: the shadows on the mirrored scene; Faithful shadows keep them regardless)");
             int msaaA = rp.Samples;
             AbToggles.Register("refl-msaa", () => rp.Samples == msaaA, v => rp.Samples = v ? msaaA : rp.AbSamples, "the reflection's multisampling: --reflection-samples (A, default 4) against MEITOU_REFL_AB_SAMPLES samples (B, default 1)");
