@@ -437,9 +437,12 @@ The whole GI at Shark, still, is 0.55 ms before (stage 0.45 + resolve 0.09) and 
 **Pictures** (`--upscaler off --no-particles --bench-motion still`, `--ab-period 16 --bench-frames 768`; the floor, a switch that does not change the picture, is about 340 to 480 k pixels
 at >= 1/255, 2 to 7 k at >= 4, 150 to 900 at >= 12, max 28 to 45): `gi-rays` Shark 476 k / 7.9 k / 892, max 33 and Hub 378 k / 3.2 k / 351, max 45; at 22:00 Hub 431 k / 1.9 k / 155, max 31
 and Shark 516 k / 6.9 k / 899, max 30; `gi-far` Shark 385 k / 5.7 k / 518, max 28, Hub 398 k / 3.4 k / 385, max 45, at 22:00 431 k / 2.0 k / 174; `gi-top-reuse` Shark 384 k / 5.6 k / 497, Hub
-341 k / 3.2 k / 351; `gi-top-trace` Shark 411 k / 5.7 k / 536. A control that does change the picture (the sun's shadow ray left out of the bounces) shows 790 k / 84 k / 2651. The diff of `gi-rays`
-at Shark is the rain's dither and the lamps' flicker, as the floor. **Unknown:** the probes' noise in motion (flicker from frame to frame at 32 rays) was not measured; the equal-variance
-rule says it is the same, and the settling is slower.
+341 k / 3.2 k / 351; `gi-top-trace` Shark 411 k / 5.7 k / 536. A control that does change the picture (the sun's shadow ray left out of the bounces) shows 790 k / 84 k / 2651. **The floor of a switch that changes nothing is not a floor for `gi-rays`**: the two stills of an A/B run are 70 frames
+of different random ray rotations apart, so they differ by the probes' own temporal noise, which a no-op switch (`gi-top-trace`) measures for each build: at Shark with 64 rays (`MEITOU_GI_RAYS=64`) 494 k / 7.9 k / 851 >= 12, max 33,
+with the default 32 rays 411 k / 5.7 k / 536, max 28; at the Hub 413 k / 4.3 k / 396, max 42 against 422 k / 3.7 k / 375, max 45. So two stills of the new build differ **less** than two of the old (the longer memory), and the `gi-rays`
+A against B at Shark (476 k / 7.9 k / 892, max 33) is exactly the old build's own frame-to-frame difference. The diff of `gi-rays` at Shark is the rain's dither, the lamps' flicker and that noise.
+**Not converged** (`--screenshot --upscaler off --no-particles` of a cold start, 70 frames after the first probe update, Shark, `MEITOU_GI_RAYS=64` against the default; each pair of shots of one build is identical, mean 0.0000, max 0 and 7): the two builds differ by mean 0.379, 0.158 % of the pixels
+over 12, max 38, because 32 rays settle in about twice the frames: after a teleport or a load the GI is not at its final value for about a second longer. **Unknown:** the probes' noise in motion (flicker from frame to frame at 32 rays) was measured only as the stills' difference above.
 Vulkan validation (`MEITOU_VK_VALIDATION=sync`, a flight at 20 units a frame with the reuse): 0 errors.
 
 **Open:** the alpha test of the leaves (about a fifth of what is left); the resolve (0.09); a fast camera, where the structure is built every frame (the instances change faster than the origin
