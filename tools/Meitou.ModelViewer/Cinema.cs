@@ -11,12 +11,15 @@ namespace Meitou.ModelViewer;
 /// The viewer's cinematic camera (docs/viewer.md "Cinematic camera"), for trailers. Keys are shots on a timeline (<see cref="CameraKey"/>):
 /// Ctrl+numpad 1-9 save the camera (with its lens and the time of day) as key 1-9, numpad 1-9 cut to one, numpad Enter flies through them
 /// (<see cref="CameraPath"/>), Shift+numpad Enter records the flight to PNG frames at a fixed frame rate. F2 opens the timeline editor along
-/// the bottom of the window (<see cref="Draw"/>): drag keys to retime them, drag the ruler to scrub, buttons to add, replace, delete and ease keys.
+/// the bottom of the window (<see cref="Draw"/>): drag keys to retime them, drag the ruler to scrub, buttons to add, replace, delete and ease keys,
+/// to record a camera path (a key every <see cref="PathStep"/> seconds while you fly) and to delete every key.
 /// The keys are kept in <c>%LOCALAPPDATA%\Meitou\viewer-shots.json</c> across starts.
 /// </summary>
 sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float> setHour, Func<bool> fullScreenOn, Action toggleFullScreen)
 {
-    const int MaxKeys = 99, RecordFps = 60;
+    const int MaxKeys = 999, RecordFps = 60;
+    /// <summary>Seconds between the keys a recorded camera path drops.</summary>
+    const float PathStep = 1;
     const float DefaultFov = 50 * MathF.PI / 180, MinFov = 10 * MathF.PI / 180, MaxFov = 100 * MathF.PI / 180, MinGap = 0.05f;
     /// <summary>The letterbox's picture shape (2.39:1, anamorphic widescreen).</summary>
     const float Scope = 2.39f;
@@ -41,6 +44,10 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
     string? takeFolder;
     int takeFrame;
     bool endTake;
+    /// <summary>Recording a camera path: the playhead time of the next key it drops; null when off.</summary>
+    double? pathNext;
+    /// <summary>"Delete all keys" was clicked once: a second click before this tick count deletes them.</summary>
+    long deleteAllUntil;
 
     public bool Playing { get; private set; }
     /// <summary>Clean picture: no panels, letterbox bars (numpad *).</summary>
@@ -82,13 +89,7 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
             case Key.KeypadSubtract: Scale(1 / 1.25f); return true;
             case Key.KeypadMultiply: Clean = !Clean; Say(Clean ? "clean picture: panels hidden, 2.39:1 letterbox" : "panels back, no letterbox"); return true;
             case Key.KeypadDivide: followTime = !followTime; Say(followTime ? "the time of day follows the keys" : "the time of day stays put"); return true;
-            case Key.KeypadDecimal when ctrl:
-                Stop();
-                keys.Clear();
-                selected = null;
-                Save();
-                Say("all keys deleted");
-                return true;
+            case Key.KeypadDecimal when ctrl: DeleteAll(); return true;
             case Key.KeypadDecimal:
                 Say(Summary());
                 foreach (var k in Sorted) Console.WriteLine($"  {k.Label,2}  {k.Time,6:0.00} s{(k.Ease ? " ease" : "     ")}  {Describe(k.Shot)}");
@@ -126,6 +127,7 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
 
     void TogglePlay(bool fromPlayhead)
     {
+        if (pathNext is not null) StopPath();
         if (Playing) { Stop(); Say($"stopped at {time:0.00} s"); return; }
         if (keys.Count < 2) { Say("save two keys or more first (Ctrl+numpad 1-9, or Add key in the F2 editor)"); return; }
         if (!fromPlayhead || time < Start || time >= End - 1e-3) time = Start;
@@ -142,10 +144,54 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
 
     void StartRecording()
     {
+        if (pathNext is not null) StopPath();
         if (keys.Count < 2) { Say("save two keys or more first"); return; }
         takeFolder = Directory.CreateDirectory(Path.Combine(@"C:\Temp", $"meitou-take-{DateTime.Now:yyyyMMdd-HHmmss}")).FullName;
         (takeFrame, time, Playing) = (0, Start, true);
         Say($"recording {End - Start:0.#} s at {RecordFps} fps into {takeFolder} (numpad Enter stops)");
+    }
+
+    /// <summary>
+    /// Starts or stops recording a camera path: the camera is saved as a new key now (one spacing after the last key, or at 0) and every
+    /// <see cref="PathStep"/> seconds after while you fly it, and once more where the recording stops.
+    /// </summary>
+    void TogglePath()
+    {
+        if (pathNext is not null) { StopPath(); return; }
+        Stop();
+        time = keys.Count == 0 ? 0 : keys.Max(k => k.Time) + spacing;
+        if (!DropPathKey()) return;
+        pathNext = time + PathStep;
+        Say($"recording the camera path: a key every {PathStep:0.#} s while you fly (Record path again stops)");
+    }
+
+    void StopPath()
+    {
+        pathNext = null;
+        if (keys.Count > 0 && time > keys.Max(k => k.Time) + MinGap) DropPathKey();
+        Save();
+        Say($"camera path recorded; {Summary()}");
+    }
+
+    /// <summary>Saves the camera as a new key at the playhead; false (and the recording stopped) when the keys are full.</summary>
+    bool DropPathKey()
+    {
+        if (keys.Count >= MaxKeys) { pathNext = null; Save(); Say($"{MaxKeys} keys at most: the camera path stops here"); return false; }
+        var k = new Entry(Enumerable.Range(1, MaxKeys).First(l => Find(l) is null), CameraShot.Of(camera(), getHour()), (float)time, false);
+        keys.Add(k);
+        selected = k;
+        return true;
+    }
+
+    /// <summary>Deletes every key (Ctrl+numpad ., or "Delete all keys" clicked twice).</summary>
+    void DeleteAll()
+    {
+        Stop();
+        pathNext = null;
+        keys.Clear();
+        (selected, time) = (null, 0);
+        Save();
+        Say("all keys deleted");
     }
 
     void Scale(float factor)
@@ -173,6 +219,12 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
     /// <summary>Moves the camera (and the hour) along the flight, or to a scrubbed playhead; call once a frame before drawing.</summary>
     public void Advance(double dt)
     {
+        if (pathNext is { } next)
+        {
+            time += dt;
+            if (time >= next) { time = next; if (DropPathKey()) pathNext = next + PathStep; }
+            return;
+        }
         if (!Playing && !preview) return;
         preview = false;
         var flight = Flight;
@@ -219,8 +271,9 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
     Drag drag;
     float viewEnd = 10;
     DebugOverlay? ui;
-    float x0, x1, y0, y1, buttonsTop, rulerTop, rulerX0, rulerX1;
-    readonly List<(string Label, float X0, float X1, Action Run)> buttons = [];
+    float x0, x1, y0, y1, buttonsTop, buttonsBottom, rulerTop, rulerX0, rulerX1;
+    readonly List<(string Label, float X0, float X1, int Row, Action Run)> buttons = [];
+    float RowTop(int row) => buttonsTop + row * (ui!.LineHeight + 8 + 6);
 
     float TimeAt(float x) => Math.Max(0, (x - rulerX0) / (rulerX1 - rulerX0) * viewEnd);
     float XAt(float t) => rulerX0 + t / viewEnd * (rulerX1 - rulerX0);
@@ -231,20 +284,19 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
         float line = o.LineHeight;
         (x0, x1) = (16, width - 16);
         y1 = height - 16;
-        // Buttons, two text lines, the key numbers' line, the ruler.
-        y0 = y1 - (Pad + line + 8 + 6 + line + 6 + line + line + RulerHeight + Pad);
-        buttonsTop = y0 + Pad;
-        rulerTop = buttonsTop + line + 8 + 6 + line + 6 + line + line;
         (rulerX0, rulerX1) = (x0 + Pad + 8, x1 - Pad - 8);
         // While a key is dragged the scale stays put; otherwise it fits the flight with room to add keys after it.
         if (drag == Drag.None) viewEnd = MathF.Max(10, MathF.Ceiling((End + spacing) / 5) * 5);
 
+        // The buttons, in as many rows as the window's width needs.
         buttons.Clear();
         float bx = x0 + Pad;
+        int row = 0;
         void Button(string label, Action run)
         {
             float w = label.Length * o.CharWidth + 16;
-            buttons.Add((label, bx, bx + w, run));
+            if (bx + w > x1 - Pad && bx > x0 + Pad) (bx, row) = (x0 + Pad, row + 1);
+            buttons.Add((label, bx, bx + w, row, run));
             bx += w + 6;
         }
         Button(Playing ? "Stop" : "Play", () => TogglePlay(fromPlayhead: true));
@@ -258,8 +310,22 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
         Button("Slower", () => Scale(1.25f));
         Button("Faster", () => Scale(1 / 1.25f));
         Button("Record", () => { if (!Playing) StartRecording(); });
+        Button(pathNext is null ? "Record path: off" : "Record path: on", TogglePath);
+        Button(Environment.TickCount64 < deleteAllUntil ? "Delete all keys: click again" : "Delete all keys", () =>
+        {
+            if (Environment.TickCount64 < deleteAllUntil) { deleteAllUntil = 0; DeleteAll(); }
+            else if (keys.Count == 0) Say("no keys to delete");
+            else { deleteAllUntil = Environment.TickCount64 + 3000; Say($"click Delete all keys again within 3 s to delete all {keys.Count}"); }
+        });
         Button(Clean ? "Letterbox: on" : "Letterbox: off", () => Clean = !Clean);
         Button(fullScreenOn() ? "Full screen: on" : "Full screen: off", toggleFullScreen);
+
+        // The button rows, two text lines, the key numbers' line, the ruler.
+        float rows = (row + 1) * (line + 8) + row * 6;
+        y0 = y1 - (Pad + rows + 6 + line + 6 + line + line + RulerHeight + Pad);
+        buttonsTop = y0 + Pad;
+        buttonsBottom = buttonsTop + rows;
+        rulerTop = buttonsBottom + 6 + line + 6 + line + line;
     }
 
     /// <summary>Whether a point (window pixels) is on the editor.</summary>
@@ -270,13 +336,15 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
     {
         if (!Contains(p)) return false;
         float line = ui!.LineHeight;
-        if (p.Y >= buttonsTop && p.Y <= buttonsTop + line + 8)
+        if (p.Y >= buttonsTop && p.Y <= buttonsBottom)
         {
-            foreach (var b in buttons) if (p.X >= b.X0 && p.X <= b.X1) { b.Run(); break; }
+            foreach (var b in buttons)
+                if (p.X >= b.X0 && p.X <= b.X1 && p.Y >= RowTop(b.Row) && p.Y <= RowTop(b.Row) + line + 8) { b.Run(); break; }
             return true;
         }
         if (p.Y >= rulerTop - line && p.Y <= rulerTop + RulerHeight)
         {
+            if (pathNext is not null) StopPath();
             // The nearest key within reach of the pointer, else the playhead.
             var hit = keys.Select(k => (k, d: MathF.Abs(XAt(k.Time) - p.X))).Where(h => h.d <= MarkerHalf + 3).OrderBy(h => h.d).Select(h => h.k).FirstOrDefault();
             Stop();
@@ -334,7 +402,7 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
         if (EditorVisible) { DrawEditor(o, width, height); return; }
         ui = null;
         if (Clean || (keys.Count == 0 && !Playing)) return;
-        string line = $"keys {Summary()}   {(Playing ? $"{(Recording ? "recording" : "playing")} {time:0.0} / {End:0.0} s" : "numpad Enter plays, F2 edits")}";
+        string line = $"keys {Summary()}   {(pathNext is not null ? $"recording the camera path {time:0.0} s" : Playing ? $"{(Recording ? "recording" : "playing")} {time:0.0} / {End:0.0} s" : "numpad Enter plays, F2 edits")}";
         float y = height - o.LineHeight - 12;
         o.Rect(8, y - 4, 16 + line.Length * o.CharWidth, y + o.LineHeight + 2, new Vector4(0.05f, 0.05f, 0.06f, 0.8f));
         o.Text(line, 12, y, DebugOverlay.TextColour);
@@ -347,10 +415,11 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
         o.Rect(x0, y0, x1, y1, Background);
         foreach (var b in buttons)
         {
-            o.Rect(b.X0, buttonsTop, b.X1, buttonsTop + line + 8, Track);
-            o.Text(b.Label, b.X0 + 8, buttonsTop + 4, DebugOverlay.TextColour);
+            float top = RowTop(b.Row);
+            o.Rect(b.X0, top, b.X1, top + line + 8, Track);
+            o.Text(b.Label, b.X0 + 8, top + 4, DebugOverlay.TextColour);
         }
-        float infoTop = buttonsTop + line + 8 + 6;
+        float infoTop = buttonsBottom + 6;
         string sel = selected is { } s
             ? $"key {s.Label} at {s.Time:0.00} s{(s.Ease ? ", eases to a stop" : "")}: {Describe(s.Shot)}"
             : "no key selected: click a key on the timeline";
@@ -377,13 +446,18 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
             o.Rect(XAt(Start), rulerTop + RulerHeight * 0.45f, XAt(last), rulerTop + RulerHeight * 0.55f, Fill * new Vector4(0.6f, 0.6f, 0.6f, 1));
             if (loop) o.Rect(XAt(last), rulerTop + RulerHeight * 0.47f, XAt(last + spacing), rulerTop + RulerHeight * 0.53f, Dim);
         }
-        foreach (var k in keys)
+        // A recorded path's keys sit close together: a number only where it clears the one before (the selected key's always).
+        float labelEnd = float.MinValue;
+        foreach (var k in Sorted)
         {
             float x = XAt(k.Time);
             var colour = k == selected ? DebugOverlay.TextColour : k.Ease ? EaseColour : Fill;
             o.Rect(x - MarkerHalf, rulerTop + RulerHeight * 0.2f, x + MarkerHalf, rulerTop + RulerHeight * 0.8f, colour);
             string label = k.Label.ToString();
-            o.Text(label, x - label.Length * o.CharWidth / 2, rulerTop - line + 2, colour);
+            float lx = x - label.Length * o.CharWidth / 2;
+            if (lx < labelEnd + 4 && k != selected) continue;
+            o.Text(label, lx, rulerTop - line + 2, colour);
+            labelEnd = lx + label.Length * o.CharWidth;
         }
         float ph = XAt((float)time);
         o.Rect(ph - 1, rulerTop - 2, ph + 1, rulerTop + RulerHeight, PlayheadColour);

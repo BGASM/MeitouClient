@@ -242,12 +242,21 @@ all the timing by 1.25. Numpad / switches whether the time of day follows the ke
 at a time (10 to 100), Home puts it back to 50; the lens is part of a key, so two keys with different lenses make a dolly zoom.
 
 **The timeline editor (F2).** A panel along the bottom of the window, drawn over the other panels: a row of buttons (Play / Stop, Loop,
-Add key at playhead, Set key to camera, Go to key, Ease, Delete key, Time follows, Slower, Faster, Record, Letterbox, Full screen), the selected key's
+Add key at playhead, Set key to camera, Go to key, Ease, Delete key, Time follows, Slower, Faster, Record, Record path, Delete all keys,
+Letterbox, Full screen; they wrap onto more rows when the window is too narrow), the selected key's
 details, and a ruler in seconds with the keys as markers (numbered; blue when easing, white when selected), the flight's span, a loop's
 way back, and the red playhead. Click a key to select it and drag it to retime it (to 0.05 s, never past its neighbours, so the order
 stays). Click or drag the ruler to scrub: the camera follows the flight to the playhead. Space plays from the playhead, Delete deletes the
-selected key. "Add key at playhead" saves the camera as a new key (the lowest free number, up to 99; only 1 to 9 have numpad keys) at
+selected key. "Add key at playhead" saves the camera as a new key (the lowest free number, up to 999 since 2026-10-11, 99 before; only 1 to 9 have numpad keys) at
 the playhead's time, so a camera move is built by scrubbing to a time, flying the camera to the view and adding a key there.
+
+**Recording a camera path** (added 2026-10-11). "Record path" (a toggle) saves the camera as a new key one spacing after the last key
+(or at 0 when there are none), then another every second of real time while you fly the camera by hand, and a last one where you
+switch it off; the playhead follows along. Playing, recording frames or clicking the ruler also switches it off. The keys are ordinary
+keys (retime, ease or delete them like any other), and the spline through one-second keys gives the hand-flown move back smoothed; a
+pause while recording stays a pause. Where the keys sit closer than their numbers are wide, only the numbers that fit (and the selected
+key's) are drawn. "Delete all keys" deletes every key, like Ctrl+numpad `.`, but only on a second click within 3 s (the first relabels
+the button "click again").
 
 **The path** (`CameraPath.Sample`). A cubic Hermite spline in time through every key's eye, yaw, pitch, log of the orbit distance, lens and
 hour. The slope at a key is its neighbours' difference over their time apart (a Catmull-Rom spline in time), so the speed changes smoothly
