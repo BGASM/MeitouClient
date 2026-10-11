@@ -202,3 +202,18 @@ Swamp[SOUTH] hides beyond 4455, the view stays in it for 7401, so the sky is lef
 take -0.25 to -0.27 as the switch's), render thread -0.04 in `sky-draw`. Picture: 690 pixels differ by 4/255 or more and 10 by 12, the
 same counts as an A/B of an unrelated switch at this view (the rain and the upscaler's jitter), with no structure in the heat map. The weather
 fog is not complete here ("never complete"), so the weather rule above does not apply at Shark.
+
+### Why `sky-draw` read 0.2 to 0.3 ms with "the sky skipped" (2026-10-11)
+
+**Observed** (RTX 4070, Shark, `MEITOU_PASS_STATS=1 MEITOU_PASS_STATS_SKIP=80 ... --fly-benchmark 300 --fly-speed 0`, 1920x1080 DLSS native): the
+`sky-draw` stage is the span from the reflection's stamp to the stamp recorded inside the scene host just after `SceneHost.Open(5, ...)` and the sky
+draw. With the sky drawn it holds the host's native-segment barrier, the load-op clears of the scene's colour, depth and GI albedo, and the sky pass
+(2 draws, 0.20 to 0.25 ms). With the sky skipped it holds only the first two and reads **0.01 to 0.03 ms** (0 draws, 1 segment): the clears are
+load ops of the rendering, not separate commands, there is no extra barrier, no pass reopened and no cloud or post work stamped there.
+
+The 0.2 to 0.3 figure came from `--fly-benchmark ... --fly-speed 0` **not skipping**: the flight's `CameraMotion.Step` reset the camera's target onto the
+terrain every frame even at speed 0, which lowered the eye so that `FogVolumes.SkyExit` read 4404 (debug print, 300 of 300 frames) against the hide
+radius 4455, `SkyHidden` was false and the sky was drawn (`passes sky-draw` 2 draws, with or without `MEITOU_SKY_FOG_SKIP=0`). A speed of 0 now leaves the camera
+where `--camera-code` put it (exit distance 7401, `SkyHidden` true, `sky-draw` 0 draws). The still `--ab sky-fog-skip` bench was never affected (A 0.01, B 0.25
+ms). Nothing is left to save in the skipped stage; the drawn sky (a full-screen triangle drawn before the scene without a depth test, most of it
+overdrawn) is the part that costs, and only matters where the fog block does not hide the whole view.

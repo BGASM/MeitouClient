@@ -27,7 +27,7 @@ sealed class CameraMotion(WorldCamera camera, Gpu gpu, Vector3 centre, bool circ
     /// <summary>Moves the camera to its place at frame <paramref name="i"/> (1-based; the circle starts at its east point).</summary>
     public void Step(int i)
     {
-        if (circle)
+        if (circle && angleStep != 0)   // a speed of 0 leaves the camera exactly where it was placed (else its target drops to the ground, a pose of its own)
         {
             float a = i * angleStep;
             float x = centre.X + radius * (MathF.Cos(a) - 1), z = centre.Z + radius * MathF.Sin(a);
