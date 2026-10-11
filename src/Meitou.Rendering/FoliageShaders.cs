@@ -31,12 +31,64 @@ static class FoliageShaders
             out float vFade;
             #define uModel mat4(vec4(aInstance0.xyz, 0.0), vec4(aInstance1.xyz, 0.0), vec4(aInstance2.xyz, 0.0), vec4(aInstance3.xyz, 1.0))
             """, required: true);
+        // invariant: the depth prepass (FoliagePrepass) and the colour pass compile this stage next to different fragment stages, and the colour pass tests depth EQUAL.
         v = Replace(v, @"void\s+main\s*\(\s*\)\s*\{", """
+            invariant gl_Position;
             void main()
             {
                 vFade = aInstance0.w;
             """, required: true);
         return v;
+    }
+
+    /// <summary>
+    /// The depth prepass's fragment stage (<see cref="FoliagePrepass"/>): only what decides whether a fragment is seen, no lighting. The fade dither and the
+    /// cut-out's hard alpha test are those of <see cref="MeshFragment"/>, on the same interpolants and samples (the colour pass has neither and tests depth EQUAL,
+    /// so this is the one visibility test). <paramref name="solid"/>: nothing at all (an empty program keeps the early depth test) for the instances that are
+    /// fully visible in a part without a cut-out. Only normal-map alpha (<c>uAlphaSource</c> 2) is handled, which is all the foliage meshes use.
+    /// </summary>
+    public static string MeshPrepassFragment(bool solid = false)
+    {
+        if (solid) return "#version 330 core\nvoid main() { }\n";
+        return """
+            #version 330 core
+            in vec3 vWorld;
+            in vec3 vNormal;
+            in vec2 vUv;
+            in vec4 vColour;
+            in float vFade;
+            uniform sampler2D uNormal;
+            uniform sampler2D uNormal2;
+            uniform bool uHasNormal;
+            uniform bool uHasDual;
+            uniform bool uTriplanar;
+            uniform float uTriplanarScale;
+            uniform vec2 uTile;
+            uniform int uAlphaSource;
+            uniform float uAlphaThreshold;
+            float foliageDither() { return fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))); }
+            vec4 sampleMap(sampler2D map, vec2 uv, vec3 n)
+            {
+                if (!uTriplanar) return texture(map, uv);
+                vec3 w = abs(normalize(n));
+                w /= (w.x + w.y + w.z);
+                vec3 p = vWorld * uTriplanarScale;
+                return texture(map, p.zy * uTile) * w.x + texture(map, p.xz * uTile) * w.y + texture(map, p.xy * uTile) * w.z;
+            }
+            void main()
+            {
+                if (vFade < 1.0 && foliageDither() >= vFade) discard;
+                if (uAlphaThreshold > 0.0 && uAlphaSource == 2 && uHasNormal)
+                {
+                    vec3 n = normalize(vNormal);
+                    vec2 uv = vUv * uTile;
+                    float blend = uHasDual ? 1.0 - vColour.a : 0.0;
+                    vec4 nm = sampleMap(uNormal, uv, n);
+                    if (uHasDual) nm = mix(nm, sampleMap(uNormal2, uv, n), blend);
+                    if (nm.a < uAlphaThreshold) discard;
+                }
+            }
+            """;
     }
 
     /// <param name="solid">For fully visible instances of a material without a cut-out: no <c>discard</c> in the program (the depth test runs before it).</param>
@@ -256,6 +308,8 @@ static class FoliageShaders
     public static string MeshFragmentNative(bool solid = false) => Gi.GiResolveShaders.WithAlbedo(NativeShaders.Port(MeshFragment(solid)), inShader: true);
     /// <summary><see cref="ShadowShaders.MeshDepthFragment"/> in the native model, for <see cref="MeshVertexNative"/>.</summary>
     public static string MeshDepthNative() => NativeShaders.MeshDepthFragment();
+    /// <summary><see cref="MeshPrepassFragment"/> in the native model, for <see cref="MeshVertexNative"/>.</summary>
+    public static string MeshPrepassNative(bool solid = false) => NativeShaders.Port(MeshPrepassFragment(solid));
 
     /// <summary>The blade programs' push constants (<see cref="GrassPush"/> is the C# side; std430).</summary>
     public const string GrassPushMembers = """

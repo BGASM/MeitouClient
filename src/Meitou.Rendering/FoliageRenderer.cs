@@ -41,7 +41,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     readonly FoliageCatalog catalog;
     // The native programs (docs/renderer-native.md 3.3, step O: the native model, the same maths), made with the renderer so a draw never compiles.
     readonly NativeFrame nativeFrame;
-    readonly NativeProg colourMesh, colourSolidMesh, depthMesh, grassProgram, grassMotionProgram;   // colourSolidMesh: colourMesh without the discards (EarlyDepth)
+    readonly NativeProg colourMesh, colourSolidMesh, depthMesh, prepassMesh, prepassSolidMesh, grassProgram, grassMotionProgram;   // colourSolidMesh: colourMesh without the discards (EarlyDepth)
     readonly WorldTextureCache textures;
     readonly ConcurrentBag<FoliageWorld> worlds = [];
     /// <summary>The zone layout cache (null with <c>--no-load-cache</c>); see <see cref="FoliageLayoutCache"/>.</summary>
@@ -83,6 +83,8 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         colourMesh = new NativeProg(gpu, nativeFrame, FoliageShaders.MeshVertexNative(), FoliageShaders.MeshFragmentNative(), "foliage meshes");
         colourSolidMesh = new NativeProg(gpu, nativeFrame, FoliageShaders.MeshVertexNative(), FoliageShaders.MeshFragmentNative(solid: true), "foliage meshes solid");
         depthMesh = new NativeProg(gpu, nativeFrame, FoliageShaders.MeshVertexNative(), FoliageShaders.MeshDepthNative(), "foliage mesh depth");
+        prepassMesh = new NativeProg(gpu, nativeFrame, FoliageShaders.MeshVertexNative(), FoliageShaders.MeshPrepassNative(), "foliage mesh prepass");
+        prepassSolidMesh = new NativeProg(gpu, nativeFrame, FoliageShaders.MeshVertexNative(), FoliageShaders.MeshPrepassNative(solid: true), "foliage mesh prepass solid");
         grassProgram = new NativeProg(gpu, nativeFrame, FoliageShaders.GrassVertexNative(), FoliageShaders.GrassFragmentNative(), "foliage grass");
         grassMotionProgram = new NativeProg(gpu, nativeFrame, FoliageShaders.GrassMotionVertexNative(), FoliageShaders.GrassMotionFragmentNative(), "foliage grass motion");
         textures = new WorldTextureCache(gpu, assets, "foliage textures");
@@ -95,6 +97,9 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         GrassMaxRange = used.Where(l => l.IsGrass).Select(l => l.Range).DefaultIfEmpty(0).Max();
         LoadMs = watch.Elapsed.TotalMilliseconds;
     }
+
+    /// <summary>Set by the world frame around the main view's draw only: the meshes may be drawn with the depth prepass (<see cref="FoliagePrepass"/>); the reflection and the shadow cascades never are.</summary>
+    public bool PrepassView { get; set; }
 
     /// <summary>Foliage drawn at all (the F key).</summary>
     public bool Enabled { get; set; } = true;
@@ -841,7 +846,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         public LegacyProgram.Attribute?[] Attributes = [];
         public MeshBindings? Plain;
         /// <summary>What a native draw needs, per program (<see cref="NativeMesh"/>).</summary>
-        public NativeMesh ColourNative, DepthNative, ColourSolidNative;
+        public NativeMesh ColourNative, DepthNative, ColourSolidNative, PrepassNative, PrepassSolidNative;
         public int Count;
         /// <summary>Blades after each 1/64 of the candidates (<see cref="FoliageGrassField.BladesWithPrefixes"/>): the density setting draws a prefix.</summary>
         public int[] Prefixes = [];
@@ -1216,7 +1221,14 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
             }
             if (meshDraws.Count > 0 || impostorDraws.Count > 0)
             {
-                RecordMeshes(depthPass ? depthMesh : colourMesh, depthPass, viewProjection, eye, light, fogColour, fogDistance, coverage);
+                // The depth prepass (FoliagePrepass): the main colour view with the GPU cull only (the reflection and the multisampled targets keep the single colour pass).
+                bool prepass = FoliagePrepass.Enabled && PrepassView && !depthPass && !coverage && !gpuResult.IsEmpty && meshDraws.Count > 0 && !GpuCullVerify;
+                if (prepass)
+                {
+                    RecordMeshes(prepassMesh, MeshPass.Prepass, viewProjection, eye, light, fogColour, fogDistance, coverage);
+                    RecordMeshes(colourSolidMesh, MeshPass.Equal, viewProjection, eye, light, fogColour, fogDistance, coverage);
+                }
+                else RecordMeshes(depthPass ? depthMesh : colourMesh, depthPass ? MeshPass.Depth : MeshPass.Colour, viewProjection, eye, light, fogColour, fogDistance, coverage);
                 if (FolTiming) recMeshes = (Stopwatch.GetTimestamp() - r0) * 1000.0 / Stopwatch.Frequency;
             }
         }
@@ -2126,7 +2138,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     // (BeginNativeInPass). Each draw method is split into Prepare (reads the textures and the zones' state, makes a draw list) and Record (the
     // list into one native segment: the sets and dynamic state once, per draw a push constant block and the mesh's own buffers).
 
-    const int ColourKind = 0, DepthKind = 1, GrassKind = 2, MotionKind = 3, SolidKind = 4;
+    const int ColourKind = 0, DepthKind = 1, GrassKind = 2, MotionKind = 3, SolidKind = 4, PrepassKind = 5, PrepassSolidKind = 6, EqualKind = 7;
     /// <summary>The first location the per-instance rows (the batch matrices) take; the mesh's own inputs are below it.</summary>
     const int RowLocation = FoliageShaders.InstanceLocation;
 
@@ -2149,8 +2161,8 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         Silk.NET.Vulkan.PolygonMode Polygon, bool AlphaToCoverage, bool DepthClamp);
 
     readonly Dictionary<(int Kind, SegmentPipeline State), int> segmentByState = [];
-    readonly SegmentPipeline[] lastSegment = new SegmentPipeline[5];
-    readonly int[] segmentIds = new int[5];
+    readonly SegmentPipeline[] lastSegment = new SegmentPipeline[8];
+    readonly int[] segmentIds = new int[8];
     int segmentCount;
 
     /// <summary>A stable number for a segment's pipeline state, so a mesh compares one int per draw.</summary>
@@ -2286,18 +2298,24 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         }
     }
 
-    /// <summary>The mesh draw list in one native segment (colour or depth), back faces culled unless the material is double-sided.</summary>
-    void RecordMeshes(NativeProg mp, bool depth, Matrix4x4 viewProjection, Vector3 eye, Vector3 light, Vector3 fogColour, float fogDistance, bool coverage)
+    /// <summary>What a mesh segment draws: the colour, a shadow cascade's depth, the main view's depth prepass (<see cref="FoliagePrepass"/>), or the colour after it (no discards, depth EQUAL, no depth write).</summary>
+    enum MeshPass { Colour, Depth, Prepass, Equal }
+
+    /// <summary>The mesh draw list in one native segment (<paramref name="pass"/>), back faces culled unless the material is double-sided.</summary>
+    void RecordMeshes(NativeProg mp, MeshPass pass, Matrix4x4 viewProjection, Vector3 eye, Vector3 light, Vector3 fogColour, float fogDistance, bool coverage)
     {
         var p = mp.P;
-        string label = depth ? "foliage mesh depth" : "foliage meshes";
+        bool depth = pass == MeshPass.Depth, prepass = pass == MeshPass.Prepass, equal = pass == MeshPass.Equal;
+        string label = depth ? "foliage mesh depth" : prepass ? "foliage mesh prepass" : equal ? "foliage meshes after prepass" : "foliage meshes";
         // Prepare (wave 4, docs/renderer-native.md 6.2): the pass state, the sets, and per draw everything resolved (pipeline, buffers, the push
         // block with its bindless indices), into a job that only records.
         var targets = Gpu.CurrentTargets();
         // The host's state, with what the GL version set around the meshes: back faces culled (GL's cull face on, its mode never changed from
         // BACK), alpha to coverage with a multisampled target.
-        var state = Gpu.CurrentState() with { Cull = Silk.NET.Vulkan.CullModeFlags.BackBit, AlphaToCoverage = coverage };
-        int segment = SegmentId(depth ? DepthKind : ColourKind, p, targets, state);
+        var sceneState = Gpu.CurrentState() with { Cull = Silk.NET.Vulkan.CullModeFlags.BackBit, AlphaToCoverage = coverage };
+        // The prepass writes depth only; the colour after it draws exactly the fragments that left their depth there (the prepass has the discards, this has none).
+        var state = prepass ? sceneState with { ColourMask = 0 } : equal ? sceneState with { Compare = Silk.NET.Vulkan.CompareOp.Equal, DepthWrite = false } : sceneState;
+        int segment = SegmentId(depth ? DepthKind : prepass ? PrepassKind : equal ? EqualKind : ColourKind, p, targets, state);
         var job = meshJobs.Rent();
         (job.Owner, job.Targets, job.State, job.Layout, job.Count) = (this, targets, state, p.Layout, 0);
         var view = new ViewConstants { ViewProjection = viewProjection, Eye = eye, LightDir = light, FogColour = fogColour, FogDistance = fogDistance };
@@ -2318,8 +2336,10 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         var sided = Silk.NET.Vulkan.CullModeFlags.None;
         Silk.NET.Vulkan.CullModeFlags? side = null;
         // The split (EarlyDepth; GPU cull, colour views): the program without the discards draws the fully visible instances of the parts without a cut-out.
-        bool splitView = indirect && gpuResult.Split && !depth;
-        int solidSegment = splitView ? SegmentId(SolidKind, colourSolidMesh.P, targets, state) : 0;
+        bool splitView = indirect && gpuResult.Split && !depth && !equal;
+        // The prepass splits the same way: the empty program for the fully visible instances of a part without a cut-out, the dither (and the cut-out) program for the rest.
+        var solidMesh = prepass ? prepassSolidMesh : colourSolidMesh;
+        int solidSegment = splitView ? SegmentId(prepass ? PrepassSolidKind : SolidKind, solidMesh.P, targets, state) : 0;
         foreach (ref readonly var d in System.Runtime.InteropServices.CollectionsMarshal.AsSpan(meshDraws))
         {
             var k = d.Material;
@@ -2343,18 +2363,18 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
             bool raster = side != want;
             side = want;
             var part = d.Part;
-            ref var n = ref (depth ? ref part.DepthNative : ref part.ColourNative);
+            ref var n = ref (depth ? ref part.DepthNative : ref (prepass ? ref part.PrepassNative : ref (equal ? ref part.ColourSolidNative : ref part.ColourNative)));
             Current(ref n, part, mp);
             // A part without a cut-out is drawn twice: its fully visible instances (the cull lays them out first) with the solid program, the dithered
             // ones after them with the full one. A cut-out part keeps its one draw over both (it needs the discard anyway).
             bool split = splitView && pc.AlphaThreshold == 0f;
             if (split)
             {
-                ref var sn = ref part.ColourSolidNative;
-                Current(ref sn, part, colourSolidMesh);
+                ref var sn = ref (prepass ? ref part.PrepassSolidNative : ref part.ColourSolidNative);
+                Current(ref sn, part, solidMesh);
                 job.Add(new MeshJob.Draw
                 {
-                    SetRaster = raster, Cull = want, Pipeline = sn.SegA == solidSegment ? sn.PipeA! : PipelineFor(ref sn, colourSolidMesh, solidSegment, state, targets.Formats, "foliage meshes solid"),
+                    SetRaster = raster, Cull = want, Pipeline = sn.SegA == solidSegment ? sn.PipeA! : PipelineFor(ref sn, solidMesh, solidSegment, state, targets.Formats, prepass ? "foliage mesh prepass solid" : "foliage meshes solid"),
                     Vertices = sn.Vertices, Elements = sn.Elements, Push = pc,
                     Args = gpuResult.Args, ArgsOffset = gpuResult.ArgsOffset + (ulong)(gpuResult.DrawCount + drawIndex) * 20,
                     FirstIndex = DrawFirst(part), IndexCount = DrawCount(part), Instances = d.Instances, FirstInstance = d.FirstInstance,
@@ -2370,8 +2390,18 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
             });
             drawIndex++;
         }
-        if (impostorDraws.Count > 0) AddImpostorDraws(job, depth, viewProjection, targets, state, coverage, indirect, meshDraws.Count + rockDraws.Count);
+        if (impostorDraws.Count > 0 && !prepass && !equal) AddImpostorDraws(job, depth, viewProjection, targets, state, coverage, indirect, meshDraws.Count + rockDraws.Count);
         Gpu.Record(label, job);
+        if (equal && impostorDraws.Count > 0)
+        {
+            // The billboards are not in the prepass (their fragment stage has its own discard): their own segment, with the scene's depth test and write.
+            var billboards = meshJobs.Rent();
+            (billboards.Owner, billboards.Targets, billboards.State, billboards.Layout, billboards.Count) = (this, targets, sceneState, p.Layout, 0);
+            billboards.Frame = job.Frame;
+            for (int a = 0; a < 4; a++) billboards.Rows[a] = job.Rows[a];
+            AddImpostorDraws(billboards, false, viewProjection, targets, sceneState, coverage, indirect, meshDraws.Count + rockDraws.Count);
+            Gpu.Record("foliage billboards", billboards);
+        }
     }
 
     readonly JobPool<MeshJob> meshJobs = new();
@@ -2822,6 +2852,8 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         colourMesh.Dispose();
         colourSolidMesh.Dispose();
         depthMesh.Dispose();
+        prepassMesh.Dispose();
+        prepassSolidMesh.Dispose();
         grassProgram.Dispose();
         grassMotionProgram.Dispose();
         DisposeGrassStore();
