@@ -159,6 +159,7 @@ static class GiShaders
             vec4 uLightGrid;    // the lamps (WorldLamps; w 0: none)
         };
         layout(set = 0, binding = 13, std430) readonly buffer ProbeState { vec4 positions[]; };
+        layout(set = 0, binding = 14, std430) readonly buffer ProbeList { uint probeList[]; };
         {{Sleep}}
         layout(set = 0, binding = 4) uniform sampler2D uGiIrradiance;
         layout(set = 0, binding = 5) uniform sampler2D uGiDistance;
@@ -219,8 +220,8 @@ static class GiShaders
 
         void main()
         {
-            // This frame's share of the probes: every uGiParams.z-th, from uGiParams.y (the rays are stored by workgroup).
-            uint probe = gl_WorkGroupID.x * uint(uGiParams.z) + uint(uGiParams.y), ray = gl_LocalInvocationID.x;
+            // This frame's probes: the CPU's list (GiProbes.BuildList; bit 31 a slow update, the rays are stored by workgroup).
+            uint probe = probeList[gl_WorkGroupID.x] & 0x7FFFFFFFu, ray = gl_LocalInvocationID.x;
             // probe = ((cascade · N + window row) · N + window column) · layers + layer
             int layer = int(probe % uint(GI_NY)), rest = int(probe / uint(GI_NY));
             int wx = rest % GI_N, wz = (rest / GI_N) % GI_N, c = rest / (GI_N * GI_N);
@@ -309,11 +310,12 @@ static class GiShaders
             vec4 lightDir;
             vec4 maps;
             vec4 albedo;
-            vec4 rayLength;     // z: the sleepers' period
+            vec4 rayLength;     // z: the sleepers' period, w: the hidden probes' period
         };
         layout(set = 0, binding = 3, rgba16f) uniform image2D uIrradiance;
         layout(set = 0, binding = 4, rg16f) uniform image2D uDistance;
         layout(set = 0, binding = 5) uniform sampler2D uGiBase;
+        layout(set = 0, binding = 6, std430) readonly buffer ProbeList { uint probeList[]; };
         {{Sleep}}
         shared vec4 sRays[{{GiProbes.Rays}}];
         shared vec3 sDirs[{{GiProbes.Rays}}];
@@ -351,7 +353,7 @@ static class GiShaders
 
         void main()
         {
-            uint probe = gl_WorkGroupID.x * uint(uGiParams.z) + uint(uGiParams.y), id = gl_LocalInvocationID.x, count = gl_WorkGroupSize.x;
+            uint entry = probeList[gl_WorkGroupID.x], probe = entry & 0x7FFFFFFFu, id = gl_LocalInvocationID.x, count = gl_WorkGroupSize.x;
             int layer = int(probe % uint(GI_NY)), rest = int(probe / uint(GI_NY));
             int wx = rest % GI_N, wz = (rest / GI_N) % GI_N, c = rest / (GI_N * GI_N);
             vec4 g0 = uGiGrid[c * 2], g1 = uGiGrid[c * 2 + 1];
@@ -380,7 +382,8 @@ static class GiShaders
             barrier();
             if (id == 0u) positions[stateSlot] = vec4(world, sNear != 0u ? 1.0 : 2.0);
             bool valid = float(sBack) < 0.25 * float(count);
-            float hysteresis = sMoved ? 0.0 : uGiParams.w;
+            // A hidden probe (bit 31) is updated every rayLength.w-th round: the hysteresis of that many updates in one.
+            float hysteresis = sMoved ? 0.0 : ((entry >> 31) != 0u ? pow(uGiParams.w, rayLength.w) : uGiParams.w);
             ivec2 tileIndex = ivec2(colX, (c * GI_N + colZ) * GI_NY + layer);
             float maxDistance = g1.z;
 

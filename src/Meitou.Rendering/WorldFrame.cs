@@ -1323,7 +1323,7 @@ static class WorldFrame
             var heights = gpu.Terrain.Snapshot();
             gi.Update(eye, heights, render.Objects ? gpu.Objects : null, gpu.Foliage is { Enabled: true } giFoliage ? giFoliage : null);
             StageClock.Sub("gi scene");
-            gpu.Probes?.Update(gi, eye, heights, gpu.Lamps);
+            gpu.Probes?.Update(gi, eye, heights, gpu.Lamps, gpu.FogVolumes);
             StageClock.Sub("gi blend");
         }
         StageClock.Lap(14);
