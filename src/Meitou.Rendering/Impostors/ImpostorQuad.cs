@@ -5,12 +5,12 @@ namespace Meitou.Rendering.Impostors;
 /// <summary>
 /// The tight billboard quad (docs/render-foliage.md "Foliage cost in the orbit"): a billboard spans the rectangle that holds the outline of the mesh's bounding box
 /// seen from the eye (the vertex stage works it out from the box's half extents) instead of the square of the bounding sphere's silhouette, so a tall tree or a flat
-/// bush has fewer transparent corners to sample and shade. The A/B <c>impostor-quad</c>; <c>MEITOU_IMPOSTOR_QUAD=0</c> starts it off. The half extents travel in the
+/// bush has fewer transparent corners to sample and shade. The A/B <c>impostor-quad</c>. The half extents travel in the
 /// push constants' spare word, three 10-bit numbers (thousandths of the radius, rounded up) and the on bit.
 /// </summary>
 public static class ImpostorQuad
 {
-    public static bool Enabled { get; set; } = Environment.GetEnvironmentVariable("MEITOU_IMPOSTOR_QUAD") != "0";
+    public static bool Enabled { get; set; } = true;
 
     /// <summary>The spare word for a mesh whose bounding box has <paramref name="halfExtent"/> (object units) about the atlas's sphere of <paramref name="radius"/>; 0 (the sphere) when the box is not inside the sphere.</summary>
     public static uint Pack(Vector3 halfExtent, float radius)

@@ -189,7 +189,7 @@ One map of the quality's side whose texels are redistributed towards where the c
 
 ## What the viewer does
 
-`--world` draws the **CSM mode** by default (`--no-shadows` turns it off, `--shadow-quality <0|1|2>` picks the side from
+`--world` draws the **CSM mode** by default (`--shadow-range 0` turns it off, `--shadow-quality <0|1|2>` picks the side from
 the table, default 1 = 2048², `--shadow-range <u>`). It follows the facts above, with these differences:
 
 - **Backend split.** `Meitou.Data.World.ShadowCascades` (no GL) does the splits, the light view, the stable size, the box,
@@ -264,7 +264,7 @@ Not the game's: the remaster's choice, on by default (F5 / `--faithful shadows` 
   only the last two are on screen.
 - **Grid anchor** (added 2026-10-10, `MeitouShadowFit.Fit`, `ShadowPass.Anchor`; *measured*). The light rotation turns about the world origin, and the game snaps in that absolute light space, so when the sun turns by an angle the texel grid slides past a point by its distance from the origin times the angle. With the clock running (the viewer's `--time-speed` or a camera flight whose keys carry the hour) that slide is several texels a frame far from the origin, and every shadow edge flickers. Measured at The Hub (51000 units out), a sun step of one 60 fps frame of a 72-game-minute-in-48-s flight (0.006 degrees): samples changed by more than 6/255 in the picture, 1328 of 57600 at noon (max 74) and 37 at 05:33, against 2 for the same frame rendered twice. Meitou now snaps on a grid through an anchor near the eye (light space minus the anchor's light-space position is whole texels), so the slide is the distance from the anchor times the angle: 95 at noon (max 28), 3 at 05:33. The anchor moves to the eye only while the sun turns and the eye is more than 1000 units from it (a move shifts the grids by a fraction of a texel, once); with the sun still nothing slides, so it stays. `ShadowTests` checks the slide. Faithful keeps the game's grid through the origin (the same slide must exist in the game whenever its sun turns, at its slower clock: from the code, not looked at in the game).
 - **Schedule** (changed 2026-10-08: cached far cascades). Cascade 0 every frame, 1 every 4th, 2 every 16th, 3 every 32nd frame
-  (`ShadowPass.Cadence`, `MEITOU_SHADOW_CADENCE=1,4,16,32` overrides it for A/B runs; the default's phases put the redraws on different
+  (`ShadowPass.Cadence`, fixed in code; its phases put the redraws on different
   frames; it was 1 / 2 / 4 / 4 before). Each cascade is kept with the matrices it was drawn with (the receiver uses each cascade's own) and
   only its tile is cleared. That is only the longest a cascade goes unchanged: it is redrawn at once when the current slice's sphere
   (plus the filter's reach) no longer fits its box (the camera moved or turned: `MeitouShadowFit.Covers`), when the sun has turned further
@@ -284,7 +284,7 @@ Not the game's: the remaster's choice, on by default (F5 / `--faithful shadows` 
   draw): cascade 0 0.12, cascade 1 0.30, cascade 2 0.73, cascade 3 1.14, of which objects 0.33, foliage meshes 0.51 and TERRAIN-mode rocks
   0.27 in cascade 3 (13,135 foliage meshes, 388 objects, 751k terrain triangles) and the same kinds 0.23 / 0.40 / 0.08 in cascade 2.
   The far cascades are the cost, and they hardly change, hence the cache.
-  The same at `--radius 2` (the user's benchmark view, one run each, the other schedule being `MEITOU_SHADOW_CADENCE=1,2,4,4`): GPU
+  The same at `--radius 2` (the user's benchmark view, one run each, the other schedule being 1,2,4,4): GPU
   time of the stage, mean without the card's outliers / p95 / max, still camera 0.33 / 1.16 / 4.06 ms (0.75 / 1.50 / 2.06 before),
   orbit 0.36 / 1.09 / 2.96 (1.08 / 3.11 / 8.75), slow flight 0.49 / 1.19 / 2.06 (1.00 / 1.85 / 4.32), fast flight (17 units a frame)
   0.37 / 1.06 / 2.79 (0.81 / 1.66 / 2.60); cascade 1, 2 and 3 drawn 876 / 220 / 110 times in 3500 frames still (1751 / 876 / 876 before).

@@ -410,7 +410,7 @@ static class LightShaftShaders
 
         uniform sampler2D uShaftLight, uShaftScatter;
         uniform vec2 uShaftAtlas;   // the atlas's size in texels
-        uniform vec4 uShaftParams;  // x darkening (strength × the sun's share of the light), y the sky's weight, z 1: show the share (debug)
+        uniform vec4 uShaftParams;  // x darkening (strength × the sun's share of the light), y the sky's weight
 
         vec2 shaftAt(vec2 cell, int k)
         {
@@ -444,11 +444,6 @@ static class LightShaftShaders
                 }
             }
             float dark = uShaftParams.x * (1.0 - share);
-            if (uShaftParams.z > 0.5)   // --shafts-debug: red the share, green the haze's alpha here, blue the haze colour's brightness, over everything
-            {
-                vec3 h = sky ? vec3(0.0) : atmoApplyHaze(vec3(0.0), uShaftEye, uShaftEye + dir * dist);
-                return vec4(share, shaftAlpha(dist), dot(h, vec3(0.2126, 0.7152, 0.0722)) * waterWeight, 0.0);
-            }
             if (sky) return vec4(air.rgb, (1.0 - dark * uShaftParams.y * shaftAlpha(uShaftRange.y)) * air.a);
             vec3 haze = atmoApplyHaze(vec3(0.0), uShaftEye, uShaftEye + dir * dist);
             // (scene − dark · haze) · T + S: the haze darkened where shadowed, then the air layer in front of it.

@@ -18,7 +18,6 @@ public sealed record NavBuildSettings
     public int MaxEdgeLength { get; init; } = 24;
     public int MinRegionArea { get; init; } = 4;
     public int MergeRegionArea { get; init; } = 40;
-    public bool Watershed { get; init; }
     /// <summary>Worker threads for tiles; 0 means all but one core.</summary>
     public int Threads { get; init; }
     /// <summary>Distance (units) within which a seed claims a region (regionPruningSettings.minDistanceToSeedPoints 0.4 Havok).</summary>

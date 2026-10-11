@@ -270,9 +270,8 @@ case is Venge by day (`heatHaze` 0.5–1) and the Ashlands (0.7–1); the Great 
 **The viewer** has no weather scheduler yet: `--weather <name>` forces one record, taken at strength `s = 1`, so its `heat haze` ×
 saturate(6 · sunY) is the target; the value moves towards it at 1/3 per real second (game speed 1, never paused) and jumps to it
 for screenshots. `gameTime` is real time × 11/1200 hours per second from the viewer's start, held still for screenshots; the game
-build (`meitou`) passes its own clock's hours instead. `--heat-haze <x>` replaces the weather's field (testing),
-`--no-heat-haze` turns the pass off (the game's `HeatHaze=0`). The pass's depth falloff uses D = 10 × the install's `view distance`
-(12000 → 120000; `--heat-haze-view-distance`), see [post-processing.md](post-processing.md#heat-haze-verified).
+build (`meitou`) passes its own clock's hours instead. `--no-heat-haze` turns the pass off (the game's `HeatHaze=0`). The pass's depth falloff uses D = 10 × the install's `view distance`
+(12000 → 120000), see [post-processing.md](post-processing.md#heat-haze-verified).
 
 ### Sounds (Verified (decompiled), FUN_1409e8f70; names only)
 
@@ -538,8 +537,7 @@ The shared values are frame globals, so every program of the frame reads them: `
 `gameTime`) and `uWeatherDust` = (x, inside, slope) in the native `FrameConstants` block (offsets 240 and 256), the dust noise and the ground
 colour map as two more frame textures. They are 0 until the viewer sets them, and at 0 every shader draws what it drew before. Since the hookup
 `WeatherSurfaces.Apply` takes wetness, `dustAmount` (x, inside, slope) and rain from `gpu.WeatherState` every frame, so the scheduler's ramps drive them and
-`--weather <name>` (a snapped forced record) goes through the same path; `--wetness x`, `--rain x` (0..100) and `--dust x[,inside,slope]` replace
-them. The water's ripple phase uses the water's own time (`uTime`), the clock the frame passes to `WaterRenderer.Draw`.
+`--weather <name>` (a snapped forced record) goes through the same path (the `--wetness`, `--rain` and `--dust` test overrides were removed). The water's ripple phase uses the water's own time (`uTime`), the clock the frame passes to `WaterRenderer.Draw`.
 
 - **Terrain** (`TerrainShaders.Fragment`, also the TERRAIN-mode rock meshes): `makeWet(albedo, wetness, 1 − gloss + absorbance, waterHeight − y, 2)`
   with the layers' `absorbance` blended exactly like the textures (`biome()`: base → grass by the overlay → slope → dirt → road → cliff; two more
@@ -600,7 +598,7 @@ them. The water's ripple phase uses the water's own time (`uTime`), the clock th
 | `WeatherState` | The frame's output, as listed in the shared design: weather record and strength, wind (xz direction, speed), sky colour multiplier and cloud density after the 30 s transition, cloud drift (direction × speed), blended fog (`FogEnabled` weight, colour, distance), `Rain`, `Wetness`, `DustAmount` (x, y inside, z slope), `HeatHaze`, and `Effects` (EFFECT, count, respawn) with `EffectStrength`. |
 | `WeatherTime`, `FrameTimes`, `WeatherRamps` | Game time (day count + hours), the three frame times (`FrameTimes.FromClock(realDt, gameSpeed, paused)`), the wetness and dust ramps (`HeatHaze` is reused for the haze). |
 
-`meitou-tools weather [--region <name> | --at x,z] [--days d0 d1] [--seed n] [--list] [--cells]` (`--cells`: the centres of the region's areas-map cells, to place the viewer) prints a region's season and weather chain (start, name,
+`meitou-tools weather [--region <name> | --at x,z] [--days d0 d1] [--seed n] [--list] [--extents]` (`--extents`: per region the cell count, bounding box and the cell nearest the mean, to place the viewer) prints a region's season and weather chain (start, name,
 strength, duration, wind, fog); `--list` prints every region's calendar. Every timer runs on the frame times the caller passes in and on
 the game time it passes in; nothing reads a clock, so a seed and a call sequence give the same weather.
 
@@ -637,14 +635,13 @@ the game time it passes in; nothing reads a clock, so a seed and a call sequence
 - **Reroll** (Tab panel, a viewer tool, not the game's): `WorldWeather.Reroll` releases a forced weather and calls `WeatherRegion.Reroll` on the camera region, which starts a
   different weather of the current season now (weighted pick without the current weather and weight-0 entries; new duration and strength), then snaps.
 - **Schedule from day 0**: the world is created at day 0, 00:00 and the regions run in game minutes up to the shown time, so `--day 52 --time 14`
-  shows what `meitou-tools weather --region <r> --days 0 100 --seed 1` lists at that time (same seed, default 1; `--weather-seed`). A step
+  shows what `meitou-tools weather --region <r> --days 0 100 --seed 1` lists at that time (same seed, 1; the viewer's `--weather-seed` option was removed). A step
   forward in time (the `]` key, the time slider) replays the schedule through the jump, and a jump of more than an hour snaps everything. **Observed**:
   this makes every region's season calendar count from day 0 (the game's own start is Unknown, see "Choices" above); the schedule never runs backwards.
 - **Mapping**: `SkyColourMultiplier` and `CloudDensity` into `SkyRenderer.SkyColourMultiplierInput` / `CloudDensityInput`; `CloudDrift` into
-  `CloudWind` (`--cloud-wind` wins, `--clouds` still wins over the density); the fog into `SkyRenderer.FogInput` (weight, colour, distance): the
+  `CloudWind` (the `--cloud-wind` override was removed; `--clouds` still wins over the density); the fog into `SkyRenderer.FogInput` (weight, colour, distance): the
   shader's fog term (`uAtmoFog.z`) is now the blended weight, the game's `fogColour.a`, so a half-faded fog is half-strength; the heat haze
-  into the post effect (`state.HeatHaze`, already ramped on the settling time; `--heat-haze <x>` replaces the weather's field and ramps in the
-  viewer, with the state's strength); the particle effect list, strength s and wind into `ParticleRenderer.SetWeather` (`WorldWeather.EffectInput`;
+  into the post effect (`state.HeatHaze`, already ramped on the settling time; the `--heat-haze <x>` override was removed); the particle effect list, strength s and wind into `ParticleRenderer.SetWeather` (`WorldWeather.EffectInput`;
   the camera effect groups are kept while the weather stays, rebuilt and prewarmed when it changes).
 - **Forcing**: `--weather <name>` is `ForceWeather(name)` (strength 1, wind speed at its maximum along +x); `--weather auto` or no option is the
   scheduler. `--weather Default` is clear with no fog, clouds, haze or particles, which `tools/scripts/parity.sh` uses so the ten views stay

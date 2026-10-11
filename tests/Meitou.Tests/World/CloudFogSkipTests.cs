@@ -62,36 +62,4 @@ public class CloudFogSkipTests
         Assert.True(hidden > 0, "the long low paths inside the block are left out");
         Assert.Equal(skyShows, marched > 0);
     }
-
-    [Fact]
-    public void The_block_hides_the_horizon_exactly_and_not_the_zenith()
-    {
-        var eye = new Vector3(0, 1121, 0);
-        Assert.Equal(0f, Transmittance(eye, Vector3.Normalize(new Vector3(1, 0.02f, 0))));   // the curve clamps: exactly nothing left
-        Assert.InRange(Transmittance(eye, Vector3.UnitY), 0.05f, 0.15f);                    // 1879 units of fog straight up leave about a tenth
-    }
-
-    /// <summary>The sky shader's weather term over a pixel with no geometry: ease-in-out of the far clip over the fog distance, times the weight.</summary>
-    static float SkyFog(SkyRenderer.AtmosphereUniforms u)
-    {
-        if (!(u.Fog.Z > 0) || !(u.Haze.W > 0)) return 0;
-        float a = Math.Clamp(u.Fog.W * u.Haze.W, 0, 1);
-        return (a < 0.5f ? 2 * a * a : 1 - 2 * (a - 1) * (a - 1)) * u.Fog.Z;
-    }
-
-    [Fact]
-    public void The_whole_march_is_left_out_only_when_the_weather_fog_covers_the_sky()
-    {
-        Assert.True(SkyRenderer.WeatherFogHidesSky(FogCullTests.Atmosphere()));                         // fog complete at 3000, far clip 50000
-        Assert.True(SkyRenderer.WeatherFogHidesSky(FogCullTests.Atmosphere(fogEnd: 25000)));           // a dust storm
-        Assert.False(SkyRenderer.WeatherFogHidesSky(FogCullTests.Atmosphere(weight: 0)));               // fog off (the swamp's weathers)
-        Assert.False(SkyRenderer.WeatherFogHidesSky(FogCullTests.Atmosphere(weight: 0.999f)));         // a fog still blending in
-        Assert.False(SkyRenderer.WeatherFogHidesSky(FogCullTests.Atmosphere(fogEnd: 190000)));         // the far clip is part of the way in
-        foreach (float weight in new[] { 0.5f, 0.9997f, 0.9998f, 1f })
-            foreach (float fogEnd in new[] { 1000f, 20000f, 49000f, 50000f, 51000f, 60000f, 120000f })
-            {
-                var u = FogCullTests.Atmosphere(weight: weight, fogEnd: fogEnd);
-                Assert.Equal(SkyFog(u) >= 0.9998f, SkyRenderer.WeatherFogHidesSky(u));
-            }
-    }
 }

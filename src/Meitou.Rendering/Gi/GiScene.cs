@@ -42,25 +42,25 @@ internal sealed unsafe class GiScene : IDisposable
     /// <summary>Foliage (trees, bushes, rocks) whose bounding radius is at least <see cref="FoliageMinSize"/> (0: none) and whose bounds come within <see cref="FoliageRange"/> of the eye is in the scene.</summary>
     public float FoliageRange { get; set; } = 4000;
     public float FoliageMinSize { get; set; } = 150;
-    /// <summary>True (default; <c>MEITOU_GI_TOP_REUSE=0</c> off, the bench's gi-top-reuse switch): the origin and the object set change in coarse steps and a top level whose instances are those of its slot's last build is not built again.</summary>
-    public bool ReuseTop { get; set; } = Environment.GetEnvironmentVariable("MEITOU_GI_TOP_REUSE") != "0";
+    /// <summary>True (default; the bench's gi-top-reuse switch): the origin and the object set change in coarse steps and a top level whose instances are those of its slot's last build is not built again.</summary>
+    public bool ReuseTop { get; set; } = true;
     /// <summary>How far the eye may leave the origin before the origin follows (rounded to 64), and the grid the object set is selected on.</summary>
     const float OriginSlack = 1024, SelectionSnap = 128;
     /// <summary>True when the last <see cref="Update"/> left the top level as it was.</summary>
     public bool TopReused { get; private set; }
     /// <summary>True: the top level is built for tracing (the build takes longer); the default while it is built rarely (<see cref="ReuseTop"/>), the bench's gi-top-trace switch.</summary>
-    public bool TopFastTrace { get; set; } = Environment.GetEnvironmentVariable("MEITOU_GI_TOP_TRACE") != "0";
-    /// <summary>True (default; `MEITOU_GI_TERRAIN_REFIT=0` off, the bench's gi-terrain-refit switch): a terrain grid that must follow the eye is refitted in place (same triangles, new heights; every `FullRebuildEvery`-th time rebuilt) instead of rebuilt into a new structure.</summary>
-    public bool RefitTerrain { get; set; } = Environment.GetEnvironmentVariable("MEITOU_GI_TERRAIN_REFIT") != "0";
+    public bool TopFastTrace { get; set; } = true;
+    /// <summary>True (default; the bench's gi-terrain-refit switch): a terrain grid that must follow the eye is refitted in place (same triangles, new heights; every `FullRebuildEvery`-th time rebuilt) instead of rebuilt into a new structure.</summary>
+    public bool RefitTerrain { get; set; } = true;
     /// <summary>
-    /// True (default; `MEITOU_GI_LAZY_SCENE=0` off, the bench's gi-lazy-scene switch; needs <see cref="ReuseTop"/>): everything that changes the traced scene changes at once, when the eye crosses into another cell of
+    /// True (default; the bench's gi-lazy-scene switch; needs <see cref="ReuseTop"/>): everything that changes the traced scene changes at once, when the eye crosses into another cell of
     /// <see cref="EpochSize"/>: the object selection, the foliage block, the origin and the terrain grids that have finished sampling. Between those commits the instances stay as they are and
     /// the top level is not built. A moving camera used to change one of them nearly every frame (the selection snap 128 units, the foliage 250, a terrain grid 512 and its completion later).
     /// </summary>
-    public bool LazyScene { get; set; } = Environment.GetEnvironmentVariable("MEITOU_GI_LAZY_SCENE") != "0";
-    /// <summary>True (default; `MEITOU_GI_SHARED_TOP=0` off, the bench's gi-top-shared switch): one top-level structure for all frame slots. The frame's full barrier orders each frame's builds after the traces of the
+    public bool LazyScene { get; set; } = true;
+    /// <summary>True (default; the bench's gi-top-shared switch): one top-level structure for all frame slots. The frame's full barrier orders each frame's builds after the traces of the
     /// frames before, so the slots need none of their own, and a changed scene is built once, not once per slot.</summary>
-    public bool SharedTop { get; set; } = Environment.GetEnvironmentVariable("MEITOU_GI_SHARED_TOP") != "0";
+    public bool SharedTop { get; set; } = true;
     /// <summary>The cell of the eye (a cube of this many units) that <see cref="LazyScene"/> commits on.</summary>
     const float EpochSize = 1024;
     (int X, int Y, int Z) epochCell;

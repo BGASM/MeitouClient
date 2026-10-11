@@ -28,34 +28,23 @@ sealed partial class GameHost
         using var display = new VulkanDisplay(null, vsync: false, streamline: WantsDlss());
         streamline = display.Streamline;
         Boot(display, interactive: false);
-        if (playerSquad is not null && (g.SelectPlayer || g.MoveTo is not null))
+        if (playerSquad is not null && g.MoveTo is { } to)
         {
             session.World.Commands.Enqueue(new Meitou.Simulation.SelectCommand(playerSquad.Members.ToList()) { Tick = session.World.Tick });
-            if (g.MoveTo is { } to) session.World.Commands.Enqueue(new Meitou.Simulation.MoveOrder([], new Vector3(to.X, 0, to.Z)) { Tick = session.World.Tick });
+            session.World.Commands.Enqueue(new Meitou.Simulation.MoveOrder([], new Vector3(to.X, 0, to.Z)) { Tick = session.World.Tick });
         }
-        bool attacked = false;
         for (int i = 0; i < g.Ticks; i++)
         {
-            if (g.AttackNearest && !attacked && playerSquad is not null && session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == playerSquad.Leader) is { } lead)
-            {
-                var victim = session.CurrentSnapshot.Characters.Where(c => !c.IsPlayer && c.Body is { Dead: false }).OrderBy(c => Vector3.DistanceSquared(c.Position, lead.Position)).FirstOrDefault();
-                if (victim is not null)
-                {
-                    session.World.Commands.Enqueue(new Meitou.Simulation.Combat.AttackOrder(playerSquad.Members.ToList(), victim.Id) { Tick = session.World.Tick });
-                    Console.WriteLine($"attack    squad ordered to attack {victim.Name} {Vector3.Distance(victim.Position, lead.Position):0} units away");
-                    attacked = true;
-                }
-            }
             session.Tick();
             session.AdvanceSimulation(session.Ticks.TickSeconds);   // one control tick of real time, at speed 1
             UpdateNav(wait: true);
         }
         SandboxFollowCamera();
         ApplyCamera(session.Camera.Current);
-        gpu.Streamer?.Settle(gpu.Anchor ?? camera.Eye);
-        gpu.Objects?.Settle(gpu.Anchor ?? camera.Eye);
-        gpu.Foliage?.Settle(gpu.Anchor ?? camera.Eye);
-        gpu.Characters?.Settle(gpu.Anchor ?? camera.Eye);
+        gpu.Streamer?.Settle(camera.Eye);
+        gpu.Objects?.Settle(camera.Eye);
+        gpu.Foliage?.Settle(camera.Eye);
+        gpu.Characters?.Settle(camera.Eye);
         WorldFrame.FinishLoading(display.Context);
         var context = display.Context;
         int w = o.Width, h = o.Height;

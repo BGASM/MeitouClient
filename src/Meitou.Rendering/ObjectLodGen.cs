@@ -14,8 +14,8 @@ namespace Meitou.Rendering;
 /// </summary>
 public static class ObjectLodGen
 {
-    /// <summary>The switch: on by default (<c>MEITOU_OBJECT_LOD_GEN=0</c> starts it off and nothing is generated); off draws the file's levels only.</summary>
-    public static bool Enabled { get; set; } = Environment.GetEnvironmentVariable("MEITOU_OBJECT_LOD_GEN") != "0";
+    /// <summary>The switch: on by default (the <c>object-lod-gen</c> A/B turns it off, and nothing is generated); off draws the file's levels only.</summary>
+    public static bool Enabled { get; set; } = true;
 
     /// <summary>Bumped when the simplifier, the steps or the error measure change (the disk cache's key).</summary>
     public const int Version = 4;
@@ -26,15 +26,15 @@ public static class ObjectLodGen
     /// <summary>Meshes with fewer triangles (all parts) get no levels.</summary>
     public const int MinTriangles = 400;
 
-    /// <summary>How many pixels a generated level may deviate from the original surface (<c>MEITOU_OBJECT_LOD_PIXELS</c>).</summary>
-    public static float Tolerance { get; set; } = Env("MEITOU_OBJECT_LOD_PIXELS", 1.5f);
+    /// <summary>How many pixels a generated level may deviate from the original surface.</summary>
+    public static float Tolerance { get; set; } = 1.5f;
 
     /// <summary>Square pixels under which a mean triangle counts as not seen, and the multiple of the tolerance a level may deviate by then (as the foliage's <c>screen-lod</c>).</summary>
-    public static float TriPixels { get; set; } = Env("MEITOU_OBJECT_LOD_TRI", 1.5f);
-    public static float Multiple { get; set; } = Env("MEITOU_OBJECT_LOD_MULT", 2f);
+    public static float TriPixels { get; set; } = 1.5f;
+    public static float Multiple { get; set; } = 2f;
 
     /// <summary>How many radii one radian of shading deviation counts as in a level's deviation (as <c>FoliageRenderer.LodNormalWeight</c>).</summary>
-    public static float NormalWeight { get; set; } = Env("MEITOU_OBJECT_LOD_NORMAL", 0.004f);
+    public static float NormalWeight { get; set; } = 0.004f;
 
     /// <summary>The disk cache of the levels, <c>%LOCALAPPDATA%\Meitou\objlods</c> (<c>MEITOU_OBJECT_LOD_CACHE</c>).</summary>
     public static string Root { get; set; } = Environment.GetEnvironmentVariable("MEITOU_OBJECT_LOD_CACHE")
@@ -43,9 +43,6 @@ public static class ObjectLodGen
     /// <summary>Counters for the load-time report: meshes built, read from the cache, and the milliseconds the builds took (all threads summed).</summary>
     public static int Built, Cached, Skipped;
     public static long BuildTicks;
-
-    static float Env(string name, float fallback) =>
-        float.TryParse(Environment.GetEnvironmentVariable(name), NumberStyles.Float, CultureInfo.InvariantCulture, out float v) && v > 0 ? v : fallback;
 
     /// <summary>One level of a mesh's merged list: from the file or generated, which of those, where it starts and how many triangles it has.</summary>
     public readonly record struct Entry(bool Generated, int Source, float Distance, int Triangles);

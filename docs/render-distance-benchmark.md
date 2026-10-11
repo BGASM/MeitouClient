@@ -18,7 +18,7 @@ options), run by `C:\Temp\agent-R\sweep.sh` / `run.sh`, and the tables below com
 
 ## 1. Method
 
-**Views** (`--fly-benchmark 300`, `MEITOU_PASS_STATS=1 MEITOU_PASS_STATS_SKIP=30`, `MEITOU_FOLIAGE_TRIS=1`):
+**Views** (`--fly-benchmark 300`, `MEITOU_PASS_STATS=1 MEITOU_PASS_STATS_SKIP=30`, and the foliage draw tally, then `MEITOU_FOLIAGE_TRIS=1`, since removed):
 
 | View | Options | Camera |
 | --- | --- | --- |
@@ -51,7 +51,7 @@ shadows 15 000).
   Counts for grass come from the paced runs; mesh and impostor counts agree within a few percent where both exist.
 
 **Instrumentation added** (commit `ace4770`; all statistics, the pictures are unchanged, section 8):
-- `MEITOU_FOLIAGE_TRIS=1`: each GPU-culled foliage view's indirect arguments are copied (one buffer copy of ≤ 20 bytes a draw) and read a
+- The foliage draw tally (`MEITOU_FOLIAGE_TRIS=1`; the tally and the switch were removed in the 2026-10 cleanup, with the benchmark's `top` lines): each GPU-culled foliage view's indirect arguments are copied (one buffer copy of ≤ 20 bytes a draw) and read a
   frame ring later: triangles and instance-draws of the meshes and of the TERRAIN-mode rocks, impostor quads, per view kind (colour, shadow,
   reflection), and per mesh name for the colour views (the benchmark's `top` lines). The older `counts … foliage instances` value
   (`LateVisible`) is not used here: it disagrees with the arguments.
@@ -230,7 +230,7 @@ Ranked by what each costs at the target (CPX), worst view first (**Observed**, f
    layouts fall behind (forest CPX paced: 221 of 300 frames without the whole layout within the 80 000 near reach, nearest 74 671; grass
    pages missing in 246 frames, nearest 6 188). Pop-in at the edge of a range that is not on screen (Hub, Stack still views: 0).
 9. **Pre-frame GPU** (uploads, cull and grass kernels): 0.24 → 1.1 ms at CPX; the foliage cull kernels 65 µs a view at large 96k
-   (`MEITOU_FOLIAGE_TIMING=1`, `fL96k_timing`).
+   (with `MEITOU_FOLIAGE_TIMING=1`, since removed, `fL96k_timing`).
 
 **Not bottlenecks** (**Observed**): shadow distance (above); VRAM (peak 6.8 GB, 59 %, at CPX with a 2 GB impostor budget and shadows 15 000;
 owners at CPX: object textures 1.4 GB, terrain 1.1 GB, foliage textures 1.1 GB, impostor atlases 0.9 GB, object meshes 0.67 GB; on an 8 GB
@@ -283,7 +283,7 @@ small impostor class. Rule, numbers per card size, design and gates: [impostors.
 
 **Measured** (**Observed**, RTX 4070, CPX preset, `--fly-pipelined` GPU frame p50, three interleaved runs against the viewer built from `0a3614a`):
 
-| Run | master | F1 only (`MEITOU_IMPOSTOR_SMALL=0`) | F1 + F3 |
+| Run | master | F1 only (small class off; then `MEITOU_IMPOSTOR_SMALL=0`, since removed) | F1 + F3 |
 | --- | --- | --- | --- |
 | Hub CPX | 46.6, 46.4, 46.4 ms | 23.7 | 20.6, 20.7, 20.6 |
 | forest CPX | 21.6, 21.4, 21.4 | 19.6 | 15.2, 15.1, 15.2 |
@@ -313,7 +313,7 @@ integrated-GPU heap behaviour is **Unknown** (no such card here).
 
 **Verified** (commit `ace4770`): `dotnet build -c Release` 0 warnings; `dotnet test -c Release` with `KENSHI_PATH` set: 492 passed,
 0 failed, 0 skipped; `tools/scripts/parity.sh … --faithful all`, ten views against `C:\Temp\base-87c7857\faithful`: max 0 in all ten
-(`C:\Temp\agent-R\gate\faithful`). The tally copies only when `MEITOU_FOLIAGE_TRIS=1`, the pre-frame stamp only with `MEITOU_PASS_STATS=1`,
+(`C:\Temp\agent-R\gate\faithful`). The tally copied only when `MEITOU_FOLIAGE_TRIS=1` (since removed), the pre-frame stamp only with `MEITOU_PASS_STATS=1`,
 the part range only with `MEITOU_OBJECT_PART_RANGE`; the object counters and the `PassMeter` change touch no command.
 
 ## 9. Open

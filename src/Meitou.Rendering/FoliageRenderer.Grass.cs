@@ -9,7 +9,7 @@ namespace Meitou.Rendering;
 /// <summary>
 /// The grass pages' storage and the GPU grass path (docs/renderer-native.md 5.4 and 5.6.2). Every page's blades sit in one arena
 /// (<see cref="FoliageGrassGpu"/>), so a blade draw is <c>Draw(vertices, blades, 0, firstBlade)</c> from one vertex binding. The CPU path
-/// (<c>MEITOU_GPU_GRASS=0</c>) walks the pages and records those draws; the GPU path writes one patch table per view and lets the cull kernels
+/// (<see cref="GpuGrass"/> off) walks the pages and records those draws; the GPU path writes one patch table per view and lets the cull kernels
 /// pick the pages, the blades and the order, then records one indirect draw.
 /// </summary>
 public sealed unsafe partial class FoliageRenderer
@@ -22,17 +22,16 @@ public sealed unsafe partial class FoliageRenderer
     NativeMesh grassMeshCpu, grassMeshMotionCpu, grassMeshGpu, grassMeshMotionGpu;
 
     /// <summary>
-    /// The grass drawn by the GPU (docs/renderer-native.md 5.6.2; the default where the device allows it): per view two compute kernels choose the
-    /// pages in view, the blades each shows and the order, and one indirect draw records them all. <c>MEITOU_GPU_GRASS=0</c> or
-    /// <c>MEITOU_GPU_CULL=0</c> starts with the CPU path (the reference): the CPU walks the pages, frustum-tests and sorts them.
+    /// The grass drawn by the GPU (docs/renderer-native.md 5.6.2; where the device allows it): per view two compute kernels choose the
+    /// pages in view, the blades each shows and the order, and one indirect draw records them all. Off is the CPU path (the reference): the CPU walks the pages, frustum-tests and sorts them.
     /// </summary>
-    public bool GpuGrass { get; set; } = Environment.GetEnvironmentVariable("MEITOU_GPU_GRASS") != "0" && Environment.GetEnvironmentVariable("MEITOU_GPU_CULL") != "0";
+    public bool GpuGrass { get; set; } = true;
 
     bool GpuGrassActive => GpuGrass && grassGpuProgram is not null;
 
-    /// <summary>Bytes of the blade arena (<c>MEITOU_GRASS_ARENA_MB</c>, 160 by default) and slots of the cull table (<c>MEITOU_GRASS_SLOTS</c>).</summary>
-    static readonly ulong GrassArenaBytes = (ulong)Env("MEITOU_GRASS_ARENA_MB", 160) << 20;
-    static readonly int GrassSlotCapacity = (int)Env("MEITOU_GRASS_SLOTS", 32768);
+    /// <summary>Bytes of the blade arena (160 MB) and slots of the cull table.</summary>
+    const ulong GrassArenaBytes = 160ul << 20;
+    const int GrassSlotCapacity = 32768;
 
     void InitGrassStore(GpuContext gpu)
     {
@@ -212,7 +211,6 @@ public sealed unsafe partial class FoliageRenderer
     /// <summary>One view's grass on the GPU: the cull into <see cref="GpuFrame.PreFrame"/>, then one indirect draw in a native segment. False when nothing can draw.</summary>
     bool DrawGrassGpu(Matrix4x4 viewProjection, Vector3 eye, Vector4[] frustum, WorldRenderOptions options, Vector3 light, Vector3 fogColour, float fogDistance, bool coverage)
     {
-        if (GpuCullVerify) { int calls = DrawCalls, blades = DrawnBlades; PrepareGrass(eye, frustum, options, coverage); (DrawCalls, DrawnBlades) = (calls, blades); }
         if (grassStore.SlotHigh == 0 || frustum.Length > 8) return false;
         if (BuildGrassRows(false, options, coverage) == 0) return false;
         var gp = grassGpuProgram!;
@@ -225,7 +223,6 @@ public sealed unsafe partial class FoliageRenderer
         var tables = BindRows(0);
         var (prefixIndex, fraction) = FoliageGrassGpu.DensityStep(Math.Min(GrassDensitySetting, MaxGrassDensity) / MaxGrassDensity);
         var result = grassStore.Dispatch(frustum, new Vector2(eye.X, eye.Z), PageSize, prefixIndex, fraction, in tables);
-        if (GpuCullVerify && !result.IsEmpty) QueueGrassVerify("colour", result);
         var view = new ViewConstants { ViewProjection = viewProjection, Eye = eye, LightDir = light, FogColour = fogColour, FogDistance = fogDistance, Time = SwayPhase() };
         var job = grassGpuJobs.Rent();
         (job.Owner, job.Targets, job.State, job.Layout) = (this, targets, state, p.Layout);
@@ -280,7 +277,6 @@ public sealed unsafe partial class FoliageRenderer
     /// <summary><see cref="DrawGrassMotion"/> on the GPU: the same cull for the near slice's camera over the patches that sway, one indirect draw.</summary>
     void DrawGrassMotionGpu(PostProcess.MotionTargets targets, Vector3 eye, float time, float previousTime, Matrix4x4 previous)
     {
-        if (GpuCullVerify) PrepareMotion(eye);
         if (grassStore.SlotHigh == 0 || motionFrustum.Length > 8) return;
         if (BuildGrassRows(true, default!, false) == 0) return;
         var gp = grassMotionGpuProgram!;
@@ -303,7 +299,6 @@ public sealed unsafe partial class FoliageRenderer
         var tables = BindRows(NearDepthIndex(targets.NearDepth));
         var (prefixIndex, fraction) = FoliageGrassGpu.DensityStep(Math.Min(GrassDensitySetting, MaxGrassDensity) / MaxGrassDensity);
         var result = grassStore.Dispatch(motionFrustum, new Vector2(eye.X, eye.Z), PageSize, prefixIndex, fraction, in tables, motionScale);
-        if (GpuCullVerify && !result.IsEmpty) QueueGrassVerify("motion", result);
         grassFrame!.Bind(cmd, p.Layout, in view, [tables.Patches.Binding]);
         if (!result.IsEmpty)
         {

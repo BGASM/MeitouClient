@@ -31,7 +31,7 @@ internal sealed class WorldLamps : IDisposable
     Vector4 grid;
     readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
 
-    /// <summary>Whether the lamps light the world (<c>--lights off</c>, the bench's <c>lights</c> switch).</summary>
+    /// <summary>Whether the lamps light the world (the bench's <c>lights</c> switch).</summary>
     public bool Enabled { get; set; } = true;
     /// <summary>The lamps of the world (outdoor, lit), once loaded; and those in this frame's grid.</summary>
     public int Count => lamps?.Length ?? 0;

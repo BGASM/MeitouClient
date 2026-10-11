@@ -212,7 +212,7 @@ texture read times a colour, so the cost is blending fill, not shader work, vert
 pass from 5.98 to 1.52 ms, and with the scissor cut to one pixel (all vertex work kept) the draws cost 0.18 ms. The sprites overlap on the order of a hundred
 layers per pixel.
 
-**What Meitou does** (`PostOptions.LowResParticles`, default on; `--faithful particles` / `--no-particles-low` draw everything at full size, byte-identical to before):
+**What Meitou does** (`PostOptions.LowResParticles`, default on; `--faithful particles` draws everything at full size, byte-identical to before):
 
 - `ParticleRenderer.Prepare` collects as before and tags each draw (one technique of one unit) with a size: only `alpha_blend` and `add` materials qualify;
   the mean screen size of the draw's sprites (square root of the mean area in render pixels) picks the size, from 80 px up a quarter-size target (1/4 per
@@ -312,7 +312,7 @@ and the checkerboard of small regions at a coast (Vain and Dreg) flipped the wea
   density are copied) and the groups go back to the live world (`EffectGroup.Rebind`) before they are swapped in. The schedule costs at most 0.3 ms (the table; the first
   group of each kind is slower for the compiling, which `EffectGroups.PrimeJit` does on a worker at start-up, as the viewer runs with tiered compilation off).
   The simulation touches only the units and runs on any thread.
-- **A change is made on the side** (`WeatherGroups`, `EffectSet`, `EffectWarmer`): once wanted, the new groups are created on the render thread (**Observed**, `MEITOU_PARTICLE_LOG=1`, which prints only changes over 1 ms, so the three
+- **A change is made on the side** (`WeatherGroups`, `EffectSet`, `EffectWarmer`): once wanted, the new groups are created on the render thread (**Observed**, with `MEITOU_PARTICLE_LOG=1`, since removed, which printed only changes over 1 ms, so the three
   build starts it shows are the first of their flights: 1.2 to 1.4 ms in all, of which 0.5 to 0.6 the world's `Frozen` copy, probably the compiling of its first call, 0.06 to 0.08 the groups
   and 0.04 to 0.06 the queuing; later starts were under 1 ms and are not itemised), queued for the warm-up thread, which runs their schedules and simulates their queued time
   (one unit after the other, at below-normal priority: the frame keeps its cores and the pool its workers), and
@@ -328,7 +328,7 @@ and the checkerboard of small regions at a coast (Vain and Dreg) flipped the wea
 - **Hysteresis on the region** (`WeatherEffectInput.Region`, the scheduler's `WeatherState.RegionName`): the game already switches the camera's region only
   once the camera is 500 units outside its current cell ([weather.md](weather.md#region-at-the-camera-verified-decompiled-fun_1409e8f70)), so
   the flips seen in a flight are genuine border cells of alternating colour, not a failure of that rule. The viewer adds a **dwell**: a change to the groups of
-  another *region* is only started when the weather has stayed what it is for `--particle-dwell` seconds (default 2), and forgotten if the weather returns to the shown one
+  another *region* is only started when the weather has stayed what it is for 2 seconds (the `--particle-dwell` option was removed), and forgotten if the weather returns to the shown one
   before (or while the new groups are being warmed: that warm-up is cancelled). A change *inside* the camera's region (the scheduler's next weather, the Tab panel's reroll, a
   forced weather, which names no region) waits for nothing. A weather shared by two regions (`clear nothing`, `Default`) is one list object, so crossing between
   such regions changes nothing at all. A camera that stays in a region gets its weather's particles about 2 s plus the warm-up after crossing in, a viewer
@@ -336,8 +336,8 @@ and the checkerboard of small regions at a coast (Vain and Dreg) flipped the wea
 - **Textures**: a particle's texture is read and decoded on a worker (`BackgroundWork`) when its group is created, uploaded when first drawn; a technique whose
   texture is still being decoded is left out of the frame (the first frames of a view wait for it). Before, the first draw of a texture decoded its PNG on the render thread: 3.3 to 5.4 ms.
 
-**Numbers** (**Observed**, 2026-10-10, Release, `MEITOU_STREAM_LOG=1 MEITOU_BENCH_SKIP=60 meitou-viewer.exe --world --at -60564,-45142 --distance 1400 --pitch 25 --size 1600x900
---fly-benchmark 3600 --fly-speed 150 --fly-radius 60000 --log-spikes`; slow flight `--fly-speed 35`; the new builds with `MEITOU_PARTICLE_LOG=1`, which prints a line for every frame
+**Numbers** (**Observed**, 2026-10-10, Release, `MEITOU_BENCH_SKIP=60 meitou-viewer.exe --log-spikes --world --at -60564,-45142 --distance 1400 --pitch 25 --size 1600x900
+--fly-benchmark 3600 --fly-speed 150 --fly-radius 60000 --log-spikes`; slow flight `--fly-speed 35`; the new builds with `MEITOU_PARTICLE_LOG=1` (since removed), which printed a line for every frame
 whose particle work takes over 2 ms on the render thread and one at every swap). The runs alternate between the baseline (master 0834d0d) and the new code, one viewer at a time, on a PC
 that other programs were using, so the frame-time percentiles differ from run to run (p99 21 to 36 ms for both): read the `particles` stage of the worst frames and the counts over 33 ms.
 The runs A to D were builds on the way (A, B: the frame's simulation on its own thread, `BeginWarm` still on the render thread; C, D: `BeginWarm` on a worker, a thread
@@ -374,7 +374,7 @@ GC pauses (up to 21 ms), shadows, reflection and the GPU wait.
   2026-10-08, when it ran on the pool).
 - **Threads** (**Observed**, 2026-10-10): the frame's simulation used to be `Task.Run` plus `Parallel.ForEach` on the shared thread pool. A task queued
   behind a burst of the other systems' `Parallel.For` (shore bake, texture and impostor encodes, ...) started 10 to 70 ms late: in an instrumented fast flight
-  (`MEITOU_PARTICLE_LOG=1`, the baseline code with the same log: 76 frames with particle work over 2 ms, 65 of them the render thread waiting in `Sync`, up to 61.9 ms
+  (`MEITOU_PARTICLE_LOG=1`, since removed, the baseline code with the same log: 76 frames with particle work over 2 ms, 65 of them the render thread waiting in `Sync`, up to 61.9 ms
   for a simulation of one unit that ran in 0.2 to 1 ms but had been queued 10 to 60 ms before it started). Now `EffectSimulator` has a thread of its own (above normal priority) and the
   units of a frame are claimed one at a time by it and by whoever waits for the job, so a worker the CPU has not given a core yet costs nothing: the waiter runs the
   units itself. A frame's units cost only 0.5 to 1.2 ms in all (the "a frame" columns above), so a parallel loop gained nothing and lost frames whenever one of its helpers was not

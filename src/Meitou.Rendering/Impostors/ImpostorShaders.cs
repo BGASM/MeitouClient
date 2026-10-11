@@ -662,7 +662,7 @@ public static class ImpostorShaders
                 vec2 world01 = (world.xz + uRockHalfWorld) / (2.0 * uRockHalfWorld);
                 vec2 gx = dFdx(world01), gy = dFdy(world01);
                 float nw = 1.0 - smoothstep(uRockFarStart, uRockFarEnd, length(world - uEye));
-                if ((uRockFlags & 4u) != 0u && (uRockFlags & 8u) != 0u && nw > 0.0)
+                if ((uRockFlags & 4u) != 0u && nw > 0.0)
                 {
                     vec2 cuv = fract((world.xz + uRockHalfWorld) * uRockRegion.zw);
                     s.albedo *= textureGrad(uRockColour, cuv, gx * uRockRegion.zw * 2.0 * uRockHalfWorld, gy * uRockRegion.zw * 2.0 * uRockHalfWorld).rgb * 1.2;

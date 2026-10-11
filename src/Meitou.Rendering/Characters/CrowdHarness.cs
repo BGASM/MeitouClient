@@ -48,7 +48,7 @@ internal sealed class CrowdHarness
         var watch = Stopwatch.StartNew();
         var (records, faction) = Candidates(db, o.Town);
         if (records.Count == 0) throw new InvalidOperationException("--crowd: no CHARACTER records found for the town");
-        var random = new Random(o.CrowdSeed);
+        var random = new Random(1);
         int n = o.Crowd;
         var picks = new GameRecord[n];
         double total = records.Sum(r => r.Weight);
@@ -63,7 +63,7 @@ internal sealed class CrowdHarness
         var failures = 0;
         Parallel.For(0, n, i =>
         {
-            try { appearances[i] = CharacterAppearance.Build(db, install.Root, picks[i].StringId, new CharacterOptions { Seed = o.CrowdSeed * 100003 + i, Faction = faction?.StringId }); }
+            try { appearances[i] = CharacterAppearance.Build(db, install.Root, picks[i].StringId, new CharacterOptions { Seed = 100003 + i, Faction = faction?.StringId }); }
             catch (Exception e) when (e is KeyNotFoundException or InvalidOperationException or IOException or ArgumentException)
             {
                 Interlocked.Increment(ref failures);
@@ -92,8 +92,8 @@ internal sealed class CrowdHarness
             poseLists[j] = j % 2 == 0 ? [new CharacterPose(Idle, 0, 1)] : [.. Walk.Select(w => new CharacterPose(w, 0, 1))];
         }
         var clock = Stopwatch.StartNew();
-        float fixedTime = o.CrowdTime ?? 0.35f;
-        var harness = new CrowdHarness(chosen, positions, yaws, phases, poseLists, interactive || CharacterSwitches.CrowdAnimate ? () => (float)clock.Elapsed.TotalSeconds : () => fixedTime);
+        const float fixedTime = 0.35f;   // the pose time of stills
+        var harness = new CrowdHarness(chosen, positions, yaws, phases, poseLists, interactive ? () => (float)clock.Elapsed.TotalSeconds : () => fixedTime);
         var renderer = new CharacterRenderer(context, install, db, assets) { Source = harness.Fill, LoadBudget = interactive ? 4 : 0 };
         renderer.SettleFirst = !interactive;   // a still waits for everything at its first frame, once the camera is known (the textures' mip streaming needs it)
         return renderer;

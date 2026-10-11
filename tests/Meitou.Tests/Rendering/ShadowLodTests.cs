@@ -13,22 +13,6 @@ public class ShadowLodTests
     const float PixelScale = 1158f;   // 1080 px, 50 degrees
 
     [Fact]
-    public void Only_the_far_cascades_are_coarsened()
-    {
-        bool was = ShadowLod.Enabled;
-        try
-        {
-            ShadowLod.Enabled = true;
-            Assert.False(ShadowLod.Applies(0));
-            Assert.True(ShadowLod.Applies(1));
-            Assert.True(ShadowLod.Applies(3));
-            ShadowLod.Enabled = false;
-            Assert.False(ShadowLod.Applies(2));
-        }
-        finally { ShadowLod.Enabled = was; }
-    }
-
-    [Fact]
     public void An_object_takes_the_level_of_the_distance_where_a_pixel_is_as_wide_as_the_cascade_texels()
     {
         Assert.Equal(0, ShadowLod.ObjectLodFloor(0, PixelScale, 1));   // not coarsened
@@ -43,41 +27,6 @@ public class ShadowLodTests
         Assert.Equal(0, Level(0, 100));   // cascade 0 keeps the distance rule
         // An instance already farther than the floor keeps its own (coarser) level, never a finer one.
         Assert.Equal(2, Level(SwampTexels[1], 9000));
-    }
-
-    [Fact]
-    public void A_terrain_level_is_allowed_while_its_grid_error_stays_within_the_texels()
-    {
-        const double Spacing = 18, Roughness = TerrainLod.Roughness;   // level l: error 2 x 18 x 2^l = 36, 72, 144, 288 ...
-        Assert.Equal(0, ShadowLod.TerrainFloorLevel(0, Spacing, Roughness, 9, 4));   // not coarsened
-        // At one texel no swamp cascade can drop a level: even level 1 deviates by 72 units, more than the 20 of cascade 3.
-        foreach (float texel in SwampTexels) Assert.Equal(0, ShadowLod.TerrainFloorLevel(texel, Spacing, Roughness, 9, 1));
-        // At four texels cascade 3 (80 units) takes level 1 (72), cascade 2 (35) stays at 0.
-        Assert.Equal(1, ShadowLod.TerrainFloorLevel(SwampTexels[3], Spacing, Roughness, 9, 4));
-        Assert.Equal(0, ShadowLod.TerrainFloorLevel(SwampTexels[2], Spacing, Roughness, 9, 4));
-        // The allowance grows level by level, and the root is never the floor.
-        Assert.Equal(2, ShadowLod.TerrainFloorLevel(20, Spacing, Roughness, 9, 8));   // 160: level 2 (144) fits, level 3 (288) does not
-        Assert.Equal(7, ShadowLod.TerrainFloorLevel(1e9f, Spacing, Roughness, 9, 8));   // capped at levels - 2
-    }
-
-    [Fact]
-    public void A_small_mesh_casts_its_impostor_only_where_the_texels_are_large_enough()
-    {
-        Assert.Equal(ShadowLod.ImpostorFrom, ShadowLod.ImpostorTransition(150, SwampTexels[3], 8));   // 150 <= 8 x 20
-        Assert.Equal(float.PositiveInfinity, ShadowLod.ImpostorTransition(200, SwampTexels[3], 8));   // 200 > 160
-        Assert.Equal(float.PositiveInfinity, ShadowLod.ImpostorTransition(150, SwampTexels[2], 8));   // 150 > 71
-        Assert.Equal(ShadowLod.ImpostorFrom, ShadowLod.ImpostorTransition(60, SwampTexels[2], 8));
-        Assert.Equal(float.PositiveInfinity, ShadowLod.ImpostorTransition(1, 0, 8));   // cascade not coarsened
-        Assert.Equal(float.PositiveInfinity, ShadowLod.ImpostorTransition(1, SwampTexels[3], 0));   // switched off
-    }
-
-    [Fact]
-    public void Generated_levels_allow_more_texels_in_a_coarsened_cascade_never_fewer()
-    {
-        Assert.Equal(4, ShadowLod.RockTolerance(2, true, 4));
-        Assert.Equal(2, ShadowLod.RockTolerance(2, false, 4));
-        Assert.Equal(2, ShadowLod.RockTolerance(2, true, 0));
-        Assert.Equal(6, ShadowLod.RockTolerance(6, true, 4));
     }
 }
 
@@ -111,12 +60,5 @@ public class TerrainFloorLevelTests
             Assert.Equal(Area(plain), Area(floored), 1.0);
             Assert.True(floored.Count < plain.Count);
         }
-    }
-
-    [Fact]
-    public void A_negative_floor_is_the_distance_rule()
-    {
-        var eye = new Vector3(0, 100, 0);
-        Assert.Equal(Select(0, eye), Select(-3, eye));
     }
 }

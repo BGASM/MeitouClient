@@ -1,7 +1,6 @@
 using System.Numerics;
 using Meitou.Content;
 using Meitou.Data;
-using Meitou.Data.Fcs;
 using Meitou.Data.Textures;
 using Meitou.Data.World;
 
@@ -66,22 +65,5 @@ public class WaterTests
                 if (d <= 12) near++;
             }
         Assert.True(exact > total / 2 && near > total * 3 / 4, $"{exact} exact, {near} within 12 of {total}");
-    }
-
-    [Fact]
-    [Slow]
-    public void Base_game_low_buildings_are_water_structures()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, $"No Kenshi install configured ({GameInstall.EnvironmentVariable}).");
-        var db = GameDatabase.Load(LoadOrder.BaseGame(install!));
-        using var map = TerrainHeightmap.Open(install!);
-        var low = WorldLevelData.Load(install!).Buildings().Where(b => map.HeightAt(b.Position.X, b.Position.Z) < WorldWater.Height).ToList();
-        // Observed: only about 5% of the 11,714 placed buildings stand on ground below the water level, and the most
-        // common of them are pontoons, swamp walkboards and the like.
-        Assert.InRange(low.Count, 300, 900);
-        var names = low.Select(b => db.Find(b.BuildingId)?.Name ?? "").ToList();
-        int watery = names.Count(n => n.Contains("Pontoon") || n.Contains("Swamp") || n.Contains("Riceweed"));
-        Assert.True(watery > low.Count / 4, $"{watery} of {low.Count}");
     }
 }

@@ -222,7 +222,7 @@ public sealed unsafe class LegacyProgram : IDisposable
         int count = blocks.Length + samplers.Length;
         // Set 0 as last pushed in this epoch, nothing bound since and the same globals: nothing to compare (the per-draw cost of a
         // batch of draws with one program). Globals are read at the program's first Flush of a native segment and after a Bind.
-        bool unchanged = !programChanged && !bindingsDirty && pushedGlobals == globalsVersion && cmd.Log is null;
+        bool unchanged = !programChanged && !bindingsDirty && pushedGlobals == globalsVersion;
         if (count > 0 && !unchanged)
         {
             var writes = stackalloc WriteDescriptorSet[count];
@@ -264,7 +264,6 @@ public sealed unsafe class LegacyProgram : IDisposable
                 };
             }
             var all = new ReadOnlySpan<WriteDescriptorSet>(writes, w);
-            cmd.Log?.Descriptors(all);
             if (!same)
             {
                 lastPushEpoch = cmd.Epoch;
@@ -282,7 +281,6 @@ public sealed unsafe class LegacyProgram : IDisposable
         bindingsDirty = false;
         pushedGlobals = globalsVersion;
         cmd.BoundProgram = this;
-        cmd.Log?.DefaultBlocks(VertexDefault, FragmentDefault);
     }
 
     DescriptorSet DynamicSet()

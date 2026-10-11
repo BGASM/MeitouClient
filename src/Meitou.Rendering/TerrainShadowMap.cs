@@ -95,7 +95,6 @@ sealed unsafe class TerrainShadowMap : IDisposable
         if (!Applies(toSun)) { result = -1; return false; }
         if (result >= 0 && Vector3.Dot(toSun, builtFor) > MathF.Cos(RebuildAngle)) return false;
         var watch = Stopwatch.StartNew();
-        long timing = StepTiming.Now();
         float horizontal = MathF.Sqrt(toSun.X * toSun.X + toSun.Z * toSun.Z);
         var direction = new Vector2(toSun.X, toSun.Z) / horizontal;   // samples (x, z) towards the sun
         float tangent = toSun.Y / horizontal;
@@ -133,7 +132,6 @@ sealed unsafe class TerrainShadowMap : IDisposable
         Gpu.EndNative(cmd);
         result = 1 - write;
         builtFor = toSun;
-        StepTiming.Add(StepTiming.Sweep, timing, passes);
         Builds++;
         LastBuildCpuMs = watch.Elapsed.TotalMilliseconds;
         return true;

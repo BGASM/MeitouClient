@@ -182,7 +182,6 @@ public sealed unsafe class WaterRenderer : IDisposable
         uniform vec4 uShore;                // x the breakers' wave count (cycles since the start, wrapping at 4096), y run-up height, z breaker wavelength, w breaker height
         uniform vec4 uWaveFade;             // eye distances over which the open waves' heights (x to y) and the shore's breakers and foam (z to w) fade out
         uniform float uLean;                // skip work with zero contribution
-        uniform float uWaterDebug;          // 1: show the shore fields (MEITOU_WATER_DEBUG=1)
         uniform sampler2D uRiverMap;        // RiverFlowBake: RG the flow direction (x, z), B the half-width over 8 texels, A the river weight; world bounds
 
         // The ocean's displacement at p, each cascade read at the mip whose texels are as far apart as the vertices sampling it (finer
@@ -823,8 +822,6 @@ public sealed unsafe class WaterRenderer : IDisposable
                 a = mix(1.0, a, 1.0 - smoothstep(uClarity.z * 0.9, uClarity.z * 1.25, dist));
             }
 
-            if (uWaterDebug > 1.5) { fragColour = vec4(s.river * fade, s.flow * 0.5 + 0.5, 1.0); return; }   // MEITOU_WATER_DEBUG=2: the river weight and flow direction
-            if (uWaterDebug > 0.5) { fragColour = vec4(clamp(s.dist / 400.0, 0.0, 1.0), s.g, s.open, 1.0); return; }   // MEITOU_WATER_DEBUG=1
             fragColour = vec4(atmoApply(colour, uEye, vWorld), a * atmoWaterWeight(dist, uWaterFar));
         }
         """;
@@ -860,7 +857,7 @@ public sealed unsafe class WaterRenderer : IDisposable
         public readonly UniformHandle Lean;
         public readonly NativeSegment Segment;
         public readonly UniformHandle ViewProjection, WaterHeight, Centre, Extent, Eye, WaterFar, HalfWorld, SeaA, SeaB, SeaColour, Time, SunDir, SunColour, GlintDir, GlintColour,
-            FogColour, FogDistance, Reflect, ReflectionViewProjection, Ocean, ShoreRect, GridStep, Shore, WaveFade, Debug, Refract, Screen, Clarity;
+            FogColour, FogDistance, Reflect, ReflectionViewProjection, Ocean, ShoreRect, GridStep, Shore, WaveFade, Refract, Screen, Clarity;
         public readonly SkyColourHandles Sky;
         public readonly SamplerSlot[] Maps;
         public readonly SamplerSlot Reflection, OceanDisp, OceanSlope, ShoreField, Refraction;
@@ -882,7 +879,6 @@ public sealed unsafe class WaterRenderer : IDisposable
             (OceanDisp, OceanSlope, ShoreField) = (P.Sampler("uOceanDisp"), P.Sampler("uOceanSlope"), P.Sampler("uShoreField"));
             Lean = P.Uniform("uLean");
             (Refract, Screen, Refraction) = (P.Uniform("uRefract"), P.Uniform("uScreen"), P.Sampler("uRefraction"));
-            Debug = P.Uniform("uWaterDebug");
             Clarity = P.Uniform("uClarity");
             Sky = SkyColourHandles.Resolve(P);
             Maps = MapNames.Select(P.Sampler).ToArray();
@@ -992,7 +988,7 @@ public sealed unsafe class WaterRenderer : IDisposable
         // The river map: baked from the whole-world heights at the flow map's size (the game's flow map does not follow the rivers); none without them.
         var riverWatch = System.Diagnostics.Stopwatch.StartNew();
         int riverSize = flow?.Width ?? 0;
-        bool rivers = Environment.GetEnvironmentVariable("MEITOU_RIVERS") != "0" && coarseHeights is not null && riverSize > 0 && coarseHeights.Length == (riverSize + 1) * (riverSize + 1);
+        bool rivers = coarseHeights is not null && riverSize > 0 && coarseHeights.Length == (riverSize + 1) * (riverSize + 1);
         SampledImage riverMap = rivers
             ? SampledImage.Rgba8(gpu, riverSize, riverSize, RiverFlowBake.Bake(coarseHeights!, riverSize, (ushort)Math.Ceiling(WorldWater.Height * ushort.MaxValue / WorldLayout.MaxHeight)), repeat: false, mipmaps: false, "water river map")
             : SampledImage.Rgba8(gpu, 1, 1, [128, 128, 0, 0], repeat: false, mipmaps: false, "water river map");
@@ -1060,8 +1056,8 @@ public sealed unsafe class WaterRenderer : IDisposable
     /// the game's water does (`--no-water-refraction`, for integrated GPUs).</summary>
     public bool Refraction { get; set; } = true;
 
-    /// <summary>Skip zero-contribution work (MEITOU_WATER_LEAN=0 for comparison).</summary>
-    public bool Lean { get; set; } = Environment.GetEnvironmentVariable("MEITOU_WATER_LEAN") != "0";
+    /// <summary>Skip zero-contribution work (<c>--ab water-lean</c>).</summary>
+    public bool Lean { get; set; } = true;
 
     /// <summary>The slice near plane bounds every fragment's eye distance from below. Beyond both cutoffs neither
     /// transmitted floor colour nor wet sand contributes, so the blended path is opaque and needs no copy.</summary>
@@ -1168,7 +1164,6 @@ public sealed unsafe class WaterRenderer : IDisposable
             p.Set(h.GridStep, gridStep);
             p.Set(h.Shore, waves.Shore);
             p.Set(h.WaveFade, WaveFadeStart, WaveFadeEnd, ShoreFadeStart, ShoreFadeEnd);
-            p.Set(h.Debug, DebugView);
             p.Set(h.Clarity, 1f / Math.Max(Clarity, 0.01f), Math.Clamp(FarClarity, 0f, 1f), Math.Max(ClearDistance, 100f));
             if (ocean.Ready) { p.Bind(h.OceanDisp, ocean.Displacement); p.Bind(h.OceanSlope, ocean.Slopes); }
             if (shore.Ready) p.Bind(h.ShoreField, shore.Sampled());
@@ -1196,9 +1191,6 @@ public sealed unsafe class WaterRenderer : IDisposable
     /// <summary>The eye distances over which the Meitou open waves fade into the flat water (the grid coarsens with the distance), and over which
     /// the shore's breakers and foam fade (they read from much further).</summary>
     public const float WaveFadeStart = 3000, WaveFadeEnd = 5500, ShoreFadeStart = 7000, ShoreFadeEnd = 10000;
-
-    /// <summary><c>MEITOU_WATER_DEBUG=1</c>: the Meitou water shows its shore fields (red the distance to the shore over 400, green the breaker phase, blue the exposure).</summary>
-    static readonly float DebugView = Environment.GetEnvironmentVariable("MEITOU_WATER_DEBUG") switch { "1" => 1f, "2" => 2f, _ => 0f };
 
     static readonly SamplerDesc ClampLinear = new(Silk.NET.Vulkan.Filter.Linear, Silk.NET.Vulkan.Filter.Linear, Silk.NET.Vulkan.SamplerMipmapMode.Nearest, false,
         Silk.NET.Vulkan.SamplerAddressMode.ClampToEdge, Silk.NET.Vulkan.SamplerAddressMode.ClampToEdge, Silk.NET.Vulkan.SamplerAddressMode.ClampToEdge, false,

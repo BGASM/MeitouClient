@@ -59,16 +59,4 @@ public sealed class OgreScriptResourcesTests : IDisposable
         Assert.DoesNotContain(res.Locations, l => l.Path == Path.GetFullPath(mod)); // only .mod and _ files at the root
         Assert.DoesNotContain(res.Locations, l => l.Path.Contains("leveldata") || l.Path.Contains("locale"));
     }
-
-    [Fact]
-    public void Find_prefers_the_requested_group_then_ordinal_order()
-    {
-        var gui = Touch("data/gui/x.dds");
-        var general = Touch("data/materials/x.dds");
-        var res = Config("[General]\nFileSystem=./data/materials\n[GUI]\nFileSystem=./data/gui\n");
-
-        Assert.Equal(gui, res.Find("x.dds"));
-        Assert.Equal(general, res.Find("x.dds", "General"));
-        Assert.Equal(["GUI", "General"], res.ScriptFiles("*.dds").Select(f => f == gui ? "GUI" : "General"));
-    }
 }

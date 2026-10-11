@@ -72,7 +72,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         if (!g.NoPopulation && scene.Database is { } gameDb)
         {
             var levels = IsSandbox ? null : scene.Objects?.Levels ?? Meitou.Data.World.WorldLevelData.Load(install);
-            if (!g.NoNavmesh && !IsSandbox)
+            if (!IsSandbox)
             {
                 nav = new Meitou.Navigation.NavSystem(install, gameDb, levels!, heights.HeightAt);
                 nav.ZoneReady += _ => navChanged = true;
@@ -85,7 +85,6 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             {
                 Population = new Meitou.Simulation.PopulationSettings { Background = interactive },
                 SynchronousPaths = !interactive,
-                BodyTimeScale = g.BodyTimeScale,
                 AnimationLengths = animationLengths = Meitou.Data.Gameplay.AnimationLengths.Load(install.Root),
                 AnimationLibrary = animationLibrary = Meitou.Data.Gameplay.AnimationLibrary.FromDatabase(gameDb),
                 AnimationBlendRate = data.Bodies.Constants.AnimationBlendRate,
@@ -95,9 +94,9 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             systems = built.Systems;
             constants = data.Bodies.Constants;
         }
-        session = new WorldSession(scene.Focus, (scene.X0, scene.Z0, scene.X1, scene.Z1), gpu.Terrain.HeightAt, o.Hour, g.TickRate ?? config.TickRate,
+        session = new WorldSession(scene.Focus, (scene.X0, scene.Z0, scene.X1, scene.Z1), gpu.Terrain.HeightAt, o.Hour, config.TickRate,
             clock: GameClockFor(constants ??= scene.Database is { } clockDb ? Meitou.Data.Gameplay.GameConstants.FromDatabase(clockDb) : null, o.Hour, o.Day ?? GameClock.DefaultStartDay),
-            simulation: new Meitou.Simulation.WorldSettings { Seed = g.Seed, MinPartitionSize = 128, Threads = Math.Max(1, g.SimThreads ?? config.SimThreads ?? Math.Clamp(Environment.ProcessorCount / 2, 1, 8)) },
+            simulation: new Meitou.Simulation.WorldSettings { Seed = g.Seed, MinPartitionSize = 128, Threads = Math.Max(1, config.SimThreads ?? Math.Clamp(Environment.ProcessorCount / 2, 1, 8)) },
             systems: systems, walkability: walkability);
         var target = camera.Target;
         foreach (var problem in session.Bindings.Apply(config.Bindings)) Console.Error.WriteLine($"config    binding skipped: {problem}");
@@ -128,12 +127,6 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         var rig = session.Camera;
         rig.Place(new Vector2(target.X, target.Z), (o.Yaw ?? 30) * MathF.PI / 180,
             (o.Pitch ?? Meitou.Data.World.KenshiCamera.InitialPitchDegrees) * MathF.PI / 180, o.Distance ?? Meitou.Data.World.KenshiCamera.InitialDistance);
-        if (g.FreeCamera)
-        {
-            session.Input.SetKey(FirstKey(InputAction.ToggleFreeCamera), true);
-            session.Tick();
-            session.Input.SetKey(FirstKey(InputAction.ToggleFreeCamera), false);
-        }
         SendFocus();
         ApplyCamera(session.Camera.Current);
         if (interactive) WorldFrame.FinishLoading(context);
@@ -148,8 +141,6 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
 
     /// <summary>DLSS asked for, on the command line or in the saved settings: Streamline must be loaded before the Vulkan device.</summary>
     bool WantsDlss() => o.Post.Upscale.Kind == UpscalerKind.Dlss || !o.Post.Upscale.Explicit && config.Graphics.TryGetValue(WorldFrame.UpscalerSliders[0], out float k) && WorldFrame.AntiAliasingKind(k) == UpscalerKind.Dlss;
-
-    EngineKey FirstKey(InputAction action) => session.Bindings.Get(action).First(b => !b.IsMouse).Key;
 
     void ApplyCamera(CameraState s)
     {

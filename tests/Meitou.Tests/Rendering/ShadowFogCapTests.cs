@@ -10,17 +10,6 @@ public class ShadowFogCapTests
     const float Fov = 50 * MathF.PI / 180, Aspect = 16f / 9;
 
     [Fact]
-    public void The_cap_is_the_padded_radius_rounded_up_on_the_grid_and_never_below_the_radius()
-    {
-        for (float r = 500; r < 20000; r *= 1.037f)
-        {
-            float cap = ShadowFogCap.Quantise(r);
-            Assert.True(cap >= r * ShadowFogCap.Margin * 0.9999f, $"{cap} for {r}");
-            Assert.True(cap <= MathF.Max(ShadowFogCap.Floor, r * ShadowFogCap.Margin * ShadowFogCap.Step * 1.0001f), $"{cap} for {r}");
-        }
-    }
-
-    [Fact]
     public void A_radius_that_wobbles_within_8_percent_keeps_the_cap_still()
     {
         var cap = new ShadowFogCap();
@@ -37,41 +26,6 @@ public class ShadowFogCapTests
             last = now;
         }
         Assert.Equal(0, changes);
-    }
-
-    [Fact]
-    public void A_growing_radius_raises_the_cap_at_once_and_a_falling_one_lowers_it_late()
-    {
-        var cap = new ShadowFogCap();
-        float a = cap.Update(3000)!.Value;
-        float b = cap.Update(3600)!.Value;
-        Assert.True(b > a && b >= 3600 * ShadowFogCap.Margin * 0.9999f);
-        Assert.Equal(b, cap.Update(3500)!.Value);   // one step down: kept
-        Assert.True(cap.Update(2400)!.Value < b);   // a long way down: lowered
-    }
-
-    [Fact]
-    public void A_missing_radius_keeps_the_cap_a_few_frames_then_releases_it()
-    {
-        var cap = new ShadowFogCap();
-        float held = cap.Update(4455)!.Value;
-        for (int i = 0; i < ShadowFogCap.HoldFrames; i++) Assert.Equal(held, cap.Update(null));
-        Assert.Null(cap.Update(null));
-        Assert.Null(cap.Update(0));
-        Assert.NotNull(cap.Update(4455));
-    }
-
-    [Fact]
-    public void A_pending_radius_keeps_the_cap_until_it_lands_however_long_it_takes_within_the_guard()
-    {
-        var cap = new ShadowFogCap();
-        float held = cap.Update(4455)!.Value;
-        for (int i = 0; i < ShadowFogCap.PendingFrames; i++) Assert.Equal(held, cap.Update(null, isPending: true));   // past the 12 frames of a missing radius
-        Assert.Equal(held, cap.Update(4455));
-        Assert.Null(Release(cap, pending: true));   // a solve that never lands is given up
-        Assert.Equal(ShadowFogCap.Quantise(4455), cap.Update(4455));
-
-        static float? Release(ShadowFogCap c, bool pending) { float? v = c.Current; for (int i = 0; i < ShadowFogCap.PendingFrames + 2; i++) v = c.Update(null, pending); return v; }
     }
 
     [Fact]

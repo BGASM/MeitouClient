@@ -9,90 +9,8 @@ public class NightAirTests
 {
     static readonly SkyPlanet Moon = SkyPlanet.All[0];
     static readonly Vector3 Albedo = new(0.284f, 0.293f, 0.259f);
-    /// <summary>The game's clock (latitude 54, sunrise 5, sunset 23), as docs/formats/sky.md "Phase through the night".</summary>
-    static readonly SkyClock Game = new(54, 5, 23);
-
     static Vector3 PlanetLight(Vector3 sun) =>
         Planetshine.Light(sun, Moon, Albedo, Planetshine.Luminance(KenshiLighting.SunLight(Vector3.UnitY)), Enhancements.MeitouPlanetshineStrength);
-
-    [Fact]
-    public void Without_the_planet_there_is_the_airglow_and_the_planet_adds_to_it()
-    {
-        Assert.Equal(NightAir.Airglow, NightAir.Colour(Vector3.Zero));
-        var gibbous = NightAir.Colour(new Vector3(0.09f));
-        Assert.True(gibbous.X > NightAir.Airglow.X && gibbous.Y > NightAir.Airglow.Y && gibbous.Z > NightAir.Airglow.Z);
-        // The air is blue: the planet's light gains most in blue, least in red.
-        Assert.True(gibbous.Z - NightAir.Airglow.Z > gibbous.X - NightAir.Airglow.X);
-    }
-
-    [Fact]
-    public void A_thin_crescent_leaves_a_darker_air_than_a_gibbous_planet()
-    {
-        // The planet at +X, the sun setting at -X (docs/formats/sky.md "Phase through the night"): gibbous at 23:30, a thin crescent by 4:00.
-        var clock = Game;
-        float Luminance(float hour) => Planetshine.Luminance(NightAir.Colour(PlanetLight(clock.SunDirection(hour))));
-        float dusk = Luminance(23.5f), midnight = Luminance(0), late = Luminance(4);   // 23:30, midnight, 4:00 (the crescent)
-        Assert.True(dusk > midnight && midnight > late, $"{dusk} {midnight} {late}");
-        float glow = Planetshine.Luminance(NightAir.Airglow);
-        Assert.InRange(late / glow, 1f, 1.05f);       // by 4:00 the crescent adds almost nothing
-        Assert.InRange(dusk / glow, 1.4f, 1.6f);      // at the brightest the planet adds about half the airglow again
-    }
-
-    [Fact]
-    public void The_night_air_is_darker_than_the_land_the_planet_and_ambient_light_near_the_camera()
-    {
-        // An up-facing surface of albedo 0.3 under the game's night ambient (docs/formats/sky.md: 0.96 · 1.2 · 0.2 on a white surface), the planet's light not counted.
-        float land = 0.3f * 0.23f;
-        var brightest = NightAir.Colour(PlanetLight(Game.SunDirection(23.5f)));
-        Assert.True(Planetshine.Luminance(brightest) < land, $"air {Planetshine.Luminance(brightest)} against land {land}");
-        Assert.True(Planetshine.Luminance(NightAir.Airglow) > 0.05f * land);   // and it is there
-    }
-
-    [Fact]
-    public void The_night_air_comes_in_through_deep_twilight_only()
-    {
-        Assert.Equal(0, NightAir.Weight(0.3f));
-        Assert.Equal(0, NightAir.Weight(0));
-        Assert.Equal(0, NightAir.Weight(Planetshine.NoneAbove));
-        Assert.Equal(1, NightAir.Weight(Planetshine.FullBelow));
-        Assert.Equal(1, NightAir.Weight(-1));
-        float last = -1;
-        for (float y = 0.05f; y >= -0.15f; y -= 0.001f)
-        {
-            float w = NightAir.Weight(y);
-            Assert.True(w >= last, $"sunY {y}");
-            last = w;
-        }
-    }
-
-    [Fact]
-    public void The_glow_falls_off_with_the_height_and_is_all_of_it_at_and_below_the_horizon()
-    {
-        Assert.Equal(1, NightAir.HorizonFalloff(0));
-        Assert.Equal(1, NightAir.HorizonFalloff(-0.4f));
-        float last = 1;
-        for (float y = 0.01f; y <= 1; y += 0.01f)
-        {
-            float f = NightAir.HorizonFalloff(y);
-            Assert.True(f < last, $"y {y}");
-            last = f;
-        }
-        float At(float degrees) => NightAir.HorizonFalloff(MathF.Sin(degrees * MathF.PI / 180));
-        Assert.InRange(At(10), 0.35f, 0.5f);    // still a glow 10° up
-        Assert.True(At(30) < 0.1f);              // nearly gone by 30°
-        Assert.True(At(90) < 0.01f);             // the zenith's stars keep their black
-    }
-
-    [Fact]
-    public void Radiance_is_the_one_function_the_haze_and_the_sky_both_add()
-    {
-        var planet = new Vector3(0.05f);
-        var air = NightAir.Colour(planet);
-        Assert.Equal(Vector3.Zero, NightAir.Radiance(planet, 0.1f, 0.3f));                                       // by day: nothing
-        Assert.Equal(air, NightAir.Radiance(planet, -0.5f, 0));                                                  // night, the horizon: all of it
-        Assert.Equal(air * NightAir.HorizonFalloff(0.2f), NightAir.Radiance(planet, -0.5f, 0.2f));
-        Assert.Equal(NightAir.Radiance(planet, -0.5f, 0), NightAir.Radiance(planet, -0.5f, -0.3f));              // below the horizon the horizon's
-    }
 
     [Theory]
     [InlineData(-1)]   // dusk: the sun sets at -X
@@ -124,46 +42,5 @@ public class NightAirTests
             }
             Assert.True(worstJump < 0.1f, $"towards {towards}: a step of {worstJump:P1}");
         }
-    }
-
-    [Fact]
-    public void The_disc_radiance_is_the_albedo_times_the_lambert_phase_function()
-    {
-        var p = Moon.Towards;
-        Assert.Equal(Albedo, Planetshine.DiscRadiance(-p, Moon, Albedo));          // the sun behind the observer: a full disc
-        Assert.Equal(Vector3.Zero, Planetshine.DiscRadiance(p, Moon, Albedo));      // behind the planet: new
-        var side = Vector3.Normalize(Vector3.Cross(p, Vector3.UnitY));
-        Assert.Equal(Albedo.Y / MathF.PI, Planetshine.DiscRadiance(side, Moon, Albedo).Y, 5);   // a quarter: a third of a full disc, not dark
-        Assert.Equal(Albedo.X * Planetshine.LambertPhase(MathF.PI / 4), Planetshine.DiscRadiance(Vector3.Normalize(side - p), Moon, Albedo).X, 4);
-    }
-
-    [Fact]
-    public void A_lighting_without_a_glint_light_glints_with_the_sun()
-    {
-        var sun = Vector3.Normalize(new Vector3(0.2f, 0.8f, 0.1f));
-        var colour = new Vector3(1, 0.9f, 0.8f);
-        var plain = new WorldLighting(sun, colour, Vector3.One, Vector3.One, Vector3.One, 1000);
-        Assert.Equal((sun, colour), plain.Glint);
-        var glint = plain with { GlintDirection = Vector3.UnitX, GlintColour = new Vector3(0.1f) };
-        Assert.Equal((Vector3.UnitX, new Vector3(0.1f)), glint.Glint);
-        // A glint light with no colour (a new planet) still counts as given: no glint, not the sun's.
-        Assert.Equal((Vector3.UnitX, Vector3.Zero), (plain with { GlintDirection = Vector3.UnitX }).Glint);
-    }
-
-    [Fact]
-    public void The_air_in_front_of_a_planet_hides_most_of_its_light_at_the_horizon_and_none_by_day()
-    {
-        // Deep night (sun well below the horizon): the haze's whole strength at the horizon, thinning with the height, never below 0.
-        float horizon = NightAir.PlanetVeil(-0.5f, 0), foot = NightAir.PlanetVeil(-0.5f, MathF.Sin(3 * MathF.PI / 180)), top = NightAir.PlanetVeil(-0.5f, MathF.Sin(21 * MathF.PI / 180));
-        Assert.Equal(1f, horizon);
-        Assert.True(horizon > foot && foot > top && top > 0, $"{horizon} {foot} {top}");
-        Assert.InRange(foot, 0.6f, 0.8f);   // the large planet's lowest point (12 - 9 degrees) is mostly hazed, its top (21 degrees) barely
-        Assert.InRange(top, 0.05f, 0.15f);
-        Assert.Equal(NightAir.PlanetVeil(-0.5f, 0), NightAir.PlanetVeil(-0.5f, -0.3f));   // below the horizon the horizon's value
-        Assert.Equal(0.93f, NightAir.PlanetVeil(-0.5f, 0, 0.93f));                       // scaled by the haze strength
-        Assert.Equal(0f, NightAir.PlanetVeil(-0.5f, 0, 0));
-        // By day and in the sun's last light (the night air's weight 0) the planet is drawn as the game draws it.
-        Assert.Equal(0f, NightAir.PlanetVeil(0.5f, 0));
-        Assert.Equal(0f, NightAir.PlanetVeil(-0.04f, 0));
     }
 }

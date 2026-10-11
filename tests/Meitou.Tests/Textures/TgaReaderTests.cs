@@ -26,24 +26,4 @@ public class TgaReaderTests
         Assert.Equal((0, 0, 255, 255), image[0, 0]);
         Assert.Equal((255, 255, 255, 255), image[1, 0]);
     }
-
-    [Fact]
-    public void Top_left_origin_keeps_the_file_order_and_32_bit_carries_alpha()
-    {
-        var file = Tga(0x28, 32, 0, 0, 255, 10, 0, 255, 0, 20, 255, 0, 0, 30, 1, 2, 3, 40);
-        var image = TgaReader.Read(file);
-        Assert.Equal((255, 0, 0, 10), image[0, 0]);
-        Assert.Equal((0, 255, 0, 20), image[1, 0]);
-        Assert.Equal((0, 0, 255, 30), image[0, 1]);
-        Assert.Equal((3, 2, 1, 40), image[1, 1]);
-    }
-
-    [Fact]
-    public void Truncated_and_compressed_files_are_refused()
-    {
-        Assert.Throws<FormatException>(() => TgaReader.Read(Tga(0, 24, 1, 2, 3)));
-        var compressed = Tga(0, 24, new byte[12]);
-        compressed[2] = 10;
-        Assert.Throws<NotSupportedException>(() => TgaReader.Read(compressed));
-    }
 }

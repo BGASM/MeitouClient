@@ -30,7 +30,6 @@ public sealed unsafe partial class GpuContext
         Frame.States.AssumeFullBarrier();
         Frame.Stats.NativeSegments++;
         list.BeginLabel(label);
-        list.Log?.Note($"native {label}");
         segment = list;
         return list;
     }
@@ -42,7 +41,6 @@ public sealed unsafe partial class GpuContext
         cmd.EndLabel();
         FullBarrier(cmd.Handle);
         segment = null;
-        cmd.Log?.Note("end native");
     }
 
     /// <summary>
@@ -63,7 +61,6 @@ public sealed unsafe partial class GpuContext
             host.Invalidate();
             Frame.Stats.NativeSegments++;
             host.BeginLabel(label);
-            host.Log?.Note($"native {label} (in host pass)");
             guestKind = GuestKind.Host;
             return guest = host;
         }
@@ -75,7 +72,7 @@ public sealed unsafe partial class GpuContext
         if (guest is null || !ReferenceEquals(cmd, guest)) throw new InvalidOperationException("EndGuest without a matching BeginGuest");
         guest = null;
         if (guestKind == GuestKind.Inline) Frame.Parallel.EndInline(cmd);
-        else { cmd.EndLabel(); cmd.Log?.Note("end native (in host pass)"); }
+        else cmd.EndLabel();
     }
 
     /// <summary>

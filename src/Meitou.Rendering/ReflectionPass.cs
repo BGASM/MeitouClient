@@ -29,8 +29,8 @@ public sealed class ReflectionPass : IDisposable
     public const int DefaultSamples = 4;
     /// <summary>Samples per texel of the reflection in use (1 = off; a change rebuilds the targets). Default <see cref="DefaultSamples"/>; <c>--reflection-samples</c>, <c>--ab refl-msaa</c>.</summary>
     public int Samples { get; set; } = DefaultSamples;
-    /// <summary>Side B of <c>--ab refl-msaa</c> (<c>MEITOU_REFL_AB_SAMPLES</c>, default 1).</summary>
-    public int AbSamples { get; set; } = 1;
+    /// <summary>Side B of <c>--ab refl-msaa</c> (1).</summary>
+    public int AbSamples => 1;
     /// <summary>
     /// Meitou: the mirrored scene is drawn without the sun shadows (the receivers see a lit surface: the frame's shadow block is swapped for the
     /// shadows-off one while the pass records; <c>--ab refl-shadows</c> flips it). A half-resolution, rippled mirror image hides the shadows' detail,
@@ -60,14 +60,6 @@ public sealed class ReflectionPass : IDisposable
     public ReflectionPass(GpuContext gpu)
     {
         Gpu = gpu;
-        // Tuning knobs for experiments (MEITOU_REFL_OBJECTS, _FOLIAGE, _LOD, _AGE); the defaults are what the viewer ships with.
-        static float Env(string n, float d) => float.TryParse(Environment.GetEnvironmentVariable("MEITOU_REFL_" + n), System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : d;
-        ObjectDistance = Env("OBJECTS", ObjectDistance);
-        FoliageDistance = Env("FOLIAGE", FoliageDistance);
-        ObjectLodBias = Env("LOD", ObjectLodBias);
-        MaxAge = (int)Env("AGE", MaxAge);
-        AbSamples = (int)Env("AB_SAMPLES", AbSamples);
-        TerrainLodScale = Env("TLOD", TerrainLodScale);
         timer = new PassTimer(gpu);
     }
 
@@ -301,7 +293,7 @@ public sealed class ReflectionPass : IDisposable
         options.Water = render.Water;
         options.Wireframe = 0;
         options.Debug = 0;
-        (options.TerrainPixelError, options.TerrainFarPixelError, options.TerrainRampStart) = (render.TerrainPixelError, render.TerrainFarPixelError, render.TerrainRampStart);
+        options.TerrainPixelError = render.TerrainPixelError;
         options.TerrainPixelScale = render.TerrainPixelScale * TerrainLodScale;
         options.MaterialDistance = Math.Min(render.MaterialDistance, MaterialDistance);
 
@@ -339,7 +331,7 @@ public sealed class ReflectionPass : IDisposable
         }
         Gpu.EndHostPass(cmd);
         // What lies beyond the near slice (20000 units on) is fogged as the sky, to the far clip.
-        if (FogVolumes && hasImage && !NoFog) RunFog(cmd, nearest, mapped, mirroredEye);
+        if (FogVolumes && hasImage) RunFog(cmd, nearest, mapped, mirroredEye);
         Gpu.EndNative(cmd);
         timer.End();
         CpuMs = watch.Elapsed.TotalMilliseconds;
@@ -473,8 +465,6 @@ public sealed class ReflectionPass : IDisposable
     /// shows; the volumes along that part are laid over the texel (the main fog pass already fogs the part from the eye to the water).
     /// </summary>
     public bool FogVolumes { get; set; }
-    /// <summary><c>MEITOU_REFL_FOG=0</c>: no fog pass over the reflection (for A/B measurements).</summary>
-    public bool NoFog { get; set; } = Environment.GetEnvironmentVariable("MEITOU_REFL_FOG") == "0";
     LegacyProgram? fogProgram;
     int fogProgramSamples = -1;
     GraphicsPipeline? fogPipeline;

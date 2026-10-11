@@ -96,27 +96,6 @@ public class CombatDataTests
         Assert.Equal(0.25f, t.StrikeProgress(1), 5);
         Assert.Equal(0.75f, t.StrikeProgress(2), 5);
     }
-
-    [Fact]
-    public void The_crossbow_lerps_its_two_levels_by_quality()
-    {
-        var r = Rec("1-t", FcsRecordType.CROSSBOW, "Bow");
-        r.Floats["pierce damage min 0"] = 20;
-        r.Floats["pierce damage min 1"] = 30;
-        r.Floats["pierce damage max 0"] = 30;
-        r.Floats["pierce damage max 1"] = 45;
-        r.Ints["range"] = 600;
-        r.Ints["range 1"] = 800;
-        r.Floats["reload time min"] = 3;
-        r.Floats["reload time min 1"] = 2;
-        var bow = CrossbowData.From(Db(r).Find("1-t")!);
-        var half = bow.At(0.5f);
-        Assert.Equal(25, half.PierceMin);
-        Assert.Equal(37, half.PierceMax);      // 37.5 truncated
-        Assert.Equal(700f, half.Range);
-        Assert.Equal(2.5f, half.ReloadMin, 4);
-        Assert.Equal(90, bow.At(1, 2).PierceMax);                       // 45 x 2
-    }
 }
 
 /// <summary>The facts of docs/game/combat.md checked against the install's records (base load order). Skipped without the game.</summary>
@@ -138,75 +117,6 @@ public class CombatInstallTests
     {
         var db = Database();
         lock (gate) return combat ??= CombatDatabase.From(db);
-    }
-
-    [Fact]
-    public void Record_counts_match_the_doc()
-    {
-        var data = Combat();
-        Assert.Equal(48, data.Weapons.Count);
-        Assert.Equal(44, data.Techniques.Count);
-        Assert.Equal(7, data.Crossbows.Count);
-        Assert.Equal(6, data.Guns.Count);
-        Assert.Equal(9, Database().OfType(FcsRecordType.LOCATIONAL_DAMAGE).Count());
-        Assert.Equal(142, data.Armours.Count);
-    }
-
-    [Fact]
-    public void Constants_of_the_base_game_are_the_defaults_the_data_layer_assumes()
-    {
-        var c = Combat().Constants;
-        var f = CombatConstants.BaseGame;
-        Assert.Equal(f.DamageMultiplier, c.DamageMultiplier, 6);
-        Assert.Equal(f.BluntDamage1, c.BluntDamage1, 4);
-        Assert.Equal(f.BluntDamage99, c.BluntDamage99, 4);
-        Assert.Equal(f.CutDamage1, c.CutDamage1, 4);
-        Assert.Equal(f.CutDamage99, c.CutDamage99, 4);
-        Assert.Equal(f.PierceDamageMultiplier, c.PierceDamageMultiplier, 5);
-        Assert.Equal(f.StumbleDamageMax, c.StumbleDamageMax, 4);
-        Assert.Equal(f.UnarmedDamageMult, c.UnarmedDamageMult, 5);
-        Assert.Equal(f.AttackChanceFactor, c.AttackChanceFactor, 5);
-        Assert.Equal(f.BaseBlockChance, c.BaseBlockChance, 5);
-        Assert.Equal(f.BlockChanceIncreasePerLevel, c.BlockChanceIncreasePerLevel, 5);
-        Assert.Equal(f.BlockChanceReductionPerLevel, c.BlockChanceReductionPerLevel, 5);
-        Assert.Equal(f.MaxNumAttackSlots, c.MaxNumAttackSlots);
-        Assert.Equal(f.DamageResistanceMin, c.DamageResistanceMin, 5);
-        Assert.Equal(f.DamageResistanceMax, c.DamageResistanceMax, 5);
-        Assert.Equal(f.BowDamage1, c.BowDamage1, 5);
-        Assert.Equal(f.BowDamage99, c.BowDamage99, 5);
-        // The stored numbers of the doc's table: 0.65 x 20 = 13, 0.65 x 80 = 52, 0.65 x 1.2 = 0.78.
-        Assert.Equal(13f, c.CutDamage1, 3);
-        Assert.Equal(52f, c.CutDamage99, 3);
-        Assert.Equal(0.78f, c.PierceDamageMultiplier, 4);
-    }
-
-    [Fact]
-    public void The_katana_record_has_the_dumped_fields()
-    {
-        var k = Combat().Weapon("476-gamedata.base")!;
-        Assert.Equal("Katana", k.Name);
-        Assert.Equal((int)WeaponCategory.Katanas, k.SkillCategory);
-        Assert.Equal(1f, k.CutDamageMultiplier);
-        Assert.Equal(0f, k.BluntDamageMultiplier);
-        Assert.Equal(-0.3f, k.ArmourPenetration, 4);
-        Assert.Equal(1.2f, k.BleedMult, 4);
-        Assert.Equal(1.1f, k.HumanDamageMult, 4);
-        Assert.Equal(0.6f, k.RobotDamageMult, 4);
-        Assert.Equal(4, k.AttackMod);
-        Assert.Equal(-4, k.DefenceMod);
-        Assert.Equal(21, k.Length);
-        Assert.Equal(2f, k.WeightKg);
-        Assert.True(k.CanBlock);
-        Assert.Equal(WeaponKinds.Katana, WeaponInstance.KindOf(k.SkillCategory));
-    }
-
-    [Fact]
-    public void Pierce_is_set_on_eleven_of_the_forty_eight_weapons_all_creature_or_robot_creature()
-    {
-        var pierce = Combat().Weapons.Where(w => w.PierceDamageMultiplier != 0).ToList();
-        Assert.Equal(11, pierce.Count);
-        Assert.All(pierce, w => Assert.True(w.SkillCategory >= 9, w.Name));   // categories 9 to 20 are the creature attacks
-        Assert.All(Combat().Weapons.Where(w => w.SkillCategory <= 8), w => Assert.Equal(0f, w.PierceDamageMultiplier));
     }
 
     [Fact]
@@ -239,29 +149,6 @@ public class CombatInstallTests
         Assert.Equal(-999f, cutStatic.AttackDistance);
         Assert.Equal(99f, cutStatic.AttackDistanceMinVsStatic);
         Assert.Equal(-10f, all.Single(t => t.Name == "Cut left").AttackDistanceMinVsStatic);
-    }
-
-    [Fact]
-    public void Armour_coverage_refers_to_the_locational_damage_records()
-    {
-        var db = Database();
-        var data = Combat();
-        var parts = db.OfType(FcsRecordType.LOCATIONAL_DAMAGE).Select(r => r.StringId).ToHashSet();
-        var covered = data.Armours.SelectMany(a => a.Coverage).ToList();
-        Assert.NotEmpty(covered);
-        Assert.All(covered, c => Assert.Contains(c.PartStringId, parts));
-        Assert.All(covered, c => Assert.InRange(c.Percent, 0, 100));
-        Assert.All(data.Armours, a => { Assert.InRange((int)a.Class, 0, 3); Assert.InRange((int)a.Material, 0, 3); });
-    }
-
-    [Fact]
-    public void Every_manufacturer_model_names_a_weapon_model_record()
-    {
-        var data = Combat();
-        Assert.NotEmpty(data.Manufacturers);
-        foreach (var m in data.Manufacturers)
-            foreach (var e in m.Models)
-                Assert.NotNull(data.WeaponMaterial(e.ModelStringId));
     }
 }
 

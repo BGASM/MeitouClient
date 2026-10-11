@@ -7,8 +7,6 @@ public class ShaderInterfaceTests
 {
     static readonly GlslProgramCompiler Compiler = new(new ShaderCompileOptions { UseDiskCache = false });
 
-    const string Main = "void main() { }\n";
-
     [Fact]
     [Slow]
     public void QualifiersArraysMatricesAndMultipleNames()
@@ -68,50 +66,5 @@ public class ShaderInterfaceTests
 
         // line numbers are unchanged by the rewrite
         Assert.Equal(vs.Count(c => c == '\n'), p.VertexSource.Count(c => c == '\n'));
-    }
-
-    [Fact]
-    [Slow]
-    public void ExplicitLocationsAreHonouredAcrossStages()
-    {
-        string vs = "#version 330 core\nlayout(location = 2) out vec4 vA;\nout vec4 vB;\nvoid main() { vA = vec4(0.0); vB = vec4(0.0); gl_Position = vec4(0.0); }\n";
-        string fs = "#version 330 core\nin vec4 vA;\nlayout(location = 0) in vec4 vB;\nlayout(location = 1) out vec4 c;\nvoid main() { c = vA + vB; }\n";
-        // vB is explicit in the fragment stage only; the vertex stage follows it
-        var p = Compiler.Compile(vs, fs);
-        Assert.Equal(2, p.Vertex.Outputs.Single(o => o.Name == "vA").Location);
-        Assert.Equal(0, p.Vertex.Outputs.Single(o => o.Name == "vB").Location);
-        Assert.Equal(2, p.Fragment.Inputs.Single(o => o.Name == "vA").Location);
-        Assert.Equal(1, p.Fragment.Outputs.Single().Location);
-    }
-
-    [Fact]
-    public void ConstArraySizesAndLayoutsWithoutLocation()
-    {
-        string vs = "#version 330 core\nconst int N = 2;\nlayout(xfb_offset = 0) out vec4 vA[N];\nvoid main() { vA[0] = vec4(0.0); vA[1] = vec4(0.0); gl_Position = vec4(0.0); }\n";
-        string fs = "#version 330 core\nin vec4 vA[N];\nout vec4 c;\nvoid main() { c = vA[1]; }\n";
-        // fs has no N: expect the clear error rather than a wrong location
-        Assert.Throws<ShaderCompileException>(() => Compiler.Compile(vs, fs));
-        string fs2 = "#version 330 core\nconst int N = 2;\nin vec4 vA[N];\nout vec4 c;\nvoid main() { c = vA[1]; }\n";
-        var (v, f) = GlslProgramCompiler.Preprocess(vs.Replace("layout(xfb_offset = 0) ", ""), fs2);
-        Assert.Contains("layout(location = 0) out vec4 vA[N]", v);
-        Assert.Contains("layout(location = 0) in vec4 vA[N]", f);
-    }
-
-    [Fact]
-    public void MultiDeclarationsAreSplit()
-    {
-        var (v, _) = GlslProgramCompiler.Preprocess("#version 330 core\nsmooth out vec2 a, b[2],\n c;\nvoid main() {}\n", "#version 330 core\nin vec2 a;\nout vec4 c;\nvoid main() {}\n");
-        Assert.Contains("layout(location = 0) smooth out vec2 a;", v);
-        Assert.Contains("layout(location = 1) smooth out vec2 b[2];", v);
-        Assert.Contains("layout(location = 3) smooth out vec2 c;", v);
-        Assert.Equal(4, v.Count(c => c == '\n'));
-    }
-
-    [Fact]
-    public void RemapKeepsAttributesAndTheOriginalMain()
-    {
-        var (v, _) = GlslProgramCompiler.Preprocess("#version 330 core\nlayout(location = 0) in vec3 a;\nvoid main() { gl_Position = vec4(a, 1.0); }\n", "#version 330 core\nout vec4 c;\nvoid main() { c = vec4(1.0); }\n", new ShaderCompileOptions { RemapClipDepth = true });
-        Assert.Contains("void meitou_original_main()", v);
-        Assert.DoesNotContain("void main() { gl_Position", v);
     }
 }

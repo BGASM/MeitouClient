@@ -12,9 +12,9 @@ public sealed unsafe partial class FoliageRenderer
 
     /// <summary>
     /// The Meitou <c>card-trim</c> switch: the alpha-tested cards of FOLIAGE-mode meshes and leaves are drawn cut to the opaque outline of their texture. Faithful draws the
-    /// whole cards. Off for good with <c>MEITOU_CARD_TRIM=0</c>, which also leaves the trimmed index lists unmade.
+    /// whole cards.
     /// </summary>
-    public bool CardTrim { get; set; } = FoliageCardTrimming.Enabled;
+    public bool CardTrim { get; set; } = true;
 
     /// <summary>What the trimming did to the meshes decoded so far (cards, triangles and areas; the sum over the parts).</summary>
     public FoliageCardTrimStats CardTrimStats { get; private set; }
@@ -31,7 +31,7 @@ public sealed unsafe partial class FoliageRenderer
     Model? DecodeTrimmed(string name, FoliageMesh mesh, bool leaves)
     {
         var model = Decode(name);
-        if (model is null || !FoliageCardTrimming.Enabled) return model;
+        if (model is null) return model;
         bool cutOut = leaves || mesh.MaterialType == 4;
         float threshold = (leaves ? mesh.LeavesAlphaThreshold : mesh.AlphaThreshold) / 255f;
         var diffuse = leaves ? mesh.LeavesTexture : mesh.Texture;

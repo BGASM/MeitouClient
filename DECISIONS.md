@@ -98,7 +98,7 @@ Choices made while working unattended on the `engine` branch, with the reason. N
     character screenshots 0.0000). The interactive mesh and character windows are no longer multisampled (the swapchain image is
     single-sampled; the offscreen pictures still resolve a 4x target).
 19. **The frame-time tail: GC, JIT, priorities, culling.** Attributed with the flight benchmark's new lines (stage means, GC pauses on
-    the worst frames, `gc` totals, `MEITOU_JOB_STATS=1` per call-site allocation) and GC events: the streaming threads allocated ~3.4 MB
+    the worst frames, `gc` totals, a per-call-site allocation table, since removed) and GC events: the streaming threads allocated ~3.4 MB
     a frame, and each single-threaded gen0 GC (2 MB promoted) spent 3-15 ms scanning the ~0.5 GB gen2, suspending every thread. Changes,
     each measured in interleaved runs: (1) less garbage: grass pages built in a per-thread buffer instead of a list sized for every
     candidate (2.4 GB a flight to 0.25), map-window levels from the shared array pool (5.1 GB a flight in all to 2.6); (2) server GC on

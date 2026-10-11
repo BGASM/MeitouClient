@@ -16,7 +16,7 @@ sealed class CameraMotion(WorldCamera camera, Gpu gpu, Vector3 centre, bool circ
 
     /// <summary>The motion <c>--bench-motion</c> names.</summary>
     public static CameraMotion For(string name, WorldOptions o, WorldCamera camera, Gpu gpu) => new(camera, gpu, camera.Target, name == "fly", Math.Max(o.FlyRadius, 1), o.FlySpeed,
-        name == "turn" ? o.BenchTurn * MathF.PI / 180 : 0, name == "orbit" ? o.BenchOrbit : 0);
+        name == "turn" ? 0.5f * MathF.PI / 180 : 0, name == "orbit" ? o.BenchOrbit : 0);   // the turn: 0.5 degrees a frame
 
     /// <summary>The old fly benchmark's: the circle, or the turn when MEITOU_FLY_TURN gives a rate, plus the orbit of MEITOU_BENCH_ORBIT.</summary>
     public static CameraMotion Fly(WorldOptions o, WorldCamera camera, Gpu gpu, float turnRadians, float orbitPixels) =>

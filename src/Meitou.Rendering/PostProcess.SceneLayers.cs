@@ -15,16 +15,16 @@ namespace Meitou.Rendering;
 /// </summary>
 public sealed unsafe partial class PostProcess
 {
-    /// <summary>Meitou: one pass for the shafts, the fog volumes and the occlusion (default on; <c>MEITOU_LAYER_MERGE=0</c>, <c>--ab layer-merge</c>).</summary>
-    public bool MergeLayers { get; set; } = Environment.GetEnvironmentVariable("MEITOU_LAYER_MERGE") != "0";
-    /// <summary>Meitou: with <see cref="MergeLayers"/>, the fog volumes at half the render size (<c>MEITOU_FOG_HALF=0</c>, <c>--ab fog-half</c>).</summary>
-    public bool FogHalf { get; set; } = Environment.GetEnvironmentVariable("MEITOU_FOG_HALF") != "0";
+    /// <summary>Meitou: one pass for the shafts, the fog volumes and the occlusion (default on; <c>--ab layer-merge</c>).</summary>
+    public bool MergeLayers { get; set; } = true;
+    /// <summary>Meitou: with <see cref="MergeLayers"/>, the fog volumes at half the render size (<c>--ab fog-half</c>).</summary>
+    public bool FogHalf { get; set; } = true;
     /// <summary>Meitou: with <see cref="MergeLayers"/> and fog volumes in view, the light shafts' apply at half the render size too, in the fog volumes' texture
-    /// (<c>MEITOU_SHAFTS_HALF=0</c>, <c>--ab shafts-half</c>). Not for the shafts alone: a half-size pass and its upsample cost more than the apply they replace.</summary>
-    public bool ShaftsHalf { get; set; } = Environment.GetEnvironmentVariable("MEITOU_SHAFTS_HALF") != "0";
+    /// (<c>--ab shafts-half</c>). Not for the shafts alone: a half-size pass and its upsample cost more than the apply they replace.</summary>
+    public bool ShaftsHalf { get; set; } = true;
     /// <summary>Meitou: when the half-size texture holds every pending layer, the merged pass is a lean one (the upsample and the occlusion) and a
-    /// second pass computes the few pixels no half-size texel fits at full size (<c>MEITOU_LAYERS_LEAN=0</c>, <c>--ab layers-lean</c>).</summary>
-    public bool LeanLayers { get; set; } = Environment.GetEnvironmentVariable("MEITOU_LAYERS_LEAN") != "0";
+    /// second pass computes the few pixels no half-size texel fits at full size (<c>--ab layers-lean</c>).</summary>
+    public bool LeanLayers { get; set; } = true;
 
     /// <summary>The ray and distance rebuild of the merged passes (<c>PostProcessShaders.SceneDistance</c>), the light shafts' camera and grid, and the
     /// fog volumes' shadow from the shafts' first atlas.</summary>

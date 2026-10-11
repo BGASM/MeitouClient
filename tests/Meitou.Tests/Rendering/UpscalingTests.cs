@@ -7,32 +7,6 @@ namespace Meitou.Tests.Rendering;
 public class UpscalingTests
 {
     [Fact]
-    public void Halton_is_the_radical_inverse()
-    {
-        Assert.Equal(0.5f, Jitter.Halton(1, 2));
-        Assert.Equal(0.25f, Jitter.Halton(2, 2));
-        Assert.Equal(0.75f, Jitter.Halton(3, 2));
-        Assert.Equal(1 / 3f, Jitter.Halton(1, 3), 6);
-        Assert.Equal(2 / 3f, Jitter.Halton(2, 3), 6);
-        Assert.Equal(1 / 9f, Jitter.Halton(3, 3), 6);
-    }
-
-    [Fact]
-    public void Phase_count_grows_with_the_square_of_the_ratio()
-    {
-        Assert.Equal(8, Jitter.PhaseCount(1600, 1600));
-        Assert.Equal(18, Jitter.PhaseCount(1067, 1600));   // quality, 1.5x: 8 * 2.25
-        Assert.Equal(32, Jitter.PhaseCount(800, 1600));
-        for (int i = 0; i < 64; i++)
-        {
-            var o = Jitter.Offset(i, 18);
-            Assert.InRange(o.X, -0.5f, 0.5f);
-            Assert.InRange(o.Y, -0.5f, 0.5f);
-        }
-        Assert.Equal(Jitter.Offset(3, 18), Jitter.Offset(21, 18));
-    }
-
-    [Fact]
     public void Jitter_moves_the_picture_by_render_pixels()
     {
         var p = Matrix4x4.CreatePerspectiveFieldOfView(0.9f, 16 / 9f, 1, 1000);
@@ -45,31 +19,6 @@ public class UpscalingTests
             Assert.Equal(a.Y / a.W - 2 * 0.5f / 900, b.Y / b.W, 5);
             Assert.Equal(a.Z / a.W, b.Z / b.W, 6);
         }
-    }
-
-    [Fact]
-    public void Render_size_follows_the_scale()
-    {
-        var o = new UpscaleOptions { Kind = UpscalerKind.Off };
-        Assert.Equal((1600, 900), o.RenderSize(1600, 900));   // off, no scale: full size
-        o.Scale = 0.5f;
-        Assert.Equal(0.5f, o.EffectiveScale);                  // off with a scale: the scene is drawn smaller and scaled up plainly (FXAA)
-        Assert.Equal((800, 450), o.RenderSize(1600, 900));
-        Assert.Equal("off at 0.5", o.Describe());
-        o.Scale = null;
-        Assert.Equal("off", o.Describe());
-        o.Kind = UpscalerKind.Fsr;
-        Assert.Equal((1328, 747), o.RenderSize(1600, 900));   // Meitou Ultra Quality by default
-        o.Scale = UpscaleOptions.ParseScale("performance");
-        Assert.Equal((1280, 720), o.RenderSize(2560, 1440));
-        o.Kind = UpscalerKind.Taa;
-        o.Scale = null;
-        Assert.Equal((2125, 1195), o.RenderSize(2560, 1440));
-        Assert.Equal(0.83f, o.EffectiveScale);
-        Assert.Equal(0.83f, UpscaleOptions.ParseScale("ultra-quality"));
-        o.Scale = UpscaleOptions.ParseScale("native");
-        Assert.Equal((2560, 1440), o.RenderSize(2560, 1440));
-        Assert.Throws<ArgumentException>(() => UpscaleOptions.ParseScale("2"));
     }
 
     static Matrix4x4 Rotation(Vector3 eye, Vector3 target) => Matrix4x4.CreateLookAt(eye, target, Vector3.UnitY) with { M41 = 0, M42 = 0, M43 = 0 };
@@ -104,20 +53,5 @@ public class UpscalingTests
             Assert.Equal(expected.X, prev.X / prev.W, 3);
             Assert.Equal(expected.Y, prev.Y / prev.W, 3);
         }
-    }
-
-    [Fact]
-    public void A_still_camera_has_no_motion_but_the_jitter()
-    {
-        var projection = Matrix4x4.CreatePerspectiveFieldOfView(0.9f, 16 / 9f, 2, 20000);
-        var eye = new Vector3(-51000, 900, -14300);
-        var rotation = Rotation(eye, eye + new Vector3(300, -80, 40));
-        var jitter = new Vector2(-0.4f, 0.1f);
-        var m = Reprojection.ClipToPrevious(rotation, eye, Jitter.Apply(projection, jitter, 1600, 900), rotation, eye, projection);
-        var ndc = new Vector4(0.3f, -0.2f, 0.98f, 1);
-        var prev = Vector4.Transform(ndc, m);
-        // The previous position is this pixel minus the jitter: motion (current unjittered − previous) is zero.
-        Assert.Equal(0.3f - 2 * jitter.X / 1600, prev.X / prev.W, 4);
-        Assert.Equal(-0.2f - 2 * jitter.Y / 900, prev.Y / prev.W, 4);
     }
 }

@@ -14,16 +14,16 @@ namespace Meitou.Rendering;
 /// </summary>
 public sealed unsafe partial class PostProcess
 {
-    /// <summary>The merged velocity and exposure kernels (Meitou default); off runs the separate full-screen passes. <c>MEITOU_POST_MERGE=0</c> starts with them off.</summary>
+    /// <summary>The merged velocity and exposure kernels (Meitou default); off runs the separate full-screen passes (<c>--ab post-merge</c>).</summary>
     public bool MergePasses
     {
         get => MergeVelocity && MergeExposure;
         set => MergeVelocity = MergeExposure = value;
     }
-    /// <summary>The velocity kernel alone (<c>MEITOU_POST_MERGE=velocity</c> or <c>=0</c> starts with it off).</summary>
-    public bool MergeVelocity { get; set; } = Environment.GetEnvironmentVariable("MEITOU_POST_MERGE") is not ("0" or "exposure");
+    /// <summary>The velocity kernel alone.</summary>
+    public bool MergeVelocity { get; set; } = true;
     /// <summary>The exposure kernel alone.</summary>
-    public bool MergeExposure { get; set; } = Environment.GetEnvironmentVariable("MEITOU_POST_MERGE") is not ("0" or "velocity");
+    public bool MergeExposure { get; set; } = true;
 
     ShaderProgram? velocityProgram, exposureProgram;
     ComputePipeline? velocityPipeline, exposurePipeline;

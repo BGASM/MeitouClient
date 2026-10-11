@@ -44,7 +44,7 @@ public sealed class WaveSet
         NormalTime = (float)(seconds / 600 % 1e4);
         float target = WindFactor(windSpeed);
         wind = first ? target : wind + (target - wind) * (float)(1 - Math.Exp(-dt / 10));
-        // The first frame starts from the clock itself (so a picture at --water-seconds shows that moment), later ones integrate.
+        // The first frame starts from the clock itself (so a still picture shows the same moment every time), later ones integrate.
         shorePhase = (first ? seconds / BreakerPeriod : shorePhase + dt / BreakerPeriod) % PhaseWrap;
         float swell = 0.6f + 0.6f * MathF.Min(wind, 1.5f);
         Shore = new Vector4((float)shorePhase, 2.2f * swell, BreakerLength, 3.5f * swell);

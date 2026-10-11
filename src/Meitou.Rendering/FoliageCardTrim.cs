@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Numerics;
 
 namespace Meitou.Rendering;
@@ -6,19 +5,16 @@ namespace Meitou.Rendering;
 /// <summary>How <see cref="FoliageCardTrimmer"/> decides (docs/render-foliage.md, "Card trimming").</summary>
 public sealed record FoliageCardTrimOptions
 {
-    /// <summary>The most vertices a trimmed card's outline may have (<c>MEITOU_TRIM_VERTICES</c>): a quad is 4 (two triangles, the same as before), 6 is four triangles.</summary>
-    public int MaxVertices { get; init; } = EnvInt("MEITOU_TRIM_VERTICES", 6);
-    /// <summary>What a triangle more than the card had costs, as a share of the card's area (<c>MEITOU_TRIM_TRIANGLE_COST</c>): the outline with the least area plus this per extra triangle wins.</summary>
-    public float TriangleCost { get; init; } = EnvFloat("MEITOU_TRIM_TRIANGLE_COST", 0.05f);
-    /// <summary>A card is trimmed only when its outline plus the extra triangles saves at least this share of its area (<c>MEITOU_TRIM_MIN_SAVING</c>).</summary>
-    public float MinSaving { get; init; } = EnvFloat("MEITOU_TRIM_MIN_SAVING", 0.1f);
-    /// <summary>Cells the outline is grown by on every side (<c>MEITOU_TRIM_MARGIN</c>).</summary>
-    public float Margin { get; init; } = EnvFloat("MEITOU_TRIM_MARGIN", 0.25f);
-    /// <summary>The size on screen, in pixels across, below which a card may lose the fringe that the coarser mips of its texture let through (<c>MEITOU_TRIM_MIN_PIXELS</c>): a card that many texels across is trimmed to the mask level that holds the mips down to that many texels per pixel, and a smaller one to a finer level.</summary>
-    public float MinPixels { get; init; } = EnvFloat("MEITOU_TRIM_MIN_PIXELS", 16f);
-
-    static int EnvInt(string name, int fallback) => int.TryParse(Environment.GetEnvironmentVariable(name), NumberStyles.Integer, CultureInfo.InvariantCulture, out int v) && v >= 3 ? v : fallback;
-    static float EnvFloat(string name, float fallback) => float.TryParse(Environment.GetEnvironmentVariable(name), NumberStyles.Float, CultureInfo.InvariantCulture, out float v) ? v : fallback;
+    /// <summary>The most vertices a trimmed card's outline may have: a quad is 4 (two triangles, the same as before), 6 is four triangles.</summary>
+    public int MaxVertices { get; init; } = 6;
+    /// <summary>What a triangle more than the card had costs, as a share of the card's area: the outline with the least area plus this per extra triangle wins.</summary>
+    public float TriangleCost { get; init; } = 0.05f;
+    /// <summary>A card is trimmed only when its outline plus the extra triangles saves at least this share of its area.</summary>
+    public float MinSaving { get; init; } = 0.1f;
+    /// <summary>Cells the outline is grown by on every side.</summary>
+    public float Margin { get; init; } = 0.25f;
+    /// <summary>The size on screen, in pixels across, below which a card may lose the fringe that the coarser mips of its texture let through: a card that many texels across is trimmed to the mask level that holds the mips down to that many texels per pixel, and a smaller one to a finer level.</summary>
+    public float MinPixels { get; init; } = 16f;
 }
 
 /// <summary>What a trim did to one part (areas are the sums over its triangles).</summary>
@@ -400,9 +396,6 @@ public static class FoliageCardTrimmer
 /// <summary>Trimming a decoded model's parts against the alpha of the normal map its material cuts out on.</summary>
 public static class FoliageCardTrimming
 {
-    /// <summary>Whether foliage meshes are trimmed at all; <c>MEITOU_CARD_TRIM=0</c> leaves them as they are (and the <c>card-trim</c> switch has nothing to flip).</summary>
-    public static bool Enabled { get; } = Environment.GetEnvironmentVariable("MEITOU_CARD_TRIM") != "0";
-
     /// <summary>
     /// Gives every part of <paramref name="model"/> its <see cref="ModelPart.TrimmedIndices"/> (the parts are replaced in the model's list; its bounds stay the original's).
     /// <paramref name="normalPath"/> is the resolved file of the normal map, <paramref name="threshold"/> the cut-out threshold (0-1). The sum of what was done.

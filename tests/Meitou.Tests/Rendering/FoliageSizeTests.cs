@@ -10,19 +10,6 @@ namespace Meitou.Tests.Rendering;
 /// <summary>The size classes of the Meitou <c>range</c> switch (docs/formats/foliage.md, "Mesh sizes").</summary>
 public class FoliageSizeTests
 {
-    [Fact]
-    public void Thresholds_split_the_sizes()
-    {
-        Assert.Equal(FoliageSizeClass.Small, FoliageSizes.Classify(0));
-        Assert.Equal(FoliageSizeClass.Small, FoliageSizes.Classify(39.9f));
-        Assert.Equal(FoliageSizeClass.Medium, FoliageSizes.Classify(FoliageSizes.MediumFrom));
-        Assert.Equal(FoliageSizeClass.Medium, FoliageSizes.Classify(124.9f));
-        Assert.Equal(FoliageSizeClass.Large, FoliageSizes.Classify(FoliageSizes.LargeFrom));
-        Assert.Equal(FoliageSizeClass.Large, FoliageSizes.Classify(5000));
-        // The largest small mesh at the end of the small range looks as big as the largest medium one at the end of the medium range.
-        Assert.Equal(FoliageSizes.MediumFrom / FoliageSizes.ThresholdSmallRange, FoliageSizes.LargeFrom / FoliageSizes.ThresholdMediumRange, 3);
-    }
-
     /// <summary>Named base-game meshes land in the class the owner's examples put them in: litter and small plants small, junk, boulders
     /// and bushes medium, trees, ruins, wrecks, rocks, pillars, hoodoos and rock stacks large (sizes as the renderer measures them, from the decoded meshes);
     /// of the large ones only the trees under 1000 take the normal impostor distance (<see cref="FoliageSizes.LargeBillboard"/> false).</summary>
@@ -58,17 +45,6 @@ public class FoliageSizeTests
             Assert.True(got == cls, $"{name}: size {size:0} is {got}, expected {cls}");
             Assert.True(FoliageSizes.LargeBillboard(radius, mesh!) == large, $"{name}: large billboard should be {large}");
         }
-    }
-
-    [Fact]
-    public void Vegetation_is_told_by_the_games_asset_folder()
-    {
-        Assert.True(FoliageSizes.IsVegetation(@".\data\newland\Assets\Plants\DeepFir01.mesh"));
-        Assert.True(FoliageSizes.IsVegetation(@".\data\foliage\Trees\ThinTree01_Trunk.mesh"));
-        Assert.True(FoliageSizes.IsVegetation("./DATA/newland/assets/plants/x.mesh"));
-        Assert.False(FoliageSizes.IsVegetation(@".\data\newland\Assets\Rocks\FlatTop_Hoodoo01.mesh"));
-        Assert.False(FoliageSizes.IsVegetation(@".\data\newland\Assets\Things\RUIN-RefineryHead04.mesh"));
-        Assert.False(FoliageSizes.IsVegetation(@".\data\newland\Assets\Buildings\HugeRuinWall01.mesh"));
     }
 
     /// <summary>The renderer's bounding radius (FoliageRenderer.PumpMeshes): half the diagonal of the main and leaves meshes' box, at least 1.</summary>

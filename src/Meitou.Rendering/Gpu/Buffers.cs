@@ -138,28 +138,6 @@ public readonly unsafe struct Transient(Buffer handle, ulong offset, byte* point
 }
 
 /// <summary>
-/// Host-visible mapped buffers by handle, so a draw log can hash what a draw reads from per-frame memory (VkGl's rings and the native
-/// allocators register their chunks). Thread-safe.
-/// </summary>
-public sealed unsafe class HostMemory
-{
-    readonly ConcurrentDictionary<ulong, (nint Pointer, ulong Size)> chunks = new();
-
-    public void Register(Buffer buffer, void* mapped, ulong size) => chunks[buffer.Handle] = ((nint)mapped, size);
-    public void Forget(Buffer buffer) => chunks.TryRemove(buffer.Handle, out _);
-
-    /// <summary>The mapped bytes of [<paramref name="offset"/>, +<paramref name="size"/>) of a registered buffer, or empty.</summary>
-    public ReadOnlySpan<byte> Read(Buffer buffer, ulong offset, ulong size)
-    {
-        if (!chunks.TryGetValue(buffer.Handle, out var c) || offset >= c.Size) return default;
-        ulong n = Math.Min(size, c.Size - offset);
-        return new ReadOnlySpan<byte>((byte*)c.Pointer + offset, (int)n);
-    }
-
-    public bool Contains(Buffer buffer) => chunks.ContainsKey(buffer.Handle);
-}
-
-/// <summary>
 /// Per-frame host-visible memory: a pointer bump in 8 MB chunks (larger requests get a chunk of their own, freed at the next reset).
 /// Regular chunks live as long as the allocator (unless <see cref="Reset"/> trims them), so descriptor sets made for them stay valid. One per frame slot (and, in wave 4, per
 /// recording thread); <see cref="Reset"/> when the slot comes round. Not thread-safe.
@@ -170,17 +148,15 @@ public sealed unsafe class LinearAllocator : IDisposable
     const BufferUsageFlags Usage = BufferUsageFlags.UniformBufferBit | BufferUsageFlags.StorageBufferBit | BufferUsageFlags.VertexBufferBit |
         BufferUsageFlags.IndexBufferBit | BufferUsageFlags.IndirectBufferBit | BufferUsageFlags.TransferSrcBit | BufferUsageFlags.TransferDstBit;
     readonly VulkanDevice device;
-    readonly HostMemory? registry;
     readonly string name;
     readonly List<GpuBuffer> chunks = [];
     int current = -1;
     ulong offset;
 
-    public LinearAllocator(VulkanDevice device, string name, HostMemory? registry = null)
+    public LinearAllocator(VulkanDevice device, string name)
     {
         this.device = device;
         this.name = name;
-        this.registry = registry;
     }
 
     /// <summary>Bytes handed out since the last reset.</summary>
@@ -196,7 +172,6 @@ public sealed unsafe class LinearAllocator : IDisposable
         for (int i = chunks.Count - 1; i >= 0; i--)
             if (chunks[i].Size > ChunkSize || i >= keep)
             {
-                registry?.Forget(chunks[i].Buffer);
                 device.Allocator.Free(chunks[i]);
                 chunks.RemoveAt(i);
             }
@@ -224,7 +199,6 @@ public sealed unsafe class LinearAllocator : IDisposable
         }
         long profileStart = UploadProfile.Begin();
         var chunk = device.Allocator.CreateBuffer(Math.Max(ChunkSize, size), Usage, MemoryKind.Upload, name);
-        registry?.Register(chunk.Buffer, chunk.Mapped, chunk.Size);
         UploadProfile.End(UploadProfile.Part.StagingChunk, profileStart);
         chunks.Add(chunk);
         current = chunks.Count - 1;
@@ -249,7 +223,6 @@ public sealed unsafe class LinearAllocator : IDisposable
     {
         foreach (var c in chunks)
         {
-            registry?.Forget(c.Buffer);
             device.DeferFree(c);
         }
         chunks.Clear();

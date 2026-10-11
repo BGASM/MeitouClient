@@ -47,7 +47,6 @@ public sealed unsafe partial class GpuContext : IDisposable
         Device = device;
         Features = GpuFeatures.Of(device);
         Features.Require(device.DeviceName);
-        HostMemory = new HostMemory();
         Defaults = new GpuDefaults(device);
         Samplers = new SamplerCache(device);
         Shaders = new ShaderLibrary(device);
@@ -69,10 +68,6 @@ public sealed unsafe partial class GpuContext : IDisposable
     public BindlessTable Bindless { get; }
     public Uploader Uploads { get; }
     public GpuFrame Frame { get; }
-    /// <summary>Per-frame host-visible chunks by buffer handle (for the draw log).</summary>
-    public HostMemory HostMemory { get; }
-    /// <summary>The draw log of the frame being recorded, when one is asked for (<see cref="DrawLog.RequestedPath"/>).</summary>
-    public DrawLog? Log { get; internal set; }
     /// <summary>The upscaler's texture LOD bias: added to the mip level of every mipmapped fetch (set by the post-processing chain).</summary>
     public float LodBias { get; set; }
 
@@ -205,6 +200,5 @@ public sealed unsafe partial class GpuContext : IDisposable
         dummyTextures.Clear();
         Samplers.Dispose();
         Defaults.Dispose();
-        Log?.Dispose();
     }
 }

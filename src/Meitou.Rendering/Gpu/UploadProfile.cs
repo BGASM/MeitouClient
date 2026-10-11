@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace Meitou.Rendering.Gpu;
 
 /// <summary>
-/// Where the time of an upload step goes (<c>MEITOU_STREAM_LOG=1</c> only; otherwise every call is a branch on a constant): per thread, the
+/// Where the time of an upload step goes (<c>--log-spikes</c> only; otherwise every call is a branch on a flag): per thread, the
 /// ticks and counts of the parts of a step that are not its own work (beginning a frame, waiting for a free frame slot, a new memory block, a
 /// block given back, a staging chunk, the copy into staging, image and buffer creation, a freed image) and the garbage collector's pauses.
 /// <see cref="Take"/> returns what the calling thread has spent since the last call, for the slow-step log lines; the steps' loops call it
@@ -13,7 +13,7 @@ public static class UploadProfile
 {
     public enum Part { FrameBegin, FrameWait, NewBlock, FreeBlock, StagingChunk, StagingCopy, CreateImage, CreateBuffer, FreeImage, FreeBuffer, Count }
 
-    public static readonly bool On = Environment.GetEnvironmentVariable("MEITOU_STREAM_LOG") == "1";
+    public static bool On => SpikeLog.Enabled;
 
     [ThreadStatic] static long[]? ticks;
     [ThreadStatic] static int[]? counts;

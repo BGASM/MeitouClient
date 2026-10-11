@@ -119,7 +119,7 @@ keeps its per-character `CombatSlot`s in two arrays of its own with the same rul
 **Partitioning** (`WorkerPool`, `World.MakePartitions`). `Threads x PartitionsPerThread` (2) partitions over `0..HighWater`, but none smaller
 than `WorldSettings.MinPartitionSize`: 16 by default (the tests cut small worlds into many partitions), 128 in the game (a world under 256
 slots runs on the calling thread; see [Measurements](#measurements) for why). Which worker runs which partition is not fixed. One thread
-means no threads: the caller runs everything. The host chooses the thread count (`--sim-threads`, `simThreads` in the user config; default
+means no threads: the caller runs everything. The host chooses the thread count (`simThreads` in the user config; default
 half the cores, 1 to 8).
 
 **Effects.** An `Act` writes `Effect`s into its partition's `EffectBuffer`; the commit concatenates them and sorts by (target slot, source
@@ -304,7 +304,7 @@ Right mouse is the command button, so **orbit is the middle button only**; saved
 load. The HUD (top left, `DebugOverlay` text and quads): game clock and day, money, clickable speed buttons (pause, 1x, 2x, 5x, the active one
 lit), the selected characters' names; for the first selected character `Health: blood n%  worst part n%  state`, `Hunger: n of 3`, the trained
 stats (attack, defence, dodge, toughness, strength, athletics) and up to 9 inventory lines. Selected characters get a green ring and their
-remaining path a yellow line. A click on the HUD never selects. Screenshot options: `--select-player`, `--move-to <x> <z>`, `--attack-nearest`
+remaining path a yellow line. A click on the HUD never selects. Screenshot option: `--move-to <x> <z>` (selects the squad and orders it to walk)
 (with `--new-game --screenshot`); a `pickcheck` line in the log checks that the leader's own pixel picks it and a ray 60 px lower lands near it.
 
 ## Movement and paths
@@ -335,7 +335,7 @@ types in `Movement.cs`: `CharacterTask`, `MoveFlags` with `AnyPath`, `SpeedMode`
   `FindPath(from, to, footprintRadius, waterFactor)`. `OpenGroundWalkability` is the stand-in the tests use: the terrain (from
   `Meitou.Data.World.GroundHeights`, the CPU heightmap window plus the coarse whole-world grid, immutable) everywhere above the water, no
   obstacles, straight paths refused when they dip under the water. The game uses the navmesh through `Meitou.Game/NavAdapter.cs`, the
-  only file that knows `Meitou.Navigation`; `--no-navmesh` falls back to the stand-in.
+  only file that knows `Meitou.Navigation`; the sandbox uses the stand-in.
 - **Not modelled:** water states and swimming, the shallow-water speed cap, roads for long trips, turn rate, the combat speed multiplier.
 
 ## Navmesh
@@ -386,12 +386,11 @@ generator in any case).
   (`CharacterCold.FootprintRadius` from the race's `pathfind footprint radius`, 0 for the default human) and the water factor
   (`CharacterCold.WaterFactor` from the race's `water avoidance`: a + 1, or 1 / (1 - a), halved for the player's faction) to `NavAgent`.
 - **Tool.** `meitou-tools navmesh` (`tools/Meitou.Tools/NavmeshTool.cs`; usage in `Program.cs`): a zone or town, the ring (`--around`),
-  geometry/OBJ/PNG output, a path (`--path`, `--closed` for closed doors), `--no-interiors`, `--no-neighbour-seeds`, cell and tile size,
+  geometry/OBJ/PNG output, a path (`--path`, `--closed` for closed doors), `--no-interiors`, `--verbose`,
   `--repeat n` (timings), `--fingerprint` (SHA-256 of the cache files of The Hub and its pinned path points: the gate for refactors). Images
   for review live outside the repo (`R:\VlcekM\MeitouClient-re\probes\nav\out\`).
-- **Tests.** `HubNavmeshTests` (`[Slow]`): repeatable builds, cache loads, gate and door properties (a path made with a closed door never stands
-  on a door polygon; the Storm House, placement 4933, is entered through its door and shut when it is closed); timings take the best of three
-  and print all. `HubNavigationTests` (`[Slow]`): the Wanderer's order across The Hub reaches the goal without leaving the mesh and with a detour
+- **Tests.** `HubNavmeshTests` (`[Slow]`): the pinned path points, gathered geometry stats, and door properties (the Storm House, placement 4933, is
+  entered through its door and shut when it is closed). `HubNavigationTests` (`[Slow]`): the Wanderer's order across The Hub reaches the goal without leaving the mesh and with a detour
   of at least 10 % over the straight line.
 - **Not done.** Exterior layouts and furniture the placements do not list, `interior terrain` buildings, a seed for interiors without a door,
   upper floors (in the mask, untested), an interior poking past its zone's border keeps the zone's bounds, parts with collision but no `.mesh`
@@ -453,7 +452,7 @@ Formulas, constants, units and the engine choices of the body code are in
 - **Medical tick** (`BodySystem.Act`, own slots). For each living character with a body: `MedicalState.Tick(HoursPerTick, ctx, events)` with a
   `MedicalContext` (constants, options, race, toughness, strength, resting, encumbrance factor from the inventory, seed, character key,
   `BodyTimeScale`); blood, bleeding, part healing and degeneration, hunger, the KO timer. It sets `MaxSpeed = Speed.Run(race, stats, medical,
-  encumbrance)` and `Health` (blood in per cent). `BodyTimeScale` (default 1, `--body-time-scale <x>`) multiplies the time of the part and blood
+  encumbrance)` and `Health` (blood in per cent). `BodyTimeScale` (default 1) multiplies the time of the part and blood
   rates, not hunger or the KO timer. The medical tick runs once: the combat system's own (`TickMedical`) is off in the game; a test shows two
   ticking systems drain hunger twice as fast.
 - **Down.** A knocked-out or dead character is stopped (orders and path dropped, velocity 0), whatever hurt it. A KO wakes when the medical tick
@@ -638,14 +637,14 @@ through `SaveCaptureOptions.Bodies`; keep the population system from making resi
 - **Panel** (bottom right): for the hero and the foe the speed v (the velocity the movement system set) and the speed measured between the last two
   snapshots, the speed chain's top speed, the mode with its cap, the fixed speed, the position and yaw, `CharacterAnimation.Phase` and `Rate`
   (the synch phase and the playback factor F), and every published layer as `name  t time/length  w weight` (lengths from `AnimationLengths`).
-- **Command line.** `--sandbox-mode walk|run|free`, `--sandbox-speed <u/s>` and `--sandbox-patrol` start the hero in a state; with `--screenshot --ticks n`
-  the picture is taken after n ticks of it (`--move-to x z`, `--select-player` and `--attack-nearest` work as in a new game). The start camera is boom 70, pitch 22,
+- **Command line.** `--sandbox-mode` (comma-separated: `walk`, `run` or `free`; a fixed speed in u/s; `patrol`, e.g. `run,patrol`) starts the hero in a state; with `--screenshot --ticks n`
+  the picture is taken after n ticks of it (`--move-to x z` works as in a new game). The start camera is boom 70, pitch 22,
   yaw 35 (`--distance`, `--pitch`, `--yaw`).
 
 ## The game host
 
 `src/Meitou.Game` (file layout in [engine.md](engine.md#the-game-host-srcmeitougame)). `GameHost.Boot` builds the `PopulationData`, the
-walkability (the navmesh through `NavAdapter`, or `OpenGroundWalkability` with `--no-navmesh`), the systems through `StandardSystems`, the
+walkability (the navmesh through `NavAdapter`, or `OpenGroundWalkability` in the sandbox), the systems through `StandardSystems`, the
 `WorldSession` with `MinPartitionSize = 128`, and the player interface; `--no-population` leaves the world empty. Each frame it sends the focus,
 keeps the navmesh on the active zones, and fills the renderer's `CharacterDrawList` from the two snapshots, interpolated
 (`GameHost.Characters.cs`); characters without an appearance get a debug square coloured by faction (`DebugOverlay`). The character renderer

@@ -37,7 +37,7 @@ static class WorldStats
             stats.Add($"  {name,-26} {bytes / 1048576.0,7:0} MB  x{count}");
         if (gpu.Reflection is { Valid: true } refl && render.Reflections) stats.Add($"reflection  cpu {refl.CpuMs:0.00} ms, gpu {refl.GpuMs:0.00} ms");
         gpu.Sky.Poll();
-        stats.Add(gpu.Sky.Physical ? $"sky         cpu {gpu.Sky.PrepareMs:0.00} ms, gpu {gpu.Sky.GpuMs:0.00} ms" : "sky         simple");
+        stats.Add($"sky         cpu {gpu.Sky.PrepareMs:0.00} ms, gpu {gpu.Sky.GpuMs:0.00} ms");
         if (gpu.Post is { } post) stats.Add($"post gpu    {post.DescribeCosts()}");
         if (gpu.Post is { } hazy && (hazy.HeatHazeAmount > 0 || gpu.HeatHazeTarget > 0))
             stats.Add($"heat haze   {hazy.HeatHazeAmount:0.00} (target {gpu.HeatHazeTarget:0.00}, weather {WorldStats.WeatherName(gpu)})" + (hazy.HeatHazeRuns ? "" : hazy.HasHeatHaze ? ", off" : ", no textures"));

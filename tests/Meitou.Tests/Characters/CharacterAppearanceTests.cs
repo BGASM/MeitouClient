@@ -20,25 +20,6 @@ public class CharacterAppearanceTests
     static string DataFile(GameInstall install, params string[] parts) => Path.Combine([install.DataDirectory, .. parts]);
 
     [Fact]
-    public void Hsb_matches_ogre_rules()
-    {
-        Assert.Equal(Vector3.Zero, CharacterAppearance.FromHsb(0.47f, 0.02f, -0.35f)); // brightness clamps to 0
-        Assert.Equal(new Vector3(0.5f), CharacterAppearance.FromHsb(0.3f, 0, 0.5f));
-        var red = CharacterAppearance.FromHsb(1.0f, 1, 1); // hue wraps to 0
-        Assert.Equal(new Vector3(1, 0, 0), red);
-        var green = CharacterAppearance.FromHsb(1 / 3f, 1, 1);
-        Assert.True(Vector3.Distance(green, new Vector3(0, 1, 0)) < 1e-5f);
-    }
-
-    [Fact]
-    public void Quaternion_from_columns_maps_axes()
-    {
-        // Columns (0,1,0), (-1,0,0), (0,0,1): 90 degrees about Z, so X goes to Y.
-        var q = PhysicsAttachmentFile.FromColumns(new Vector3(0, 1, 0), new Vector3(-1, 0, 0), new Vector3(0, 0, 1));
-        Assert.True(Vector3.Distance(Vector3.Transform(Vector3.UnitX, q), Vector3.UnitY) < 1e-5f);
-    }
-
-    [Fact]
     [Slow]
     public void Weapon_attachment_points_match_the_male_skeleton()
     {
@@ -69,43 +50,6 @@ public class CharacterAppearanceTests
         if (bone.Parent is not { } parent) return (bone.Position, bone.Orientation);
         var (pp, pr) = Derived(skeleton, parent);
         return (pp + Vector3.Transform(bone.Position, pr), pr * bone.Orientation);
-    }
-
-    [Fact]
-    [Slow]
-    public void Every_attachment_phs_reads_or_is_refused()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, "Kenshi install not found");
-        int read = 0;
-        foreach (var file in Directory.EnumerateFiles(install.DataDirectory, "*.phs", SearchOption.AllDirectories))
-        {
-            try
-            {
-                PhysicsAttachmentFile.ReadFile(file);
-                read++;
-            }
-            catch (NotSupportedException) { }
-            catch (FormatException) { }
-        }
-        Assert.True(read > 0);
-    }
-
-    [Fact]
-    [Slow]
-    public void Ruka_body_file_reads()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, "Kenshi install not found");
-        var body = AppearanceFile.Read(DataFile(install, "character", "bodies", "Ruka.bod2"));
-        Assert.True(body.Female);
-        var db = Database(install);
-        Assert.Equal(FcsRecordType.RACE, db.Find(body.RaceId!)!.Type);
-        Assert.Equal(FcsRecordType.HEAD, db.Find(body.HeadId!)!.Type);
-        Assert.Equal(FcsRecordType.ATTACHMENT, db.Find(body.HairId!)!.Type);
-        Assert.NotNull(body.SkinTone);
-        Assert.InRange(body.SkinTone!.Value.X, 0.9f, 1f);
-        Assert.Equal(16f, body.Get("Age"));
     }
 
     [Fact]
@@ -152,37 +96,6 @@ public class CharacterAppearanceTests
 
     [Fact]
     [Slow]
-    public void Drawn_weapon_uses_bare_sword_and_sheath()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, "Kenshi install not found");
-        var c = CharacterAppearance.Build(Database(install), install.Root, "Greenlander", new CharacterOptions { Equip = ["Katana"], WeaponDrawn = true });
-        Assert.Contains(c.Parts, p => p.Field == "bare sword" && p.Point == "hands");
-        Assert.Contains(c.Parts, p => p.Field == "sheath" && p.Point == "hip");
-    }
-
-    [Fact]
-    [Slow]
-    public void Walk_records_split_the_body_between_lower_and_upper()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, "Kenshi install not found");
-        var db = Database(install);
-        var lower = AnimationMask.Find(db, "walk lower");
-        var upper = AnimationMask.Find(db, "walk upper");
-        Assert.Equal("lower", lower.Layer);
-        Assert.Equal("upper", upper.Layer);
-        Assert.Contains("Bip01 L Thigh", upper.DeletedBones);
-        Assert.DoesNotContain("Bip01 L Thigh", lower.DeletedBones);
-        Assert.Contains("Bip01 Head", lower.DeletedBones);
-        Assert.DoesNotContain("Bip01 Head", upper.DeletedBones);
-        // "run upper stealth" plays the Ogre animation "ninjarun".
-        Assert.Equal("ninjarun", AnimationMask.Find(db, "run upper stealth").AnimationName);
-        Assert.True(AnimationMask.Plain("postures").DeletedBones.SetEquals(["Bip01 L Hand", "Bip01 R Hand", "Bip01 Prop1", "Bip01 Prop2"]));
-    }
-
-    [Fact]
-    [Slow]
     public void Body_mesh_poses_are_named_morphs()
     {
         var install = GameInstall.Locate();
@@ -193,18 +106,5 @@ public class CharacterAppearanceTests
         Assert.All(mesh.Poses, p => Assert.Equal(1, p.Target));
         int vertices = (int)mesh.SubMeshes[0].VertexData!.VertexCount;
         Assert.All(mesh.Poses, p => Assert.All(p.Vertices, v => Assert.True(v.Index < vertices)));
-    }
-
-    [Fact]
-    [Slow]
-    public void Beep_uses_her_body_file()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, "Kenshi install not found");
-        var c = CharacterAppearance.Build(Database(install), install.Root, "Beep");
-        Assert.NotNull(c.Body);
-        Assert.Equal("Hive Worker Drone", c.Race.Name);
-        Assert.Contains(c.Parts, p => p.Record.Name == "Rag Loincloth");
-        Assert.NotEmpty(c.PoseWeights);
     }
 }

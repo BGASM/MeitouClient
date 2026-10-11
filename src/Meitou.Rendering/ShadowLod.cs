@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace Meitou.Rendering;
 
 /// <summary>
@@ -12,24 +10,24 @@ namespace Meitou.Rendering;
 /// </summary>
 public static class ShadowLod
 {
-    /// <summary>The switch: on by default (<c>MEITOU_SHADOW_COARSE=0</c> starts it off); off draws every cascade's casters as before.</summary>
-    public static bool Enabled { get; set; } = Environment.GetEnvironmentVariable("MEITOU_SHADOW_COARSE") != "0";
+    /// <summary>The switch: on by default (<c>--ab shadow-coarse</c>); off draws every cascade's casters as before.</summary>
+    public static bool Enabled { get; set; } = true;
 
     /// <summary>The first cascade the coarser casters apply to (the nearest, index 0, keeps the picture's detail).</summary>
     public const int FirstCascade = 1;
 
-    /// <summary>Objects take the mesh level the game would pick at the distance where one pixel of the render spans this many texels; <c>MEITOU_SHADOW_OBJECT_TEXELS</c>.</summary>
-    public static float ObjectTexels { get; set; } = EnvZero("MEITOU_SHADOW_OBJECT_TEXELS", 1f);
+    /// <summary>Objects take the mesh level the game would pick at the distance where one pixel of the render spans this many texels.</summary>
+    public const float ObjectTexels = 1f;
 
-    /// <summary>The height error (texels) a terrain level's grid may have, <see cref="Meitou.Data.World.TerrainLod.Roughness"/> x its spacing; <c>MEITOU_SHADOW_TERRAIN_TEXELS</c>.</summary>
-    public static float TerrainTexels { get; set; } = EnvZero("MEITOU_SHADOW_TERRAIN_TEXELS", 1f);
+    /// <summary>The height error (texels) a terrain level's grid may have, <see cref="Meitou.Data.World.TerrainLod.Roughness"/> x its spacing.</summary>
+    public const float TerrainTexels = 1f;
 
-    /// <summary>The deviation (texels) a generated foliage level may have in a coarsened cascade, when that is more than the main rule's; <c>MEITOU_SHADOW_ROCK_TEXELS</c>.</summary>
-    public static float RockTexels { get; set; } = EnvZero("MEITOU_SHADOW_ROCK_TEXELS", 4f);
+    /// <summary>The deviation (texels) a generated foliage level may have in a coarsened cascade, when that is more than the main rule's.</summary>
+    public const float RockTexels = 4f;
 
     /// <summary>A foliage mesh with a resident impostor atlas casts the impostor (a flat, sun-facing cut-out) in a coarsened cascade when its world radius is at most this many texels:
-    /// the atlas's sun direction is quantised (12 x 12 frames, about 7 degrees), which moves the shadow by about 0.12 radius; <c>MEITOU_SHADOW_IMPOSTOR_TEXELS</c>, 0 never.</summary>
-    public static float ImpostorTexels { get; set; } = EnvZero("MEITOU_SHADOW_IMPOSTOR_TEXELS", 8f);
+    /// the atlas's sun direction is quantised (12 x 12 frames, about 7 degrees), which moves the shadow by about 0.12 radius.</summary>
+    public const float ImpostorTexels = 8f;
 
     /// <summary>The ground distance from the eye from which such an instance casts the impostor (the mesh nearer than that).</summary>
     public const float ImpostorFrom = 200;
@@ -71,7 +69,4 @@ public static class ShadowLod
 
     /// <summary>The tolerance (texels) of a generated foliage level in a cascade: <paramref name="main"/> (the main rule), or <paramref name="texels"/> (default <see cref="RockTexels"/>) where coarsened if that is more.</summary>
     public static float RockTolerance(float main, bool coarse, float? texels = null) => coarse ? Math.Max(main, texels ?? RockTexels) : main;
-
-    static float EnvZero(string name, float fallback) =>
-        float.TryParse(Environment.GetEnvironmentVariable(name), NumberStyles.Float, CultureInfo.InvariantCulture, out float v) && v >= 0 ? v : fallback;
 }

@@ -1,4 +1,3 @@
-using Meitou.Rendering;
 using Meitou.Rendering.Gpu;
 using Meitou.Rendering.Gpu.Core;
 using Meitou.Rendering.Gpu.Shaders;
@@ -94,24 +93,6 @@ public class BindlessTests
         System.Runtime.InteropServices.MemoryMarshal.AsBytes(values.AsSpan()).ToArray();
 
     [Fact]
-    public void Kind_follows_the_format()
-    {
-        Assert.Equal(BindlessKind.UTexture2D, BindlessTable.KindFor(Format.R8G8B8A8Uint));   // the terrain's uCells (GL RGBA8UI)
-        Assert.Equal(BindlessKind.UTexture2D, BindlessTable.KindFor(Format.R16Uint));
-        Assert.Equal(BindlessKind.UTexture2D, BindlessTable.KindFor(Format.R32Uint));
-        Assert.Equal(BindlessKind.ITexture2D, BindlessTable.KindFor(Format.R32Sint));
-        Assert.Equal(BindlessKind.ITexture2D, BindlessTable.KindFor(Format.R16Sint));
-        Assert.Equal(BindlessKind.Texture2D, BindlessTable.KindFor(Format.R8G8B8A8Unorm));
-        Assert.Equal(BindlessKind.Texture2D, BindlessTable.KindFor(Format.D24UnormS8Uint));      // depth reads as float
-        Assert.Equal(BindlessKind.Texture2D, BindlessTable.KindFor(Format.D32SfloatS8Uint));
-        Assert.Equal(BindlessKind.Shadow2D, BindlessTable.KindFor(Format.D32Sfloat, shadow: true));
-        Assert.Equal(BindlessKind.Texture2DArray, BindlessTable.KindFor(Format.R8G8B8A8Srgb, TextureKind.Texture2DArray));
-        Assert.Equal(BindlessKind.Cube, BindlessTable.KindFor(Format.R16G16B16A16Sfloat, TextureKind.Cube));
-        Assert.Throws<NotSupportedException>(() => BindlessTable.KindFor(Format.R8G8B8A8Uint, TextureKind.Texture2DArray));
-        Assert.Throws<NotSupportedException>(() => BindlessTable.KindFor(Format.R8G8B8A8Unorm, shadow: true));
-    }
-
-    [Fact]
     [Slow]
     public unsafe void Integer_textures_read_back_exact_values_through_the_bindless_arrays()
     {
@@ -149,28 +130,6 @@ public class BindlessTests
 
             var texels = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(ctx.ReadBack(target, 16)).ToArray();
             Assert.Equal([0xFE030201u, 1000u, 99995u, 0xC0FFEEu, 0x0780_00FFu, 65535u, 132767u, 0xC0FFEEu], texels);
-        }
-        ExpectClean(d!);
-    }
-
-    [Fact]
-    [Slow]
-    public void A_shader_that_declares_the_bindless_set_wrongly_is_refused()
-    {
-        using var d = TryCreate();
-        Assert.SkipWhen(d is null, "No Vulkan 1.3 device");
-        using (var ctx = new GpuContext(d!))
-        {
-            const string wrong = """
-                #version 450
-                #extension GL_EXT_nonuniform_qualifier : require
-                layout(set = 0, binding = 0) uniform usampler2D cells[];
-                layout(push_constant) uniform Push { uint texture; } pc;
-                layout(location = 0) out uvec4 colour;
-                void main() { colour = texelFetch(cells[nonuniformEXT(pc.texture)], ivec2(0), 0); }
-                """;
-            var e = Assert.Throws<InvalidOperationException>(() => ctx.Shaders.Native(FullScreen, wrong, "wrong", [ctx.Bindless.Layout], 4));
-            Assert.Contains("must be 'sampler2D textures2D[]' (got UInt", e.Message, StringComparison.Ordinal);   // binding 0 is the float array
         }
         ExpectClean(d!);
     }

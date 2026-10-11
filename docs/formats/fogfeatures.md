@@ -234,7 +234,7 @@ cover with transmittance exactly 0 ([../render-clouds.md](../render-clouds.md) "
 projection's sub-pixel jitter (its ray is the pixel's centre; the fog is smooth, the depth edges are what the upscaler's history handles), and
 touches neither the motion vectors, the depth nor the reactive mask. The fog cull is unchanged (`FogVolumes.Hidden` is asked by the same draws).
 The data are uniform-buffer reads, the same for every pixel; a block whose box the pixel's ray misses costs one box test. The viewer prints the volumes drawn (`fog vols` line) with
-`--screenshot`; `--no-fog-volumes` turns them off (the pass is skipped when no volume is in view). The "post cost" line has `scene` (up to the
+`--screenshot`; the volumes are always on (the `--no-fog-volumes` option was removed; the pass is skipped when no volume is in view). The "post cost" line has `scene` (up to the
 water), `fog` (this pass) and `particles`.
 
 Cost of the pass (**Observed**, 2026-10-08, same card, best of several runs because other sessions share the GPU, interleaved with a build from before the change): the pass is 0.14 ms at Shark in swamp rain and 0.11 ms at The Hub; Shark scene 7.54 to 5.87 + 0.14 (+ 0.02 particles), foliage 4.51 to 3.47, the sky pass 0.17 to 0.05 ms, the reflection 0.32 to 0.25 ms; the Hub scene 3.32 to 3.13 + 0.11. Before it, with per-fragment volumes (**Observed**, 2026-10-08, RTX 4070, 1600 × 900, `--screenshot` "post cost" scene GPU ms; without volumes / the earlier 8-block
@@ -242,7 +242,7 @@ texture version / the per-fragment list): Shark in swamp rain 6.34 / 8.22 / 7.80
 3.43 / 4.83 / 4.28, inside the Skinner's Roam dome 2.80 / 3.82 / 3.64. So drawing every volume (and the sphere and beams) costs less than the
 capped version: the far-clip cull drops what cannot show, and the data are uniform reads instead of texture fetches.
 
-**Fog cull** (Meitou's own optimisation; the image does not change; `--no-fog-cull` turns it off). In dense fog, everything beyond a few
+**Fog cull** (Meitou's own optimisation; the image does not change; always on, the `--no-fog-cull` option was removed). In dense fog, everything beyond a few
 thousand units is fully hidden, so the main camera does not draw it. Each frame `FogVolumes.Update` takes the volume the game draws last
 (nearest by its node, so everything sorted before it is covered by it) and, if that is a block the eye is inside (all seven planes with a
 margin, and its box), computes a *hide distance* R. `FogVolumes.Hidden(min, max, kind)` then says a box is hidden when it lies wholly inside
@@ -278,8 +278,8 @@ the `View` buffer (`FogVolumes.WriteCull`, 10 vec4s, `mode.y` = on); the shadow 
 same instance, same sphere; the quad's silhouette is the sphere's out here). An instance the test drops writes -2 as any other not drawn, so the
 compaction and the indirect arguments need no change. The kernel counts those it dropped per chunk, the scan sums them into an extra entry of the
 offsets, and the total is read back a frame ring late (summed over the frame's fog dispatches, whose number varies with the cascades) into the
-`fog cull` line's "foliage instances"; the CPU path (`MEITOU_GPU_CULL=0`) tests the same in `FoliageCull.CullGroup` and counts the same way.
-Measured (**Observed**, 2026-10-08, `--fly-benchmark 300 --fly-radius 1 --fly-speed 0` with `MEITOU_FOLIAGE_TRIS=1 MEITOU_PASS_STATS=1`, on / off
+`fog cull` line's "foliage instances"; the CPU path (`FoliageRenderer.GpuCull` off, the reference) tests the same in `FoliageCull.CullGroup` and counts the same way.
+Measured (**Observed**, 2026-10-08, `--fly-benchmark 300 --fly-radius 1 --fly-speed 0` with the draw tally (the since removed `MEITOU_FOLIAGE_TRIS=1`) and `MEITOU_PASS_STATS=1`, on / off
 `--no-fog-cull` as interleaved pairs, RTX 4070 shared with other viewers): Shark in swamp rain `--distance 400 --pitch 4`: 3953 of 20357 foliage
 instances left out of the main view (4453 of 20500 at `--distance 1500 --pitch 8`), colour-view triangles drawn meshes 727k / 1015k, rocks 2651k /
 2968k, impostors 19.6k / 24.8k; the foliage pass's GPU time 2.62-2.69 / 2.92-2.93 ms (three pairs, 0.3 ms), the frame's GPU time 6.2-6.5 / 6.57 ms.
@@ -325,7 +325,7 @@ there the soft edges thin out (blur falls as 1 / L), so at Shark the plain bound
   - The same still (`--bench-motion still`): 3 pixels differ by 4 levels or more, max 5, mean 0.055, the TAA and exposure noise the cull always had.
   - Not measured: other blocks (the Fog Islands, the Vain), where the plain bound already gave no cull.
 
-**Weather fog cull** (Meitou's own, 2026-10-08; the image does not change to within a few levels; `--no-fog-cull` turns it off with the block cull). The same
+**Weather fog cull** (Meitou's own, 2026-10-08; the image does not change to within a few levels; always on with the block cull, the `--no-fog-cull` option was removed). The same
 `Hidden` / `Covers` also ask a second, simpler question: is the box's nearest point at least `D` from the eye, where `D` is the distance past which the
 *weather's* fog (`SkyRenderer.FogCullDistance`, from the uniforms `atmoApply` reads) makes the pixel its own colour. Terrain nodes, objects, characters, foliage
 zones and the foliage cull kernel (`FogHidden`: `fog[0].w` = D squared, `fog[1].w` = 1 when the eye's block is there too) use it in the main camera's
@@ -346,7 +346,7 @@ the fog off (their fog is the placed volumes, the block cull above), so the Shar
 names it ("weather fog beyond 14850: ...").
 In Meitou shadows the cascades' far distance is clamped to D (`ShadowPass.RangeCap`, one line in `EffectiveRange`; nothing beyond D shows, so the receivers
 
-**Shading rate over the fog** (`--fog-vrs`, [render-post.md](../render-post.md), "Fog shading rate"): the post fog's own alpha is what sets it. A pass after each frame's scene evaluates `fogVolumesAccumulate` (the function above, unchanged) along the ray to the nearest surface of each 16 x 16 tile and a margin, together with the haze and the weather's fog, and the next frame's opaque scene passes shade 2 x 2 or 4 x 4 pixels with one fragment where at least 0.8 or 0.97 of the surface is hidden. **Observed** on the swamp: 28 % of the tiles coarse at the end of the orbit, GPU total -0.31 +-0.15 ms at 1920x1080 native DLAA.
+**Shading rate over the fog** (always on when the device supports it; the `--fog-vrs` / `--no-fog-vrs` options were removed; [render-post.md](../render-post.md), "Fog shading rate"): the post fog's own alpha is what sets it. A pass after each frame's scene evaluates `fogVolumesAccumulate` (the function above, unchanged) along the ray to the nearest surface of each 16 x 16 tile and a margin, together with the haze and the weather's fog, and the next frame's opaque scene passes shade 2 x 2 or 4 x 4 pixels with one fragment where at least 0.8 or 0.97 of the surface is hidden. **Observed** on the swamp: 28 % of the tiles coarse at the end of the orbit, GPU total -0.31 +-0.15 ms at 1920x1080 native DLAA.
 there are not needed): it moves the cascade splits, so shadows near the camera change slightly (finer texels); that makes it Meitou's `shadows` switch only
 (`--faithful shadows` keeps the game's cascades whole). Measured (**Observed**, 2026-10-08, RTX 4070 shared, 1280 x 720 with DLSS, `--world --town "The Hub"
 --radius 2 --distance 9000 --pitch 10 --yaw 300 --weather "shek desert storm" --time 12 --no-fog-volumes --faithful shadows`; fog distance 15000, so D = 14850): 20
@@ -364,4 +364,4 @@ Differences from the game (**Observed**, viewer choices):
 - The game's beam formula divides by zero for a ray along the axis; Meitou clamps those divisors.
 - An effect's fade-out starts from full size in Meitou (the fraction is fade-in × fade-out), where the game starts it from the current values; they
   differ only for an effect stopped while still fading in.
-- With the simple sky (`--simple-sky`, `B`) the volumes are off.
+- The simple sky (`--simple-sky`, `B`), with which the volumes were off, was removed.

@@ -237,13 +237,13 @@ checked 2026-10-04):
   ground fog is deprecated, fog planes/spheres/beams are the placed "fog volumes", `fogfeatures.dat`, [fogfeatures.md](fogfeatures.md):
   their blocks are height-limited, but they are separate objects drawn after the haze, not part of it).
 
-### In the viewer: `--haze kenshi` (default) and `physical`
+### In the viewer: the `kenshi` haze (the `--haze kenshi|physical` option was removed in the 2026-10-12 cleanup)
 
-`atmoApply` has two branches (`--haze kenshi|physical`, `SkyRenderer.KenshiHaze`; the sky itself is the same in both):
+`atmoApply` has two branches (`kenshi` and `physical`; the viewer can no longer choose, it always runs `kenshi`; the sky itself is the same in both):
 
 - **kenshi** (the default): the game's formula, evaluated per pixel in the object, terrain, foliage and water shaders instead of in a
   separate pass over the G-buffer (same result for opaque surfaces). Alpha: the ramp from `0.06 D` to `min(D, 0.6 D)`, D = 50000
-  (`--haze-distance` sets D: view distance × 10). D is not the viewer's far clip (about 357000): past D the game's formula simply goes
+  (D = view distance × 10; the `--haze-distance` option was removed). D is not the viewer's far clip (about 357000): past D the game's formula simply goes
   on. Colour: `KenshiHaze.Colour` / GLSL `hazeColour`, SkyX's exposure × Rayleigh phase × `invλ⁴ · Kr · sun` × the 4-sample
   in-scattering from SkyX's camera to the point mapped by the dome radius 70000, with the game's lift and -0.3 clamp: the game's
   own expression, in the same HDR units as the sky and the lit scene, so the exposure treats them alike. At night the integral
@@ -265,14 +265,14 @@ checked 2026-10-04):
   otherwise became a large blown-out disc on the sea from high up).
 - **A guard in the integral** (viewer): each sample's optical depth is floored at −1 (`SkyXModel.OpticalFloor`, also in the GLSL),
   which bounds the runaway; it changes nothing within the game's range or for the sky (minimums above).
-- **Haze strength** (viewer option, not the game's: `--haze-strength <x>`, the Tab panel's "Haze strength (1 = game)", 0 to 3,
+- **Haze strength** (viewer option, not the game's: the Tab panel's "Haze strength (1 = game)", the `--haze-strength` option was removed, 0 to 3,
   default 0.93, the Meitou haze switch, so far mountains stay visible; 1 = the game's, the Faithful side, F3 in the viewer): multiplies how far the atmosphere haze is blended in (the game's ramp, or the physical haze's amount,
   capped at 1), before the weather's fog, which it leaves alone.
 - **At night** (**Verified**: `KenshiHaze.Colour` is exactly 0 at 3000, 10000, 30000 and 50000 units for a sun 60° under the horizon): the haze colour is SkyX's
   sunlit in-scattering, which is black once the sun is down, so the ramp turns everything past 0.06 D darker and everything past 0.6 D (30000) black against a
   black sky: only the land round the camera stays lit (the game's rule; `--faithful night` keeps it, pixel for pixel). The Meitou `night` switch ("Night air")
   fills it in: [Night air (Meitou)](#night-air-meitou) below.
-- **physical** (`--haze physical`, all heights; a viewer alternative, not the game's): the closed-form optical depth of SkyX's own air (its Rayleigh and Mie depths
+- **physical** (not selectable any more, the `--haze physical` option was removed; all heights; a viewer alternative, not the game's): the closed-form optical depth of SkyX's own air (its Rayleigh and Mie depths
   straight up, without the earlier turbidity factor) along the ray, with one density scale height = 40000 world units (a viewer
   choice; the game's world unit is Unknown), in-scattering of the sky's colour in the ray's direction, closing at `--fog`
   (default 250000).
@@ -304,7 +304,7 @@ and sky-view tables, the 0.36° sun disc) is gone, with `AtmosphereModel.cs`.
   Colour `texture × saturate(n · sun) + SkyX's Rayleigh colour towards the pixel` (`SkyRenderer.planet`). Drawn after the stars and before the
   clouds; the weather's fog over the sky covers them as it covers the dome. The day is the weather's (`WorldWeather.Day`), the hour the clock's.
   With the Meitou `night` switch the planets are seen through the night air ("Night air", "Planets in the air"); `--faithful night` and the day draw them as the game does.
-- **Clouds** (the weather's density, or `--clouds <0..1>` as a test override; `--cloud-wind <x>,<z>` for the drift): the game's
+- **Clouds** (the weather's density, or `--clouds <0..1>` as a test override; the drift comes from the weather, the `--cloud-wind` option was removed): the game's
   planar layer, drawn in the sky pass after the stars and before the moon, alpha-blended in HDR ([clouds.md](clouds.md#in-the-viewer)).
   `SkyRenderer` takes the density (`CloudDensityInput`), the sky colour multiplier (`SkyColourMultiplierInput`) and the wind velocity
   (`CloudWind`, advanced by `StepClouds`) as inputs; the same density drives `horizonClouds`.
@@ -326,8 +326,7 @@ and sky-view tables, the 0.36° sun disc) is gone, with `AtmosphereModel.cs`.
   and down faces times the environment factor. At night the Meitou `planetshine` switch changes which light this is (the planet's, below).
 - **Exposure**: in game-sky mode the post-processing measures the frame's mean luminance and scales by `0.55 / clamp(mean,
   MIN_LUMINANCE, MAX_LUMINANCE)` with the game's band ([post-processing.md](post-processing.md)).
-- `--simple-sky` (key `B`) switches back to the old colour model, the old light and squared-distance fog, with a fixed exposure,
-  for comparison.
+- The old colour model, light and squared-distance fog, with a fixed exposure (`--simple-sky`, key `B`), was removed in the 2026-10-12 cleanup.
 
 ### Planetshine (Meitou)
 
@@ -353,7 +352,7 @@ Everything is in `Planetshine` (`NightSky.cs`, tests `PlanetshineTests`) and `Sk
   the sun's own light, which is zero at night). The physical value (strength 1) is small *against the game's night*: a full planet of this albedo sends
   0.0071 of the sun (0.0023 in light units), and the real phase 0.0015 at 23:30 and 0.0003 at 2:00 (light units), while the game's night ambient on an up-facing white
   surface is `0.96 · 1.2 · 0.2 = 0.23`, about a quarter of what the noon sun gives one facing it (`π · 0.96 · 0.3185 ≈ 0.96`). So the default
-  `Enhancements.MeitouPlanetshineStrength` is **60** (`--planetshine-strength <x>`, the Tab slider "Planetshine strength (x physical)", 0 to 200):
+  `Enhancements.MeitouPlanetshineStrength` is **60** (the Tab slider "Planetshine strength (x physical)", 0 to 200; the `--planetshine-strength` option was removed):
   at the brightest part of the night (23:30) a face turned to the planet gets about the ambient's level again, so the relief reads (rock faces
   towards the planet lit, the others and the ground at slope in the ambient's flat grey), and by 4:00 the crescent adds almost nothing, as it
   should. Against real moonlight the physical value is strong (about 3000 ×: the planet covers 0.079 sr, the Moon 7e-5, at a larger albedo), but
@@ -403,8 +402,8 @@ Everything is in `Planetshine` (`NightSky.cs`, tests `PlanetshineTests`) and `Sk
   the change (1 pixel of 921 600 differs by one level, the foliage's noise). **Observed**: the patch is now 62 to 77 of 255 at 23:30 (the lit disc in the sky 85 to 165 over its face),
   27 to 41 at 0:30, 27 at 1:00 and 9 at 2:00, following the phase down, grey like the planet, and absent with `--faithful planetshine`; it is still a point-source glint for a disc 18° wide (a hot spot where the real reflection would be a broad smear, and with no Fresnel term,
   which would lower it further at this grazing angle: **Unknown** whether the owner wants either).
-- **Not exercised**: the probes' light with `--gi` (they read the same published light: a run at 23:30 gave no error and the mean luminance 0.055 →
-  0.065 against Faithful, but the picture was not inspected for the bounce), the simple sky (`--simple-sky` keeps its own light), and weather other than
+- **Not exercised**: the probes' light with GI on (they read the same published light: a run at 23:30 gave no error and the mean luminance 0.055 →
+  0.065 against Faithful, but the picture was not inspected for the bounce), the simple sky (removed), and weather other than
   `Default` at night.
 - **Not done**: Moon2's light (an eighth of the solid angle, 11° from the large one); the cloud layer lit by the planet; fog volumes and particles
   keep the sun's `Daylight`; the planet's light passing through the atmosphere (reddening near the horizon); a planet eclipsed by the land.
@@ -467,7 +466,7 @@ Reference math in `NightAir` (`NightSky.cs`, tests `NightAirTests`), shader side
   85, 85, 70, 61, 53, 46, 38 and 22 for Faithful: no rise, no pop where the air comes in (it is 0 up to 23:06); the blue channel of the mean rises a little (43 at 23:12 to 49 at 23:18)
   as the red of the sunset fades and the air takes over.
 - **Not done**: the planet's direction in the glow (it is the same all round the horizon, not brighter towards the planet); the planet's colour (the tint is blue whatever
-  the albedo); the air for the simple sky (`--simple-sky` has none); `--haze physical` far above the ground gets the glow only through `atmoSky`.
+  the albedo); the `physical` haze (no longer selectable) far above the ground gets the glow only through `atmoSky`.
 - **Left open** (**Unknown**, not exercised): weather with a fog colour at night (the weather fog's colour is black at night, `fog · Daylight(sunY)`, and mixes over everything
   including this glow, as it does in the game), dust storms and rain.
 
@@ -512,7 +511,7 @@ with tests in `MeitouNightSkyTests`). Nothing here is read from the game except 
 - **Cost** (sky pass, 1920 × 1080, RTX 4070, minimum of five runs, 2026-10-10, measured with the Milky Way still in, so its removal makes Meitou a little cheaper; not re-measured): Faithful 0.12 ms, Meitou 0.34 ms (0.31 before the per-pixel grain and crisp dust: the
   grain and the dust edges cost 0.03), 0.26 ms with the faint layer left out (grain still on); 4K 1.11 ms (the same per pixel); 0.11 ms by day (skipped). Per pixel the work is bounded: three layers, each looking at one to four cells (a layer's cells that
   can reach the pixel at all), an early test against the largest chance before the exact one, the three-word hash only for cells that hold a star. An
-  integrated GPU draws the first two layers (`StarField.IntegratedLayers`; `MEITOU_FORCE_INTEGRATED=1` shows it elsewhere, `MEITOU_STAR_LAYERS=0..3` sets the layers).
+  integrated GPU draws the first two layers (`StarField.IntegratedLayers`; `MEITOU_FORCE_INTEGRATED=1` shows it elsewhere).
 - **Water**: the reflection pass draws the sky with the same program and the reflected view, so the reflected sky has the same stars (the derivatives give the
   pixel scale of the reflection target).
 

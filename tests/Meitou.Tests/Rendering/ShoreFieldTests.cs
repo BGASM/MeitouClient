@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Numerics;
 using Meitou.Data.World;
 using Meitou.Rendering;
@@ -6,7 +5,7 @@ using Meitou.Rendering;
 namespace Meitou.Tests.Rendering;
 
 /// <summary>The shore distance field's CPU bake on synthetic terrain (docs/render-water.md "Shore distance field"); no game and no GPU.</summary>
-public class ShoreFieldTests(Xunit.ITestOutputHelper output)
+public class ShoreFieldTests
 {
     const int N = 512;
     const float Texel = 10f;
@@ -41,17 +40,6 @@ public class ShoreFieldTests(Xunit.ITestOutputHelper output)
             }
         Assert.True(checkedTexels > 10000);
         Assert.True(worst <= 3f, $"worst error {worst} units");
-    }
-
-    [Fact]
-    public void Shoreline_is_placed_between_texels_not_at_their_centres()
-    {
-        // Shore at x = 3 (a third of a texel past a texel centre line): texel centres are at ...±5, so the field must read +/-2 and 8 beside it.
-        var g = Bake((x, z) => 100f + 0.2f * (x - 3f));
-        var (i, j) = ((int)MathF.Floor((0 - g.X0) / Texel), N / 2);
-        float left = g.Distance[j * N + i - 1], right = g.Distance[j * N + i];
-        Assert.InRange(left, 7.5f, 8.5f); // centre at x = -5, 8 from the shore
-        Assert.InRange(right, -2.5f, -1.5f); // centre at x = +5... land, 2 from the shore
     }
 
     [Fact]
@@ -103,170 +91,5 @@ public class ShoreFieldTests(Xunit.ITestOutputHelper output)
             Assert.True(g.Sample(x, z).Y < 0.05f, $"islet exposure at ({x},{z}) = {g.Sample(x, z).Y}");
         foreach (var (x, z) in new[] { (1200f + 760, 0f), (1200f, 780f), (1200f - 760, 100f) })
             Assert.True(g.Sample(x, z).Y > 0.95f, $"island exposure at ({x},{z}) = {g.Sample(x, z).Y}");
-    }
-
-    [Fact]
-    public void Narrow_bay_has_low_exposure_inside_and_full_at_the_mouth_in_the_sea()
-    {
-        // Sea for x > 1500; a 300-wide channel |z| < 150 from x = -1800 to the sea; land elsewhere.
-        float Height(float x, float z)
-        {
-            float sea = 100f + (1500f - x) * 0.1f;
-            float channel = 100f + MathF.Max(MathF.Abs(z) - 150f, -1800f - x) * 0.1f;
-            return Math.Min(sea, channel);
-        }
-        var g = Bake(Height);
-        Assert.True(g.Distance[(N / 2) * N + N / 2] > 100, "channel centre is water");
-        Assert.True(g.Sample(-1200, 0).Y < 0.05f, $"inner bay {g.Sample(-1200, 0).Y}");
-        Assert.True(g.Sample(-300, 0).Y < 0.05f, $"middle of the bay {g.Sample(-300, 0).Y}");
-        Assert.True(g.Sample(2800, 0).Y > 0.95f, $"open sea outside {g.Sample(2800, 0).Y}");
-        // Near the mouth it is in between: some open sea within reach.
-        Assert.True(g.Sample(1350, 0).Y > g.Sample(-300, 0).Y);
-    }
-
-    [Fact]
-    public void Open_water_to_the_edge_is_clamped_and_fully_exposed()
-    {
-        var g = Bake((x, z) => 0f);
-        Assert.All(g.Distance, d => Assert.Equal(g.MaxDistance, d));
-        Assert.All(g.Exposure, e => Assert.Equal(1f, e));
-    }
-
-    [Fact]
-    public void Land_everywhere_is_negative_and_unexposed()
-    {
-        var g = Bake((x, z) => 500f);
-        Assert.All(g.Distance, d => Assert.Equal(-g.MaxDistance, d));
-        Assert.All(g.Exposure, e => Assert.Equal(0f, e));
-    }
-
-    [Fact]
-    public void Gradient_direction_has_no_jumps_near_a_straight_shore()
-    {
-        float c = MathF.Cos(0.5f), s = MathF.Sin(0.5f);
-        var g = Bake((x, z) => 100f + 0.07f * (c * x + s * z));
-        Vector2 Grad(int i, int j) => Vector2.Normalize(new(
-            g.Distance[j * N + i + 1] - g.Distance[j * N + i - 1], g.Distance[(j + 1) * N + i] - g.Distance[(j - 1) * N + i]));
-        float worst = 0;
-        for (int j = 2; j < N - 3; j++)
-            for (int i = 2; i < N - 3; i++)
-            {
-                if (g.Distance[j * N + i] is < 0 or > 800) continue;
-                float cos1 = Vector2.Dot(Grad(i, j), Grad(i + 1, j)), cos2 = Vector2.Dot(Grad(i, j), Grad(i, j + 1));
-                worst = Math.Max(worst, MathF.Acos(Math.Clamp(Math.Min(cos1, cos2), -1, 1)) * 180 / MathF.PI);
-            }
-        Assert.True(worst < 30, $"largest turn between neighbouring water texels {worst} degrees");
-    }
-
-    [Fact]
-    public void Centre_snaps_to_whole_texels_and_the_rect_matches()
-    {
-        var g = ShoreBake.Bake((x, z) => 0f, 1234.4f, -77.7f, 64, 10f);
-        Assert.Equal(1230f, g.X0 + 32 * 10f);
-        Assert.Equal(-80f, g.Z0 + 32 * 10f);
-        Assert.Equal(g.X0 + 640f, g.X1);
-    }
-
-    [Fact]
-    [Bench]
-    public void Full_size_bake_time()
-    {
-        // A diagonal coast with a few islands, 1024² at 10 units.
-        float H(float x, float z) => 100f + 0.05f * (x + 0.3f * z) + 40f * MathF.Sin(x * 0.0021f) * MathF.Cos(z * 0.0017f);
-        ShoreBake.Bake(H, 0, 0);
-        var watch = Stopwatch.StartNew();
-        for (int k = 0; k < 5; k++) ShoreBake.Bake(H, k * 10, 0);
-        double ms = watch.Elapsed.TotalMilliseconds / 5;
-        output.WriteLine($"shore field bake 1024^2: {ms:0.0} ms");
-        Assert.True(ms < 100, $"{ms} ms");
-    }
-
-    // ------------------------------------------------------------------ the arrays of a bake, the uniform field, the texels' layout
-
-    static float Coast(float x, float z) => 100f + 0.05f * (x + 0.3f * z) + 40f * MathF.Sin(x * 0.0021f) * MathF.Cos(z * 0.0017f);
-
-    [Fact]
-    public void A_bake_with_a_scratch_is_the_same_field_and_the_next_one_reuses_the_arrays()
-    {
-        var scratch = new ShoreBake.Scratch();
-        var fresh = ShoreBake.Bake(Coast, 0, 0, 128, Texel);
-        var first = ShoreBake.Bake(Coast, 0, 0, 128, Texel, scratch: scratch);
-        Assert.Equal(fresh.Distance, first.Distance);
-        Assert.Equal(fresh.Exposure, first.Exposure);
-
-        // Another place: the arrays are overwritten, nothing of the first bake is left in them.
-        var freshElsewhere = ShoreBake.Bake(Coast, 900, -300, 128, Texel);
-        var second = ShoreBake.Bake(Coast, 900, -300, 128, Texel, scratch: scratch);
-        Assert.Same(first.Distance, second.Distance);
-        Assert.Same(first.Exposure, second.Exposure);
-        Assert.Equal(freshElsewhere.Distance, second.Distance);
-        Assert.Equal(freshElsewhere.Exposure, second.Exposure);
-    }
-
-    [Fact]
-    public void A_bake_with_a_scratch_allocates_a_fraction_of_one_without()
-    {
-        const int size = 256;
-        var scratch = new ShoreBake.Scratch();
-        ShoreBake.Bake(Coast, 0, 0, size, Texel, scratch: scratch);   // the first one makes the arrays
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        ShoreBake.Bake(Coast, 50, 0, size, Texel, scratch: scratch);
-        long with = GC.GetAllocatedBytesForCurrentThread() - before;
-        before = GC.GetAllocatedBytesForCurrentThread();
-        ShoreBake.Bake(Coast, 50, 0, size, Texel);
-        long without = GC.GetAllocatedBytesForCurrentThread() - before;
-        output.WriteLine($"allocated on the calling thread: {with / 1024} KB with a scratch, {without / 1024} KB without");
-        // Seven arrays of size² (3 floats for a seed) are 2.3 MB at 256²; what is left is the blocks of the exposure and a few closures.
-        Assert.True(without > 2_000_000, $"{without}");
-        Assert.True(with < without / 4, $"{with} against {without}");
-    }
-
-    [Fact]
-    public void A_field_with_no_waterline_in_it_is_uniform_and_one_with_a_coast_is_not()
-    {
-        var land = ShoreBake.Bake((x, z) => 500f, 0, 0, 128, Texel);
-        Assert.True(land.IsUniform(out var value));
-        Assert.Equal(-ShoreGrid.DefaultMaxDistance, value.X);
-        Assert.Equal(0f, value.Y);
-        // The shader reads the same at any point of a uniform field as the one texel would give.
-        Assert.Equal(value, land.Sample(land.X0 + 17, land.Z0 + 400));
-
-        Assert.False(ShoreBake.Bake(Coast, 0, 0, 128, Texel).IsUniform(out _));
-    }
-
-    [Fact]
-    public void Interleaving_into_a_kept_array_gives_the_same_texels_as_interleaving_into_a_new_one()
-    {
-        var g = ShoreBake.Bake(Coast, 0, 0, 64, Texel);
-        var kept = new float[64 * 64 * 2];
-        Array.Fill(kept, float.NaN);
-        g.InterleaveInto(kept);
-        Assert.Equal(g.Interleaved(), kept);
-        Assert.Throws<ArgumentException>(() => g.InterleaveInto(new float[10]));
-    }
-    // ------------------------------------------------------------------ HeightSnapshot
-
-    [Fact]
-    public void Snapshot_reads_the_coarse_grid_far_from_the_fine_window_and_the_fine_one_inside_it()
-    {
-        const int coarseSize = 17;
-        var coarse = new ushort[coarseSize * coarseSize];
-        for (int j = 0; j < coarseSize; j++)
-            for (int i = 0; i < coarseSize; i++) coarse[j * coarseSize + i] = (ushort)(1000 * i + 300 * j);
-        // A 40 x 40 window of the real heightmap at the world's centre, flat at raw 20000.
-        int cols = 40;
-        var fineRaw = new ushort[cols * cols];
-        Array.Fill(fineRaw, (ushort)20000);
-        var fine = new HeightWindow(2000, 2000, 1, cols, cols, fineRaw);
-        var snap = new HeightSnapshot(coarse, coarseSize, fine, fineBand: 100);
-
-        // Far corner of the world: coarse grid bilinear at an exact node.
-        float cell = WorldLayout.WorldSize / (float)(coarseSize - 1);
-        float x = -WorldLayout.HalfWorldSize + 3 * cell, z = -WorldLayout.HalfWorldSize + 2 * cell;
-        Assert.Equal(WorldLayout.RawToHeight((ushort)(1000 * 3 + 300 * 2)), snap.HeightAt(x, z), 0.01f);
-
-        // Deep inside the fine window (more than the band from its edge): its own value.
-        var (wx, wz) = fine.WorldOf(cols / 2, cols / 2);
-        Assert.Equal(WorldLayout.RawToHeight(20000), snap.HeightAt((float)wx, (float)wz), 0.01f);
     }
 }

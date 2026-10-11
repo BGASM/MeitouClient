@@ -580,7 +580,7 @@ to one that alters a mesh needs `NavMeshCache.BuilderVersion` bumped.
   can never equal a shipped tile's `Hash` string. The check proposed under "Comparing with the shipped tiles" stays a proposal for a real port of FUN_1403a1cb0.
   **Observed** (not in the key): the gatherer's `IncludeFoliage` and `CarveConvexObstacles`, the foliage data, the BUILDING and BUILDING_PART records'
   contents (a mod changing a part under the same id keeps the old mesh), `seeds.def`, the collision files and the DotRecast version.
-- Debug aids of `meitou-tools navmesh`: `NAV_VERBOSE` (painters, seeds, interior listings, door joins, path points) and `NAV_DUMP` (`--near` lists every
-  field of a building record) are read once at start; `--fingerprint` builds The Hub's two zones (or `--zone`) with fresh state, prints the SHA-256 of the
+- Debug aids of `meitou-tools navmesh`: `--verbose` (painters, seeds, interior listings, door joins, path points, and with `--near` every
+  field of a building record); `--fingerprint` builds The Hub's two zones (or `--zone`) with fresh state, prints the SHA-256 of the
   cache file each would save and the point lists of the Hub paths pinned by `HubNavmeshTests`. Two builds give the same hash (**Verified**), so a refactor of
   the builder is checked by it, by the OBJ the tool writes, and by the pinned paths.

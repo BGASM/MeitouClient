@@ -6,21 +6,15 @@ reproduces are described in [characters.md](characters.md), [animation.md](anima
 
 ## Test harness
 
-`--world --town "The Hub" --crowd N [--crowd-seed S] [--crowd-time T]`: N characters generated with `CharacterGenerator` from the CHARACTER
+`--world --town "The Hub" --crowd N` (the seed is fixed at 1 and the still clock at 0.35 of the day; the `--crowd-seed` and `--crowd-time` options were removed): N characters generated with `CharacterGenerator` from the CHARACTER
 records of the town's `residents` and `bar squads` (SQUAD_TEMPLATE `choosefrom list`, weighted), standing on a sunflower spiral round the
 start point, even indices idling (`idle_stand_relax`) and odd ones walking in place (`walk lower` + `walk upper`). Stills use a fixed
 time (default 0.35 s); the interactive viewer uses a clock. Without `--crowd` nothing of the renderer is created and the world image is
 unchanged (image-diff 0 px against the pre-change baseline, `--upscaler off`).
 
-Env (all read once at start, in `Characters/CharacterSwitches.cs`):
-
-| Variable | Effect |
-|---|---|
-| `MEITOU_CHARACTER_LOG=1` | one line per part of every appearance built (levels, triangles, material) |
-| `MEITOU_CHARACTER_LOD=faithful` | keep the mesh files' own LOD levels instead of the generated ones (Meitou mode, default; see Engine choices) |
-| `MEITOU_CHARACTER_MORPH=0` | no face poses (the GPU morph of the body mesh) |
-| `MEITOU_CHARACTER_MOTION=0` | leave the characters out of the temporal upscalers' motion vectors |
-| `MEITOU_CROWD_ANIMATE=1` | the `--crowd` harness animates with a real-time clock even for stills (otherwise they hold `--crowd-time`) |
+There are no environment switches: the per-part build log, the keep-the-files'-own-LOD option, the face-pose and motion-vector switches and the
+real-time crowd clock (`MEITOU_CHARACTER_LOG`, `_LOD`, `_MORPH`, `_MOTION`, `MEITOU_CROWD_ANIMATE`, cleanup 2026-10) were removed. The generated LOD,
+the face poses and the motion vectors are always on; the `--crowd` harness holds a fixed time for stills.
 
 On exit a `characters ...` line gives counts per LOD level and timings (means of the last 10 frames, 40 for the shadow cascades; kept in rings of 64 samples).
 
@@ -41,7 +35,7 @@ On exit a `characters ...` line gives counts per LOD level and timings (means of
 
 ## Engine choices
 
-- **Generated LOD** (Meitou mode, default; `MEITOU_CHARACTER_LOD=faithful` keeps the files' own levels): every mesh gets four reduced levels by edge collapse
+- **Generated LOD** (always on; the files' own levels are no longer an option): every mesh gets four reduced levels by edge collapse
   (`MeshSimplifier`: quadric error, open edges and skinning-weight changes penalised, no flips), at half, a quarter, an eighth and a twentieth of its triangles,
   used from 5, 11, 22 and 45 radii of the part (value = distance minus radius, the `distance_sphere` rule). The levels only re-point corners at existing vertices, so one
   vertex buffer, the weights and the morph slots serve every level. Reason: the files' own levels are few and far (`human_female` has none; the male body's only
@@ -55,10 +49,8 @@ On exit a `characters ...` line gives counts per LOD level and timings (means of
 - No root motion: the walk loop's root translation starts and ends in the same place (**Observed** on `walk lower`), so characters walk in place and the simulation moves them.
 - **Face poses**: the vertices any pose moves get a slot (1..n, in the vertex's colour X as raw bits; characters use no vertex colours); an appearance's offsets, the poses
   summed at their weights as Kenshi bakes them (`CharacterShape.BakeWeight`), live in one growing storage buffer (`MorphArena`, binding 8), identical sets stored once
-  (squads share faces). The vertex program adds the offset before skinning; normals are not changed (the poses carry none, **Verified** in ogre-mesh.md). `MEITOU_CHARACTER_MORPH=0` turns it off.
-- **Motion vectors**: `PostProcess.ObjectMotion` (shared with the grass through one hook): the near slice's characters drawn again with last frame's palette (binding 9) and
-  model matrices (instance locations 12 to 15) into the motion target (red, green), where the near depth matches. `MEITOU_CHARACTER_MOTION=0` turns it off.
-  A character not posed this frame has no bone motion.
+  (squads share faces). The vertex program adds the offset before skinning; normals are not changed (the poses carry none, **Verified** in ogre-mesh.md).- **Motion vectors**: `PostProcess.ObjectMotion` (shared with the grass through one hook): the near slice's characters drawn again with last frame's palette (binding 9) and
+  model matrices (instance locations 12 to 15) into the motion target (red, green), where the near depth matches.  A character not posed this frame has no bone motion.
 
 ## Findings
 
@@ -73,7 +65,7 @@ On exit a `characters ...` line gives counts per LOD level and timings (means of
 ## Left
 
 A coarser or merged shadow caster for far characters; GPU culling; the guard's stand-in textures for characters (a small shared diffuse colour rather than grey);
-generated LOD as a Faithful/Meitou switch (`Enhancements`, `--faithful`) instead of `MEITOU_CHARACTER_LOD` (needs the shared `Enhancements.cs` / `WorldFrame.cs` after the merge); normals for the face morph; the original's per-frame animation update budget (docs/game/game-loop.md) instead of the distance-based pose rate.
+generated LOD as a Faithful/Meitou switch (`Enhancements`, `--faithful`; the old `MEITOU_CHARACTER_LOD` env switch was removed); normals for the face morph; the original's per-frame animation update budget (docs/game/game-loop.md) instead of the distance-based pose rate.
 
 ## Code layout
 

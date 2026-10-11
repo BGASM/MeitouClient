@@ -146,12 +146,7 @@ internal static partial class ZoneNavMeshBuilder
         foreach (int c in painters) Mark(ctx, g.Painters[c], NavArea.Door, chf, s.CellSize * s.DoorInflateCells);
 
         long t2 = Stopwatch.GetTimestamp();
-        if (s.Watershed)
-        {
-            RcRegions.BuildDistanceField(ctx, chf);
-            RcRegions.BuildRegions(ctx, chf, s.MinRegionArea, s.MergeRegionArea);
-        }
-        else RcRegions.BuildRegionsMonotone(ctx, chf, s.MinRegionArea, s.MergeRegionArea);
+        RcRegions.BuildRegionsMonotone(ctx, chf, s.MinRegionArea, s.MergeRegionArea);
         long t3 = Stopwatch.GetTimestamp();
         var cset = RcContours.BuildContours(ctx, chf, s.MaxSimplificationError, s.MaxEdgeLength, 1);
         long t4 = Stopwatch.GetTimestamp();
