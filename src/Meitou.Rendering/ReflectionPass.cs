@@ -66,6 +66,10 @@ public sealed class ReflectionPass : IDisposable
         FoliageDistance = Env("FOLIAGE", FoliageDistance);
         ObjectLodBias = Env("LOD", ObjectLodBias);
         MaxAge = (int)Env("AGE", MaxAge);
+        MovingLite = Env("MOVING", 1) != 0;
+        MoveHold = (int)Env("MOVE_HOLD", MoveHold);
+        MoveScale = Env("MOVE_SCALE", MoveScale);
+        MoveSamples = (int)Env("MOVE_SAMPLES", MoveSamples);
         AbSamples = (int)Env("AB_SAMPLES", AbSamples);
         TerrainLodScale = Env("TLOD", TerrainLodScale);
         timer = new PassTimer(gpu);
@@ -107,6 +111,29 @@ public sealed class ReflectionPass : IDisposable
     public float ObjectReach => CullToWater ? ObjectDistance : Math.Max(ObjectDistance, 3000);
     /// <summary>The foliage range in use, as <see cref="ObjectReach"/>.</summary>
     public float FoliageReach => CullToWater ? FoliageDistance : Math.Max(FoliageDistance, 3000);
+
+    /// <summary>
+    /// Meitou: while the camera moves the reflection is redrawn every frame (the held image is good for no more than a tenth of a degree or a few
+    /// units of eye travel), and the ripples and the next frame's motion carry off its detail, so then (and only then) it is drawn at
+    /// <see cref="MoveScale"/> of its size (a quarter of the picture's pixels instead of a half, same multisampling, same contents: nothing pops in or out).
+    /// At rest, and for <see cref="MoveHold"/> frames after the last movement, it is the full picture; the full and the smaller targets are both kept,
+    /// so changing over costs nothing. <c>--ab refl-moving</c> flips it, <c>MEITOU_REFL_MOVING=0</c> turns it off; probes: <c>MEITOU_REFL_MOVE_SCALE</c>,
+    /// <c>_MOVE_SAMPLES</c>, <c>_MOVE_HOLD</c>, <c>_MOVE_FORCE=1</c> (the smaller picture also at rest, to compare the stills). Not in Faithful (<see cref="MeitouWater"/>).
+    /// </summary>
+    public bool MovingLite { get; set; } = true;
+    /// <summary>Set by the frame loop: the water is in Meitou mode (the lighter picture while moving is a Meitou change).</summary>
+    public bool MeitouWater { get; set; } = true;
+    public float MoveScale { get; set; } = 0.5f;
+    public int MoveSamples { get; set; } = 4;
+    /// <summary>Frames the lighter picture is kept after the camera last left the held image's pose by more than it tolerates (so a slow drift does not flip between the two sizes every few frames).</summary>
+    public int MoveHold { get; set; } = 12;
+    int moveHold;
+    bool moving;
+    /// <summary>Probe (MEITOU_REFL_MOVE_FORCE=1): the lighter reflection also at rest, to compare its picture in the stills.</summary>
+    public bool ForceLite { get; set; } = Environment.GetEnvironmentVariable("MEITOU_REFL_MOVE_FORCE") == "1";
+    bool Lite => MovingLite && MeitouWater && (moving || ForceLite);
+    float CurScale => Lite ? Scale * MoveScale : Scale;
+    int CurSamples => Lite ? Math.Min(Samples, MoveSamples) : Samples;
     /// <summary>Meitou: draw only the part of the reflection the water on the screen looks up (<see cref="WaterRect"/>), and nothing with no water in view.</summary>
     public bool CropToWater { get; set; } = true;
     /// <summary>Extra ground (units) around a mirrored thing's footprint tested for water: the waves' ripples shift the lookup, and the terrain grid is coarse.</summary>
@@ -183,14 +210,25 @@ public sealed class ReflectionPass : IDisposable
 
     void Resize(int w, int h)
     {
-        if (w == width && h == height && colour is not null && builtFor == Samples) return;
-        Free();
-        (width, height, builtFor) = (w, h, Samples);
+        if (w == width && h == height && colour is not null && builtFor == CurSamples) return;
+        // The other size kept from before (the full picture while the lighter one is in use, and the other way round): swapping back to it
+        // costs nothing, where creating the targets again took the render thread about 5 ms on the frame the camera started or stopped.
+        if (spare is { } kept && kept.Width == w && kept.Height == h && kept.BuiltFor == CurSamples)
+        {
+            var now = Keep();
+            Restore(kept);
+            spare = now.Colour is null ? null : now;
+            return;
+        }
+        FreeSpare();
+        spare = colour is null ? null : Keep();
+        (colour, depth, msColour, msDepth) = (null, null, null, null);
+        (width, height, builtFor) = (w, h, CurSamples);
         colour = GpuTexture.Create(Gpu, new TextureDesc(Format.R16G16B16A16Sfloat, w, h, Use: TextureUse.Sampled | TextureUse.ColourTarget | TextureUse.TransferDst, Name: "reflection colour"));
 
         // The picture is drawn multisampled and resolved: the mirrored shoreline, fences and rooflines are hard edges, and
         // without it each texel of the half-resolution image is a visible stair step that the wave distortion then smears.
-        samples = Math.Min(Samples, MaxSamples());
+        samples = Math.Min(CurSamples, MaxSamples());
         if (samples <= 1) samples = 0;
         GpuTexture Target(Format format, TextureUse use, int count, string name) =>
             GpuTexture.Create(Gpu, new TextureDesc(format, w, h, Samples: Math.Max(count, 1), Use: use, Name: name));
@@ -213,8 +251,24 @@ public sealed class ReflectionPass : IDisposable
         return max;
     }
 
+    /// <summary>The targets of one size, kept beside the ones in use (<see cref="Resize"/>).</summary>
+    readonly record struct TargetSet(GpuTexture? Colour, GpuTexture? Depth, GpuTexture? MsColour, GpuTexture? MsDepth, int Samples, int BuiltFor, int Width, int Height);
+    TargetSet? spare;
+    TargetSet Keep() => new(colour, depth, msColour, msDepth, samples, builtFor, width, height);
+    void Restore(TargetSet s) => (colour, depth, msColour, msDepth, samples, builtFor, width, height) = (s.Colour, s.Depth, s.MsColour, s.MsDepth, s.Samples, s.BuiltFor, s.Width, s.Height);
+    void FreeSpare()
+    {
+        if (spare is not { } s) return;
+        s.Colour?.Dispose();
+        s.Depth?.Dispose();
+        s.MsColour?.Dispose();
+        s.MsDepth?.Dispose();
+        spare = null;
+    }
+
     void Free()
     {
+        FreeSpare();
         if (colour is null) return;
         // Released after the frames in flight.
         colour.Dispose();
@@ -247,6 +301,8 @@ public sealed class ReflectionPass : IDisposable
         Poll();
         lapAt = Stopwatch.GetTimestamp();
         Array.Clear(LastPhaseMs);
+        if (hasImage && Moved(camera)) moveHold = MoveHold; else if (moveHold > 0) moveHold--;
+        moving = moveHold > 0;
         if (CanReuse(camera, fullWidth, fullHeight)) { Valid = true; skipped++; age++; return; }
         age = 0;
         lastEye = eye;
@@ -259,7 +315,7 @@ public sealed class ReflectionPass : IDisposable
         if (CropToWater && WaterRect(camera, (float)fullWidth / fullHeight) is { } wet) rect = wet;
         else if (CropToWater) { Valid = hasImage = false; return; }   // no water in view: nothing to reflect (the water pass is not drawn either, or shows the sky)
 
-        Resize(Math.Max((int)(fullWidth * Scale), 64), Math.Max((int)(fullHeight * Scale), 64));
+        Resize(Math.Max((int)(fullWidth * CurScale), 64), Math.Max((int)(fullHeight * CurScale), 64));
         timer.Begin();
 
         // The world mirrored about the water, seen from the real eye: the same as the unmirrored world seen from the
@@ -306,7 +362,7 @@ public sealed class ReflectionPass : IDisposable
         options.MaterialDistance = Math.Min(render.MaterialDistance, MaterialDistance);
 
         terrain.BeginFrame();
-        texelScale = 0.5f * height / (MathF.Tan(camera.FieldOfView / 2) * Margin);   // texels of the half-resolution image per unit of (size / distance)
+        texelScale = 0.5f * height * (Scale / CurScale) / (MathF.Tan(camera.FieldOfView / 2) * Margin);   // texels of the half-resolution image per unit of (size / distance)
         bool first = true;
         Matrix4x4 mapped = default, nearest = default;
         foreach (var (near, far0) in camera.Slices())
@@ -353,13 +409,19 @@ public sealed class ReflectionPass : IDisposable
     bool CanReuse(WorldCamera camera, int fullWidth, int fullHeight)
     {
         if (age >= MaxAge || !hasImage || colour is null || msColour is null && samples != 0) return false;
-        if (width != Math.Max((int)(fullWidth * Scale), 64) || height != Math.Max((int)(fullHeight * Scale), 64)) return false;
+        if (builtFor != CurSamples || width != Math.Max((int)(fullWidth * CurScale), 64) || height != Math.Max((int)(fullHeight * CurScale), 64)) return false;
+        return !Moved(camera);
+    }
+
+    /// <summary>Whether the camera has left the pose the held image was drawn from by more than the parallax and turn it tolerates.</summary>
+    bool Moved(WorldCamera camera)
+    {
         var view = camera.View;
         float shift = Vector3.Distance(camera.Eye, lastEye);
         // About a texel of parallax for things 3000 units away, and no more than a tenth of a degree of turn.
         float turn = Vector3.Dot(new Vector3(view.M13, view.M23, view.M33), new Vector3(lastView.M13, lastView.M23, lastView.M33));
         float up = Vector3.Dot(new Vector3(view.M12, view.M22, view.M32), new Vector3(lastView.M12, lastView.M22, lastView.M32));
-        return camera.FieldOfView == lastFov && shift <= 3 + 0.004f * (camera.Eye.Y - WorldWater.Height) && turn > 0.999998f && up > 0.999998f;
+        return !(camera.FieldOfView == lastFov && shift <= 3 + 0.004f * (camera.Eye.Y - WorldWater.Height) && turn > 0.999998f && up > 0.999998f);
     }
 
     /// <summary>The <see cref="StageClock"/> stage of the reflection's recording jobs.</summary>
