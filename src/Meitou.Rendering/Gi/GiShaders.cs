@@ -132,13 +132,13 @@ static class GiShaders
     /// last frame there (the bounces beyond the first). A ray that misses sees the lighting pass's ambient in its direction. Back faces of objects
     /// count as dark and give a negative distance (the blend marks probes that see many as inside).
     /// </summary>
-    public static readonly string ProbeTrace = $$"""
+    public static string ProbeTrace(int rays) => $$"""
         #version 460
         #extension GL_EXT_ray_query : require
         #extension GL_EXT_buffer_reference : require
         #extension GL_EXT_buffer_reference_uvec2 : require
         #extension GL_EXT_scalar_block_layout : require
-        layout(local_size_x = {{GiProbes.Rays}}) in;
+        layout(local_size_x = {{rays}}) in;
         {{Meitou.Rendering.Gpu.BindlessTable.Declarations(1)}}
 
         layout(set = 0, binding = 0) uniform accelerationStructureEXT uScene;
@@ -157,6 +157,7 @@ static class GiShaders
             vec4 albedo;        // rgb: the objects' albedo, w: the terrain ground colour map present
             vec4 rayLength;     // x per cascade 0, y cascade 1, z the sleepers' period
             vec4 uLightGrid;    // the lamps (WorldLamps; w 0: none)
+            vec4 extra;         // y: the far cascade's period
         };
         layout(set = 0, binding = 13, std430) readonly buffer ProbeState { vec4 positions[]; };
         layout(set = 0, binding = 14, std430) readonly buffer ProbeList { uint probeList[]; };
@@ -221,7 +222,7 @@ static class GiShaders
         void main()
         {
             // This frame's probes: the CPU's list (GiProbes.BuildList; bit 31 a slow update, the rays are stored by workgroup).
-            uint probe = probeList[gl_WorkGroupID.x] & 0x7FFFFFFFu, ray = gl_LocalInvocationID.x;
+            uint probe = probeList[gl_WorkGroupID.x] & 0x3FFFFFFFu, ray = gl_LocalInvocationID.x;
             // probe = ((cascade · N + window row) · N + window column) · layers + layer
             int layer = int(probe % uint(GI_NY)), rest = int(probe / uint(GI_NY));
             int wx = rest % GI_N, wz = (rest / GI_N) % GI_N, c = rest / (GI_N * GI_N);
@@ -294,9 +295,9 @@ static class GiShaders
     /// values by the hysteresis. A probe whose position changed (the grid scrolled, a new column) starts over. A probe that sees back faces in
     /// over a quarter of its rays is inside geometry: alpha 0, which the surfaces' sampling leaves out.
     /// </summary>
-    public static readonly string ProbeBlend = $$"""
+    public static string ProbeBlend(int rays) => $$"""
         #version 460
-        layout(local_size_x = {{GiProbes.Rays}}) in;
+        layout(local_size_x = {{rays}}) in;
         const int GI_N = {{GiProbes.Columns}}, GI_NY = {{GiProbes.Layers}}, GI_IRR = {{GiProbes.IrradianceTexels}}, GI_DIST = {{GiProbes.DistanceTexels}};
         layout(set = 0, binding = 0, std430) readonly buffer RayResults { vec4 rays[]; };
         layout(set = 0, binding = 1, std430) buffer ProbeState { vec4 positions[]; };
@@ -311,14 +312,16 @@ static class GiShaders
             vec4 maps;
             vec4 albedo;
             vec4 rayLength;     // z: the sleepers' period, w: the hidden probes' period
+            vec4 uLightGrid;
+            vec4 extra;         // y: the far cascade's period
         };
         layout(set = 0, binding = 3, rgba16f) uniform image2D uIrradiance;
         layout(set = 0, binding = 4, rg16f) uniform image2D uDistance;
         layout(set = 0, binding = 5) uniform sampler2D uGiBase;
         layout(set = 0, binding = 6, std430) readonly buffer ProbeList { uint probeList[]; };
         {{Sleep}}
-        shared vec4 sRays[{{GiProbes.Rays}}];
-        shared vec3 sDirs[{{GiProbes.Rays}}];
+        shared vec4 sRays[{{rays}}];
+        shared vec3 sDirs[{{rays}}];
         shared uint sBack, sNear;
         shared bool sMoved;
         // The inner texels' new values: the borders copy them (only the inner texels are blended).
@@ -353,7 +356,7 @@ static class GiShaders
 
         void main()
         {
-            uint entry = probeList[gl_WorkGroupID.x], probe = entry & 0x7FFFFFFFu, id = gl_LocalInvocationID.x, count = gl_WorkGroupSize.x;
+            uint entry = probeList[gl_WorkGroupID.x], probe = entry & 0x3FFFFFFFu, id = gl_LocalInvocationID.x, count = gl_WorkGroupSize.x;
             int layer = int(probe % uint(GI_NY)), rest = int(probe / uint(GI_NY));
             int wx = rest % GI_N, wz = (rest / GI_N) % GI_N, c = rest / (GI_N * GI_N);
             vec4 g0 = uGiGrid[c * 2], g1 = uGiGrid[c * 2 + 1];
@@ -383,7 +386,7 @@ static class GiShaders
             if (id == 0u) positions[stateSlot] = vec4(world, sNear != 0u ? 1.0 : 2.0);
             bool valid = float(sBack) < 0.25 * float(count);
             // A hidden probe (bit 31) is updated every rayLength.w-th round: the hysteresis of that many updates in one.
-            float hysteresis = sMoved ? 0.0 : ((entry >> 31) != 0u ? pow(uGiParams.w, rayLength.w) : uGiParams.w);
+            float hysteresis = sMoved ? 0.0 : ((entry >> 31) != 0u ? pow(uGiParams.w, rayLength.w) : (entry >> 30 & 1u) != 0u ? pow(uGiParams.w, extra.y) : uGiParams.w);
             ivec2 tileIndex = ivec2(colX, (c * GI_N + colZ) * GI_NY + layer);
             float maxDistance = g1.z;
 

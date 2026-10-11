@@ -111,31 +111,41 @@ public sealed unsafe class AccelerationStructure : IDisposable
     /// (<see cref="RebuildTop"/>).</summary>
     public static AccelerationStructure CreateTop(VulkanDevice device, uint maxInstances, string name)
     {
-        var geo = TopGeometry(0);
-        var build = new AccelerationStructureBuildGeometryInfoKHR
-        {
-            SType = StructureType.AccelerationStructureBuildGeometryInfoKhr, Type = AccelerationStructureTypeKHR.TopLevelKhr,
-            Flags = BuildAccelerationStructureFlagsKHR.PreferFastBuildBitKhr, Mode = BuildAccelerationStructureModeKHR.BuildKhr, GeometryCount = 1, PGeometries = &geo,
-        };
-        var sizes = new AccelerationStructureBuildSizesInfoKHR { SType = StructureType.AccelerationStructureBuildSizesInfoKhr };
-        uint max = maxInstances;
-        device.AccelerationStructures!.GetAccelerationStructureBuildSizes(device.Device, AccelerationStructureBuildTypeKHR.DeviceKhr, &build, &max, &sizes);
+        // Room for either build flavour (RebuildTop's fastTrace).
+        var sizes = TopSizes(device, maxInstances, BuildAccelerationStructureFlagsKHR.PreferFastBuildBitKhr);
+        var traceSizes = TopSizes(device, maxInstances, BuildAccelerationStructureFlagsKHR.PreferFastTraceBitKhr);
+        sizes.AccelerationStructureSize = Math.Max(sizes.AccelerationStructureSize, traceSizes.AccelerationStructureSize);
+        sizes.BuildScratchSize = Math.Max(sizes.BuildScratchSize, traceSizes.BuildScratchSize);
         var top = new AccelerationStructure(device, AccelerationStructureTypeKHR.TopLevelKhr, Math.Max(sizes.AccelerationStructureSize, 256), name) { MaxInstances = maxInstances };
         top.scratch = device.Allocator.CreateBuffer(sizes.BuildScratchSize + device.ScratchAlignment, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.ShaderDeviceAddressBit,
             MemoryKind.DeviceLocal, name + " scratch");
         return top;
     }
 
+    static AccelerationStructureBuildSizesInfoKHR TopSizes(VulkanDevice device, uint maxInstances, BuildAccelerationStructureFlagsKHR flags)
+    {
+        var geo = TopGeometry(0);
+        var build = new AccelerationStructureBuildGeometryInfoKHR
+        {
+            SType = StructureType.AccelerationStructureBuildGeometryInfoKhr, Type = AccelerationStructureTypeKHR.TopLevelKhr,
+            Flags = flags, Mode = BuildAccelerationStructureModeKHR.BuildKhr, GeometryCount = 1, PGeometries = &geo,
+        };
+        var sizes = new AccelerationStructureBuildSizesInfoKHR { SType = StructureType.AccelerationStructureBuildSizesInfoKhr };
+        uint max = maxInstances;
+        device.AccelerationStructures!.GetAccelerationStructureBuildSizes(device.Device, AccelerationStructureBuildTypeKHR.DeviceKhr, &build, &max, &sizes);
+        return sizes;
+    }
+
     /// <summary>Rebuilds a structure of <see cref="CreateTop"/> over <paramref name="count"/> (at most <see cref="MaxInstances"/>) <see cref="InstanceRecord"/>s
     /// at <paramref name="instancesAddress"/> into <paramref name="cmd"/>.</summary>
-    public void RebuildTop(CommandList cmd, ulong instancesAddress, uint count)
+    public void RebuildTop(CommandList cmd, ulong instancesAddress, uint count, bool fastTrace = false)
     {
         if (count > MaxInstances) throw new ArgumentOutOfRangeException(nameof(count), $"{count} instances, room for {MaxInstances}");
         var geo = TopGeometry(instancesAddress);
         var build = new AccelerationStructureBuildGeometryInfoKHR
         {
             SType = StructureType.AccelerationStructureBuildGeometryInfoKhr, Type = AccelerationStructureTypeKHR.TopLevelKhr,
-            Flags = BuildAccelerationStructureFlagsKHR.PreferFastBuildBitKhr, Mode = BuildAccelerationStructureModeKHR.BuildKhr, GeometryCount = 1, PGeometries = &geo,
+            Flags = fastTrace ? BuildAccelerationStructureFlagsKHR.PreferFastTraceBitKhr : BuildAccelerationStructureFlagsKHR.PreferFastBuildBitKhr, Mode = BuildAccelerationStructureModeKHR.BuildKhr, GeometryCount = 1, PGeometries = &geo,
             DstAccelerationStructure = Handle, ScratchData = new DeviceOrHostAddressKHR { DeviceAddress = ScratchAddress() },
         };
         var range = new AccelerationStructureBuildRangeInfoKHR { PrimitiveCount = count };

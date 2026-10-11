@@ -15,14 +15,20 @@ namespace Meitou.Rendering.Gi;
 /// </summary>
 internal sealed unsafe class GiProbes : IDisposable
 {
-    public const int Columns = 32, Layers = 8, IrradianceTexels = 8, DistanceTexels = 16, Cascades = 2, Rays = 64;
+    public const int Columns = 32, Layers = 8, IrradianceTexels = 8, DistanceTexels = 16, Cascades = 2;
+    /// <summary>Rays per probe by default (32 or 64: the trace's workgroup size; <c>MEITOU_GI_RAYS</c>).</summary>
+    public static readonly int DefaultRays = int.TryParse(Environment.GetEnvironmentVariable("MEITOU_GI_RAYS"), out var rayCount) ? (rayCount == 64 ? 64 : 32) : 32;
+    /// <summary>The most rays per probe (the ray buffer's stride).</summary>
+    public const int MaxRays = 64;
     public const int ProbesPerCascade = Columns * Columns * Layers, Probes = ProbesPerCascade * Cascades;
     /// <summary>Per cascade: the spacing across, the spacing up, the rays' length.</summary>
     static readonly (float Spacing, float SpacingY, float RayLength)[] Grid = [(128, 96, 4000), (512, 384, 16000)];
 
     readonly GpuContext ctx;
-    readonly ShaderProgram traceProgram, blendProgram, invalidateProgram;
-    readonly ComputePipeline tracePipeline, blendPipeline, invalidatePipeline;
+    readonly ShaderProgram invalidateProgram;
+    readonly ComputePipeline invalidatePipeline;
+    // The trace and blend programs by the rays per probe (the workgroup size): the default, and the other one once the bench's gi-rays switch asks for it.
+    readonly Dictionary<int, (ShaderProgram Trace, ShaderProgram Blend, ComputePipeline TracePipeline, ComputePipeline BlendPipeline)> variants = [];
     readonly Texture irradiance, distance;
     readonly Texture[] bases;
     readonly DeviceBuffer rays, state;
@@ -51,6 +57,10 @@ internal sealed unsafe class GiProbes : IDisposable
     public Vector3 ObjectAlbedo { get; set; } = new(0.35f, 0.32f, 0.28f);
     /// <summary>The probes are updated in this many interleaved shares, one share a frame (each probe every Phases-th frame; 1, 2, 4 or 8).</summary>
     public int Phases { get; set; } = 4;
+    /// <summary>Rays each probe traces per update (32 or 64; the bench's gi-rays switch). The hysteresis is scaled with it so that the noise stays the same (<see cref="UpdateHysteresis"/>).</summary>
+    public int Rays { get; set; } = DefaultRays;
+    /// <summary>The probes of the far cascade are traced and blended on one of every this many of their rounds, with the hysteresis of that many updates in one (1: every round; <c>MEITOU_GI_FAR_PERIOD</c>; the bench's gi-far switch).</summary>
+    public int FarPeriod { get; set; } = int.TryParse(Environment.GetEnvironmentVariable("MEITOU_GI_FAR_PERIOD"), out var farPeriod) ? Math.Max(farPeriod, 1) : 2;
     public long Updates { get; private set; }
 
     /// <summary>How much the probes replace the sky's light (1: fully, 0: not at all; <c>--gi-strength</c>).</summary>
@@ -89,26 +99,12 @@ internal sealed unsafe class GiProbes : IDisposable
     public GiProbes(GpuContext ctx)
     {
         this.ctx = ctx;
-        traceProgram = ctx.Shaders.Compute(GiShaders.ProbeTrace, "gi probe trace",
-        [
-            (0, DescriptorType.AccelerationStructureKhr), (1, DescriptorType.StorageBuffer), (2, DescriptorType.StorageBuffer), (3, DescriptorType.UniformBuffer),
-            (4, DescriptorType.CombinedImageSampler), (5, DescriptorType.CombinedImageSampler), (6, DescriptorType.CombinedImageSampler),
-            (7, DescriptorType.CombinedImageSampler), (8, DescriptorType.CombinedImageSampler), (9, DescriptorType.CombinedImageSampler),
-            (10, DescriptorType.CombinedImageSampler), (11, DescriptorType.CombinedImageSampler), (12, DescriptorType.CombinedImageSampler),
-            (13, DescriptorType.StorageBuffer), (14, DescriptorType.StorageBuffer),
-        ], ctx.Bindless.Layout);
-        blendProgram = ctx.Shaders.Compute(GiShaders.ProbeBlend, "gi probe blend",
-        [
-            (0, DescriptorType.StorageBuffer), (1, DescriptorType.StorageBuffer), (2, DescriptorType.UniformBuffer),
-            (3, DescriptorType.StorageImage), (4, DescriptorType.StorageImage), (5, DescriptorType.CombinedImageSampler), (6, DescriptorType.StorageBuffer),
-        ]);
         invalidateProgram = ctx.Shaders.Compute(GiShaders.ProbeInvalidate, "gi probe invalidate",
         [
             (0, DescriptorType.StorageBuffer), (1, DescriptorType.UniformBuffer), (2, DescriptorType.StorageImage), (3, DescriptorType.CombinedImageSampler),
         ]);
         invalidatePipeline = ctx.Pipelines.Get(new ComputePipelineDesc(invalidateProgram, "gi probe invalidate"));
-        tracePipeline = ctx.Pipelines.Get(new ComputePipelineDesc(traceProgram, "gi probe trace"));
-        blendPipeline = ctx.Pipelines.Get(new ComputePipelineDesc(blendProgram, "gi probe blend"));
+        Variant(Rays);
         int rows = Cascades * Columns * Layers;
         irradiance = Texture.Create(ctx, new TextureDesc(Format.R16G16B16A16Sfloat, Columns * (IrradianceTexels + 2), rows * (IrradianceTexels + 2),
             Use: TextureUse.Storage | TextureUse.Sampled | TextureUse.TransferDst, Name: "gi probe irradiance"));
@@ -118,7 +114,7 @@ internal sealed unsafe class GiProbes : IDisposable
         bases = new Texture[ctx.Device.Frames.Count];
         for (int i = 0; i < bases.Length; i++)
             bases[i] = Texture.Create(ctx, new TextureDesc(Format.R32Sfloat, Columns, Columns * Cascades, Use: TextureUse.Sampled | TextureUse.TransferDst, Name: "gi probe bases"));
-        rays = DeviceBuffer.Create(ctx, (ulong)Probes * Rays * 16, BufferUse.Storage, "gi probe rays");
+        rays = DeviceBuffer.Create(ctx, (ulong)Probes * MaxRays * 16, BufferUse.Storage, "gi probe rays");
         state = DeviceBuffer.Create(ctx, (ulong)Probes * 16, BufferUse.Storage | BufferUse.TransferDst, "gi probe state");
         lists = new GpuBuffer[ctx.Device.Frames.Count];
         for (int i = 0; i < lists.Length; i++)
@@ -192,7 +188,40 @@ internal sealed unsafe class GiProbes : IDisposable
         }
         else hiddenValid = false;
         var list = new Span<uint>((void*)lists[slot].Mapped, Probes);
-        Listed = GiFogHide.List(list, phases, phase, (uint)(Updates / phases), hide ? HiddenPeriod : 0, hiddenLayers, grid[1].X, grid[1].Y, grid[3].X, grid[3].Y);
+        Listed = GiFogHide.List(list, phases, phase, (uint)(Updates / phases), hide ? HiddenPeriod : 0, FarPeriod, hiddenLayers, [grid[1].X, grid[1].Y, grid[3].X, grid[3].Y]);
+    }
+
+    /// <summary>The trace and blend for <paramref name="rays"/> rays a probe (the workgroup size), made on first use.</summary>
+    (ShaderProgram Trace, ShaderProgram Blend, ComputePipeline TracePipeline, ComputePipeline BlendPipeline) Variant(int rays)
+    {
+        if (variants.TryGetValue(rays, out var made)) return made;
+        var trace = ctx.Shaders.Compute(GiShaders.ProbeTrace(rays), "gi probe trace " + rays,
+        [
+            (0, DescriptorType.AccelerationStructureKhr), (1, DescriptorType.StorageBuffer), (2, DescriptorType.StorageBuffer), (3, DescriptorType.UniformBuffer),
+            (4, DescriptorType.CombinedImageSampler), (5, DescriptorType.CombinedImageSampler), (6, DescriptorType.CombinedImageSampler),
+            (7, DescriptorType.CombinedImageSampler), (8, DescriptorType.CombinedImageSampler), (9, DescriptorType.CombinedImageSampler),
+            (10, DescriptorType.CombinedImageSampler), (11, DescriptorType.CombinedImageSampler), (12, DescriptorType.CombinedImageSampler),
+            (13, DescriptorType.StorageBuffer), (14, DescriptorType.StorageBuffer),
+        ], ctx.Bindless.Layout);
+        var blend = ctx.Shaders.Compute(GiShaders.ProbeBlend(rays), "gi probe blend " + rays,
+        [
+            (0, DescriptorType.StorageBuffer), (1, DescriptorType.StorageBuffer), (2, DescriptorType.UniformBuffer),
+            (3, DescriptorType.StorageImage), (4, DescriptorType.StorageImage), (5, DescriptorType.CombinedImageSampler), (6, DescriptorType.StorageBuffer),
+        ]);
+        return variants[rays] = (trace, blend, ctx.Pipelines.Get(new ComputePipelineDesc(trace, "gi probe trace " + rays)), ctx.Pipelines.Get(new ComputePipelineDesc(blend, "gi probe blend " + rays)));
+    }
+
+    /// <summary>
+    /// The hysteresis of one update. <see cref="Hysteresis"/> is the per-frame figure for 64 rays; with fewer rays the same noise needs a longer memory: an exponential
+    /// average of independent samples has a variance of (1 - h) / (1 + h) of one sample's, and a sample of n rays has the variance of 64 / n times that of 64 rays, so
+    /// (1 - h) / (1 + h) is scaled by n / 64.
+    /// </summary>
+    float UpdateHysteresis(int phases)
+    {
+        float h = MathF.Pow(Hysteresis, phases);
+        if (Rays >= MaxRays) return h;
+        float k = (1 - h) / (1 + h) * Rays / MaxRays;
+        return (1 - k) / (1 + k);
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -201,7 +230,7 @@ internal sealed unsafe class GiProbes : IDisposable
         public Vector4 Params;
         public Vector4 Grid0, Grid1, Grid2, Grid3;
         public Matrix4x4 Rotation;
-        public Vector4 Origin, SunLight, LightDir, Maps, Albedo, RayLength, LightGrid;
+        public Vector4 Origin, SunLight, LightDir, Maps, Albedo, RayLength, LightGrid, Extra;
     }
 
     /// <summary>
@@ -212,6 +241,7 @@ internal sealed unsafe class GiProbes : IDisposable
     {
         if (scene.Top is null) return;
         slot = ctx.Frame.Slot;
+        var variant = Variant(Rays);
         int phases = Phases is 1 or 2 or 4 or 8 ? Phases : 4, phase = (int)(Updates % phases);
         bool moved = false;
         for (int c = 0; c < Cascades; c++)
@@ -245,7 +275,7 @@ internal sealed unsafe class GiProbes : IDisposable
         var constants = new Constants
         {
             // The hysteresis per update, so that a probe settles in as many frames whatever the phases.
-            Params = new Vector4(1, phase, phases, MathF.Pow(Hysteresis, phases)),
+            Params = new Vector4(1, phase, phases, UpdateHysteresis(phases)),
             Grid0 = grid[0], Grid1 = grid[1], Grid2 = grid[2], Grid3 = grid[3],
             Rotation = RandomRotation(),
             Origin = new Vector4(scene.Origin, Updates),
@@ -254,6 +284,7 @@ internal sealed unsafe class GiProbes : IDisposable
             Maps = Read<Vector4>(g, "uAtmoMaps"),
             RayLength = new Vector4(Grid[0].RayLength, Grid[1].RayLength, SleepPeriod, HiddenPeriod),
             LightGrid = lamps?.Grid ?? default,
+            Extra = new Vector4(0, FarPeriod > 1 ? FarPeriod : 1, 0, 0),
         };
         var ground = g.Texture("uWeatherGround")?.Invoke() ?? default;
         constants.Albedo = new Vector4(ObjectAlbedo, ground.IsNull ? 0 : 1);
@@ -262,6 +293,8 @@ internal sealed unsafe class GiProbes : IDisposable
         var cmd = ctx.BeginNative("gi probes");
         cmd.BeginLabel("gi probes");
         cmd.Barrier(BarrierBatch.Full);
+        // With the pass meter the full barrier that starts the probe passes is timed apart (it waits for the top level's build).
+        if (StageClock.OnClose is not null) { cmd.EndLabel(); ctx.EndNative(cmd); StageClock.Sub("gi probes barrier"); cmd = ctx.BeginNative("gi probes"); cmd.BeginLabel("gi probes"); }
         if (moved)
         {
             // The tiles whose probe moved hold another place's light until their update: hide them (GiShaders.ProbeInvalidate).
@@ -313,11 +346,11 @@ internal sealed unsafe class GiProbes : IDisposable
                 writes[4 + i] = new WriteDescriptorSet { SType = StructureType.WriteDescriptorSet, DstBinding = (uint)(4 + i), DescriptorCount = 1, DescriptorType = DescriptorType.CombinedImageSampler, PImageInfo = &images[i] };
             writes[13] = Buffer(13, DescriptorType.StorageBuffer, &stateInfo);
             writes[14] = Buffer(14, DescriptorType.StorageBuffer, &listInfo);
-            cmd.BindPipeline(tracePipeline);
-            cmd.PushDescriptors(traceProgram.Layout, 0, new ReadOnlySpan<WriteDescriptorSet>(writes, 15), PipelineBindPoint.Compute);
+            cmd.BindPipeline(variant.TracePipeline);
+            cmd.PushDescriptors(variant.Trace.Layout, 0, new ReadOnlySpan<WriteDescriptorSet>(writes, 15), PipelineBindPoint.Compute);
             // Set 1: the bindless table, for the objects' diffuse maps at the hits.
             var table = ctx.Bindless.Set;
-            cmd.BindSets(traceProgram.Layout, 1, new ReadOnlySpan<DescriptorSet>(&table, 1), default, PipelineBindPoint.Compute);
+            cmd.BindSets(variant.Trace.Layout, 1, new ReadOnlySpan<DescriptorSet>(&table, 1), default, PipelineBindPoint.Compute);
             if (listed > 0) cmd.Dispatch((uint)listed);
         }
         cmd.Barrier(ComputeAfterCompute);
@@ -344,8 +377,8 @@ internal sealed unsafe class GiProbes : IDisposable
             writes[4] = new WriteDescriptorSet { SType = StructureType.WriteDescriptorSet, DstBinding = 4, DescriptorCount = 1, DescriptorType = DescriptorType.StorageImage, PImageInfo = &images[1] };
             writes[5] = new WriteDescriptorSet { SType = StructureType.WriteDescriptorSet, DstBinding = 5, DescriptorCount = 1, DescriptorType = DescriptorType.CombinedImageSampler, PImageInfo = &images[2] };
             writes[6] = Buffer(6, DescriptorType.StorageBuffer, &listInfo);
-            cmd.BindPipeline(blendPipeline);
-            cmd.PushDescriptors(blendProgram.Layout, 0, new ReadOnlySpan<WriteDescriptorSet>(writes, 7), PipelineBindPoint.Compute);
+            cmd.BindPipeline(variant.BlendPipeline);
+            cmd.PushDescriptors(variant.Blend.Layout, 0, new ReadOnlySpan<WriteDescriptorSet>(writes, 7), PipelineBindPoint.Compute);
             if (listed > 0) cmd.Dispatch((uint)listed);
         }
         cmd.Barrier(ComputeAfterCompute);
@@ -403,8 +436,7 @@ internal sealed unsafe class GiProbes : IDisposable
         foreach (var l in lists) ctx.Device.DeferFree(l);
         rays.Dispose();
         state.Dispose();
-        traceProgram.Dispose();
-        blendProgram.Dispose();
+        foreach (var v in variants.Values) { v.Trace.Dispose(); v.Blend.Dispose(); }
         invalidateProgram.Dispose();
     }
 }

@@ -43,7 +43,7 @@ reflection reads neither storage images nor acceleration structures, and pushes 
 
 *From the code.*
 
-- **Origin.** Positions in the structures are relative to `GiScene.Origin`, the eye rounded to 64 units. Each frame's instance transforms
+- **Origin.** Positions in the structures are relative to `GiScene.Origin`, the eye rounded to 64 units, which follows the eye only once it is more than 1024 units away (2026-10-11, see "Cost of the GI stage"). Each frame's instance transforms
   are offset by it, so floats keep their precision anywhere in the world, which is 1.47 M units across.
 - **Terrain.** Two height-field grids around the eye: 256 × 256 quads at 16 units (4096 across) and at 160 units (40960 across). Each is
   sampled from the CPU `HeightSnapshot` on a worker, uploaded and built into a bottom level. A grid is rebuilt when the eye has moved an
@@ -64,7 +64,7 @@ reflection reads neither storage images nor acceleration structures, and pushes 
     level the mesh holds (or that level's manual LOD mesh), one geometry per part.
   - A structure unused for 600 frames is dropped. Evicting the mesh itself does not invalidate it: a built structure no longer reads its
     inputs.
-- **Top level.** One per frame slot, sized for 16384 instances and rebuilt in place every frame (prefer fast build). Instances and
+- **Top level.** One per frame slot, sized for 16384 instances and rebuilt in place (built to trace fast) when its instances are not those of its last build (2026-10-11: with the eye still or walking that is rare, see "Cost of the GI stage"; it was every frame, built fast). Instances and
   geometry records are written into host-visible buffers of the slot.
 - **Geometry records.** 32 bytes per geometry: vertex address, index address, stride, kind. A hit's record is the instance's custom index
   plus the geometry index. The shader fetches the triangle's indices and positions with `GL_EXT_buffer_reference` (`uvec2` addresses,
@@ -131,7 +131,7 @@ So keeping the structures up to date costs well under a tenth of a millisecond p
 - **Atlases.** The irradiance atlas holds 8 × 8 octahedral texels per probe, plus a 1-texel border (RGBA16F; alpha 1 marks a valid probe).
   The distance atlas holds 16 × 16 per probe, plus the border (RG16F). It stores the mean hit distance and the mean of its square, over
   twice the spacing. The borders copy the opposite edges, so bilinear filtering works across the octahedron's seams.
-- **Trace.** Each probe traces 64 rays, in spherical Fibonacci directions turned by a random rotation each update.
+- **Trace.** Each probe traces 32 rays (64 with `MEITOU_GI_RAYS=64`; 64 until 2026-10-11, see "Cost of the GI stage"), in spherical Fibonacci directions turned by a random rotation each update.
   - A ray that misses sees the lighting function's ambient in its direction: the sky's irradiance × (1 − 0.04) × the ambient map × the
     environment factor, the same units as `kenshiLight`'s `envDiffuse`.
   - A front-face hit sees an albedo (the weather's ground colour map on the terrain, a constant 0.35 / 0.32 / 0.28 on objects) times the
@@ -140,7 +140,7 @@ So keeping the structures up to date costs well under a tenth of a millisecond p
   - A back-face hit is dark, with a negative distance. A probe whose rays see more than 25 % back faces is inside geometry and is marked
     invalid.
 - **Blend.** The rays are blended into the irradiance tile (cosine weights) and the distance tile (cosine to the 50th power), borders
-  included. The hysteresis is 0.97 per frame.
+  included. The hysteresis is 0.97 per frame at 64 rays; with 32 rays it is scaled to 0.985 so that the noise stays the same (the memory of an exponential average of n-ray samples has a variance of (1 - h) / (1 + h) / n).
 - **Round robin.** Each frame updates a quarter of the probes, every fourth probe by index, from a phase that advances by one per frame
   (`--gi-phases`, 1, 2, 4 or 8; default 4). The hysteresis per update is 0.97 raised to the number of phases, so a probe settles in about
   as many frames as with every probe updated each frame. When a grid scrolls (or its bases change), `GiShaders.ProbeInvalidate` first sets alpha 0 on every tile
@@ -344,6 +344,106 @@ units away, one inside the fog and two where the block does not hide anything an
 lamps), the same as A against B. **Popping**: none seen in those pictures; the stale light is the light of up to 64 frames ago, and the sun and the lamps hardly change in that
 time. A fast time of day (`--time-speed`) or a flight so fast that the zone's inner edge reaches a probe before its next update would show it first. **Unknown**: lamp flicker
 in the hidden zone (not looked at).
+
+## Cost of the GI stage (2026-10-11, `perf-gi-cost`)
+
+Meitou's own optimisations; the picture is meant not to change. **Observed**, RTX 4070, Shark in the swamp rain (`--world --camera-code
+018C6C25C7309B75C4723B5747D78075406DF4113E00A00C46 --radius 2 --size 1920x1080 --upscaler dlss --render-scale native`), master fa5174a. Sizes at the
+start: 2 cascades of 32 x 8 x 32 probes = 16384 probes (128 and 512 apart), a quarter of them each frame (4096, fewer with the sleepers and the fog-hidden
+ones), 64 rays each (at most 262144 rays a frame), a traced scene of about 765 instances (375 objects, 384 foliage, the terrain grids).
+
+**Where the time went** (serialised pass meter, `MEITOU_PASS_STATS=1 MEITOU_PASS_STATS_SKIP=80 ... --fly-benchmark 300 --fly-speed 0`, three runs after a warm-up
+run: the first run after a pause shows the card at idle clocks, trace 0.38 and resolve 0.7, so never read a first run; the rows are the `gi` stage's parts, GPU ms):
+
+| Part | Before | After |
+| --- | --- | --- |
+| `gi scene barrier` (the full barrier before the builds, with the frame's uploads) | 0.01 | (no segment is recorded when nothing is built) |
+| `gi scene blas` (terrain grids and new object structures: none once settled) | 0.01 | 0 |
+| `gi scene` = the top level's rebuild, 765 instances | 0.13 to 0.14 | 0.01 (the barrier after it) |
+| `gi probes barrier` (the full barrier that starts the probe passes) | 0.01 | 0.01 |
+| `gi trace` | 0.22 to 0.23 | 0.14 |
+| `gi blend` | 0.07 to 0.08 | 0.04 to 0.05 |
+| **`gi` stage** | **0.44 to 0.46** | **0.20 to 0.21** |
+| `gi resolve` (the resolve and the apply, the `post` section `gi`; not changed) | 0.09 | 0.09 to 0.10 |
+
+The pass meter splits the scene segment in three (`GiScene`: after the barrier, before the top level) and the probes' one after its barrier, only while the
+meter is on (`StageClock.OnClose`); without it the native lists are as they were.
+
+**What the trace's time is** (`--ab` of throw-away switches that skipped one part of the trace shader at a time, still, 3072 frames, period 4, GPU `gi` stage A - B,
+so the cost of the part; none kept; at 64 rays unless noted):
+
+| Part skipped | Cost |
+| --- | --- |
+| the leaf alpha test (`solid()`: the indices, three vertex uvs and the map's alpha, for every candidate hit on a leaf card; the candidates are still stepped through) | +0.08 to +0.09 (+0.05 at 32 rays) |
+| the sun's shadow ray from each hit | +0.03 (+0.02) |
+| all the shading of the hits (the rays still traced) | +0.07 (+0.03) |
+| the probes' bounce lookup (`giIrradiance` at the hits) | 0.00 |
+| the lamps at the hits | -0.01 to 0.00 |
+| the object's diffuse map at the hit / the terrain's ground colour map | 0.00 / -0.02 (nothing) |
+| foliage out of the primary rays: cascade 0 / cascade 1 | +0.01 to +0.02 / +0.01 |
+| foliage out of the shadow rays | +0.02 to +0.03 |
+| objects out of the primary rays | 0.00 |
+| the alpha tested at mip 4 instead of 2 | -0.02 (nothing: the fetch is not what costs) |
+| leaves taken as solid past 800 units without the test | 0.00 (the cost is in the candidates near the probe, in the canopies) |
+| every other lane of a probe's workgroup returns at once (half the rays, the same warps) | +0.07 (a warp costs what it cost, so fewer lanes save little) |
+
+- **Observed:** the traversal itself is two thirds of the trace (0.15 of 0.22 at 64 rays), the hit shading a third. The foliage's cut-out leaves are the largest
+  part that can be told apart (about a fifth of the stage after the changes below), and it is not the texture: the candidate steps and their dependent loads are.
+- The alpha test can only be made cheaper by changing the scene (fewer or trimmed leaf cards, `--gi-foliage` above 150, a coverage per part instead of the test),
+  none of which keeps the picture; **Open**.
+
+**Changes** (each a Meitou switch, default on; `--ab <name>`, side A the change; the deltas are each against the state with the ones before it on, GPU `gi` stage / GPU total,
+`--ab-period 4 --bench-frames 3072`, the Shark camera unless noted):
+
+| Switch (env to turn it off) | Still | Orbit (135 units a frame) | Hub, still | Walking, 4 and 16 units a frame |
+| --- | --- | --- | --- | --- |
+| `gi-top-reuse` (`MEITOU_GI_TOP_REUSE=0`) | -0.12 / -0.14 | -0.01 / -0.06 | -0.08 / -0.09 | -0.10 / -0.16 and -0.07 / -0.15 |
+| `gi-rays` (`MEITOU_GI_RAYS=64`) | -0.10 / -0.13 | -0.10 / -0.08 | -0.06 / -0.08 | |
+| `gi-far` (`MEITOU_GI_FAR_PERIOD=1`) | -0.03 / -0.08 | -0.04 / -0.05 | -0.02 / -0.06 | |
+| `gi-top-trace` (`MEITOU_GI_TOP_TRACE=0`) | -0.02 / -0.07 | -0.01 / -0.04 | -0.01 / -0.03 | |
+
+- **`gi-top-reuse`** (`GiScene`): the top level is rebuilt only when the frame's instances are not, byte for byte, those it was last built over (a copy per frame slot,
+  49 KB, compared with `SequenceEqual`; an equal array is an equal structure, `InstanceRecord` has no padding). Three things make them equal for longer:
+  the origin follows the eye only once it is 1024 units away (it was rounded to 64 every frame, so any walk changed every transform); the objects are
+  selected around the eye snapped to a 128 grid with the range widened by 111 (the set changed whenever an object crossed the 6000 range, about every third frame
+  at walking speed; every object within the range of the true eye is still in); and a frame that builds nothing no longer records the scene's native list at all
+  (it is opened on first use: `GiScene.Open`). The foliage block was cached already. Costs: floats at up to 1024 + 6000 units from the origin, as before at 6000 (their precision at
+  8192 is 0.001); an object the eye is up to 111 units past the range edge of is kept. Side B of the switch is the old behaviour exactly.
+  In the orbit the eye moves 135 units a frame and the structure is rebuilt as before (no gain); the Hub gains less because it has fewer instances to build.
+- **`gi-rays`**: 32 rays per probe instead of 64, so the trace's workgroup is one warp (the shaders are made per ray count, `GiShaders.ProbeTrace(rays)`, `GiProbes.Variant`),
+  and the hysteresis is scaled so that the noise stays that of 64 rays: an exponential average of independent n-ray samples has variance (1 - h) / (1 + h) / n of one ray's, so
+  (1 - h) / (1 + h) is multiplied by 32 / 64 (0.97 a frame becomes 0.985, 0.885 an update becomes 0.941). The cost is a probe that takes twice as many frames to settle (about 65 frames
+  to 95 % at the default four phases instead of 33, so the probes follow the sun and the lamps' flicker half as fast) and a probe that starts over (a column that scrolled in,
+  at the grid's far edge) is one 32-ray sample at first. Trace 0.23 to 0.15, blend 0.08 to 0.05 (the pass meter), the stage -0.10 in paired runs.
+- **`gi-far`**: the probes of cascade 1 are listed on every second one of their rounds (every 8th frame), `GiFogHide.FarBit` in the list entry, the blend giving them the hysteresis of two updates
+  in one (`pow(h, 2)`; the same slow update as the fog-hidden probes have at 16). The sleep rule is keyed on the tile as before, so a far sleeper is still checked every
+  8th of its updates, on a round where it is listed. A fog-hidden probe keeps its own rule. The far probes light only the pixels and bounces beyond cascade 0's reach, about 2000 units out.
+- **`gi-top-trace`**: the top level is built to trace fast instead of to build fast (`AccelerationStructure.RebuildTop(fastTrace)`; the storage is sized for both). With the reuse it is built rarely,
+  and in the orbit, where it is built every frame, the stage is unchanged (the build costs what the trace gains).
+
+**Together** (**Observed**, the same binary with the four env switches off against on, two runs each interleaved, 3072 frames, GPU ms, mean):
+
+| View | `gi` stage before | after | GPU total | Frame |
+| --- | --- | --- | --- | --- |
+| Shark, still | 0.50 | 0.26 | -0.22, -0.24 | -0.24, -0.33 |
+| Shark, orbit (`--bench-motion orbit`) | 0.64 to 0.65 | 0.54 to 0.56 | -0.09, +0.11 (a run with a stall) | -0.10, +0.37 (the same) |
+| Hub, still (`--view hub`) | 0.34 | 0.20 | -0.14, -0.13 | -0.14 (one run had a stall) |
+| Shark, walking 8 units a frame (`--bench-motion fly --fly-speed 8`) | 0.56 | 0.32 | -0.23, -0.23 | -0.24, -0.23 |
+
+Render thread, Shark still: the `gi` stage 0.22 to 0.16 ms (the objects are no longer walked into a new list and a native list recorded every frame; the other rows of
+the render-thread table differ by a tenth of a ms between the separate processes, so read the GPU rows).
+The whole GI at Shark, still, is 0.55 ms before (stage 0.45 + resolve 0.09) and 0.30 after. The GPU total moves less than the stage in the orbit because the other stages overlap it.
+
+**Pictures** (`--upscaler off --no-particles --bench-motion still`, `--ab-period 16 --bench-frames 768`; the floor, a switch that does not change the picture, is about 340 to 480 k pixels
+at >= 1/255, 2 to 7 k at >= 4, 150 to 900 at >= 12, max 28 to 45): `gi-rays` Shark 476 k / 7.9 k / 892, max 33 and Hub 378 k / 3.2 k / 351, max 45; at 22:00 Hub 431 k / 1.9 k / 155, max 31
+and Shark 516 k / 6.9 k / 899, max 30; `gi-far` Shark 385 k / 5.7 k / 518, max 28, Hub 398 k / 3.4 k / 385, max 45, at 22:00 431 k / 2.0 k / 174; `gi-top-reuse` Shark 384 k / 5.6 k / 497, Hub
+341 k / 3.2 k / 351; `gi-top-trace` Shark 411 k / 5.7 k / 536. A control that does change the picture (the sun's shadow ray left out of the bounces) shows 790 k / 84 k / 2651. The diff of `gi-rays`
+at Shark is the rain's dither and the lamps' flicker, as the floor. **Unknown:** the probes' noise in motion (flicker from frame to frame at 32 rays) was not measured; the equal-variance
+rule says it is the same, and the settling is slower.
+Vulkan validation (`MEITOU_VK_VALIDATION=sync`, a flight at 20 units a frame with the reuse): 0 errors.
+
+**Open:** the alpha test of the leaves (about a fifth of what is left); the resolve (0.09); a fast camera, where the structure is built every frame (the instances change faster than the origin
+can lag; a refit does not help, the count changes); fewer rays for cascade 1 (16000 long) than for cascade 0.
 
 ## Resolve (`--gi-resolve <n>`, `Gi/GiResolveShaders.cs`, `PostProcess.RunGiResolve`)
 
