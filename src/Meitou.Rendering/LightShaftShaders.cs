@@ -14,7 +14,7 @@ static class LightShaftShaders
     public const int AtlasColumns = 8;
 
     /// <summary>The grid, the slices' distances and the camera.</summary>
-    const string Common = """
+    internal const string Common = """
 
         uniform vec4 uShaftGrid;    // x cells across, y cells down, z slices, w slices per atlas row
         uniform vec4 uShaftRange;   // x where the first slice starts, y where the last ends (distance along the ray), z ln(y / x), w the frame (the jitter's seed)
@@ -34,7 +34,7 @@ static class LightShaftShaders
         """;
 
     /// <summary>The haze's alpha along a ray (after <see cref="AtmosphereShaders.Functions"/>).</summary>
-    const string Alpha = """
+    internal const string Alpha = """
 
         // How much of the haze (and the weather's fog) a ray has gathered by this distance: atmoKenshiHaze's alpha (the ramp, then the fog's
         // ease-in-out curve over it). The simple sky's and the physical haze's alpha by distance alone (the physical one's direction is left out).
@@ -146,7 +146,7 @@ static class LightShaftShaders
         """;
 
     /// <summary>The Meitou air layer's density and light (the scatter pass and the apply pass).</summary>
-    const string Air = """
+    internal const string Air = """
 
         uniform vec4 uShaftAir;     // x density at the base (per world unit; 0: no layer), y the base height, z the scale height, w the phase's anisotropy g
 
@@ -245,27 +245,16 @@ static class LightShaftShaders
     /// <c>darkening × (1 − share)</c> of its haze colour (a negative colour); the sky, which no haze covers, is scaled by
     /// <c>1 − darkening × (1 − share) × sky weight × alpha at the grid's end</c>.
     /// </summary>
-    public static readonly string Apply = "#version 330 core\n" + AtmosphereShaders.Functions + Common + Alpha + Air + """
+    public static readonly string Apply = "#version 330 core\n" + AtmosphereShaders.Functions + Common + Alpha + Air + ApplyFunctions + """
 
         in vec2 vUv;
         out vec4 fragColour;
-        uniform sampler2D uNearDepth, uFarDepth, uShaftLight, uShaftScatter;
+        uniform sampler2D uNearDepth, uFarDepth;
         uniform vec2 uNearPlanes, uFarPlanes;
         uniform float uWaterY;
         uniform int uHasFar;
-        uniform vec2 uShaftAtlas;   // the atlas's size in texels
-        uniform vec4 uShaftParams;  // x darkening (strength × the sun's share of the light), y the sky's weight, z 1: show the share (debug)
 
         float viewZ(float d, vec2 nf) { float zd = 2.0 * d - 1.0; return nf.x * nf.y / (nf.y - zd * (nf.y - nf.x)); }
-
-        vec2 shaftAt(vec2 cell, int k)
-        {
-            int columns = int(uShaftGrid.w);
-            vec2 tile = vec2(float(k % columns), float(k / columns)) * uShaftGrid.xy;
-            return (tile + clamp(cell, vec2(0.5), uShaftGrid.xy - 0.5)) / uShaftAtlas;
-        }
-        float shaftShare(vec2 cell, int k) { return textureLod(uShaftLight, shaftAt(cell, k), 0.0).r; }
-        vec4 shaftScatter(vec2 cell, int k) { return textureLod(uShaftScatter, shaftAt(cell, k), 0.0); }
 
         void main()
         {
@@ -287,6 +276,33 @@ static class LightShaftShaders
                 float tw = (uWaterY - uShaftEye.y) / dir.y;
                 if (tw > 0.0 && (sky || tw < dist)) { dist = tw; sky = false; }
             }
+            fragColour = shaftLayer(vUv, dir, dist, sky);
+        }
+        """;
+
+    /// <summary>
+    /// The apply pass's work for one pixel, given its ray and distance (<c>shaftLayer</c>: the colour to add and the factor the scene is kept by), shared by
+    /// <see cref="Apply"/> and the merged scene layers pass (<see cref="PostProcessShaders.SceneLayers"/>). Needs <see cref="Common"/>, <see cref="Alpha"/>
+    /// and <see cref="Air"/> before it.
+    /// </summary>
+    internal const string ApplyFunctions = """
+
+        uniform sampler2D uShaftLight, uShaftScatter;
+        uniform vec2 uShaftAtlas;   // the atlas's size in texels
+        uniform vec4 uShaftParams;  // x darkening (strength × the sun's share of the light), y the sky's weight, z 1: show the share (debug)
+
+        vec2 shaftAt(vec2 cell, int k)
+        {
+            int columns = int(uShaftGrid.w);
+            vec2 tile = vec2(float(k % columns), float(k / columns)) * uShaftGrid.xy;
+            return (tile + clamp(cell, vec2(0.5), uShaftGrid.xy - 0.5)) / uShaftAtlas;
+        }
+        float shaftShare(vec2 cell, int k) { return textureLod(uShaftLight, shaftAt(cell, k), 0.0).r; }
+        vec4 shaftScatter(vec2 cell, int k) { return textureLod(uShaftScatter, shaftAt(cell, k), 0.0); }
+
+        // dist: to the surface, the water in front of it, or for the sky (sky true) the grid's end.
+        vec4 shaftLayer(vec2 vUv, vec3 dir, float dist, bool sky)
+        {
             // The far ends of the slices: s - 1 is where this distance lies between them (-1 the eye, where the share is 1).
             float s = shaftSlice(min(dist, uShaftRange.y)) - 1.0;
             float share = 1.0;
@@ -310,17 +326,12 @@ static class LightShaftShaders
             if (uShaftParams.z > 0.5)   // --shafts-debug: red the share, green the haze's alpha here, blue the haze colour's brightness, over everything
             {
                 vec3 h = sky ? vec3(0.0) : atmoApplyHaze(vec3(0.0), uShaftEye, uShaftEye + dir * dist);
-                fragColour = vec4(share, shaftAlpha(dist), dot(h, vec3(0.2126, 0.7152, 0.0722)), 0.0);
-                return;
+                return vec4(share, shaftAlpha(dist), dot(h, vec3(0.2126, 0.7152, 0.0722)), 0.0);
             }
-            if (sky)
-            {
-                fragColour = vec4(air.rgb, (1.0 - dark * uShaftParams.y * shaftAlpha(uShaftRange.y)) * air.a);
-                return;
-            }
+            if (sky) return vec4(air.rgb, (1.0 - dark * uShaftParams.y * shaftAlpha(uShaftRange.y)) * air.a);
             vec3 haze = atmoApplyHaze(vec3(0.0), uShaftEye, uShaftEye + dir * dist);
             // (scene − dark · haze) · T + S: the haze darkened where shadowed, then the air layer in front of it.
-            fragColour = vec4(air.rgb - dark * haze * air.a, air.a);
+            return vec4(air.rgb - dark * haze * air.a, air.a);
         }
         """;
 }

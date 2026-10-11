@@ -144,6 +144,16 @@ public sealed unsafe partial class PostProcess
             Draw(sc.P, shaftScatter!);
         }
 
+        var parameters = new Vector4(Math.Clamp(darkening, 0, 1), o.ShaftSky, o.ShaftDebug ? 1 : 0, 0);
+        shaftFrame = (grid, range, new Vector2(tanY * aspectNow, tanY), Math.Clamp(darkening, 0, 1));
+        if (MergeLayers)
+        {
+            // The apply is the merged pass's (ApplySsao).
+            (shaftsPending, shaftArgs) = (true, (air, parameters));
+            Stamp("shafts");
+            CloseSegment();
+            return;
+        }
         var a = shaftApply;
         Common(a);
         Bind(a.P, a.NearDepth, sceneDepth);
@@ -156,12 +166,11 @@ public sealed unsafe partial class PostProcess
         a.P.Set(a.WaterY, WaterHeight ?? float.MinValue);
         a.P.Set(a.HasFar, farSliceDrawn ? 1 : 0);
         a.P.Set(a.Atlas, aw, ah);
-        a.P.Set(a.Params, Math.Clamp(darkening, 0, 1), o.ShaftSky, o.ShaftDebug ? 1 : 0, 0);
+        a.P.Set(a.Params, parameters);
         a.P.ApplyGlobals();
         Draw(a.P, sceneColour!.Attachment, sceneColour.Format, width, height, width, height, FogState);
         Stamp("shafts");
         CloseSegment();
-        shaftFrame = (grid, range, new Vector2(tanY * aspectNow, tanY), Math.Clamp(darkening, 0, 1));
     }
 
     void DisposeShafts()

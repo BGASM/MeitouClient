@@ -34,6 +34,8 @@ static partial class WorldApp
             AbToggles.Register("fog-direction", () => fog.DirectionBound, v => fog.DirectionBound = v, "the fog cull's bound by ray direction (off: only the plain bound, which finds no distance at a 50000 far clip)");
         }
         if (post.FogVrsSupported) AbToggles.Register("fog-vrs", () => post.FogVrs, v => post.FogVrs = v, "variable-rate shading where the fog hides the surface: the opaque scene passes shade 2x2 or 4x4 pixels with one fragment (MEITOU_FOG_VRS=a,b the opacities); B: every pixel shaded");
+        AbToggles.Register("layer-merge", () => post.MergeLayers, v => post.MergeLayers = v, "the light shafts' apply, the fog volumes and the SSAO onto the scene in one pass (A) against three passes (B)");
+        AbToggles.Register("fog-half", () => post.FogHalf, v => post.FogHalf = v, "with the merged layers, the fog volumes at half the render size, upsampled by depth (A) against full size (B)");
         float startScale = post.Options.Upscale.EffectiveScale;
         AbToggles.Register("render-scale", () => post.Options.Upscale.EffectiveScale >= startScale, v => post.Options.Upscale.Scale = v ? startScale : MathF.Round(startScale * 0.67f * 100) / 100,
             "the render scale as set (A) against two thirds of it (B), switched at run time like the Tab slider (targets and upscaler made again)");

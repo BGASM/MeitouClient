@@ -659,6 +659,7 @@ public sealed unsafe partial class PostProcess : IDisposable
         // The final passes draw into Target (the window's backbuffer, or the caller's texture) with a viewport of the display size.
         var final = PassTargets.Of(Target ?? throw new InvalidOperationException("PostProcess.Target is not set"), null);
         bool needDepth = o.Ssao && haveNearSlice;
+        if (shaftsPending || fogPending > 0) ApplyLayers(false);   // a caller that drew the layers without ApplySsao: the occlusion stays the composite's
 
         bool ao = needDepth;
         if (ao && !aoApplied) RunSsao();
@@ -760,6 +761,14 @@ public sealed unsafe partial class PostProcess : IDisposable
     {
         MarkScene();
         if (!volumes || sceneColour is null || !haveNearSlice) return;
+        if (MergeLayers)
+        {
+            PrepareFogLayer();
+            shaftFrame.Darkening = 0;
+            Stamp("fog");
+            CloseSegment();
+            return;
+        }
         var f = fogPass;
         Bind(f.P, f.NearDepth, sceneDepth);
         Bind(f.P, f.FarDepth, farSliceDrawn ? farDepth : null);
@@ -805,6 +814,11 @@ public sealed unsafe partial class PostProcess : IDisposable
     public void ApplySsao()
     {
         MarkScene();
+        if (MergeLayers)
+        {
+            ApplyLayers(Options.Ssao && haveNearSlice && sceneColour is not null && aoA is not null);
+            return;
+        }
         if (!Options.Ssao || !haveNearSlice || sceneColour is null || aoA is null) return;
         RunSsao();
         var p = aoApplyPass ??= new AoApplyPass(Gpu);
@@ -1293,6 +1307,7 @@ public sealed unsafe partial class PostProcess : IDisposable
         Free();
         DisposeShadingRate();
         DisposeShafts();
+        DisposeSceneLayers();
         DisposeMerged();
         Hiz?.Dispose();
         foreach (var p in new FullscreenProgram[] { ssao, blur, luminancePass, adaptPass, compositePass, fxaaPass, hazePass, velocityPass, taaPass, fogPass, particleDepthPass, particleCompositePass, particleCoveragePass }) p.P.Dispose();
