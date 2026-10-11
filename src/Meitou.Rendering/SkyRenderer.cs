@@ -329,17 +329,23 @@ public sealed unsafe partial class SkyRenderer : IDisposable
                 }
                 col += night * aboveHorizon * stars * (0.35 + clamp(-uAtmoSun.y * 0.45, 0.0, 1.0)) * 2.0;
             }
+            // Meitou night air (docs/formats/sky.md "Night air"): a planet is far beyond the air, so it is seen through it: its light is hidden by the veil (more towards the
+            // horizon) and the air's own glow shows over it, the same colour the sky beside it has (atmoSky), so the dark side of a planet is not a black hole in the glow
+            // and its foot fades into the horizon haze as far land does. Both are exactly 0 in Faithful and by day (uAtmoNight.a = 0).
+            vec3 airDir = vec3(dir.x, max(dir.y, 0.0), dir.z);
+            float veil = atmoNightVeil(airDir);
+            vec3 air = atmoNightAir(normalize(airDir)) * uAtmoTint;
             // The planets: render queue 6 with the priorities 1 and 2, after the skydome (queue 5) and before the cloud entity (queue 6, priority 100), so the
             // clouds pass in front of them. The large one first, then the small one, which covers the large one's edge where the discs overlap (about half a degree).
             if (uHas.y > 0.5)
             {
                 vec4 p = planet(dir, uPlanetBody0, uPlanetSpin.x, uPlanetSpin.y, uPlanet0);
-                col = mix(col, p.rgb, p.a);
+                col = mix(col, p.rgb * (1.0 - veil) + air, p.a);
             }
             if (uHas.w > 0.5)
             {
                 vec4 p = planet(dir, uPlanetBody1, uPlanetSpin.z, uPlanetSpin.w, uPlanet1);
-                col = mix(col, p.rgb, p.a);
+                col = mix(col, p.rgb * (1.0 - veil) + air, p.a);
             }
             // Clouds: SkyX's cloud layer on the dome (SkyX_Clouds.hlsl, docs/formats/clouds.md), after the sky, the stars and the planets;
             // alpha-blended over them in HDR. The dome direction below the horizon is evaluated at a hair above it (alpha is then the horizon value).

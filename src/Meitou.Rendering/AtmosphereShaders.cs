@@ -156,6 +156,12 @@ static class AtmosphereShaders
         {
             return uAtmoNight.rgb * (uAtmoNight.a * exp(-max(dir.y, 0.0) * {{F(1 / NightAir.FalloffHeight)}}));
         }
+        // The share of a distant body's light (a planet) the night air in front of it hides: the haze's own strength at the horizon, thinning with the height as the glow does
+        // (NightAir.PlanetVeil). Zero in Faithful and by day, so the body is drawn as the game draws it.
+        float atmoNightVeil(vec3 dir)
+        {
+            return clamp(uAtmoNight.a * uAtmoAltitude.y * exp(-max(dir.y, 0.0) * {{F(1 / NightAir.VeilHeight)}}), 0.0, 1.0);
+        }
         // The skydome's HDR colour (SkyX_Skydome.hlsl, HDR branch); night: SkyX's night factor (where the glow and the stars show).
         vec3 atmoSky(vec3 dir, out float night)
         {

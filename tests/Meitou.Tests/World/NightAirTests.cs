@@ -149,4 +149,21 @@ public class NightAirTests
         // A glint light with no colour (a new planet) still counts as given: no glint, not the sun's.
         Assert.Equal((Vector3.UnitX, Vector3.Zero), (plain with { GlintDirection = Vector3.UnitX }).Glint);
     }
+
+    [Fact]
+    public void The_air_in_front_of_a_planet_hides_most_of_its_light_at_the_horizon_and_none_by_day()
+    {
+        // Deep night (sun well below the horizon): the haze's whole strength at the horizon, thinning with the height, never below 0.
+        float horizon = NightAir.PlanetVeil(-0.5f, 0), foot = NightAir.PlanetVeil(-0.5f, MathF.Sin(3 * MathF.PI / 180)), top = NightAir.PlanetVeil(-0.5f, MathF.Sin(21 * MathF.PI / 180));
+        Assert.Equal(1f, horizon);
+        Assert.True(horizon > foot && foot > top && top > 0, $"{horizon} {foot} {top}");
+        Assert.InRange(foot, 0.6f, 0.8f);   // the large planet's lowest point (12 - 9 degrees) is mostly hazed, its top (21 degrees) barely
+        Assert.InRange(top, 0.05f, 0.15f);
+        Assert.Equal(NightAir.PlanetVeil(-0.5f, 0), NightAir.PlanetVeil(-0.5f, -0.3f));   // below the horizon the horizon's value
+        Assert.Equal(0.93f, NightAir.PlanetVeil(-0.5f, 0, 0.93f));                       // scaled by the haze strength
+        Assert.Equal(0f, NightAir.PlanetVeil(-0.5f, 0, 0));
+        // By day and in the sun's last light (the night air's weight 0) the planet is drawn as the game draws it.
+        Assert.Equal(0f, NightAir.PlanetVeil(0.5f, 0));
+        Assert.Equal(0f, NightAir.PlanetVeil(-0.04f, 0));
+    }
 }

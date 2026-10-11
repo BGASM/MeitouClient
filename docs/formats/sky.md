@@ -303,6 +303,7 @@ and sky-view tables, the 0.36° sun disc) is gone, with `AtmosphereModel.cs`.
   gives the mesh's UV, `textureGrad` with the gradients of whichever of u and u + ½ is continuous (no seam), coverage antialiased over a pixel.
   Colour `texture × saturate(n · sun) + SkyX's Rayleigh colour towards the pixel` (`SkyRenderer.planet`). Drawn after the stars and before the
   clouds; the weather's fog over the sky covers them as it covers the dome. The day is the weather's (`WorldWeather.Day`), the hour the clock's.
+  With the Meitou `night` switch the planets are seen through the night air ("Night air", "Planets in the air"); `--faithful night` and the day draw them as the game does.
 - **Clouds** (the weather's density, or `--clouds <0..1>` as a test override; `--cloud-wind <x>,<z>` for the drift): the game's
   planar layer, drawn in the sky pass after the stars and before the moon, alpha-blended in HDR ([clouds.md](clouds.md#in-the-viewer)).
   `SkyRenderer` takes the density (`CloudDensityInput`), the sky colour multiplier (`SkyColourMultiplierInput`) and the wind velocity
@@ -435,6 +436,23 @@ Reference math in `NightAir` (`NightSky.cs`, tests `NightAirTests`), shader side
   works with both `stars` settings): `+ atmoNightAir(d)` where `d` is the direction with its height clamped at 0 (below the horizon the horizon's colour), and SkyX's own
   night glow (`night · ((0.05, 0.05, 0.1) (1 − y)³)^2.2`, **Verified** nonzero at the horizon, (0.0025, 0.0025, 0.0115) for a sun 64° under it, 0.0013 at y 0.1)
   is scaled by `1 − weight` so the two never add: the game's glow gives way to the night air as it comes in.
+- **Planets in the air** (2026-10-11; fix of "the night mist renders behind the moons"). **Cause** (**Observed**: The Hub, `--distance 9000 --pitch 4 --yaw 315 --time 0`, 1920x1080, `--upscaler off`, and the same with
+  `Port North --distance 2000 --pitch 14 --yaw 315 --time 23.5`, whose sea mirrors the planets): the sky pass draws the dome, which holds the night air (`atmoSky`), then the stars, then
+  each planet with `col = mix(col, planet, coverage)`, a full replacement. The game's planet is opaque and only has SkyX's Rayleigh in-scattering added (**Verified**, "Planets"), which is black at night,
+  so the planet's night side was a black disc cut out of the glow that the sky beside it, and the haze over the far land, had; its foot (the large planet's lowest point is 3 degrees up, the glow there
+  0.77 of its horizon value) looked pasted in front of the mist. Not a pass-order problem: the weather's fog term is applied after the planets and covers them, as in the game, and the placed fog volumes draw over the
+  sky with depth as before. **The game** has no night air and its fog pass drops the atmosphere term over sky pixels ("The sky is fogged by the global term"), so a planet is never hazed by the atmosphere
+  there (**Verified**, see Haze): Faithful (`--faithful night`) is unchanged. **Fix (Meitou, the `night` switch)**: a planet is far beyond the air, so it is drawn as `planet · (1 − veil) + air`, with `air` the
+  same `atmoNightAir` the sky beside it has (times the weather's sky tint) and `veil = NightAir.PlanetVeil` = twilight weight × haze strength (`uAtmoAltitude.y`, 0.93) × `exp(−y / 0.15)`: the
+  haze's strength at the horizon, 0.70 at the large planet's foot (3 degrees), 0.25 at its centre (12 degrees), 0.09 at its top. Both numbers (the 0.15 height and using the haze's strength) are **chosen by eye**, no
+  physical basis (**Unknown**); the veil is neutral in colour (no reddening, the planets' colours stay). The dark side now shows the glow (the air in front of it), the foot fades into the horizon haze as far ridges do.
+  `air` and `veil` are exactly 0 when the night air's weight is 0 (day, the sun's last light, `--faithful night`), so those pictures are **Verified** unchanged: image-diff 0 px against the build before
+  (day 13:00, a night view facing away from the planets, `--faithful night` with the planets in view, 22:54 dusk), with two stills of one build also 0 px. Night views with the planets differ in the planets' discs only
+  (1.2 to 1.7 % of the pixels by 12/255 or more, mean 0.3 to 0.5; the sea view 2.8 to 3.0 %, which also holds the mirrored planets). **The water's reflection** needs nothing of its own: `ReflectionPass` draws
+  the same sky pass with the mirrored camera, so the reflected planets get the same air and veil (**Observed**, the Port North pair: the reflected dark side no longer a black bulge in the glow, the reflected
+  foot faded; the planet glint is a separate light, unchanged). Cost: one `exp` and a few multiplies per sky pixel; sky pass at the Hub night view, 1920x1080 DLSS native, RTX 4070, 768 frames still,
+  two runs each of the old and the new build: median 0.37 / 0.37 ms against 0.38 / 0.38 ms (within the run-to-run spread). Screenshots (before / after, same names with the prefix) in
+  the session scratchpad `moon-fog\`: `night`, `low0`, `low235`, `low232` (the planets over the horizon band), `sea`, `sea0` (reflection), `twilight`, `day`, `away`, `faithful`.
 - **Horizon falloff**: `atmoNightAir(d) = colour · weight · exp(−max(d.y, 0) / 0.2)` (`NightAir.HorizonFalloff`): 1 at and below the horizon, 0.43 at 10° (y
   0.17), 0.18 at 20°, 0.08 at 30°, 0.007 at the zenith. A real airglow band peaks about 10° up; a plain exponential from the horizon is the simple choice (**Observed**:
   the stars keep their contrast above 40°). The haze evaluates the same function of the direction **from the eye to the surface**, so a fully hazed ridge at
