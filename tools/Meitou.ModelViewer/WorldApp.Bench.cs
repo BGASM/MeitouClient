@@ -26,6 +26,8 @@ static partial class WorldApp
         // The runtime switches: the Faithful / Meitou ones under their ids (A = Meitou), then what can flip between two frames (A = on).
         AbToggles.Clear();
         AbToggles.RegisterEnhancements(LiveSwitches(o, () => gpu, () => camera, () => render));
+        if (gpu.Water is { } water) AbToggles.Register("water-lean", () => water.Lean, v => water.Lean = v,
+            "skip zero-contribution surf, ocean and distant detail work and opaque slices' refraction copies (MEITOU_WATER_LEAN=0); B: always evaluate/copy");
         AbToggles.Register("occlusion", () => post.OcclusionCull, v => post.OcclusionCull = v, "foliage occlusion cull against the previous frame's depth pyramid (--no-occlusion-cull)");
         if (gpu.FogVolumes is { } fog)
         {

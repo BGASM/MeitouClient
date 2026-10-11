@@ -12,13 +12,14 @@ namespace Meitou.Tests.Vulkan;
 public class LegacySpirvGoldenTests
 {
     /// <summary>SHA-256 of vertex SPIR-V followed by fragment SPIR-V, per world program: without the remap, then with it.</summary>
+    // Meitou water refreshed 2026-10-11 for zero-contribution branches and explicit texture gradients.
     // Cloud and cloud-shadow consumers refreshed 2026-10-11 for the volumetric pass and transmission map.
     static readonly Dictionary<string, (string Plain, string Remap)> Golden = new()
     {
         ["sky simple"] = ("8CFB64AEBF8222327737BB1CBFE25C83", "4FA13EF63843235F949CF456477373F1"),
         ["sky"] = ("90F5703ED7FE4028FBF0E172022D972D", "35726F6A0817F3679886FB2B356DCF4A"),
         ["water"] = ("77A79F6C02B3C420528FF882D5C4DC8B", "31B73107669BFFD09DEE5592C54AED09"),
-        ["water meitou"] = ("5715587E33908C0B35CD6D4ED26202C4", "20B95F8B8DABFCD2855593E20F383888"),
+        ["water meitou"] = ("0B3D2C0F3D36A72D5699A17F48CA9C7A", "BB990E306C93185518D4713890BDEA47"),
         ["debug overlay"] = ("2967439E6B38320ED5326B2EF7EA984C", "FFCCCC151047230FD630483A92FEA9E2"),
         ["terrain patch"] = ("FFBE636C9C2C5EFB7A3D290EBB04DC16", "D43A5B762B206CC3105717D05CFE876D"),
         ["terrain mesh"] = ("4CF4CF48D45451A39BB782FD4488FCC6", "48E5014B9F9E00C050F90C5F8BB673FF"),

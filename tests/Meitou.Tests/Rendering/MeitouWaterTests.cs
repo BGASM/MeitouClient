@@ -6,6 +6,19 @@ namespace Meitou.Tests.Rendering;
 /// <summary>The Meitou water's CPU side (docs/render-water.md): the breakers on the game clock, the polar grid and the foam bake.</summary>
 public class MeitouWaterTests
 {
+    [Theory]
+    [InlineData(20000, 10000, false)]
+    [InlineData(14999, 10000, true)]
+    [InlineData(15000, 10000, false)]
+    [InlineData(20000, 20000, true)]
+    [InlineData(9999, 1000, true)]
+    [InlineData(10000, 1000, false)]
+    [InlineData(0.5f, 0, true)]
+    public void Refraction_slice_keeps_transparent_floor_and_shore_runup(float near, float clarity, bool expected)
+    {
+        Assert.Equal(expected, WaterRenderer.SliceCanTransmit(near, clarity));
+    }
+
     [Fact]
     public void Reflection_fog_shader_compiles_for_plain_and_multisampled_depth()
     {
