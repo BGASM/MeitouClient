@@ -256,6 +256,88 @@ So keeping the structures up to date costs well under a tenth of a millisecond p
 - Low sun (`7.5`) in an alley: the shade is much darker and lit by warm bounce light (mean difference 21).
 - **Open:** the overall level may be a little dark (energy lost through the constant object albedo, and no foliage in the scene).
 
+## Probes in the fog (2026-10-11, `Gi/GiFogHide.cs`)
+
+Meitou's own optimisation; the picture is meant not to change. A probe only matters through the surfaces that read it, and where the fog block the
+eye is in hides everything near it, no such surface is visible. `GiProbes.Update` takes the frame's `FogVolumes` and works out, per probe column,
+how many of its lowest probes are hidden; those are traced and blended on one of every `HiddenPeriod` (16) of their own rounds instead of every
+round. `--ab gi-fog` (side B: every probe at its normal rate), `MEITOU_GI_HIDDEN_PERIOD=<n>` sets the default (0 off).
+
+- **Rule** (*from the code*). A lookup (`giCascade`) moves its point off the surface by at most 0.3 of the smaller spacing, then reads the cells
+  around it, so a probe is read from points within one spacing across (plus that offset) and, up and down, from `base + (l - 0.5) sy` to
+  `base + (l + 1.5) sy` (the bottom layer from below too, the top layer from above too: the layer index is clamped). `GiFogHide.ReachBox` is that
+  box for a column's lowest L layers, from the cull block's floor up. A column's hidden layers are the largest L < 8 for which `FogVolumes.Covers`
+  holds for the box: wholly inside the block's box and seven planes and no nearer to the eye than the hide distance, or past the weather fog's
+  distance. That is the test the terrain, object and foliage culls use (docs/formats/fogfeatures.md "In Meitou"), so the rule is no looser than
+  those. The top layer is never hidden. Bounces read the same lookup, so a hit surface in a hidden box reads hidden probes too.
+- **Solved rarely.** The hidden layers are worked out again when the grid scrolls, the block changes, the eye has moved 96 units, or a hide
+  distance has grown by more than the margin left of the boxes' widening (the boxes are widened by twice 96, so the cached answer holds for an eye that
+  moved up to 96 and a distance that grew by 192 less the move). A solve is 0.08 ms on the render thread (the swamp, 2048 columns, most rejected by
+  a distance test in x and z); orbiting at Shark it runs every third frame.
+- **The list.** The CPU writes the frame's probe indices into a per-slot buffer (`GiFogHide.List`, bit 31 marks a slow update) and the trace and
+  blend dispatch one workgroup per entry (`probe = list[gid]` instead of `gid * phases + phase`). With nothing hidden the list is exactly the old
+  enumeration (`GiFogHideTests`), so clear views are unchanged by construction. The blend gives a slow update the hysteresis of 16 updates in one
+  (`pow(h, 16)`); a probe that moved starts over as before.
+- **Hidden probes are not frozen and not invalid**: they keep their last irradiance, valid, and are refreshed every 16th round (64 frames at the
+  default four phases). Bounces from visible probes that land on a hidden surface read them. A probe that comes out of the hidden zone has at most
+  that much stale light until its next normal update; a probe whose position changed (a column that scrolled in) is invalid until its first update,
+  which comes within 16 rounds, long before the eye is near enough (the zone's inner edge is at least the hide distance away).
+- **The water reflection** reads the probes only with the `gi-reflection` switch's side B; its mirrored camera is not the main view's, so the
+  hidden set (the main camera's) does not hold for it. Off by default.
+
+**Where the GI time goes** (**Observed**, 2026-10-11, RTX 4070, Shark in the swamp rain, `--world --camera-code
+018C6C25C7309B75C4723B5747D78075406DF4113E00A00C46 --radius 2 --size 1920x1080 --upscaler dlss --render-scale native --fly-benchmark 400 --fly-speed 0` with
+`MEITOU_PASS_STATS=1 MEITOU_PASS_STATS_SKIP=80`; the eye is a little lower than the camera code's, and another viewer shared the GPU, so +-0.03 ms; GPU ms): whole GI
+0.54 = scene 0.16 + trace 0.27 + blend 0.11, the resolve and apply 0.10 more.
+
+| Experiment (same command, one run each) | scene | trace | blend |
+| --- | --- | --- | --- |
+| as it is (`MEITOU_GI_HIDDEN_PERIOD=0`) | 0.16 | 0.27 | 0.11 |
+| no objects or foliage in the traced scene (`--gi-range 100 --gi-foliage 0`) | 0.04 | 0.07 | 0.09 |
+| `--gi-range 3000`, 6000 (default) | 0.16, 0.16 | 0.28, 0.27 | 0.11, 0.11 |
+| cascade 0 only (cascade 1 not listed) | 0.20 | 0.19 | 0.07 |
+| cascade 1 only | 0.16 | 0.13 | 0.05 |
+| rays of 1000 and 2000 (cascade 0, 1; picture changes) | 0.16 | 0.21 | 0.11 |
+| rays of 4000 and 4500 | 0.15 | 0.26 | 0.10 |
+| hidden probes never updated (`MEITOU_GI_HIDDEN_PERIOD=100000`) | 0.15 | 0.25 | 0.08 |
+
+(The ray-length and cascade rows came from throw-away switches, not kept.)
+
+- **What the fog makes invisible here is a small part of it.** At this camera the hide distance is 4455 and the block hides 3574 of the 16384
+  probes (all in cascade 1: cascade 0 reaches 2896 from the eye at most); the other 12.8 k are read by pixels or bounces within the fog's reach.
+  The scene's 765 instances (384 foliage) all lie within 4000 units (objects within 3000), so the fog hides none of the structure either. The trace's
+  cost is the objects and foliage in the structure (0.2 of its 0.27 ms: the rays traverse many instances), which are all near and visible.
+- **Rays: not shortened.** Cutting the rays to what the fog leaves visible barely changes the trace (0.27 to 0.26 at 4000 / 4500, 0.21 at 1000 /
+  2000: the cost is the traversal of nearby instances and the hit shading, not the length), and it is not conservative: a hit on a hidden wall is
+  light that reaches a visible probe, which would then see the sky's ambient instead. Not built.
+- **The traced scene: not cut.** For the same reason the instances beyond the hide distance are not dropped (there are none here to drop).
+- **The GI resolve: not built.** Its pixels beyond the hide distance would be skipped by a per-point test (the position it already rebuilds, inside
+  the block's planes, past the hide distance). Measured by painting the flagged pixels past 4455 in the resolve's apply: none at this camera (the
+  farthest hills are at 1500 to 4000; a test at 1500 painted the hills and the horizon band). The resolve and apply cost 0.10 ms and would save a few
+  percent of that where fog hides far surfaces; not worth the plumbing of the block's planes into the legacy post programs yet.
+
+**Measured** (**Observed**, 2026-10-11, RTX 4070, `--ab gi-fog --ab-period 4 --bench-frames 3072`, other options as above; delta = A - B; a second viewer was
+on the GPU at times, so read the deltas, not the absolute times):
+
+| View | GI stage (GPU) | GPU total | Frame | Render thread, `gi` |
+| --- | --- | --- | --- | --- |
+| Shark camera code, still | -0.06 (+-0.00) | -0.13 (+-0.01) | -0.12 (+-0.03) | +0.01 (+-0.00) |
+| the same, `--bench-motion orbit` (3 px a frame at distance 9000: the eye moves 135 units a frame, so the layers are solved every frame, and it leaves the block's reach for part of the circle) | -0.02 (+-0.01) | -0.09 (+-0.04) | +0.02 (+-0.08) | +0.05 (+-0.01) |
+| `--view swamp-rain` (orbiting Shark at 2000), two runs | -0.04, -0.04 (+-0.01) | -0.10, -0.10 (+-0.03) | -0.17, -0.11 (+-0.09, +-0.04) | +0.03, +0.02 (+-0.01) |
+| `--view hub` (no fog block, nothing hidden, the lists are equal: the harness's own bias) | -0.02 (+-0.01) | -0.06 | -0.05 | 0.00 |
+
+So the GI stage gets about 0.04 to 0.06 ms cheaper (of 0.5 to 0.65) where the swamp fog is on and the eye is inside its reach, 8 to 12 %. The
+listing costs +0.01 ms of render thread with the eye still and 0.02 to 0.03 at walking speed (a solve every third frame); at 135 units a frame it is +0.05.
+
+**Pictures** (**Observed**, `--screenshot --upscaler off --no-particles` at 1920 x 1080 so that nothing else moves; two shots of one build are identical, mean
+0.0000): hidden probes at 16 against off: mean 0.0001, max 4 of 255 at the Shark camera. After flying through the zone (`--fly-to`): max 1 at an arrival
+point inside the fog (6000 units away), and max 22 on a handful of pixels (mean 0.001) at one just outside the block, where probes that had been hidden on the way
+are up to 64 frames stale. The Hub and the desert (`--world --town Heft --radius 2 --distance 3000 --pitch 10 --yaw 300 --time 12`): 0 and 1 against off, and 0 and 1 for two
+shots of the same build. The harness's own A/B stills cannot show this: two stills of one build differ in 650 k pixels (rain and lamps), the same as A against B.
+**Popping**: none seen in those pictures; the stale light is the light of up to 64 frames ago, and the sun and the lamps hardly change in that time. A fast time of day
+(`--time-speed`) or a flight so fast that the zone's inner edge reaches a probe before its next update would show it first. **Unknown**: lamp flicker in the hidden zone
+(not looked at).
+
 ## Resolve (`--gi-resolve <n>`, `Gi/GiResolveShaders.cs`, `PostProcess.RunGiResolve`)
 
 *From the code.* The terrain and the buildings no longer read the probes per fragment; the probes are read once per pixel of a target at

@@ -54,6 +54,12 @@ internal sealed class FogVolumes
     /// <summary>The block the fog cull works from this frame (null: the cull is off), and the distance from the eye beyond which a box inside it is hidden.</summary>
     public string? CullBlock => occluder?.Name;
     public float CullRadius => occluder is null ? 0 : MathF.Sqrt(hideRadiusSquared);
+    /// <summary>What the cull works from this frame, for a caller that caches answers of <see cref="Covers"/>: the block (null: none), its hide distance and the weather fog's distance (0: none).</summary>
+    internal (object? Block, float Radius, float Weather) CullState => (occluder, CullRadius, AtmosphereDistance ?? 0);
+    /// <summary>True when <see cref="Covers"/> can answer yes this frame (a block the eye is in, or the weather fog complete).</summary>
+    public bool CullActive => occluder is not null || atmosphereRadiusSquared > 0;
+    /// <summary>The lowest y a box may reach and still lie inside the cull's block (its early-out box); very low when only the weather fog culls.</summary>
+    public float CullFloor => occluder is { } v ? v.BoxMin.Y : -1e6f;
     Volume? occluder;
     float hideRadiusSquared;
     Vector3 cullEye;
