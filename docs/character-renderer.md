@@ -29,6 +29,10 @@ On exit a `characters ...` line gives counts per LOD level and timings (means of
 - **Draw**: instanced per (mesh part, LOD level, sidedness). Per instance: a 4x4 matrix (vertex inputs 7-10) and a `uvec4`
   (bone base, material slot, flags). Materials are a table in an SSBO (binding 7, 256 B records, bindless texture indices), so one
   instance buffer and few draws cover a whole crowd. Sphere culling and LOD selection (`MeshLod`) on the CPU, per view.
+  The instance matrices (this frame's and last frame's) are relative to the view's eye, and the view's matrices take the eye back out
+  (in double on the CPU); the vertex program adds the eye back for the shading position. Skinned in world floats, characters tens of
+  thousands of units from the origin (the Hub) jiggled: every animated vertex rounds to a new float step each frame (~0.004 units at
+  30000, pixels in a close-up). Static meshes round the same way every frame, so the world does not show it.
 - **Shading**: one shader with three modes (item, body, hair) that layers vests, head at uv+(0,1), skin tone, hair/beard overlays and
   dye, then the shared mesh lighting tail (`kenshiLight`, atmosphere), so characters are lit like the world.
 - **Shadows**: the same instances are drawn into the existing cascades with a depth program that only does the cut-out test.

@@ -474,7 +474,7 @@ translation (ogre-skeleton.md), so walk cycles match the leg length.
 its binding height (about 10 units; the idle's root track barely moves it), so the soles end about 1.8 units
 below the ground at Height 120 and as much above it at 80 (bind pose and `idle_stand_relax` alike). What keeps
 the feet on the ground in Kenshi (the character controller, the scene node height, a use of the
-(`Height` − 80) × 0.025 value) was not found; the viewer doesn't compensate.
+(`Height` − 80) × 0.025 value) was not found. The character renderer compensates (engine choice, 2026-10-12): `CharacterContent.GroundOffset` poses the bind pose with and without the shape and lowers the character by how far the lowest foot bone (`Bip01 L/R Foot`, `Toe0`) rose, so a short body no longer floats and a tall one no longer sinks (a short sandbox foe visibly floated before). Constant per appearance; a crouching pose is not re-grounded.
 
 **Not Verified**: anything in game. The viewer (`--shape`, [viewer.md](viewer.md#characters)) applies the
 formulas with M from the CHARACTER's `stats` STATS record (strength and smithing; an approximation, the game

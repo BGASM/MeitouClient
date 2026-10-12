@@ -23,6 +23,7 @@ public sealed partial class World
             list.Add(new CharacterSnapshot(id, cold?.Appearance, state[i].Position, state[i].Yaw, cold?.Animation is { } anim && animations is not null ? animations.Publish(anim) : AnimationLayers.For(state[i].Animation, state[i].AnimationTime))
             {
                 Faction = cold?.Faction ?? -1,
+                WeaponDrawn = cold is not null && cold.DrawnWeapon != Meitou.Data.Gameplay.WeaponKinds.None,
                 Name = cold?.Name ?? "",
                 SquadId = cold?.SquadId ?? -1,
                 IsPlayer = cold?.IsPlayer ?? false,

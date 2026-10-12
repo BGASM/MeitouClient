@@ -431,7 +431,7 @@ The original's rules (decompilation) are in [animation.md](animation.md#run-time
   every base-game stumble has `chance` 0, so they are equally likely: engine choice). A technique cuts it short (engine).
 - **Root motion** (**Verified** selection): `relocates` clips, attacks and dodges (not pure blocks) move the character by their `Bip01`
   track's ground part (`AnimationLengths.Root`, read from the skeletons) turned by its heading, onto walkable ground only; the renderer keeps
-  only the height of that track. Fading one-shot clips keep advancing, so they keep moving the character, as in Kenshi.
+  only the height of that track. Fading one-shot clips keep advancing, so they keep moving the character, as in Kenshi. **Bodies collide** (engine stand-in for the physics controllers, 2026-10-12): the part of a root-motion step that would end nearer than the two footprint radii to another living character (last tick's positions, the grid's order) is dropped, the sideways part kept (`AnimationSystem.Relocate`); before, attacks that gain ground walked the fighters into one spot.
 - **Down and up.** A character that goes down falls with the `Dodge back fall` technique's clip and lies in `sleeponfloor` (the original
   switches to its ragdoll: engine stand-in); coming round plays `standing up 3` to 86 % (**Verified**), cut short by walking or a technique.
 - **Stance.** `CharacterCold.DrawnWeapon` and `InCombat` (set by combat) select the combat-mode and armed variants; the leg ramps use the lowest

@@ -101,7 +101,7 @@ static class CharacterShaders
             uint slot = floatBitsToUint(aColour.x);
             if (aInstanceData.w != 0u && slot != 0u && slot < 0x1000000u) local += morphs.deltas[aInstanceData.w + slot].xyz;
             vec4 p = world * vec4(local, 1.0);
-            vWorld = p.xyz;
+            vWorld = p.xyz + view.eye;   // the instances are relative to the eye (CharacterRenderer.DrawView)
             mat3 n = mat3(world);
             vNormal = n * aNormal;
             vTangent = vec4(n * aTangent.xyz, aTangent.w);

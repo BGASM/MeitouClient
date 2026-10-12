@@ -210,7 +210,7 @@ For characters without a body file (`@ 14007c880`, `@ 14007b310`, `@ 14007b940`,
   (fcs.def: "Sheathed if its a weapon") at its slot name; a slot named `back` becomes `back2` when the
   item's `inventory y` (its row in the inventory section) is above 0 ([Rolling weapons](#rolling-weapons)).
 - **Drawing** puts the WEAPON `bare sword` mesh at `hands` and the `sheath` mesh at the slot point (an item
-  whose type has no bare mesh uses `mesh`).
+  whose type has no bare mesh uses `mesh`). Meitou: the first WEAPON (the one `CharacterAssembly.MakeFighter` puts in hand) gets both sets as parts tagged `WeaponShown.Sheathed` / `Drawn`; the renderer shows one by the snapshot's `WeaponDrawn` (`CharacterCold.DrawnWeapon`, set while fighting), so drawing needs no new asset.
 - The entity is then attached with `attachObjectToBone(bone, offset rotation, offset position)`
   (ogre-skeleton.md, mode 0); an unknown bone falls back to the root bone.
 

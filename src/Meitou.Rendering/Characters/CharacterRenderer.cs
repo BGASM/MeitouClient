@@ -67,7 +67,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public float Radius;
         public int BoneBase, AttachBase, LayerStart, LayerCount;
         public CharState State;
-        public bool Repose;
+        public bool Repose, WeaponDrawn;
     }
 
     /// <summary>What the renderer keeps of a character between frames (by <see cref="CharacterInstance.Key"/>): its last posed palette and the one before.</summary>
@@ -177,7 +177,9 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             if (liveCount == live.Length) Array.Resize(ref live, liveCount * 2);
             ref var l = ref live[liveCount++];
             l.Asset = asset;
-            l.World = Matrix4x4.CreateRotationY(inst.Yaw) * Matrix4x4.CreateTranslation(inst.Position);
+            // Lowered by the body shape's lift, so a short body's feet stay on the ground (CharacterAsset.GroundOffset).
+            l.World = Matrix4x4.CreateRotationY(inst.Yaw) * Matrix4x4.CreateTranslation(inst.Position - new Vector3(0, asset.GroundOffset, 0));
+            l.WeaponDrawn = inst.WeaponDrawn;
             l.Centre = centre;
             l.Radius = asset.Radius;
             l.BoneBase = boneTotal;
@@ -253,6 +255,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             float distance = Vector3.Distance(eye, live[i].Centre);
             foreach (var part in live[i].Asset.Parts)
             {
+                if (!part.ShowsWith(live[i].WeaponDrawn)) continue;
                 if (part.MaterialFrame != updateStamp)
                 {
                     part.MaterialFrame = updateStamp;

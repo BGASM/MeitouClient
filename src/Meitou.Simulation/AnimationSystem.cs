@@ -144,7 +144,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             speed = a.SmoothSpeed(speed, CharacterAnimation.WindowFor(dt));
             var id = table.IdOf(i);
             var root = Update(a, cold, speed, dt, world.Seed, Rng.Key(id), world.Tick, wantedLower, wantedUpper, ViewOf(id, world.Tick, cold));
-            if (root != Vector2.Zero) Relocate(world, ref next[i], root);
+            if (root != Vector2.Zero) Relocate(world, i, ref next[i], root);
         }
     }
 
@@ -167,15 +167,44 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     /// <summary>
     /// Root motion: moves the character by the ground part of its relocating clips' <c>Bip01</c> track (model X and Z turned by its heading), onto
     /// the ground, unless that point is not walkable (Kenshi moves its physics controller, so collisions apply; docs/animation.md "Root motion").
+    /// The bodies collide too (engine stand-in for the controllers): the part of the move that would bring it nearer than the two footprint radii to a living
+    /// character (last tick's positions) is dropped, so an attack that gains ground stops at its target instead of walking into it.
     /// </summary>
-    static void Relocate(World world, ref CharacterHot c, Vector2 root)
+    internal static void Relocate(World world, int self, ref CharacterHot c, Vector2 root)
     {
         float sin = MathF.Sin(c.Yaw), cos = MathF.Cos(c.Yaw);
-        float x = c.Position.X + root.X * cos + root.Y * sin;
-        float z = c.Position.Z - root.X * sin + root.Y * cos;
+        var step = new Vector2(root.X * cos + root.Y * sin, -root.X * sin + root.Y * cos);
+        var table = world.Characters;
+        var block = new BodyBlock { Table = table, Self = self, From = new Vector2(c.Position.X, c.Position.Z), Step = step, Radius = CombatTuning.Footprint(table.Cold(self)) };
+        world.Grid.Query(block.From.X, block.From.Y, block.Radius + MaxFootprint + step.Length(), ref block, static (int other, ref BodyBlock b) =>
+        {
+            var all = b.Table.Previous;
+            if (other == b.Self || !all[other].Alive) return;
+            var away = b.From - new Vector2(all[other].Position.X, all[other].Position.Z);
+            float reach = b.Radius + CombatTuning.Footprint(b.Table.Cold(other));
+            if ((away + b.Step).LengthSquared() >= reach * reach) return;
+            // It would end up inside: keep only the part of the step that does not close the distance.
+            float length = away.Length();
+            if (length < 1e-4f) return;
+            var normal = away / length;
+            float closing = Vector2.Dot(b.Step, normal);
+            if (closing < 0) b.Step -= normal * closing;
+        });
+        float x = c.Position.X + block.Step.X, z = c.Position.Z + block.Step.Y;
         var walk = world.Walkability;
         if (!walk.IsWalkable(x, z)) return;
         c.Position = new Vector3(x, walk.GroundHeight(x, z), z);
+    }
+
+    /// <summary>The largest footprint radius a body is tested against (a human's is 4; the biggest animals' are larger).</summary>
+    const float MaxFootprint = 30;
+
+    struct BodyBlock
+    {
+        public CharacterTable Table;
+        public int Self;
+        public Vector2 From, Step;
+        public float Radius;
     }
 
     /// <summary>

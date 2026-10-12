@@ -49,9 +49,15 @@ internal sealed unsafe partial class CharacterRenderer
         finally { (depthPass, shadowLodFloor) = (false, 0); }
     }
 
-    void DrawView(in ViewConstants view, Vector3 eye, Vector4[] frustum)
+    void DrawView(in ViewConstants worldView, Vector3 eye, Vector4[] frustum)
     {
         var cpu = Stopwatch.StartNew();
+        // Drawn relative to the view's eye (the vertex program adds it back for the shading): skinned in world floats, an animated vertex far from
+        // the origin (the Hub, tens of thousands of units out) rounds to a different step every frame and the character visibly jiggles.
+        var origin = worldView.Eye;
+        var view = worldView;
+        view.ViewProjection = FromOrigin(origin, worldView.ViewProjection);
+        view.PreviousViewProjection = FromOrigin(origin, worldView.PreviousViewProjection);
         DrawnCharacters = DrawnParts = DrawCalls = 0;
         DrawnTriangles = 0;
         Array.Clear(LevelParts);
@@ -68,8 +74,10 @@ internal sealed unsafe partial class CharacterRenderer
             DrawnCharacters++;
             foreach (var part in l.Asset.Parts)
             {
-                Matrix4x4 model = l.World;
-                if (!part.Shared) model = attach[l.AttachBase + part.AttachIndex] * l.World;
+                if (!part.ShowsWith(l.WeaponDrawn)) continue;
+                var world = Relative(l.World, origin);
+                Matrix4x4 model = world;
+                if (!part.Shared) model = attach[l.AttachBase + part.AttachIndex] * world;
                 var mesh = part.Mesh;
                 float value = MeshLod.Value(eye, Vector3.Transform(part.BoundsCentre, model), part.BoundsRadius * model.ScaleLength(), depthPass ? LodBias * ShadowLodBias : LodBias);
                 // In a shadow map hair is a silhouette, so it takes the rule's own distances there (its levels start CharacterContent.HairLodScale times farther for the picture).
@@ -78,7 +86,11 @@ internal sealed unsafe partial class CharacterRenderer
                 if (depthPass && part.ShadowDistances is { } shadowLevels && MeshLod.Select(shadowLevels, value) is int k && k > 0) level = part.ShadowFirst + k - 1;   // the body's shadow-only levels
                 bool twoSided = part.Material.DoubleSided;
                 var instance = new CharInstance { Model = model, BoneBase = (uint)l.BoneBase, Material = (uint)part.MaterialSlot, MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
-                if (motionPass) instance.PreviousModel = part.Shared ? l.State.PreviousWorld : l.State.PreviousAttach[part.AttachIndex] * l.State.PreviousWorld;
+                if (motionPass)
+                {
+                    var previousWorld = Relative(l.State.PreviousWorld, origin);
+                    instance.PreviousModel = part.Shared ? previousWorld : l.State.PreviousAttach[part.AttachIndex] * previousWorld;
+                }
                 DrawnParts++;
                 foreach (var gp in mesh.Parts)
                 {
@@ -143,6 +155,26 @@ internal sealed unsafe partial class CharacterRenderer
         timer.End();
         LastDrawCpuMs = cpu.Elapsed.TotalMilliseconds;
         if (!depthPass) drawCpu.Add(LastDrawCpuMs);
+    }
+
+    /// <summary><paramref name="world"/> with <paramref name="origin"/> taken off its translation.</summary>
+    static Matrix4x4 Relative(Matrix4x4 world, Vector3 origin)
+    {
+        world.Translation -= origin;
+        return world;
+    }
+
+    /// <summary><paramref name="m"/> (world to clip) for positions relative to <paramref name="origin"/>: translation(origin) × m, in double so the
+    /// origin's large coordinates cancel exactly.</summary>
+    static Matrix4x4 FromOrigin(Vector3 origin, in Matrix4x4 m)
+    {
+        double x = origin.X, y = origin.Y, z = origin.Z;
+        var r = m;
+        r.M41 = (float)(x * m.M11 + y * m.M21 + z * m.M31 + m.M41);
+        r.M42 = (float)(x * m.M12 + y * m.M22 + z * m.M32 + m.M42);
+        r.M43 = (float)(x * m.M13 + y * m.M23 + z * m.M33 + m.M43);
+        r.M44 = (float)(x * m.M14 + y * m.M24 + z * m.M34 + m.M44);
+        return r;
     }
 
     readonly Dictionary<GpuObjectPart, MotionHolder> motionNatives = [];

@@ -20,6 +20,9 @@ internal sealed class AssetPart
     public Matrix4x4 Offset = Matrix4x4.Identity;
     /// <summary>Index among the character's bone-attached parts (the matrices <see cref="CharacterRenderer"/> keeps per frame); -1 for shared parts.</summary>
     public int AttachIndex = -1;
+    /// <summary>Only while the weapon in hand is sheathed or drawn (<see cref="CharacterPart.Shown"/>).</summary>
+    public WeaponShown Shown;
+    public bool ShowsWith(bool weaponDrawn) => Shown == WeaponShown.Always || (Shown == WeaponShown.Drawn) == weaponDrawn;
     public required PartMaterial Material;
     /// <summary>The mesh file's bounds (the LOD value's centre and radius), in the part's own space.</summary>
     public required Vector3 BoundsCentre;
@@ -85,6 +88,8 @@ internal sealed class CharacterAsset
     public string Idle = "idle_stand_relax";
     /// <summary>A sphere round the standing character in its own space (centre height, radius) for culling.</summary>
     public float Height = 20, Radius = 16;
+    /// <summary>How far the body shape lifts the feet in the bind pose (negative: sinks them); the renderer lowers the character by it.</summary>
+    public float GroundOffset;
 }
 
 /// <summary>
@@ -277,6 +282,7 @@ internal sealed class CharacterContent : IDisposable
 
         var asset = new CharacterAsset { Appearance = c, Rig = rig };
         asset.Shape = Shape(c, rig);
+        asset.GroundOffset = GroundOffset(rig, asset.Shape);
         if (body.Morphs is { } bodyMorphs && bodyMorphs.Deltas(c.PoseWeights, c.Character?.GetBool("shaved") == true && bodyMorphs.HasCuttableHorns) is { } deltas)
         {
             var key = string.Join(';', c.PoseWeights.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => FormattableString.Invariant($"{p.Key}={p.Value}"))) + "@" + bodyPath + (c.Character?.GetBool("shaved") == true);
@@ -298,7 +304,7 @@ internal sealed class CharacterContent : IDisposable
             var ap = new AssetPart
             {
                 Label = $"{part.Record.Type} '{part.Record.Name}' .{part.Field}", Mesh = loaded.Gpu, Shared = shared, Material = ItemMaterial(c, part, path, loaded),
-                BoundsCentre = loaded.Centre, BoundsRadius = loaded.Radius,
+                BoundsCentre = loaded.Centre, BoundsRadius = loaded.Radius, Shown = part.Shown,
             };
             if (!shared)
             {
@@ -333,7 +339,30 @@ internal sealed class CharacterContent : IDisposable
         return rig.Shape(shape.BoneSize, shape.PositionalSize, shape.MovementScale);
     }
 
-        // ---- materials (CharacterScene.BodyMaterial / PartMaterial) ----
+    static readonly string[] FootBones = ["Bip01 L Foot", "Bip01 R Foot", "Bip01 L Toe0", "Bip01 R Toe0"];
+
+    /// <summary>
+    /// How far <paramref name="shape"/> raises the lowest foot bone in the bind pose over the neutral shape (docs/animation.md, "Body shape sliders"): the bone sizes
+    /// scale the legs about the hips while <c>Bip01</c> keeps its height, so a short body floats and a tall one sinks. What grounds them in Kenshi was not found;
+    /// lowering the character by this is an engine choice.
+    /// </summary>
+    static float GroundOffset(SkeletonRig rig, BodyShapeData? shape)
+    {
+        if (shape is null) return 0;
+        var handles = FootBones.Select(rig.Handle).OfType<int>().ToArray();
+        if (handles.Length == 0) return 0;
+        var scratch = rig.Rent();
+        try
+        {
+            scratch.PoseDerived(null, []);
+            float neutral = handles.Min(h => scratch.DerivedPosition[h].Y);
+            scratch.PoseDerived(shape, []);
+            return handles.Min(h => scratch.DerivedPosition[h].Y) - neutral;
+        }
+        finally { rig.Return(scratch); }
+    }
+
+    // ---- materials (CharacterScene.BodyMaterial / PartMaterial) ----
 
     static Vector4 Channel(int channel) => channel switch { 1 => new(0, 1, 0, 0), 2 => new(0, 0, 1, 0), 3 => new(0, 0, 0, 1), _ => new(1, 0, 0, 0) };
 

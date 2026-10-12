@@ -120,4 +120,24 @@ public class AnimationTests
         for (int i = 10; i < 20; i++) still += system.Update(a, cold, 0, dt, 1, 1, 50 + i, combatView: CombatView.None with { Technique = block, Progress = i / 30f });
         Assert.Equal(Vector2.Zero, still);
     }
+
+    [Fact]
+    public void Root_motion_stops_at_another_body_and_keeps_the_sideways_part()
+    {
+        var world = new SimWorld(new WorldSettings { Seed = 1, Threads = 1, PublishSnapshots = false }, new OpenGroundWalkability((_, _) => 150), []);
+        // Facing +X (yaw 90 degrees), 10 units from a second character: two footprints of 4 leave 2 units to go.
+        var a = world.Characters.Spawn(new CharacterHot { Position = new Vector3(1000, 150, 1000), Yaw = MathF.PI / 2, Health = 100 }, new CharacterCold(), 0);
+        world.Characters.Spawn(new CharacterHot { Position = new Vector3(1010, 150, 1000), Health = 100 }, new CharacterCold(), 0);
+        world.RunTick();   // builds the grid of these positions
+        ref var hot = ref world.Characters.Next[a.Slot];
+        AnimationSystem.Relocate(world, a.Slot, ref hot, new Vector2(0, 2));
+        Assert.Equal(1002, hot.Position.X, 3);
+        // A lunge of 7 more (and 3 to its right, world +Z) would end inside the other body: the closing part is dropped, the sideways part kept.
+        AnimationSystem.Relocate(world, a.Slot, ref hot, new Vector2(-3, 7));
+        Assert.Equal(1002, hot.Position.X, 3);
+        Assert.Equal(1003, hot.Position.Z, 3);
+        // Away from it, nothing is held back.
+        AnimationSystem.Relocate(world, a.Slot, ref hot, new Vector2(0, -5));
+        Assert.Equal(997, hot.Position.X, 3);
+    }
 }

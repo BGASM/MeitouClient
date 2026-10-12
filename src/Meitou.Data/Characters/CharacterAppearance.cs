@@ -32,7 +32,12 @@ public sealed record CharacterPart
     public string? Point { get; init; }
     /// <summary>The material the item was made with, if chosen (MATERIAL_SPECS_CLOTHING of clothing, MATERIAL_SPECS_WEAPON model of a weapon).</summary>
     public GameRecord? Material { get; init; }
+    /// <summary>When the part shows: always, or only while the weapon in hand is sheathed or drawn (the first weapon's meshes).</summary>
+    public WeaponShown Shown { get; init; }
 }
+
+/// <summary>When a <see cref="CharacterPart"/> shows: the first weapon has its sheathed <c>mesh</c> and its drawn <c>bare sword</c> and <c>sheath</c> in one appearance.</summary>
+public enum WeaponShown : byte { Always, Sheathed, Drawn }
 
 /// <summary>A clothing texture layered onto the body (ARMOUR <c>vest texture</c>; character.hlsl "vest").</summary>
 public sealed record BodyLayer(GameRecord Record, string Diffuse, string? Normal, string? ColourMap);
@@ -249,8 +254,10 @@ public sealed class CharacterAppearance
             weapons.Add((extra, point, null));
         }
         result.LoadAttachmentPoints(installRoot, race);
+        // The weapon a fight draws is the first WEAPON (hip, then back: CharacterAssembly.MakeFighter); it gets its sheathed and drawn meshes, the renderer shows one set.
+        int inHand = weapons.FindIndex(w => w.Weapon.Type == FcsRecordType.WEAPON);
         for (int i = 0; i < weapons.Count; i++)
-            result.AddWeapon(weapons[i].Weapon, female, weapons[i].Point, drawn: options.WeaponDrawn && i == 0, backCount: 0, weapons[i].Model);
+            result.AddWeapon(weapons[i].Weapon, female, weapons[i].Point, drawn: options.WeaponDrawn && i == 0, backCount: 0, weapons[i].Model, both: !options.WeaponDrawn && i == inHand);
         return result;
     }
 
@@ -282,21 +289,25 @@ public sealed class CharacterAppearance
         Parts.Add(new CharacterPart { Record = item, Mesh = mesh, Field = field, Mode = AttachMode.SharedSkeleton, Slot = slot, Material = material });
     }
 
-    void AddWeapon(GameRecord weapon, bool female, string slot, bool drawn, int backCount, GameRecord? model = null)
+    /// <param name="both">Both sets: the sheathed mesh tagged <see cref="WeaponShown.Sheathed"/>, the drawn ones <see cref="WeaponShown.Drawn"/> (a renderer that follows the fight).</param>
+    void AddWeapon(GameRecord weapon, bool female, string slot, bool drawn, int backCount, GameRecord? model = null, bool both = false)
     {
         if (slot == "back" && backCount > 0) slot = "back2";
         string Field(string f) => f == "mesh" && female && weapon.GetPath("mesh female").Length > 0 ? "mesh female" : f;
-        if (drawn && weapon.GetPath("bare sword").Length > 0)
+        bool bare = weapon.GetPath("bare sword").Length > 0;
+        if ((drawn || both) && bare)
         {
-            Parts.Add(new CharacterPart { Record = weapon, Mesh = weapon.GetPath("bare sword"), Field = "bare sword", Mode = AttachMode.Bone, Slot = AttachSlot.Weapon, Point = "hands", Material = model });
+            var shown = both ? WeaponShown.Drawn : WeaponShown.Always;
+            Parts.Add(new CharacterPart { Record = weapon, Mesh = weapon.GetPath("bare sword"), Field = "bare sword", Mode = AttachMode.Bone, Slot = AttachSlot.Weapon, Point = "hands", Material = model, Shown = shown });
             if (weapon.GetPath("sheath") is { Length: > 0 } sheath)
-                Parts.Add(new CharacterPart { Record = weapon, Mesh = sheath, Field = "sheath", Mode = AttachMode.Bone, Slot = AttachSlot.Weapon, Point = slot });
-            return;
+                Parts.Add(new CharacterPart { Record = weapon, Mesh = sheath, Field = "sheath", Mode = AttachMode.Bone, Slot = AttachSlot.Weapon, Point = slot, Shown = shown });
+            if (!both) return;
         }
         // Mode-0 items fall back from "mesh female" to "mesh" (ogre-skeleton.md).
         string field = Field("mesh");
         if (weapon.GetPath(field) is not { Length: > 0 } mesh) { Notes.Add($"'{weapon.Name}' has no mesh"); return; }
-        Parts.Add(new CharacterPart { Record = weapon, Mesh = mesh, Field = field, Mode = AttachMode.Bone, Slot = AttachSlot.Weapon, Point = slot, Material = model });
+        Parts.Add(new CharacterPart { Record = weapon, Mesh = mesh, Field = field, Mode = AttachMode.Bone, Slot = AttachSlot.Weapon, Point = slot, Material = model,
+            Shown = both && bare ? WeaponShown.Sheathed : WeaponShown.Always });
     }
 
     void LoadAttachmentPoints(string installRoot, GameRecord race)
