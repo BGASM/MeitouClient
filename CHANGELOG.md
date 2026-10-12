@@ -3,6 +3,10 @@
 What changed in each release, newest first. The release workflow copies the section of the version it builds into the GitHub release
 notes and refuses to release a version without one: add a `## vX.Y.Z` section with one `- ` line per change before running it.
 
+## v0.7.1
+
+- Plant layouts stay cached across updates: an update no longer makes plants fill in slowly on the first start unless the layout itself changed
+
 ## v0.7.0
 
 - Night sky: Kenshi's two planets in the sky, and a new star field that twinkles and fades towards the horizon (Faithful keeps the game's)

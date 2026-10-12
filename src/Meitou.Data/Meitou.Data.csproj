@@ -13,5 +13,4 @@
   <ItemGroup>
     <PackageReference Include="StbImageSharp" Version="2.30.16" />
   </ItemGroup>
-  <Import Project="LayoutCodeHash.targets" />
 </Project>

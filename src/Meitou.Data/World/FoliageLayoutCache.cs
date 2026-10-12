@@ -32,8 +32,8 @@ public readonly record struct FoliageLayoutCacheStats(int Hits, int Misses, int 
 /// <c>%LOCALAPPDATA%\Meitou\foliage\&lt;key&gt;\z&lt;X&gt;.&lt;Y&gt;.&lt;w|f&gt;.mfl</c> (or the constructor's root; never in the repository),
 /// one file per zone and layout kind (whole or far only). The key is a hash of everything the layout reads: the foliage records (every field of the
 /// layers, meshes and grass types reached from the biomes), the towns, the size and write time of the heightmap, blend file, biome map and overlay
-/// tiles, this format's version and a hash of the source of the layout's code (Meitou.Data and Meitou.Core, <see cref="LayoutCodeHash"/>, generated at build time), so any change to
-/// the layout code or its inputs makes a new key, and the same sources give the same key in any directory or build. Settings (foliage and grass range, grass density) are not inputs of the layout and are not in it.
+/// tiles, this format's version and <see cref="LayoutVersion"/>, bumped by hand when a code change alters what the layout places, so an edit elsewhere
+/// keeps the cache. Settings (foliage and grass range, grass density) are not inputs of the layout and are not in it.
 /// </para>
 /// <para>
 /// A file is written to a temporary name and moved into place, carries its key, zone, sizes and a checksum, and is read whole: anything that does not
@@ -45,6 +45,9 @@ public sealed class FoliageLayoutCache
 {
     /// <summary>The file format's version: bump it when the layout of the bytes changes.</summary>
     public const int FormatVersion = 1;
+    /// <summary>The layout's version: bump it whenever a change to the layout code (FoliageLayout, its random numbers, the readers it uses) changes what it places;
+    /// a stale cache otherwise keeps serving the old placement.</summary>
+    public const int LayoutVersion = 1;
     const uint Magic = 0x434C464D;   // "MFLC"
     public const long DefaultMaxBytes = 2048L << 20;
     static readonly TimeSpan AbandonedTemporary = TimeSpan.FromHours(1), StaleKey = TimeSpan.FromDays(30);
@@ -91,9 +94,7 @@ public sealed class FoliageLayoutCache
         }
         var inv = CultureInfo.InvariantCulture;
         text.Append("meitou-foliage-layout-cache|").Append(FormatVersion).Append('\n');
-        // The code: a hash of the source of Meitou.Data and Meitou.Core (everything the layout runs), generated at build time (LayoutCodeHash.targets): the same for the same
-        // sources in any directory or build, unlike the assemblies' module ids.
-        text.Append("code|").Append(LayoutCodeHash.Value).Append('\n');
+        text.Append("layout|").Append(LayoutVersion).Append('\n');
         // The records: biomes in colour order, their layers, each layer's meshes (with children) and grass types, field by field.
         var done = new HashSet<Meitou.Data.GameRecord>();
         foreach (var (colour, layers) in catalog.ByBiome.OrderBy(b => b.Key))
