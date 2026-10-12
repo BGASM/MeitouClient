@@ -336,7 +336,10 @@ types in `Movement.cs`: `CharacterTask`, `MoveFlags` with `AnyPath`, `SpeedMode`
   `Meitou.Data.World.GroundHeights`, the CPU heightmap window plus the coarse whole-world grid, immutable) everywhere above the water, no
   obstacles, straight paths refused when they dip under the water. The game uses the navmesh through `Meitou.Game/NavAdapter.cs`, the
   only file that knows `Meitou.Navigation`; the sandbox uses the stand-in.
-- **Not modelled:** water states and swimming, the shallow-water speed cap, roads for long trips, turn rate, the combat speed multiplier.
+- **Turning (engine):** the heading turns at most 720° per second and the speed is scaled by the cosine of the turn still to make, so a
+  character turns about on the spot before it runs (`MovementSystem.TurnRate`, [pathfinding.md](game/pathfinding.md#turning-and-orders-on-the-move-ours)).
+  A new order on the move keeps the old path until the new one arrives.
+- **Not modelled:** water states and swimming, the shallow-water speed cap, roads for long trips, the combat speed multiplier.
 
 ## Navmesh
 
@@ -413,7 +416,7 @@ The original's rules (decompilation) are in [animation.md](animation.md#run-time
   (`AnimationDefinition.SpeedWeight`, `LegWeight`, `AnimationLibrary.Movement`). Synched clips share one phase per character advancing
   F x v x the weighted `play speed` of the lower clips **cycles** per second; unsynched movement clips run F x `play speed` x v clip seconds
   per second; F = 2 - H, H the body's movement scale (`CharacterShape.MovementScaleOf`). In combat v is signed along the facing, so backing off
-  picks the `... combat shuffle long BK` clips. From 1 unit per second a character moves, else it stands (engine). The speed the animations see is the 3D velocity's length through Kenshi's 8-sample trimmed median (`CharacterAnimation.SmoothSpeed`; sampled per tick, not per frame: engine).
+  picks the `... combat shuffle long BK` clips. From 1 unit per second a character moves, else it stands (engine). The speed the animations see is the 3D velocity's length through Kenshi's 8-sample trimmed median (`CharacterAnimation.SmoothSpeed`; sampled per tick, not per frame, with the window cut to the same time as 8 frames at 60 fps, 4 ticks at 30 Hz: engine).
 - **Idles.** Out of combat one of the whole-body idles by `idle chance`, kept for `idle time min` .. `max` seconds. In combat (engine
   choice after the original's footwork): the lower movement blend at the current speed (`walk lower combat shuffle short` at rest) under an
   upper-body guard idle (`AnimationLibrary.CombatIdles`: the `guard` records by the weapon kind in hand, `MA idle1` for fists; the hands'

@@ -180,6 +180,7 @@ sealed partial class GameHost
                 screenshotRequested = false;
                 if (overlay is not null && !g.NoPopulation) DrawMarkers(overlay, size.X, size.Y);
                 if (overlay is not null && IsSandbox) DrawSandbox(overlay, size.X, size.Y);
+                if (!g.NoPopulation) player.Steer();
                 if (overlay is not null && !g.NoPopulation) player.Draw(overlay, size.X, size.Y);
                 // The debug overlays are left out of saved pictures: the statistics at the top left, the key list below them, the profiler.
                 if (overlay is not null && !shot)

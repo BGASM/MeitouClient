@@ -52,6 +52,69 @@ public class MovementTests
     }
 
     [Fact]
+    public void A_new_order_on_the_move_keeps_the_character_running_until_its_path_arrives()
+    {
+        // The asynchronous path service: the new path takes at least a tick, and the old one is followed meanwhile (holding the right button).
+        using var w = Flat(synchronous: false);
+        var id = Add(w, new(0, 300, 0));
+        w.Commands.Enqueue(new MoveOrder([id], new Vector3(800, 0, 0)) { Tick = 0 });
+        Assert.True(TestWaits.TickUntil(w, () => w.Characters.Previous[id.Slot].Velocity.Length() > 50));
+        for (int k = 0; k < 10; k++)
+        {
+            var at = Where(w, id);
+            w.Commands.Enqueue(new MoveOrder([id], new Vector3(at.X + 400, 0, at.Z + 100 * (k % 2 == 0 ? 1 : -1))) { Tick = w.Tick });
+            for (int t = 0; t < 3; t++)
+            {
+                w.RunTick();
+                Assert.True(w.Characters.Previous[id.Slot].Velocity.Length() > 50, $"stopped {t} ticks after re-order {k}");
+                Assert.Equal((byte)CharacterTask.GoTo, w.Characters.Previous[id.Slot].Task);
+            }
+        }
+    }
+
+    [Fact]
+    public void Turning_is_limited_and_a_reversal_turns_on_the_spot_before_running()
+    {
+        using var w = Flat();
+        var id = Add(w, new(0, 300, 0));
+        w.Commands.Enqueue(new MoveOrder([id], new Vector3(0, 0, 400)) { Tick = 0 });
+        w.RunTicks(30);
+        Assert.Equal(0, w.Characters.Previous[id.Slot].Yaw, 0.01f);
+        // Straight back: no ground is gained until the heading is within 90 degrees of the way.
+        var before = Where(w, id);
+        w.Commands.Enqueue(new MoveOrder([id], new Vector3(0, 0, -400)) { Tick = w.Tick });
+        float yaw = w.Characters.Previous[id.Slot].Yaw;
+        float maxStep = MovementSystem.TurnRate * w.TickSeconds + 1e-4f;
+        int ticks = 0;
+        do
+        {
+            w.RunTick();
+            float now = w.Characters.Previous[id.Slot].Yaw;
+            Assert.InRange(MathF.Abs(MathF.IEEERemainder(now - yaw, MathF.Tau)), 0, maxStep);
+            if (MathF.Abs(MathF.IEEERemainder(now - MathF.PI, MathF.Tau)) > MathF.PI / 2) Assert.True(Where(w, id).Z >= before.Z - 0.5f, "moved while facing away");
+            yaw = now;
+            Assert.True(++ticks < 30, $"never ran off: yaw {now}, at {Where(w, id)}");
+        }
+        while (w.Characters.Previous[id.Slot].Velocity.Length() < 79);
+        // About a quarter second for half a turn at 720 degrees per second, then full speed.
+        Assert.InRange(ticks, 6, 10);
+    }
+
+    [Fact]
+    public void Sharp_queued_corners_are_reached_without_circling_a_waypoint()
+    {
+        using var w = Flat();
+        var id = Add(w, new(0, 300, 0), max: 120);
+        Vector3[] corners = [new(100, 0, 0), new(0, 0, 30), new(100, 0, 60), new(0, 0, 90)];
+        w.Commands.Enqueue(new MoveOrder([id], corners[0]) { Tick = 0 });
+        foreach (var c in corners.Skip(1)) w.Commands.Enqueue(new MoveOrder([id], c) { Tick = 0, Queued = true });
+        w.RunTicks(30 * 8);
+        var end = Where(w, id);
+        Assert.InRange(Vector2.Distance(new(end.X, end.Z), new(0, 90)), 0, MovementSystem.ArriveRadius + 1);
+        Assert.Equal((byte)CharacterTask.Idle, w.Characters.Previous[id.Slot].Task);
+    }
+
+    [Fact]
     public void Spawning_or_removing_in_a_parallel_phase_fails_loudly()
     {
         using var w = Flat(extra: new Misbehaving());

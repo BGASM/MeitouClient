@@ -44,21 +44,26 @@ public sealed class CharacterAnimation
 
     /// <summary>
     /// The speed the animations see (docs/animation.md "Movement", <b>Verified</b>): of the last 8 samples, sorted, the 3 lowest and 3 highest dropped and the
-    /// middle two averaged (fewer samples at the start: the trimmed middle of those there are). Kenshi samples every frame; here every tick (engine).
+    /// middle two averaged (fewer samples at the start: the trimmed middle of those there are). Kenshi samples every frame; here every tick, so the window
+    /// is <paramref name="window"/> ticks (<see cref="WindowFor"/>: as many seconds as 8 frames at 60 fps) with the trim scaled alike (engine).
     /// </summary>
-    public float SmoothSpeed(float raw)
+    public float SmoothSpeed(float raw, int window = SpeedWindow)
     {
-        Speeds[SpeedCount++ % SpeedWindow] = raw;
-        int n = Math.Min(SpeedCount, SpeedWindow);
+        window = Math.Clamp(window, 1, SpeedWindow);
+        Speeds[SpeedCount++ % window] = raw;
+        int n = Math.Min(SpeedCount, window);
         Span<float> sorted = stackalloc float[SpeedWindow];
         Speeds.AsSpan(0, n).CopyTo(sorted);
         sorted = sorted[..n];
         sorted.Sort();
-        int trim = Math.Min(SpeedTrim, (n - 1) / 2);
+        int trim = Math.Min(SpeedTrim * window / SpeedWindow, (n - 1) / 2);
         float sum = 0;
         for (int i = trim; i < n - trim; i++) sum += sorted[i];
         return sum / (n - 2 * trim);
     }
+
+    /// <summary>The window of <see cref="SmoothSpeed"/> for a tick of <paramref name="dt"/> seconds: the 8 samples of 60 fps frames in ticks (4 at 30 Hz).</summary>
+    public static int WindowFor(float dt) => Math.Clamp((int)MathF.Round(SpeedWindow / (60 * dt)), 1, SpeedWindow);
 
     internal void Hash(ref StateHasher h)
     {
@@ -136,7 +141,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             float speed = v.Length();
             // In combat the speed is signed along the facing: backing off is negative and picks the clips with a negative move speed.
             if (cold.InCombat) speed = v.X * MathF.Sin(next[i].Yaw) + v.Z * MathF.Cos(next[i].Yaw);
-            speed = a.SmoothSpeed(speed);
+            speed = a.SmoothSpeed(speed, CharacterAnimation.WindowFor(dt));
             var id = table.IdOf(i);
             var root = Update(a, cold, speed, dt, world.Seed, Rng.Key(id), world.Tick, wantedLower, wantedUpper, ViewOf(id, world.Tick, cold));
             if (root != Vector2.Zero) Relocate(world, ref next[i], root);

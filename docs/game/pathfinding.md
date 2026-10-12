@@ -403,6 +403,20 @@ updated". FUN_1403a66c0 splits the door AABB across zone cells and calls FUN_140
   1402ae990, 1402ae5e0) with two instances per CharMovement at +0x310 and +0x318, created in FUN_1406628e0 (**Observed**). The
   slot assignment rules are **Unknown**.
 
+### Turning and orders on the move (ours)
+
+- **Observed** (a Kenshi recording, 2026-10-12, 60 fps, a standing human ordered to run about 100° to his side): the body turns
+  about 100° in some 0.15 s with little ground gained, the run pose is in by about 0.2 s after the turn starts and the speed looks
+  full at once after that; at the end the run goes over into the standing idle in about 0.15 s with no slide or slowing stride. How
+  fast the nav agent's direction turns was not traced (**Unknown**; the facing follows it every frame, [animation.md](../animation.md#turning-and-head-look)).
+- **Engine choice** (`MovementSystem.Turn`): the heading a path is followed along turns at most `TurnRate` = 4π rad/s (720°/s)
+  towards the next waypoint, and the speed is the path speed times the cosine of the turn still left (zero beyond 90°), so a
+  reversal turns on the spot in about a quarter second and a bend is run as an arc (radius v / 4π, 5.6 units at v = 70). The yaw is
+  the heading, also while turning on the spot.
+- **Engine choice**: a move order given to a character that is already following a path keeps that path until the new one arrives
+  (`MovementSystem.GoTo`), so the re-orders of a held right button (ui-input.md) never stop it for the path service's ticks; if
+  the old path ends first the character waits for the new one, and a failed new path drops both.
+
 ## Off-screen and far characters
 
 - Unloaded squads are `UnloadedPlatoon` objects and do not use navmeshes or CharMovement: see [game-loop.md](game-loop.md#factions-and-squads) and [ai.md](ai.md#unloaded-squads) (stand-in speeds

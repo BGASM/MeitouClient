@@ -218,7 +218,10 @@ Verified (decompilation; `@ 14051d8e0`, `@ 14051d000`, `@ 14052bad0`, `@ 14052e6
   scale g (1 for humans). It is the **actual** velocity, the length of the whole 3D displacement over dt, not the target
   speed. It is **smoothed**: `@ 14051f3b0` stores the raw value at +0x178 and filters +0x180 through `@ 14052a8c0`: of
   the last 8 samples, sorted, the 3 lowest and 3 highest are dropped and the middle two averaged (window and trim set in
-  `@ 14051fa90`; one sample per frame). The strafe speed +0x184 has the same filter (`@ 14051f3f0`).
+  `@ 14051fa90`; one sample per frame). The strafe speed +0x184 has the same filter (`@ 14051f3f0`). Ours samples once per
+  30 Hz tick, so it keeps the filter's delay in seconds rather than in samples: 4 ticks with 1 dropped at each end (8 and 3
+  at 60 Hz; `CharacterAnimation.WindowFor`, engine). With 8 ticks the run started and stopped about 170 ms after the body did,
+  twice Kenshi's lag at 60 fps, and the feet slid.
 - F = +0x188 / g, the shape code writing +0x188 = 3 − Height − Leg length = 2 − H: **F = 1** with default sliders.
   Expected rates for a default human (unhurt, unencumbered): walking (speed mode 0, v 15) the walk alone, **0.90 cycles
   per second** (15 × 0.06); speed mode 1 (v 55) jog 0.996 + run 0.004, 1.43 c/s; running (mode 2, athletics 0, v = S =

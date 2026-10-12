@@ -16,7 +16,9 @@ namespace Meitou.Simulation;
 /// an answer is applied in a serial step, so a path is never read while it is replaced.</item>
 /// </list>
 /// Not modelled yet (Unknown or later): water states and swimming, slopes (the original has no slope penalty), the combat speed
-/// multiplier, road routes for far trips, the formation slot rules (Unknown), turning speed.
+/// multiplier, road routes for far trips, the formation slot rules (Unknown).
+/// <item>Turning (engine choice; the original's rate is Unknown): the heading a path is followed along turns at most <see cref="TurnRate"/>, and the
+/// speed is scaled by the cosine of what is left of the turn (none beyond 90 degrees), so a character turns about on the spot before it runs off.</item>
 /// Queued orders (<see cref="CharacterCold.OrderQueue"/>) and the formation (<see cref="Formation"/>) exist.
 /// </summary>
 public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
@@ -40,6 +42,11 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
     public const float WaitMin = 3, WaitMax = 10;
     /// <summary>A follower farther than this from its slot runs at full speed to catch up.</summary>
     public const float CatchUpDistance = 60;
+    /// <summary>
+    /// Radians per second the heading of a path follower turns at most (engine choice: a Kenshi recording turns a standing character about 100 degrees in
+    /// 0.15 s before it runs; docs/game/pathfinding.md "Turning").
+    /// </summary>
+    public const float TurnRate = 4 * MathF.PI;
 
     public PathService Paths { get; } = paths;
 
@@ -97,7 +104,10 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
         }
     }
 
-    /// <summary>Sends a character to a point at a speed mode, dropping its queue and path (serial phases only).</summary>
+    /// <summary>
+    /// Sends a character to a point at a speed mode, dropping its queue (serial phases only). A path it is following is kept until the new one
+    /// arrives, so a new order given on the move (holding the right button) does not stop it for the ticks the path takes.
+    /// </summary>
     public static void GoTo(CharacterTable table, int slot, Vector2 target, byte mode)
     {
         ref var n = ref table.Next[slot];
@@ -106,8 +116,7 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
         n.Task = (byte)CharacterTask.GoTo;
         n.Goal = target;
         n.Mode = mode;
-        n.Flags = (ushort)((n.Flags & ~(ushort)(MoveFlags.Pending | MoveFlags.HasPath)) | (ushort)MoveFlags.NeedPath);
-        n.PathCursor = 0;
+        n.Flags = (ushort)((n.Flags & ~(ushort)MoveFlags.Pending) | (ushort)MoveFlags.NeedPath);
         cold.PathRequest = 0;
     }
 
@@ -157,6 +166,9 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
             }
             else
             {
+                // No way there: the old path (an order given on the move) is dropped too.
+                n.Flags = (ushort)(n.Flags & ~(ushort)MoveFlags.HasPath);
+                n.PathCursor = 0;
                 n.TaskTime = FailedPathWait;
                 if (n.Task == (byte)CharacterTask.GoTo) { n.Task = (byte)CharacterTask.Idle; cold.OrderQueue.Clear(); }
             }
@@ -269,7 +281,9 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                 n.Flags = (ushort)(n.Flags & ~(ushort)MoveFlags.HasPath);
                 n.PathCursor = 0;
                 speed = 0;
-                if (n.Task == (byte)CharacterTask.GoTo)
+                // The end of an old path while the new one is on its way (an order given on the move) leaves the task to the new path.
+                bool replaced = ((MoveFlags)n.Flags & (MoveFlags.NeedPath | MoveFlags.Pending)) != 0;
+                if (!replaced && n.Task == (byte)CharacterTask.GoTo)
                 {
                     if (cold.OrderQueue.Count > 0)
                     {
@@ -280,7 +294,7 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                     }
                     else n.Task = (byte)CharacterTask.Idle;
                 }
-                else
+                else if (!replaced)
                 {
                     ulong roll = Rng.Hash(world.Seed, Rng.Key(table.IdOf(i)), RngPurpose.Think, (ulong)world.Tick);
                     n.TaskTime = WaitMin + Rng.Float(roll) * (WaitMax - WaitMin);
@@ -290,6 +304,11 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
             {
                 // A path is followed at the top speed at once (the nav agent sets its velocity to top speed x direction); the 15 / s ramp is the combat steering's.
                 speed = cold.InCombat && desired > speed ? MathF.Min(speed + Acceleration * dt, desired) : desired;
+                if (dir != Vector2.Zero)
+                {
+                    (dir, speed) = Turn(p.Yaw, dir, speed, dt);
+                    n.Yaw = MathF.Atan2(dir.X, dir.Y);   // also while it turns on the spot
+                }
             }
 
             // Separation from the neighbours of the last tick, visited in the grid's fixed order.
@@ -328,6 +347,20 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
             n.Animation = (ushort)(speed < 1 ? 0 : speed <= n.WalkSpeed + 1 ? 1 : 2);
             n.AnimationTime = n.Animation == p.Animation ? p.AnimationTime + dt : 0;
         }
+    }
+
+    /// <summary>
+    /// The heading turned from <paramref name="yaw"/> towards <paramref name="wanted"/> by at most <see cref="TurnRate"/> x <paramref name="dt"/>,
+    /// and the speed scaled by the cosine of the turn still to make (zero beyond 90 degrees: the character turns where it stands).
+    /// </summary>
+    public static (Vector2 Dir, float Speed) Turn(float yaw, Vector2 wanted, float speed, float dt)
+    {
+        float target = MathF.Atan2(wanted.X, wanted.Y);
+        float delta = MathF.IEEERemainder(target - yaw, MathF.Tau);
+        float max = TurnRate * dt;
+        float heading = MathF.Abs(delta) <= max ? target : yaw + MathF.CopySign(max, delta);
+        float left = MathF.IEEERemainder(target - heading, MathF.Tau);
+        return (new Vector2(MathF.Sin(heading), MathF.Cos(heading)), speed * MathF.Max(0, MathF.Cos(left)));
     }
 
     struct SeparationState
