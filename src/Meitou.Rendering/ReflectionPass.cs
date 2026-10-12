@@ -105,6 +105,20 @@ public sealed class ReflectionPass : IDisposable
     public float WaterPad { get; set; } = 60;
     /// <summary>The distance from the eye beyond which the weather's fog hides every surface this frame (<see cref="FogVolumes.AtmosphereDistance"/>), set by the frame loop; null: none.</summary>
     public float? HideDistance { get; set; }
+    /// <summary>
+    /// Meitou (<see cref="WaterGate"/>): the distance beyond which the haze has stopped growing (<see cref="SkyRenderer.HazeCompleteDistance"/>), set by
+    /// the frame loop; null: no cap. Water past it shows the haze whatever it reflects, so <see cref="WaterRect"/> leaves it out: the sea past the map's
+    /// edge no longer keeps the pass alive at the Hub (docs/render-water.md).
+    /// </summary>
+    public float? WaterDistance { get; set; }
+    /// <summary>
+    /// The distance to the nearest water the last <see cref="WaterRect"/> found: positive infinity when it found none within the distances it tests,
+    /// NaN when it did not run (the reflection off or under the water, <see cref="CropToWater"/> off), so the water pass gates nothing on it.
+    /// </summary>
+    public float NearestWater { get; private set; } = float.NaN;
+    /// <summary>The last run found no water in view, at this picture size: the verdict is reused as an image would be (<see cref="CanReuse"/>).</summary>
+    bool noWater;
+    int noWaterWidth, noWaterHeight;
     /// <summary>Things whose bounding sphere is under this many texels of radius in the reflection are left out of it.</summary>
     public float MinTexels { get; set; } = 1.5f;
     HeightSnapshot heights;
@@ -234,12 +248,12 @@ public sealed class ReflectionPass : IDisposable
         Valid = false;
         var eye = camera.Eye;
         float plane = WorldWater.Height;
-        if (eye.Y <= plane + 1 || fullWidth < 8 || fullHeight < 8) { hasImage = false; return; }   // under the water there is nothing to reflect
+        if (eye.Y <= plane + 1 || fullWidth < 8 || fullHeight < 8) { hasImage = noWater = false; NearestWater = float.NaN; return; }   // under the water there is nothing to reflect
         var watch = Stopwatch.StartNew();
         Poll();
         lapAt = Stopwatch.GetTimestamp();
         Array.Clear(LastPhaseMs);
-        if (CanReuse(camera, fullWidth, fullHeight)) { Valid = true; skipped++; age++; return; }
+        if (CanReuse(camera, fullWidth, fullHeight)) { Valid = hasImage; skipped++; age++; return; }   // the image, or the verdict that there is no water in view
         age = 0;
         lastEye = eye;
         lastView = camera.View;
@@ -248,8 +262,21 @@ public sealed class ReflectionPass : IDisposable
         realEye = eye;
         // Where the water is on the screen, as a rectangle of the reflection's clip space: what is outside it is never looked up.
         var rect = new Vector4(-1, -1, 1, 1);
-        if (CropToWater && WaterRect(camera, (float)fullWidth / fullHeight) is { } wet) rect = wet;
-        else if (CropToWater) { Valid = hasImage = false; return; }   // no water in view: nothing to reflect (the water pass is not drawn either, or shows the sky)
+        NearestWater = float.NaN;
+        noWater = false;
+        if (CropToWater)
+        {
+            if (WaterRect(camera, (float)fullWidth / fullHeight, out float nearestWater) is { } wet) { rect = wet; NearestWater = nearestWater; }
+            else
+            {
+                // No water in view: nothing to reflect, and nothing for the water pass's ocean and refraction to serve (WaterGate; the water itself
+                // is still drawn: what is past WaterDistance shows the haze). The verdict is kept like an image, so the rays are not cast again next frame.
+                NearestWater = float.PositiveInfinity;
+                (noWater, noWaterWidth, noWaterHeight) = (true, fullWidth, fullHeight);
+                Valid = hasImage = false;
+                return;
+            }
+        }
 
         Resize(Math.Max((int)(fullWidth * Scale), 64), Math.Max((int)(fullHeight * Scale), 64));
         timer.Begin();
@@ -344,8 +371,10 @@ public sealed class ReflectionPass : IDisposable
     /// </summary>
     bool CanReuse(WorldCamera camera, int fullWidth, int fullHeight)
     {
-        if (age >= MaxAge || !hasImage || colour is null || msColour is null && samples != 0) return false;
-        if (width != Math.Max((int)(fullWidth * Scale), 64) || height != Math.Max((int)(fullHeight * Scale), 64)) return false;
+        if (age >= MaxAge) return false;
+        // An image at this size, or the no-water verdict at this size (heights stream in, so it is checked again after MaxAge frames like an image).
+        if (hasImage ? colour is null || msColour is null && samples != 0 || width != Math.Max((int)(fullWidth * Scale), 64) || height != Math.Max((int)(fullHeight * Scale), 64)
+                     : !noWater || fullWidth != noWaterWidth || fullHeight != noWaterHeight) return false;
         var view = camera.View;
         float shift = Vector3.Distance(camera.Eye, lastEye);
         // About a texel of parallax for things 3000 units away, and no more than a tenth of a degree of turn.
@@ -378,7 +407,7 @@ public sealed class ReflectionPass : IDisposable
         }
         int frames = cpuSamples.Count + skipped;
         double perFrame(IEnumerable<double> v) => v.Skip(1).Sum() / Math.Max(frames - 1, 1);
-        return $"{cpuSamples.Count} passes drawn, {skipped} frames reused; per frame mean cpu {perFrame(cpuSamples):0.00} ms, gpu {perFrame(gpuSamples):0.00} ms; per pass: gpu {One(gpuSamples)}, cpu {One(cpuSamples)} ms (cpu mean by part: terrain {PhaseMs[1] / Math.Max(cpuSamples.Count, 1):0.00}, objects {PhaseMs[2] / Math.Max(cpuSamples.Count, 1):0.00}, foliage {PhaseMs[3] / Math.Max(cpuSamples.Count, 1):0.00})";
+        return $"{cpuSamples.Count} passes drawn, {skipped} frames reused; per frame mean cpu {perFrame(cpuSamples):0.00} ms, gpu {perFrame(gpuSamples):0.00} ms; per pass: gpu {One(gpuSamples)}, cpu {One(cpuSamples)} ms (cpu mean by part: terrain {PhaseMs[1] / Math.Max(cpuSamples.Count, 1):0.00}, objects {PhaseMs[2] / Math.Max(cpuSamples.Count, 1):0.00}, foliage {PhaseMs[3] / Math.Max(cpuSamples.Count, 1):0.00}); nearest water {NearestWater:0} units";
     }
 
     /// <summary>OpenGL perspective (depth âˆ’1..1) with clip X negated: the mirror's reversed winding turns back to counter-clockwise.</summary>
@@ -427,12 +456,17 @@ public sealed class ReflectionPass : IDisposable
     /// The rectangle (x0, y0, x1, y1) of the reflection's clip space that the water on the screen looks up, or null with no water in view:
     /// a grid of screen points (every 20 pixels or so) whose ray down to the water plane meets ground below the water, each projected
     /// with the reflection's matrix (the water does the same with its own position); padded by the ripples' largest shift of the lookup
-    /// (0.04 of the texture, 0.08 in clip space) and a cell.
+    /// (0.04 of the texture, 0.08 in clip space) and a cell. Water past <see cref="MaxDistance"/>, and with <see cref="WaterGate"/> past
+    /// <see cref="WaterDistance"/>, does not count. <paramref name="nearest"/>: the distance to the nearest sample on water (infinity with none; NaN
+    /// when the view could not be inverted).
     /// </summary>
-    Vector4? WaterRect(WorldCamera camera, float aspect)
+    Vector4? WaterRect(WorldCamera camera, float aspect, out float nearest)
     {
         float plane = WorldWater.Height, he = realEye.Y - plane;
+        nearest = float.NaN;
         if (!Matrix4x4.Invert(camera.View, out var inverse)) return new Vector4(-1, -1, 1, 1);
+        nearest = float.PositiveInfinity;
+        float far = WaterGate.Enabled && WaterDistance is { } cap ? MathF.Min(MaxDistance, cap) : MaxDistance;
         var view = new Matrix4x4(1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 2 * plane, 0, 1) * camera.View;
         var mapped = view * Perspective(camera.FieldOfView, aspect, 1, 1000);
         float tan = MathF.Tan(camera.FieldOfView / 2), level = plane + WaterRise;
@@ -444,7 +478,9 @@ public sealed class ReflectionPass : IDisposable
                 var dir = Vector3.TransformNormal(new Vector3(((i + 0.5f) / nx * 2 - 1) * tan * aspect, ((j + 0.5f) / ny * 2 - 1) * tan, -1), inverse);
                 if (dir.Y > -1e-4f) continue;
                 var p = realEye + dir * (he / -dir.Y);
-                if (dir.Length() * (he / -dir.Y) > MaxDistance || heights.HeightAt(p.X, p.Z) >= level) continue;
+                float distance = dir.Length() * (he / -dir.Y);
+                if (distance > far || heights.HeightAt(p.X, p.Z) >= level) continue;
+                nearest = MathF.Min(nearest, distance);
                 var c = Vector4.Transform(new Vector4(p, 1), mapped);
                 if (c.W <= 1e-3f) continue;
                 float x = c.X / c.W, y = c.Y / c.W;

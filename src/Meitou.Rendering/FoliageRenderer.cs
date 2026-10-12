@@ -1115,12 +1115,15 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         bool gpu = GpuCull && gpuCull is not null;
         bool cachedDepth = depthPass && shadowCandidatesFrame == updates && shadowCandidatesEye == eye && shadowCandidatesRange == maxRange;
         cullView.Set(frustum);
-        bool reuseWork = gpu && depthPass && gpuWorkFrame == Gpu.Frame.Number && gpuWorkEye == eye && gpuWorkRange == maxRange && gpuWorkTexel == (lodCoarse ? lodTexel : 0);
+        // With the zone box test in the cascades (ShadowZoneBox) a list is this cascade's alone: the planes are part of the key (each cascade passes its own array).
+        bool zoneBox = gpu && depthPass && ShadowZoneBox.Enabled;
+        bool reuseWork = gpu && depthPass && gpuWorkFrame == Gpu.Frame.Number && gpuWorkEye == eye && gpuWorkRange == maxRange && gpuWorkTexel == (lodCoarse ? lodTexel : 0)
+                         && (zoneBox ? ReferenceEquals(gpuWorkPlanes, frustum) : gpuWorkPlanes is null);
         if (gpu)
         {
             if (!reuseWork)
             {
-                CollectWork(eye, maxRange, boxTest: !depthPass);
+                CollectWork(eye, maxRange, boxTest: !depthPass || zoneBox);
                 BuildGpuWork(options, terrain);
             }
             foreach (var a in gpuOrder) BatchOf(a);
@@ -1131,7 +1134,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
             else CullZones(eye, options, maxRange, record: depthPass);
             active.RemoveAll(static b => b.Count == 0);
         }
-        if (gpu && !reuseWork) (gpuWorkFrame, gpuWorkEye, gpuWorkRange, gpuWorkTexel) = depthPass ? (Gpu.Frame.Number, eye, maxRange, lodCoarse ? lodTexel : 0) : (-1, default, 0, 0);
+        if (gpu && !reuseWork) (gpuWorkFrame, gpuWorkEye, gpuWorkRange, gpuWorkTexel, gpuWorkPlanes) = depthPass ? (Gpu.Frame.Number, eye, maxRange, lodCoarse ? lodTexel : 0, zoneBox ? frustum : null) : (-1, default, 0, 0, null);
         lodView = gpu ? CurrentLodView(eye.Y) : default;
         if (gpu) ShowBatches(eye);
         double tCull = cpu.Elapsed.TotalMilliseconds;
@@ -1289,7 +1292,8 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
             // The zone's box against the frustum first: most of a far, wide ring is behind the camera. Its margin is how far the bounds of
             // the zone's meshes reach from their instances' positions (ruins and rock pillars reach hundreds to thousands of units; a fixed
             // margin of 300 culled such a mesh whose zone was out of view while the mesh itself was in it). Not while recording for the
-            // cascades: each has its own frustum.
+            // cascades on the CPU path, whose candidates serve every cascade of the frame; the GPU path tests each cascade's own list against
+            // its planes (ShadowZoneBox), so cascade 0's list no longer holds every zone within the shadow range.
             if (boxTest)
             {
                 float m = ZoneMargin(state);
@@ -1425,6 +1429,8 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     float gpuWorkRange;
     /// <summary>The coarsened cascade's texel the work list was built for (0: not coarsened): its impostor transitions depend on it (<see cref="ShadowLod.ImpostorTransition"/>).</summary>
     float gpuWorkTexel;
+    /// <summary>The cascade's planes the depth work list was box-tested against (<see cref="ShadowZoneBox"/>); null: the list holds every zone in range.</summary>
+    Vector4[]? gpuWorkPlanes;
     int gpuWorkStamp;
     FoliageCullDraw[] gpuDraws = new FoliageCullDraw[64];
     /// <summary>The current view's cull (rows and indirect arguments), read by <see cref="RecordMeshes"/> and the rocks' draws.</summary>

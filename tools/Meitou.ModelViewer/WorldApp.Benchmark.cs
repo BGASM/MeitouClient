@@ -60,6 +60,9 @@ static partial class WorldApp
             float clock = gpu.Particles is { Groups.Count: > 0 } ? (float)(i / 60.0 / 600) : 0;
             // --time-speed: the hour runs on as in the viewer (game hours per real minute), at 1/60 s a frame.
             float hour = o.TimeSpeed > 0 ? (o.Hour + o.TimeSpeed * i / 3600f) % 24 : o.Hour;
+            // The water's, the stars' and the heat haze's clock follows it too (the frame loop holds that clock still for pictures), so the
+            // ocean's FFT records every frame as it does in the viewer: the exit line's `water ocean: N passes` then counts the frames it ran.
+            if (o.TimeSpeed > 0) gpu.HeatHazeHours = hour;
             { Draw(gpu, scene, camera, render, w, h, hour, clock, o.FogDistance); EndFrame(context); }
             double cpuMs = frameWatch.Elapsed.TotalMilliseconds;
             if (i % 500 == 0 || i <= 4) Console.WriteLine($"gpu       frame {i}: {context.Frame.Stats}");
