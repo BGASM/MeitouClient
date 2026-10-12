@@ -971,6 +971,10 @@ static class WorldFrame
                 shadow.Enabled = v >= KenshiShadows.MinRange;
                 if (shadow.Enabled) shadow.Settings = shadow.Settings with { Range = MathF.Round(v / 100) * 100 };
             }, "0", Logarithmic: true, Text: v => shadow.Enabled ? v.ToString("0", CultureInfo.InvariantCulture) : "0 (off)"));
+            // The game's `shadow quality` (--shadow-quality): the atlas is made again at the new side on the next frame.
+            sliders.Add(new Slider("Shadow map size (game quality 0-2)", 0, 2, () => Array.IndexOf(KenshiShadows.QualitySizes, shadow.Settings.MapSize),
+                v => shadow.Settings = shadow.Settings with { MapSize = KenshiShadows.MapSize((int)MathF.Round(v)) }, "0",
+                Text: v => KenshiShadows.MapSize((int)MathF.Round(v)).ToString(CultureInfo.InvariantCulture) + "²"));
             if (shadow.Meitou) sliders.Add(new Slider("Shadow filter 0-2 (Meitou; 0 low-end)", 0, 2, () => shadow.FilterQuality, v => shadow.FilterQuality = (int)MathF.Round(v), "0"));
         }
         // A viewer option, not the game's: 1 is the game's haze (docs/formats/sky.md).
