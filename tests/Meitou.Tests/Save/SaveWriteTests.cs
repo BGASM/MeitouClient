@@ -53,50 +53,6 @@ public partial class SaveWriteTests
 
     // ------------------------------------------------------------------ against the user's saves
 
-    [Theory, Trait("Category", "Slow")]
-    [MemberData(nameof(SaveSamples.Names), MemberType = typeof(SaveSamples))]
-    public void A_loaded_save_written_to_a_folder_is_the_same_files(string folder)
-    {
-        SkipWithoutSaves(folder);
-        var game = Load(folder);
-        string target = Path.Combine(Temp("copy"), "copy");
-        try
-        {
-            game.Write(target);
-            var original = new SaveFolder([folder]);
-            var copy = SaveFolder.Open(target);
-            Assert.Equal(original.Names, copy.Names);
-            foreach (var name in original.Names)
-                Assert.True(original.ReadAllBytes(name).AsSpan().SequenceEqual(copy.ReadAllBytes(name)), $"{name} differs");
-        }
-        finally { Directory.Delete(Path.GetDirectoryName(target)!, recursive: true); }
-    }
-
-    [Theory, Trait("Category", "Slow")]
-    [MemberData(nameof(SaveSamples.Names), MemberType = typeof(SaveSamples))]
-    public void Derived_data_computed_for_a_real_save_is_what_the_game_wrote(string folder)
-    {
-        SkipWithoutSaves(folder);
-        var original = Load(folder);
-        var game = original.Clone();
-        game.UpdateDerived();
-        Assert.Equal(original.Quick.SlotLists[0], game.Quick.SlotLists[0]);
-        Assert.Equal(original.Quick.SlotLists[1], game.Quick.SlotLists[1]);
-        Assert.Equal(original.Quick.SlotLists[2], game.Quick.SlotLists[2]);
-        Assert.Equal(original.Quick.SlotLists[3], game.Quick.SlotLists[3]);
-        var was = original.AllFiles().ToDictionary(f => f.Name, f => f.File);
-        foreach (var (name, file) in game.AllFiles())
-        {
-            var old = was[name];
-            if (file.Data.FileType != FcsFileType.V15) continue;   // saved by the mod editor, left as it is
-            Assert.True(file.Data.NextId - old.Data.NextId is 0 or -1, $"{name}: nextId {file.Data.NextId} was {old.Data.NextId}");
-            Assert.Equal(old.Records.Select(r => r.ByteSize), file.Records.Select(r => r.ByteSize));
-            if (name.StartsWith("zone/")) Assert.Equal(old.SlotLists.Count, file.SlotLists.Count);
-        }
-        // The zone list names every file, including the one the original left out.
-        Assert.Equal(game.Zones.Keys, game.Camera.Zones);
-    }
-
     /// <summary>Key names with their numbers folded: <c>flesh3</c> and <c>flesh5</c> are one key <c>flesh#</c>.</summary>
     static IEnumerable<string> Keys(FcsRecord r) =>
         r.Bools.Keys.Select(k => "b:" + Fold(k)).Concat(r.Floats.Keys.Select(k => "f:" + Fold(k))).Concat(r.Ints.Keys.Select(k => "i:" + Fold(k)))

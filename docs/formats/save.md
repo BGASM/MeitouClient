@@ -484,8 +484,8 @@ writes back **byte for byte** (`SaveReadTests.Every_file_of_a_save_reads_and_wri
 | `SaveBuilder` | Makes the records of a new save (CAMERA, factions with war state, towns, platoons, characters with their six states) with the key sets above, the id patterns and seeded random serials; can also add to an existing save; `RemoveCharacter` |
 | `SavePortraits` | The blank 2048 x 2048 atlas of a new save |
 
-`UpdateDerived` recomputes what follows from the rest: the CAMERA `zones` list from the zone files, every platoon's `char count`, slot lists 0 and 1 of `quick.save` (2 and 3 are kept, or start as 1..4096), the slot list of a zone file that has none (the slots of its buildings), each file's `nextId` and the child-count `byteSize`s; on a real save it reproduces the game's values
-(`Derived_data_computed_for_a_real_save_is_what_the_game_wrote`). `Write` follows the game's temp-folder discipline: everything goes to `_current<N>` next to the destination, then the old folder is renamed away and the new one renamed in, so a failed write leaves the old save and no working folder.
+`UpdateDerived` recomputes what follows from the rest: the CAMERA `zones` list from the zone files, every platoon's `char count`, slot lists 0 and 1 of `quick.save` (2 and 3 are kept, or start as 1..4096), the slot list of a zone file that has none (the slots of its buildings), each file's `nextId` and the child-count `byteSize`s; on a real save it reproduced the game's values
+(**Observed**: a test checked this, and that a loaded save writes back the same files, against the user's saves until 2026-10-12; both were removed then). `Write` follows the game's temp-folder discipline: everything goes to `_current<N>` next to the destination, then the old folder is renamed away and the new one renamed in, so a failed write leaves the old save and no working folder.
 
 Saves go to a folder of our own while testing (`%LOCALAPPDATA%\Meitou\save-test\` by convention); nothing writes to the original game's `save` folders. The version string written is "1.0.68".
 
