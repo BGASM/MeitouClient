@@ -57,8 +57,10 @@ Dependencies point one way: Core ← Data ← Engine / Rendering ← Game / view
   windowing library's events; each tick consumes it once, so a press is seen by exactly one tick however frames and ticks fall.
   `InputBindings` maps keys and buttons to `InputAction`s; defaults below, overridable in the user config.
 - **Frames**: vsync off by default with a frame limiter (default 240 fps; sleeps most of the frame and spins the last 1.5 ms);
-  `--vsync`, `--fps-limit <n>` (0 = unlimited). The window opens maximized.
-- **User config**: `meitou.user.json` (git-ignored) in the working directory, else next to the executable: `fpsLimit`, `vSync`,
+  `--vsync`, `--fps-limit <n>` (0 = unlimited). The window opens in borderless full screen as the viewer's does (`BorderlessFullScreen`
+  in `Meitou.Rendering.Display`, shared with the viewer); `Alt+Enter` or the Tab panel's "Full screen" switches to the maximized window and back,
+  `--windowed` starts windowed for one run.
+- **User config**: `meitou.user.json` (git-ignored) in the working directory, else next to the executable: `fpsLimit`, `vSync`, `fullScreen`,
   `tickRate` (the control tick), `simThreads`, `graphics` (the Tab panel's sliders by label) and `bindings` (action → comma-separated keys, e.g.
   `"RotateLeft": "Q,Left"`, buttons as `Mouse:Right`). Written on exit.
 
@@ -99,8 +101,11 @@ view meets the ground.
 
 Default keys: `W A S D` move, `Q`/`E` or `Left`/`Right` rotate, `Up`/`Down` pitch, wheel or `PageUp`/`PageDown` zoom,
 middle drag orbit (right click is the move command, see [simulation.md](simulation.md#player)), left click or drag selects, `1`..`9`, `` ` ``, `R`; `;` free camera (`R`/`F` up/down in it), `Space` pause, `F2`/`F3`/`F4` speed 1x/2x/5x (`.`/`,` step through them), `Tab` settings panel, `F8` or
-`PrintScreen` screenshot (C:\Temp; Kenshi's own keys), `F10` key list, `F11` frame statistics, `F12` profiler chart (gpu, cpu, off),
-`Esc` quit. The three debug overlays are the viewer's, and as there they are left out of screenshots. `Shift+F1`
+`PrintScreen` screenshot (C:\Temp; Kenshi's own keys), `F9` fps counter, `F10` key list, `F11` frame statistics, `F12` profiler chart (gpu, cpu, off),
+`Alt+Enter` full screen, `Esc` quit. The debug overlays are the viewer's, and as there they are left out of screenshots; in the game they start
+below the HUD, which holds the top left corner. The `Tab` panel is the viewer's (`WorldFrame.CreateSettingsPanel`) with its time of day (it sets
+the game clock's hour, `GameClock.SetHourOfDay`), VSync and full screen rows; only the viewer's time speed is left out (the game has its speeds).
+Time of day, VSync and full screen are not stored under `graphics` (vsync and full screen have their own keys, saved when changed in play). `Shift+F1`
 turns Meitou off (every Faithful / Meitou switch Faithful) and back on as they were (the viewer's `F1`; plain `F2`..`F4` and `F8` keep the game's meaning). The switches are checkboxes at the bottom of the `Tab` panel (ticked: Meitou), saved in meitou.user.json
 unless `--meitou` / `--faithful` is given; the viewer's panel has them too.
 

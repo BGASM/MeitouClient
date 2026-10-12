@@ -37,6 +37,9 @@ sealed partial class GameHost
         }, vsync, streamline: WantsDlss());
         streamline = display.Streamline;
         var window = display.Window!;
+        // Borderless full screen as the viewer starts (Alt+Enter and the Tab panel switch it); --windowed keeps the window for this run.
+        bool fullScreen = config.FullScreen && !o.Windowed;
+        if (fullScreen) BorderlessFullScreen.Toggle(window);
         Boot(display, interactive: true);
         var overlay = DebugOverlay.TryCreate(display.Context);
         // The viewer's debug overlays (docs/engine.md): F10 the key list, F11 the frame statistics, F12 the profiler chart.
@@ -44,10 +47,14 @@ sealed partial class GameHost
         // The Faithful / Meitou switches; Shift+F1 turns Meitou off and back on (plain F2..F4 and F8 are the game's speed and screenshot keys), the Tab panel sets them one by one.
         var switches = WorldFrame.LiveSwitches(o, () => gpu, () => camera, () => render);
         var meitou = new MeitouToggle(switches);
-        var panel = overlay is null ? null : WorldFrame.CreateSettingsPanel(overlay, gpu, render, switches: switches);
+        // The viewer's panel: the game clock's time of day, vsync and full screen on top of the graphics sliders.
+        var panel = overlay is null ? null : WorldFrame.CreateSettingsPanel(overlay, gpu, render,
+            getHour: () => (float)session.Clock.HourOfDay, setHour: v => session.Clock.SetHourOfDay(v),
+            getVSync: () => display.VSync, setVSync: v => display.VSync = v, switches: switches,
+            getFullScreen: () => BorderlessFullScreen.IsOn(window), setFullScreen: _ => BorderlessFullScreen.Toggle(window));
         if (panel is not null)
             foreach (var slider in panel.Sliders)
-                if (config.Graphics.TryGetValue(slider.Label, out float v) && !(o.Post.Upscale.Explicit && WorldFrame.UpscalerSliders.Contains(slider.Label)))
+                if (!SessionSliders.Contains(slider.Label) && config.Graphics.TryGetValue(slider.Label, out float v) && !(o.Post.Upscale.Explicit && WorldFrame.UpscalerSliders.Contains(slider.Label)))
                     slider.Set(Math.Clamp(v, slider.Min, slider.Max));
         // The switches as saved, unless the command line chose them (--meitou / --faithful).
         if (panel is not null && !Environment.GetCommandLineArgs().Any(a => a is "--meitou" or "--faithful"))
@@ -66,9 +73,10 @@ sealed partial class GameHost
         Vector2 Pixels(Vector2 p) => p * new Vector2(window.FramebufferSize.X / (float)Math.Max(window.Size.X, 1), window.FramebufferSize.Y / (float)Math.Max(window.Size.Y, 1));
         foreach (var kb in silkInput.Keyboards)
         {
-            kb.KeyDown += (_, k, _) =>
+            kb.KeyDown += (keyboard, k, _) =>
             {
                 if (k is SilkKey.ShiftLeft or SilkKey.ShiftRight) shiftDown = true;
+                if (k == SilkKey.Enter && (keyboard.IsKeyPressed(SilkKey.AltLeft) || keyboard.IsKeyPressed(SilkKey.AltRight))) { BorderlessFullScreen.Toggle(window); return; }
                 if (KeyMap.Map(k) is { } key)
                 {
                     if (shiftDown && key == EngineKey.F1) { Console.WriteLine(meitou.Toggle()); return; }
@@ -176,14 +184,15 @@ sealed partial class GameHost
                 // The debug overlays are left out of saved pictures: the statistics at the top left, the key list below them, the profiler.
                 if (overlay is not null && !shot)
                 {
-                    float panelsBottom = 0;
+                    // Below the HUD, which holds the top left corner in the game (the viewer's overlays start at the top).
+                    float panelsBottom = g.NoPopulation ? 0 : player.HudBottom;
                     if (fpsVisible && fpsText.Length > 0)
                     {
-                        float w = fpsText.Length * overlay.CharWidth + 12, h = overlay.LineHeight + 8;
-                        overlay.Rect(8, 8, 8 + w, 8 + h, DebugOverlay.PanelColour);
-                        overlay.Text(fpsText, 14, 12, DebugOverlay.TextColour);
+                        float w = fpsText.Length * overlay.CharWidth + 12, h = overlay.LineHeight + 8, top = panelsBottom + 8;
+                        overlay.Rect(8, top, 8 + w, top + h, DebugOverlay.PanelColour);
+                        overlay.Text(fpsText, 14, top + 4, DebugOverlay.TextColour);
                         overlay.Flush(size.X, size.Y);
-                        panelsBottom = 8 + h - 8;   // the panels add their own 16 px margin
+                        panelsBottom = top + h - 8;   // the panels add their own 16 px margin
                     }
                     if (statsVisible && stats.Count > 0) panelsBottom = overlay.Panel(size.X, size.Y, "Meitou   (F11 hides this)", stats, panelsBottom);
                     if (overlay.Visible)
@@ -208,7 +217,7 @@ sealed partial class GameHost
             {
                 // Once a second: the frame, the simulation, then the renderer's lines.
                 stats.Clear();
-                stats.Add($"{statsFrames / statsTimer:0} fps ({(vsync ? "vsync" : fpsLimit > 0 ? $"limit {fpsLimit}" : "uncapped")}), gpu {(gpuSamples > 0 ? $"{gpuSum / gpuSamples:0.00}" : "-")} ms");
+                stats.Add($"{statsFrames / statsTimer:0} fps ({(display.VSync ? "vsync" : fpsLimit > 0 ? $"limit {fpsLimit}" : "uncapped")}), gpu {(gpuSamples > 0 ? $"{gpuSum / gpuSamples:0.00}" : "-")} ms");
                 long ticks = session.Simulation.TotalTicks - statsTicks;
                 statsTicks = session.Simulation.TotalTicks;
                 stats.Add($"simulation  {ticks / statsTimer:0} ticks/s, {session.CurrentSnapshot.Characters.Count} characters, dropped {session.Simulation.DroppedTicks} ticks in all");
@@ -233,10 +242,14 @@ sealed partial class GameHost
             totalFrames++;
             if (g.QuitAfter is { } quitAfter && now >= quitAfter) { Console.WriteLine($"profile   {session.CurrentSnapshot.Characters.Count} characters in the snapshot, {session.CurrentSnapshot.Characters.Count(c => c.Appearance is not null)} drawable; per frame: simulation advance {advanceTotal / Math.Max(totalFrames, 1):0.000} ms ({session.Simulation.TotalTicks} ticks, {advanceTotal / Math.Max(session.Simulation.TotalTicks, 1):0.000} ms per tick), host draw-list fill {fillTotal / Math.Max(fillCalls, 1):0.000} ms, world draw cpu {drawTotal / Math.Max(totalFrames, 1):0.00} ms, {(gpu.Characters is { } chars ? chars.Statistics() : "no characters")}");
                 Console.WriteLine($"smoke     {totalFrames} frames in {now:0.0} s: {totalFrames / now:0} fps on average, {session.Ticks.TotalTicks} control ticks, {session.Simulation.TotalTicks} simulation ticks, game time {session.Clock.TimeText}"); quit = true; }
-            if (!vsync && fpsLimit > 0) Limit(frame, now, 1.0 / fpsLimit);
+            if (!display.VSync && fpsLimit > 0) Limit(frame, now, 1.0 / fpsLimit);
         }
+        // Vsync and full screen are kept when changed in play (a command line's --vsync or --windowed alone is not saved).
+        if (display.VSync != vsync) config.VSync = display.VSync;
+        if (BorderlessFullScreen.IsOn(window) != fullScreen) config.FullScreen = BorderlessFullScreen.IsOn(window);
         if (panel is not null)
-            foreach (var slider in panel.Sliders) config.Graphics[slider.Label] = slider.Get();
+            foreach (var slider in panel.Sliders)
+                if (!SessionSliders.Contains(slider.Label)) config.Graphics[slider.Label] = slider.Get();
         if (panel is not null)
             foreach (var toggle in panel.Toggles) config.Graphics[SwitchKey(toggle.Label)] = toggle.Get() ? 1 : 0;
         profiler?.Dispose();
@@ -248,6 +261,8 @@ sealed partial class GameHost
         return 0;
 
         static string SwitchKey(string label) => "Meitou: " + label;
+
+        string? FullScreenState() => BorderlessFullScreen.IsOn(window) ? "borderless" : "window";
 
         // The state shown beside a key in the F10 list, by the item's first word.
         string? KeyState(string key)
@@ -261,10 +276,16 @@ sealed partial class GameHost
                 "Tab" => OnOff(panel?.Visible == true),
                 "F12" => profiler?.Showing.ToString().ToLowerInvariant(),
                 "Shift+F1" => meitou.On ? "Meitou" : "Faithful",
+                "Alt+Enter" => FullScreenState(),
+                "F9" => OnOff(fpsVisible),
+                "F11" => OnOff(statsVisible),
                 _ => null,
             };
         }
     }
+
+    /// <summary>Panel rows that are the session's state, not graphics settings: kept out of <c>graphics</c> in meitou.user.json (vsync and full screen have their own keys).</summary>
+    static readonly HashSet<string> SessionSliders = ["Time of day", "VSync", "Full screen"];
 
     static void SaveScreenshot(GpuContext context, Texture backbuffer, int width, int height)
     {

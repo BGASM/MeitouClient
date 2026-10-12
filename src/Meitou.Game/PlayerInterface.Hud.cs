@@ -26,6 +26,9 @@ sealed partial class PlayerInterface
         return (Margin, Margin, Margin + width, Margin + height);
     }
 
+    /// <summary>The bottom of the HUD panel as last drawn (0 before the first frame), where the debug overlays start.</summary>
+    public float HudBottom => HudBox().Y1;
+
     bool OverHud(Vector2 p)
     {
         var b = HudBox();

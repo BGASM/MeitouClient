@@ -1,12 +1,12 @@
 using Silk.NET.Windowing;
 
-namespace Meitou.ModelViewer;
+namespace Meitou.Rendering.Display;
 
 /// <summary>
-/// Borderless full screen for the viewer (Alt+Enter, the F2 editor's button): the window loses its border and covers its monitor, so
+/// Borderless full screen for the viewer and the game (Alt+Enter, the Tab panel, the viewer's F2 editor button): the window loses its border and covers its monitor, so
 /// nothing of the desktop shows and switching away is instant (no exclusive mode change). Toggling again gives the bordered, maximized window back.
 /// </summary>
-static class BorderlessFullScreen
+public static class BorderlessFullScreen
 {
     public static bool IsOn(IWindow window) => window.WindowBorder == WindowBorder.Hidden;
 

@@ -5,7 +5,7 @@ namespace Meitou.Game;
 
 /// <summary>
 /// The player's settings, kept in <c>meitou.user.json</c> (git-ignored) in the working directory, else next to the executable:
-/// the frame limit, vsync, the simulation tick rate, the graphics sliders of the Tab panel (by label) and key bindings
+/// the frame limit, vsync, full screen, the simulation tick rate, the graphics sliders of the Tab panel (by label) and key bindings
 /// (action name to comma-separated keys, as <see cref="Engine.Input.InputBindings.Apply"/> reads them). Written back on exit.
 /// </summary>
 sealed class UserConfig
@@ -15,6 +15,8 @@ sealed class UserConfig
     /// <summary>Frames per second when vsync is off; 0 = unlimited. Engine default 240.</summary>
     public int FpsLimit { get; set; } = 240;
     public bool VSync { get; set; }
+    /// <summary>Borderless full screen (the Tab panel, Alt+Enter); <c>--windowed</c> starts in a window for one run.</summary>
+    public bool FullScreen { get; set; } = true;
     public int TickRate { get; set; } = 30;
     /// <summary>Worker threads of the simulation; null = half the cores.</summary>
     public int? SimThreads { get; set; }
