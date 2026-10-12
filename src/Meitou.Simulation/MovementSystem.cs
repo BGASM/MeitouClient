@@ -155,8 +155,19 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
         {
             if (!table.TryResolveNext(answer.Character, out int slot)) continue;
             var cold = table.Cold(slot)!;
-            if (cold.PathRequest != answer.Id) continue;   // an older request: the character was given another goal since
             ref var n = ref table.Next[slot];
+            if (cold.PathRequest != answer.Id)
+            {
+                // An older request: the character was given another goal since. Orders given again every tick (a held right button) are each replaced
+                // before their path comes, so a found path newer than the one followed is still taken while the latest request is on its way.
+                bool waiting = (n.Flags & (ushort)(MoveFlags.NeedPath | MoveFlags.Pending)) != 0;
+                if (!answer.Path.Found || !waiting || n.Task != (byte)CharacterTask.GoTo || answer.Id <= cold.PathApplied) continue;
+                cold.Path = [.. answer.Path.Points.Skip(1)];
+                cold.PathApplied = answer.Id;
+                n.PathCursor = 0;
+                n.Flags |= (ushort)MoveFlags.HasPath;
+                continue;
+            }
             n.Flags = (ushort)(n.Flags & ~(ushort)MoveFlags.Pending);
             if (answer.Path.Found)
             {

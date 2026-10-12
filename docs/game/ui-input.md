@@ -224,8 +224,8 @@ Screenshot (event 0x10) is handled in frameEnded: hides the camera grid widget f
   selects; portrait click selects, double click centres and follows; middle mouse holds rotate, wheel zooms;
   in build mode `<` `>` rotate, left click places, right click finishes a link.
 - Holding the right button after a move on terrain steers: the order follows the cursor while the button is down (**Observed**, play
-  of the original). Ours (`PlayerInterface.Steer`, engine choice): once a frame, the move is given again at the ground point under the
-  cursor when it is 5 units or more from the last one and 3 world ticks have passed, and once more on release; not for shift (queued)
+  of the original). Ours (`PlayerInterface.Steer`, engine choice): the move is given again at the ground point under the cursor every
+  world tick (checked once a frame), and once more on release; not for shift (queued)
   moves or attacks. Kenshi's own handling of the held button was not traced (the 0.2 s context-menu timer above is for targets).
 
 PlayerInterface (global 142134690): +0x2a0 player faction, +0x2a8 active platoon, +0x298 placement ghost,

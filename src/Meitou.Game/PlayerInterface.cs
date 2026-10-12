@@ -24,12 +24,6 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     /// <summary>Character height used for picking and for the box select's aim point.</summary>
     public const float CharacterHeight = 2.2f;
     const float DragThreshold = 5;
-    /// <summary>
-    /// While the right button is held after a move order, the order is given again at the cursor when its ground point has moved this far (world units)
-    /// and at least <see cref="SteerTicks"/> world ticks have passed (engine choice: often enough to look continuous, rarely enough for the path service).
-    /// </summary>
-    public const float SteerDistance = 5;
-    public const int SteerTicks = 3;
 
     Vector2? dragFrom;
     Vector2 mouse;
@@ -116,15 +110,16 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     }
 
     /// <summary>
-    /// Once a frame: while the right button is held after a move order, the order follows the ground point under the cursor (also when the camera moves
-    /// and the cursor does not). <paramref name="final"/> (the button is let go) gives the last point regardless of the tick spacing.
+    /// Once a frame: while the right button is held after a move order, the order is given again at the ground point under the cursor once every world
+    /// tick (also when the camera moves and the cursor does not). <paramref name="final"/> (the button is let go) gives the last point unless this tick
+    /// already has the same one.
     /// </summary>
     public void Steer(bool final = false)
     {
         if (!steering || OverHud(mouse)) return;
-        if (!final && session.World.Tick - steerTick < SteerTicks) return;
+        if (!final && session.World.Tick == steerTick) return;
         if (Ray(mouse) is not { } ray || GroundHit(ray.Origin, ray.Direction) is not { } hit) return;
-        if (Vector2.Distance(new Vector2(hit.X, hit.Z), new Vector2(steerTarget.X, steerTarget.Z)) < SteerDistance) return;
+        if (final && session.World.Tick == steerTick && hit == steerTarget) return;
         Move(hit, queued: false);
         (steerTarget, steerTick) = (hit, session.World.Tick);
     }

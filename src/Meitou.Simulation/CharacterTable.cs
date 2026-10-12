@@ -57,6 +57,11 @@ public sealed class CharacterCold
     public Vector3[] Path { get; set; } = [];
     /// <summary>The path request in flight, so an answer to an older one is ignored.</summary>
     public long PathRequest { get; set; }
+    /// <summary>
+    /// The request whose path is being followed when it was not the one in flight (an order given again before its path came, holding the right button);
+    /// set only with the asynchronous path service, so not hashed.
+    /// </summary>
+    public long PathApplied { get; set; }
     /// <summary>Belongs to the player's faction: can be selected and ordered.</summary>
     public bool IsPlayer { get; set; }
     /// <summary>Queued move orders (X/Z) after the current one (shift + right click); changed only by the character's own partition or a serial phase.</summary>

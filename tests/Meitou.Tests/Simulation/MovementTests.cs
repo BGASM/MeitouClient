@@ -73,6 +73,26 @@ public class MovementTests
     }
 
     [Fact]
+    public void Orders_given_every_tick_still_steer_the_character()
+    {
+        // A held right button: a new order each tick, each replaced before its path may have come; the newest path that came is followed.
+        using var w = Flat(synchronous: false);
+        var id = Add(w, new(0, 300, 0));
+        w.Commands.Enqueue(new MoveOrder([id], new Vector3(0, 0, 400)) { Tick = 0 });
+        Assert.True(TestWaits.TickUntil(w, () => w.Characters.Previous[id.Slot].Velocity.Length() > 50));
+        for (int k = 0; k < 45; k++)
+        {
+            var at = Where(w, id);
+            w.Commands.Enqueue(new MoveOrder([id], new Vector3(at.X + 300, 0, at.Z)) { Tick = w.Tick });
+            w.RunTick();
+            Thread.Sleep(5);
+        }
+        // Steered round to +X and running that way.
+        var v = w.Characters.Previous[id.Slot].Velocity;
+        Assert.True(v.X > 50 && MathF.Abs(v.Z) < 20, $"velocity {v}");
+    }
+
+    [Fact]
     public void Turning_is_limited_and_a_reversal_turns_on_the_spot_before_running()
     {
         using var w = Flat();

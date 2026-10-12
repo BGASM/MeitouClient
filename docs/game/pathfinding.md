@@ -415,7 +415,9 @@ updated". FUN_1403a66c0 splits the door AABB across zone cells and calls FUN_140
   the heading, also while turning on the spot.
 - **Engine choice**: a move order given to a character that is already following a path keeps that path until the new one arrives
   (`MovementSystem.GoTo`), so the re-orders of a held right button (ui-input.md) never stop it for the path service's ticks; if
-  the old path ends first the character waits for the new one, and a failed new path drops both.
+  the old path ends first the character waits for the new one, and a failed new path drops both. Orders given every tick are each
+  replaced before their path comes, so a found path of an older request is still taken when it is newer than the one followed
+  (`CharacterCold.PathApplied`) while the latest request is on its way.
 
 ## Off-screen and far characters
 
