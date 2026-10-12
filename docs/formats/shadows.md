@@ -190,7 +190,7 @@ One map of the quality's side whose texels are redistributed towards where the c
 ## What the viewer does
 
 `--world` draws the **CSM mode** by default (`--shadow-range 0` turns it off, `--shadow-quality <0|1|2>` picks the side from
-the table, default 1 = 2048², `--shadow-range <u>`). It follows the facts above, with these differences:
+the table, default 2 = 4096² since 2026-10-12 (1 = 2048² before; the game itself defaults to 1024², a missing key), `--shadow-range <u>`). It follows the facts above, with these differences:
 
 - **Backend split.** `Meitou.Data.World.ShadowCascades` (no GL) does the splits, the light view, the stable size, the box,
   the snapping (in double, in absolute light space, so far from the origin the map still moves in whole texels), the bias and
