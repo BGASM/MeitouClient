@@ -405,7 +405,7 @@ updated". FUN_1403a66c0 splits the door AABB across zone cells and calls FUN_140
 
 ### Turning and orders on the move (ours)
 
-- **Observed** (a Kenshi recording, 2026-10-12, 60 fps, a standing human ordered to run about 100° to his side): the body turns
+- **Observed** (a Kenshi recording, 2026-10-12, frames 40 ms apart, a standing human ordered to run about 100° to his side): the body turns
   about 100° in some 0.15 s with little ground gained, the run pose is in by about 0.2 s after the turn starts and the speed looks
   full at once after that; at the end the run goes over into the standing idle in about 0.15 s with no slide or slowing stride. How
   fast the nav agent's direction turns was not traced (**Unknown**; the facing follows it every frame, [animation.md](../animation.md#turning-and-head-look)).
