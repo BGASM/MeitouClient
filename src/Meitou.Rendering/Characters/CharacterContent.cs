@@ -29,6 +29,9 @@ internal sealed class AssetPart
     public int MaterialSlot;
     /// <summary>The body mesh, whose vertices take the asset's morph.</summary>
     public bool Morphed;
+    /// <summary>The mesh's shadow-only levels (null: the shadow passes pick among the picture's levels): their distances, level 0 first (the original), and the mesh level the first of them is.</summary>
+    public float[]? ShadowDistances;
+    public int ShadowFirst;
     /// <summary>Nearest distance of a user this frame, for the textures' mip streaming.</summary>
     public float Near;
     float uvScale;
@@ -102,9 +105,12 @@ internal sealed class CharacterContent : IDisposable
     public List<string> Messages { get; } = [];
     public long MeshBytes { get; private set; }
     public int MeshCount => meshes.Count;
+    /// <summary>The render's pixels per radian (<see cref="CharacterRenderer.SetView"/>) when a mesh loads: its generated levels are placed by it and keep their distances after a resize.
+    /// Until the first view: 1080 rows at 50 degrees.</summary>
+    public float LodPixelsPerRadian { get; set; } = Meitou.Data.World.TerrainLod.ProjectionScale(1080, 50 * MathF.PI / 180);
 
     /// <param name="FirstMaterialName">The first submesh's material (script) name, which is all the material resolver takes of a submesh; null: no submesh.</param>
-    sealed record LoadedMesh(GpuObjectMesh Gpu, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs = null);
+    sealed record LoadedMesh(GpuObjectMesh Gpu, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs = null, float[]? ShadowDistances = null, int ShadowFirst = 0);
 
     public CharacterContent(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets)
     {
@@ -164,8 +170,8 @@ internal sealed class CharacterContent : IDisposable
         return skeletonNames[path] = mesh.SkeletonName;
     }
 
-    /// <summary>Reads and uploads a mesh file, with its skinning weights for a skeleton of <paramref name="boneCount"/> bones (null: unskinned).</summary>
-    LoadedMesh? Mesh(string path, int? boneCount)
+    /// <summary>Reads and uploads a mesh file, with its skinning weights for a skeleton of <paramref name="boneCount"/> bones (null: unskinned); its generated levels start <paramref name="lodScale"/> times farther than the rule gives.</summary>
+    LoadedMesh? Mesh(string path, int? boneCount, float lodScale = 1, bool shadowLevels = false)
     {
         var key = (path.ToLowerInvariant(), boneCount ?? -1);
         if (meshes.TryGetValue(key, out var cached)) return cached;
@@ -182,7 +188,17 @@ internal sealed class CharacterContent : IDisposable
             // The LOD value is distance minus this radius. A few character meshes carry a stored radius many times their size (human_female:
             // 116 for a 20 unit tall body), which would keep them at full detail for another hundred units: the model's own extent bounds it.
             radius = Math.Min(radius, Math.Max(model.Radius, 1));
-            var levels = GeneratedLevels(mesh, model, radius);
+            // Hair and beards (HairLodScale) are alpha-tested cards: a collapse merges cards and strands go while the surface hardly moves, so the deviation underrates it.
+            var levels = GeneratedLevels(mesh, model, radius, LodPixelsPerRadian * lodScale, LodSettings);
+            // Shadow-only levels (the body, which has no cut-outs): built without the texture guard, whose refusals stop the body at about 1300 triangles, so a crowd's
+            // shadows can be coarser than its picture; never picked by the picture (distance infinity), the depth pass chooses among them by ShadowDistances.
+            float[]? shadowDistances = null;
+            int shadowFirst = levels.Count;
+            if (shadowLevels && GeneratedLevels(mesh, model, radius, LodPixelsPerRadian, ShadowSettings) is { Count: > 1 } shadow)
+            {
+                shadowDistances = [.. shadow.Select(l => l.Distance)];
+                levels.AddRange(shadow.Skip(1).Select(l => l with { Distance = float.PositiveInfinity }));
+            }
             var decoded = new DecodedObjectMesh { Model = model, Levels = levels, Manual = [], Centre = centre, Radius = radius };
             var gpuMesh = new GpuObjectMesh { Distances = [.. levels.Select(l => l.Distance)], Manual = new GpuObjectMesh?[levels.Count], Centre = centre, Radius = radius };
             gpu.EnsureFrame();
@@ -204,7 +220,7 @@ internal sealed class CharacterContent : IDisposable
                 gpuMesh.Bytes += vertexBytes + indexBytes;
             }
             MeshBytes += gpuMesh.Bytes;
-            result = new LoadedMesh(gpuMesh, mesh.SubMeshes.FirstOrDefault()?.MaterialName, centre, radius, morphs);
+            result = new LoadedMesh(gpuMesh, mesh.SubMeshes.FirstOrDefault()?.MaterialName, centre, radius, morphs, shadowDistances, shadowFirst);
         }
         catch (Exception e) when (e is OgreFormatException or IOException or EndOfStreamException or InvalidDataException)
         {
@@ -213,28 +229,33 @@ internal sealed class CharacterContent : IDisposable
         return meshes[key] = result;
     }
 
+    /// <summary>The steps (share of a part's triangles), floor per part, limits and guards the character levels are built with: the objects' limits, and collapses keep the
+    /// texture coordinates (without that a face's eyes and mouth smeared across their UV islands from the second level on).</summary>
+    static readonly FoliageLodBuilder.Settings LodSettings = new([0.5f, 0.25f, 0.12f, 0.05f], 40, 0.25f, 3.2f, 0.85f, true);
+
+    /// <summary>The shadow-only levels' settings: as <see cref="LodSettings"/> without the texture guard (a shadow map shows no texture), down to 5 %.</summary>
+    static readonly FoliageLodBuilder.Settings ShadowSettings = LodSettings with { UvAware = false };
+
+    /// <summary>How much farther the levels of hair and beards start: reduced at the rule's distance their dark strands thinned visibly at 200 units; never reduced they were
+    /// about 650k of a 500-character crowd's 2.0M triangles.</summary>
+    internal const float HairLodScale = 4;
+
     /// <summary>
-    /// Mesh levels generated by edge collapse from level 0 for every
-    /// mesh, at distances in proportion to the mesh's size (about 5, 11, 22 and 45 radii), because the files' own are few and far (human_female has
-    /// none, the male body's only level starts at 200 units).
+    /// Mesh levels generated by edge collapse from level 0 for every mesh, because the files' own are few and far (human_female has none, the male body's only level starts at
+    /// 200 units). Each level starts where its deviation from the original is under the objects' tolerance in rendered pixels (<see cref="ObjectLodGen.Distances"/>, measured in
+    /// the bind pose at <paramref name="pixelsPerRadian"/>), so a face or a weapon keeps its detail as long as it would show.
     /// </summary>
-    static List<MeshLodLevel> GeneratedLevels(OgreMesh mesh, Model model, float radius)
+    static List<MeshLodLevel> GeneratedLevels(OgreMesh mesh, Model model, float radius, float pixelsPerRadian, FoliageLodBuilder.Settings settings)
     {
-        float[] fractions = [0.5f, 0.25f, 0.12f, 0.05f];
-        float[] radii = [5, 11, 22, 45];
-        var chains = new uint[model.Parts.Count][][];
-        Parallel.For(0, chains.Length, p => chains[p] = MeshSimplifier.Chain(model.Parts[p].Vertices, model.Parts[p].Indices, fractions, 40));
         var levels = new List<MeshLodLevel> { new(0, mesh.SubMeshes.Select(s => (uint[]?)s.Indices.Indices).ToList()) };
-        long previous = model.Parts.Sum(p => (long)p.Indices.Length);
-        float unit = Math.Max(radius, 2);
-        for (int k = 0; k < fractions.Length; k++)
+        var parts = model.Parts.Where(p => p.Indices.Length > 0).ToList();
+        if (parts.Count == 0 || FoliageLodBuilder.Build(model, radius, settings) is not { } set) return levels;
+        var distances = ObjectLodGen.Distances(set, ObjectLodGen.TriangleExtent(parts), radius, pixelsPerRadian);
+        for (int k = 1; k < set.Levels; k++)
         {
-            long total = chains.Sum(c => (long)c[k].Length);
-            if (total > previous * 0.85) continue;
-            previous = total;
             var subs = new uint[]?[mesh.SubMeshes.Count];
-            for (int p = 0; p < chains.Length; p++) subs[model.Parts[p].SubMeshIndex] = chains[p][k];
-            levels.Add(new MeshLodLevel(unit * radii[k], subs));
+            for (int p = 0; p < parts.Count; p++) subs[parts[p].SubMeshIndex] = set.Indices[p][k - 1];
+            levels.Add(new MeshLodLevel(distances[k], subs));
         }
         return levels;
     }
@@ -250,7 +271,7 @@ internal sealed class CharacterContent : IDisposable
         catch (Exception e) when (e is OgreFormatException or IOException or EndOfStreamException or InvalidDataException) { Messages.Add($"{c.BodyMesh}: {e.Message}"); return null; }
         var rig = skeletonName is null ? null : Rig(skeletonName);
         if (rig is null) { parsed = null; Messages.Add($"{c.BodyMesh} has no skeleton ({skeletonName})"); return null; }
-        var body = Mesh(bodyPath, rig.BoneCount);
+        var body = Mesh(bodyPath, rig.BoneCount, shadowLevels: true);
         parsed = null;
         if (body is null) return null;
 
@@ -265,14 +286,14 @@ internal sealed class CharacterContent : IDisposable
         {
             Label = $"body {Path.GetFileName(bodyPath)}", Mesh = body.Gpu, Shared = true, Material = BodyMaterial(c),
             BoundsCentre = body.Centre, BoundsRadius = body.Radius,
-            Morphed = asset.MorphBase != 0,
+            Morphed = asset.MorphBase != 0, ShadowDistances = body.ShadowDistances, ShadowFirst = body.ShadowFirst,
         });
         foreach (var part in c.Parts)
         {
             var path = FindMesh(part.Mesh);
             if (path is null) continue;
             bool shared = part.Mode == AttachMode.SharedSkeleton;
-            var loaded = Mesh(path, shared ? rig.BoneCount : null);
+            var loaded = Mesh(path, shared ? rig.BoneCount : null, part.Record.Type == FcsRecordType.ATTACHMENT ? HairLodScale : 1);
             if (loaded is null || loaded.Gpu.Parts.Count == 0) continue;
             var ap = new AssetPart
             {
@@ -312,7 +333,7 @@ internal sealed class CharacterContent : IDisposable
         return rig.Shape(shape.BoneSize, shape.PositionalSize, shape.MovementScale);
     }
 
-    // ---- materials (CharacterScene.BodyMaterial / PartMaterial) ----
+        // ---- materials (CharacterScene.BodyMaterial / PartMaterial) ----
 
     static Vector4 Channel(int channel) => channel switch { 1 => new(0, 1, 0, 0), 2 => new(0, 0, 1, 0), 3 => new(0, 0, 0, 1), _ => new(1, 0, 0, 0) };
 

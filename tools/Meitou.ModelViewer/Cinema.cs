@@ -36,7 +36,7 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
     readonly List<Entry> keys = [];
     /// <summary>The time a new key is placed after the last one, and a loop takes from the last key back to the first.</summary>
     float spacing = 6;
-    bool loop, followTime = true;
+    bool loop, followTime;
     /// <summary>The playhead, seconds on the timeline.</summary>
     double time;
     /// <summary>The playhead moved without playing (a scrub, a click): the camera goes there on the next frame.</summary>
@@ -355,17 +355,17 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
         return true;
     }
 
-    /// <summary>Moves a dragged key (between its neighbours, so the order stays) or the playhead; true while dragging.</summary>
+    /// <summary>Moves a dragged key (past other keys too, which reorders them; never onto one) or the playhead; true while dragging.</summary>
     public bool MouseMove(Vector2 p)
     {
         if (drag == Drag.None || ui is null) return false;
         float t = TimeAt(p.X);
         if (drag == Drag.Key && selected is { } k)
         {
-            var sorted = Sorted;
-            int i = sorted.IndexOf(k);
-            float lo = i > 0 ? sorted[i - 1].Time + MinGap : 0, hi = i + 1 < sorted.Count ? sorted[i + 1].Time - MinGap : float.MaxValue;
-            k.Time = Math.Clamp(MathF.Round(t * 20) / 20, lo, hi);   // to 0.05 s
+            // To 0.05 s, not before 0; over another key it steps on in the direction it moves, so a key can be pulled in front of or behind others.
+            float to = MathF.Max(0, MathF.Round(t * 20) / 20), step = to >= k.Time ? MinGap : -MinGap;
+            while (keys.Any(e => e != k && MathF.Abs(e.Time - to) < MinGap - 1e-4f)) to = to + step < 0 ? (step = MinGap) : to + step;
+            k.Time = to;
             time = k.Time;
         }
         else time = t;

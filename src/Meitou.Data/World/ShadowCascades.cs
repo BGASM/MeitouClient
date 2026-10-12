@@ -107,7 +107,8 @@ public static class KenshiShadows
 }
 
 /// <summary>The camera the cascades are fitted to: its eye, view axes and perspective (vertical field of view, width over height).</summary>
-public readonly record struct ShadowView(Vector3 Eye, Vector3 Forward, Vector3 Up, float FieldOfViewY, float Aspect, float Near);
+/// <paramref name="Focus"/>: how far ahead the camera looks at what it is about (the orbit camera's boom; 0: unknown), which the Meitou fit sizes the first cascade by.
+public readonly record struct ShadowView(Vector3 Eye, Vector3 Forward, Vector3 Up, float FieldOfViewY, float Aspect, float Near, float Focus = 0);
 
 /// <summary>What the viewer draws: the map's side, how far shadows reach (view depth), the number of cascades.</summary>
 /// <param name="CameraNear">The game camera's near clip: the cascades' boxes start there, and with <paramref name="CameraFar"/> it turns the
@@ -115,9 +116,16 @@ public readonly record struct ShadowView(Vector3 Eye, Vector3 Forward, Vector3 U
 public sealed record ShadowSettings(int MapSize = KenshiShadows.LazyMapSize, float Range = KenshiShadows.DefaultRange, int Cascades = KenshiShadows.CascadeCount,
     float CameraNear = KenshiShadows.CameraNear, float CameraFar = KenshiShadows.CameraFar)
 {
-    /// <summary>Tiles per row of the atlas.</summary>
+    /// <summary>
+    /// The most cascades the renderer holds (the receivers' uniform arrays are this long). The game's CSM has <see cref="KenshiShadows.CascadeCount"/>
+    /// (<see cref="Cascades"/>, the Faithful count); the Meitou shadows have their own count (<c>ShadowPass.MeitouCascades</c>).
+    /// </summary>
+    public const int MaxCascades = 8;
+    /// <summary>Tiles per row of the game's atlas (ceil(√<see cref="Cascades"/>): 2 for its four), which the Faithful CSM draws as the one layer of
+    /// the cascade array.</summary>
     public int Grid => (int)Math.Ceiling(Math.Sqrt(Cascades));
-    /// <summary>Side of one cascade's tile in texels.</summary>
+    /// <summary>Side of one cascade's tile in texels (the map side over <see cref="Grid"/>: 2048 at the side 4096): also the side of each Meitou
+    /// cascade's layer.</summary>
     public int TileSize => MapSize / Grid;
 }
 
@@ -128,6 +136,9 @@ public sealed record ShadowSettings(int MapSize = KenshiShadows.LazyMapSize, flo
 /// </summary>
 public sealed class ShadowCascade
 {
+    /// <summary><see cref="Index"/> of the landmark map's box (<see cref="MeitouShadowFit.FitLandmarks"/>): not a cascade, nor a layer of the cascade array (it has a map of its own).</summary>
+    public const int LandmarkIndex = -1;
+    /// <summary>The cascade's number, nearest first: also its layer in the cascade array. <see cref="LandmarkIndex"/> for the landmark map.</summary>
     public int Index { get; init; }
     /// <summary>View depths this cascade serves (the previous split up to its own).</summary>
     public float NearDepth { get; init; }
@@ -154,9 +165,9 @@ public sealed class ShadowCascade
     /// <summary>The PCF radius in the tile's UV units (0..1 across the tile).</summary>
     public float FilterRadius { get; init; }
     /// <summary>
-    /// The tile's rectangle in the atlas: x0, y0, width, height in 0..1 (GL texture space, y up). As the game's: cascade i in column
+    /// The tile's rectangle in the game's atlas: x0, y0, width, height in 0..1 (GL texture space, y up). As the game's: cascade i in column
     /// i / grid and Direct3D row i % grid counted from the top, so the whole atlas is the game's picture (taps that leave a tile read the
-    /// same neighbour).
+    /// same neighbour). The Meitou cascades (a layer of the cascade array each) and the landmark map have the whole of their map, (0, 0, 1, 1).
     /// </summary>
     public Vector4 Tile { get; init; }
 

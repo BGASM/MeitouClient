@@ -194,11 +194,11 @@ public sealed unsafe partial class PostProcess : IDisposable
 
     sealed class SsaoPass : FullscreenProgram
     {
-        public readonly SamplerSlot Depth;
-        public readonly UniformHandle Tan, NearFar, Size, Radius, Strength, FadeStart, FadeEnd, Right, Up, Back, Eye;
+        public readonly SamplerSlot Depth, Mask;
+        public readonly UniformHandle Tan, NearFar, Size, Radius, Strength, FadeStart, FadeEnd, Right, Up, Back, Eye, CharacterOccluder;
         public SsaoPass(GpuContext gpu) : base(gpu, PostProcessShaders.Ssao, "post ssao")
         {
-            Depth = P.Sampler("uDepth");
+            (Depth, Mask, CharacterOccluder) = (P.Sampler("uDepth"), P.Sampler("uMask"), P.Uniform("uCharacterOccluder"));
             (Tan, NearFar, Size, Radius, Strength, FadeStart, FadeEnd) = (P.Uniform("uTan"), P.Uniform("uNearFar"), P.Uniform("uSize"),
                 P.Uniform("uRadius"), P.Uniform("uStrength"), P.Uniform("uFadeStart"), P.Uniform("uFadeEnd"));
             (Right, Up, Back, Eye) = (P.Uniform("uRight"), P.Uniform("uUp"), P.Uniform("uBack"), P.Uniform("uSsaoEye"));
@@ -1140,6 +1140,10 @@ public sealed unsafe partial class PostProcess : IDisposable
         float tanY = MathF.Tan(fovY * 0.5f);
         var s = ssao;
         Bind(s.P, s.Depth, sceneDepth);
+        // Characters count less as occluders (the mask, as the blur's below): a body lying on the ground darkened a halo round it as wide as itself.
+        bool characters = sceneColour is not null && (CharactersDrawn || !MaskSkip);
+        Bind(s.P, s.Mask, characters ? sceneColour : null);
+        s.P.Set(s.CharacterOccluder, characters ? PostOptions.SsaoCharacterOccluder : 1f);
         s.P.Set(s.Tan, tanY * aspect, tanY);
         s.P.Set(s.NearFar, nearPlane, farPlane);
         s.P.Set(s.Size, (float)width, (float)height);

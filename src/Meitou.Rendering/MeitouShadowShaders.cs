@@ -1,4 +1,5 @@
 using System.Globalization;
+using Meitou.Data.World;
 
 using Meitou.Rendering.Gpu;
 
@@ -14,8 +15,10 @@ static class MeitouShadowShaders
 {
     public const uint Binding = 8;
     public const string Block = "MeitouShadowReceiver";
-    /// <summary>Size of <see cref="Block"/> (std140).</summary>
-    public const int BlockBytes = 272;
+    /// <summary>Size of <see cref="Block"/> (std140): two vec4 arrays of <see cref="ShadowSettings.MaxCascades"/>, four vec4, a mat4 and a vec4.</summary>
+    public const int BlockBytes = 2 * ShadowSettings.MaxCascades * 16 + 4 * 16 + 64 + 16;
+    /// <summary>Float offsets in <see cref="Block"/> of the members after the two per-cascade arrays (<c>uMsParams</c> and on).</summary>
+    public const int ParamsOffset = 2 * ShadowSettings.MaxCascades * 4;
     /// <summary>Taps of the filter and of the blocker search.</summary>
     public const int FilterTaps = 16, BlockerTaps = 8;
 
@@ -37,8 +40,8 @@ static class MeitouShadowShaders
 
         layout(std140) uniform {{Block}}
         {
-            vec4 uMsSlice[4];      // x: first view depth the cascade serves (its blend band included), y: last, z: filter radius (tile UV), w: texel (world)
-            vec4 uMsBox[4];        // x: world units per tile UV, y: box depth (world), z: blocker search radius (tile UV), w: penumbra (tile UV) per world unit of blocker distance
+            vec4 uMsSlice[{{ShadowSettings.MaxCascades}}];      // x: first view depth the cascade serves (its blend band included), y: last, z: filter radius (tile UV), w: texel (world)
+            vec4 uMsBox[{{ShadowSettings.MaxCascades}}];        // x: world units per tile UV, y: box depth (world), z: blocker search radius (tile UV), w: penumbra (tile UV) per world unit of blocker distance
             vec4 uMsParams;        // x: noise offset (changes per frame under a temporal upscaler), y: shadow range, z: fade start, w: terrain term fade start
             vec4 uMsTerrain;       // xy: world x, z of the first sample, z: samples per world unit, w: 1 when the terrain term is on
             vec4 uMsTerrain2;      // x: samples per side, y: height bias, z: minimum softness (height), w: softness per unit of occluder distance
@@ -47,7 +50,7 @@ static class MeitouShadowShaders
             vec4 uMsLandmark;      // x: filter radius (UV), y: normal offset (world), w: 1 when the landmark map is on
         };
         uniform sampler2D uShadowTerrain;   // per world grid sample: (height of the shadow's top, distance to the occluder)
-        uniform sampler2D uShadowBlocker;   // the atlas's depth at half resolution, nearest of each 2 × 2 (raw, for the blocker search)
+        uniform sampler2DArray uShadowBlocker;   // the cascades' depth at half resolution, nearest of each 2 × 2 (raw, for the blocker search), a layer per cascade
         uniform sampler2DShadow uShadowLandmark;   // the landmarks' depth along the sun (comparison)
 
         // The terrain's own shadow beyond the cascades: a world point is shadowed by the land towards the sun when it lies below the
@@ -85,7 +88,6 @@ static class MeitouShadowShaders
             float cosL = clamp(-nl.z, 0.0, 1.0);
             vec3 p = world - uShadowOrigin.xyz + ng * (texel * (0.5 + 1.5 * sqrt(1.0 - cosL * cosL)));
             vec3 t = (uShadowTile[c] * vec4(p, 1.0)).xyz;
-            vec4 rect = uShadowRect[c];
             float radius = uMsSlice[c].z;
             float reach = uMsBox[c].z + uShadowExtent[c].y * 2.0;
             if (any(lessThan(t.xy, vec2(reach))) || any(greaterThan(t.xy, vec2(1.0 - reach))) || t.z >= 1.0) return -1.0;
@@ -107,7 +109,7 @@ static class MeitouShadowShaders
                     vec2 d = msDisk8[k];
                     vec2 o = vec2(rot.x * d.x - rot.y * d.y, rot.y * d.x + rot.x * d.y) * search;
                     vec2 uv = clamp(t.xy + o, vec2(0.0), vec2(1.0));
-                    float z = textureLod(uShadowBlocker, rect.xy + uv * rect.zw, 0.0).r;
+                    float z = textureLod(uShadowBlocker, vec3(uv, float(c)), 0.0).r;
                     float limit = t.z + dot(o, slope) - 0.0005;
                     if (z < limit) { sum += z; found += 1.0; }
                 }
@@ -123,8 +125,7 @@ static class MeitouShadowShaders
                 {
                     vec2 d = msDisk16[k];
                     vec2 o = vec2(rot.x * d.x - rot.y * d.y, rot.y * d.x + rot.x * d.y) * radius;
-                    vec2 uv = t.xy + o;
-                    lit += textureLod(uShadowMap, vec3(rect.xy + uv * rect.zw, t.z + dot(o, slope)), 0.0);
+                    lit += shadowLayer(t.xy + o, c, t.z + dot(o, slope));
                 }
                 return lit / {{F(FilterTaps)}};
             }
@@ -132,8 +133,7 @@ static class MeitouShadowShaders
             {
                 vec2 d = msDisk8[k];
                 vec2 o = vec2(rot.x * d.x - rot.y * d.y, rot.y * d.x + rot.x * d.y) * radius;
-                vec2 uv = t.xy + o;
-                lit += textureLod(uShadowMap, vec3(rect.xy + uv * rect.zw, t.z + dot(o, slope)), 0.0);
+                lit += shadowLayer(t.xy + o, c, t.z + dot(o, slope));
             }
             return lit / {{F(FilterTaps / 2)}};
         }
@@ -175,7 +175,7 @@ static class MeitouShadowShaders
             if (depth < uMsParams.y)
             {
                 int count = int(uShadowForward.w);
-                for (int c = 0; c < 4; c++)
+                for (int c = 0; c < {{ShadowSettings.MaxCascades}}; c++)
                 {
                     if (c >= count || depth > uMsSlice[c].y) continue;
                     float s = msCascade(c, world, ng, nl, noise);
@@ -239,11 +239,12 @@ static class MeitouShadowShaders
         }
         """;
 
-    /// <summary>The blocker map: the atlas's raw depth (comparison off while it runs), the nearest of each 2 × 2 texels.</summary>
+    /// <summary>The blocker map's layer <c>uLayer</c>: that cascade's raw depth (comparison off while it runs), the nearest of each 2 × 2 texels.</summary>
     public const string BlockerFragment = """
         #version 330 core
-        uniform sampler2D uAtlas;
+        uniform sampler2DArray uAtlas;
         uniform float uAtlasSize;
+        uniform int uLayer;
         out vec4 fragColour;
         void main()
         {
@@ -251,7 +252,7 @@ static class MeitouShadowShaders
             float z = 1.0;
             for (int j = 0; j < 2; j++)
                 for (int i = 0; i < 2; i++)
-                    z = min(z, texelFetch(uAtlas, ivec2(base) + ivec2(i, j), 0).r);
+                    z = min(z, texelFetch(uAtlas, ivec3(ivec2(base) + ivec2(i, j), uLayer), 0).r);
             fragColour = vec4(z, 0.0, 0.0, 1.0);
         }
         """;

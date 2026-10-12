@@ -169,8 +169,8 @@ static partial class NativeShaders
         ["uAtmoClouds"] = "textures2D[frame.atmoClouds]", ["uAtmoCloudsTile"] = "textures2D[frame.atmoCloudsTile]",
         ["uAtmoIrradiance"] = "texturesCube[frame.atmoIrradiance]", ["uAtmoSpecular"] = "texturesCube[frame.atmoSpecular]",
         ["uAtmoAmbientMap"] = "textures2D[frame.atmoAmbientMap]",
-        ["uShadowMap"] = "shadowTextures[frame.shadowMap]", ["uShadowNoise"] = "textures2D[frame.shadowNoise]",
-        ["uShadowTerrain"] = "textures2D[frame.shadowTerrain]", ["uShadowBlocker"] = "textures2D[frame.shadowBlocker]",
+        ["uShadowMap"] = "shadowArrays[frame.shadowMap]", ["uShadowNoise"] = "textures2D[frame.shadowNoise]",
+        ["uShadowTerrain"] = "textures2D[frame.shadowTerrain]", ["uShadowBlocker"] = "textures2DArray[frame.shadowBlocker]",
         ["uShadowLandmark"] = "shadowTextures[frame.shadowLandmark]",
         ["uWeatherWet"] = "frame.weatherWet", ["uWeatherDust"] = "frame.weatherDust",
         ["uWeatherGround"] = "textures2D[frame.weatherGround]", ["uWeatherDustNoise"] = "textures2D[frame.weatherDustNoise]",
@@ -351,8 +351,8 @@ unsafe struct FrameConstants
     public static readonly (string Name, BindlessKind Kind, int Offset)[] Textures =
     [
         ("uAtmoIrradiance", BindlessKind.Cube, 208), ("uAtmoSpecular", BindlessKind.Cube, 212), ("uAtmoAmbientMap", BindlessKind.Texture2D, 216),
-        ("uShadowMap", BindlessKind.Shadow2D, 220), ("uShadowNoise", BindlessKind.Texture2D, 224), ("uShadowTerrain", BindlessKind.Texture2D, 228),
-        ("uShadowBlocker", BindlessKind.Texture2D, 232), ("uShadowLandmark", BindlessKind.Shadow2D, 236),
+        ("uShadowMap", BindlessKind.ShadowArray, 220), ("uShadowNoise", BindlessKind.Texture2D, 224), ("uShadowTerrain", BindlessKind.Texture2D, 228),
+        ("uShadowBlocker", BindlessKind.Texture2DArray, 232), ("uShadowLandmark", BindlessKind.Shadow2D, 236),
         ("uWeatherGround", BindlessKind.Texture2D, 272), ("uWeatherDustNoise", BindlessKind.Texture2D, 276),
         ("uGiIrradiance", BindlessKind.Texture2D, 8592), ("uGiDistance", BindlessKind.Texture2D, 8596), ("uGiBase", BindlessKind.Texture2D, 8600),
         ("uLightCells", BindlessKind.Texture2D, 8624), ("uLightIndex", BindlessKind.Texture2D, 8628), ("uLightData", BindlessKind.Texture2D, 8632),

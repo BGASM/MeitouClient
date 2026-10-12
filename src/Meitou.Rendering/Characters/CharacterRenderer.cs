@@ -106,6 +106,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     public void SetView(int width, int height, float fieldOfView)
     {
         content.Textures.Mips.SetView(width, height, fieldOfView, Gpu.LodBias);
+        content.LodPixelsPerRadian = Meitou.Data.World.TerrainLod.ProjectionScale(height, fieldOfView);   // the generated levels are placed by their deviation in rendered pixels
         viewKnown = true;
     }
 

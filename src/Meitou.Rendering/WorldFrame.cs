@@ -47,6 +47,8 @@ sealed class WorldOptions
     /// <summary>Terrain LOD (<see cref="TerrainLod"/>): the screen-space error in render pixels (null: the reach switch's mode default).</summary>
     public float? TerrainError;
     public bool NoWater, ShowKeys;
+    /// <summary>No placed fog volumes (<c>fogfeatures.dat</c> not read); the weather's fog spheres still work. Set by the game's sandbox, no switch of its own.</summary>
+    public bool NoFogFeatures;
     /// <summary>`--play-shots`: the viewer starts flying its saved camera keys (the F2 timeline) on a loop.</summary>
     public bool PlayShots;
     /// <summary>The game's <c>texture resolution gimping</c> (0..4; missing key: 1) and <c>water reflection</c> (0..4; missing: 2) settings (docs/formats/settings.md).</summary>
@@ -718,7 +720,7 @@ static class WorldFrame
         gpu.Post.LoadHeatHaze(assets);
         // The placed fog volumes (docs/formats/fogfeatures.md): the swamp's fog and the like, part of the game's look.
         // Always made: the weather's fog spheres go through it too, with or without a fogfeatures.dat.
-        gpu.FogVolumes = new FogVolumes(context, FogFeatures.Load(install));
+        gpu.FogVolumes = new FogVolumes(context, o.NoFogFeatures ? [] : FogFeatures.Load(install));
         gpu.Post.FogVrs = true;   // takes effect where the device supports fragment shading rates
         gpu.Sky.HazeStrength = o.HazeStrength;
         gpu.Sky.NightAir = o.NightAir;
@@ -809,7 +811,7 @@ static class WorldFrame
         gpu.Shadow = new ShadowPass(context, assets) { Settings = new ShadowSettings(KenshiShadows.MapSize(o.ShadowQuality), o.ShadowRangeFor(o.MeitouShadows)), Meitou = o.MeitouShadows, FilterQuality = o.ShadowFilter, Enabled = !o.ShadowsOff };
         if (!gpu.Shadow.HasNoise) Console.WriteLine($"warning   shadows: {KenshiShadows.NoiseTexture} not found, the receiver's jitter is a hash");
         gpu.Shadow.SetTerrain(scene.Coarse, scene.CoarseSize);   // the Meitou shadows' terrain shadow beyond the range
-        Console.WriteLine($"shadows   {gpu.Shadow.Settings.MapSize}² atlas, {gpu.Shadow.Settings.Cascades} cascades of {gpu.Shadow.Settings.TileSize}², range {gpu.Shadow.Settings.Range:0}");
+        Console.WriteLine($"shadows   {gpu.Shadow.Settings.MapSize}² atlas, {gpu.Shadow.CascadeCount} cascades of {gpu.Shadow.Settings.TileSize}² ({(gpu.Shadow.Meitou ? "Meitou: a layer each" : "Faithful: tiles of one layer")}), range {gpu.Shadow.Settings.Range:0}");
         if (o.Crowd > 0 && scene.Database is not null) gpu.Characters = Characters.CrowdHarness.Create(context, install, scene, assets, o, interactive);
         gpu.DebugShadows = o.DebugShadows;
         if (o.GiDebug > 0 || o.Gi)
@@ -963,6 +965,7 @@ static class WorldFrame
         sliders.Add(new Slider("Terrain detail: error px (less = finer)", 1, 32, () => r.TerrainPixelError, v => r.TerrainPixelError = v, "0.0", Logarithmic: true));
         // The game's `Shadow Range` slider goes 1000 to 9000; the viewer allows more (the cascades stretch over it), and its left end (0) turns the
         // shadows off (low-end GPUs).
+        Toggle? fifthCascade = null;
         if (g.Shadow is { } shadow)
         {
             const float off = KenshiShadows.MinRange * 0.9f;
@@ -976,6 +979,7 @@ static class WorldFrame
                 v => shadow.Settings = shadow.Settings with { MapSize = KenshiShadows.MapSize((int)MathF.Round(v)) }, "0",
                 Text: v => KenshiShadows.MapSize((int)MathF.Round(v)).ToString(CultureInfo.InvariantCulture) + "²"));
             if (shadow.Meitou) sliders.Add(new Slider("Shadow filter 0-2 (Meitou; 0 low-end)", 0, 2, () => shadow.FilterQuality, v => shadow.FilterQuality = (int)MathF.Round(v), "0"));
+            if (shadow.Meitou) fifthCascade = new Toggle("Shadow cascade 5 (Meitou)", () => shadow.MeitouCascades >= 5, v => shadow.MeitouCascades = v ? 5 : 4);
         }
         // A viewer option, not the game's: 1 is the game's haze (docs/formats/sky.md).
         sliders.Add(new Slider("Haze strength (1 = game)", 0, 3, () => g.Sky.HazeStrength, v => g.Sky.HazeStrength = v, "0.00"));
@@ -1019,6 +1023,7 @@ static class WorldFrame
             Text: v => (1 << (int)MathF.Round(v)) + "x" + (MathF.Round(v) >= 3 ? " (as the game)" : "")));
         // The Faithful / Meitou switches as checkboxes (ticked: Meitou), the F-key toggles' state.
         var toggles = switches?.Select(e => new Toggle(e.Name, () => e.IsMeitou, v => e.IsMeitou = v, () => e.IsMeitou ? e.Meitou : e.Faithful)).ToList();
+        if (fifthCascade is not null) (toggles ??= []).Add(fifthCascade);
         // The billboard (impostor atlas) disk cache: deleted files are baked again when next needed; the resident atlases stay until evicted.
         var actions = new List<PanelAction>();
         if (g.Weather is { } weather)
@@ -1059,7 +1064,7 @@ static class WorldFrame
 
     /// <summary>Per-cascade and per-step CPU times in the stats strings (ShadowPass.CasterStats, FoliageRenderer's details); the viewer's screenshots and benchmarks turn it on.</summary>
     public static bool DetailedStats;
-    static readonly string[] CascadeLabels = ["shadow c0", "shadow c1", "shadow c2", "shadow c3"];
+    static readonly string[] CascadeLabels = [.. Enumerable.Range(0, ShadowSettings.MaxCascades).Select(i => $"shadow c{i}")];
 
     public static void Draw(Gpu gpu, WorldScene scene, WorldCamera camera, WorldRenderOptions render, int width, int height, float hour, float time, float fogDistance)
     {
@@ -1086,8 +1091,9 @@ static class WorldFrame
         StageClock.Lap(1);
         if (gpu.Foliage is { } lodFoliage) lodFoliage.LodPixelsPerRadian = render.TerrainPixelScale;   // the generated mesh levels measure their deviation in rendered pixels
         gpu.Foliage?.Update(eye);
-        gpu.Characters?.Update(eye);
         StageClock.Lap(2);
+        gpu.Characters?.Update(eye);
+        StageClock.Lap(StageClock.UpdChars);
         float floor = gpu.Terrain.HeightAt(eye.X, eye.Z);
         if (render.Water) floor = Math.Max(floor, WorldWater.Height);
         camera.EyeClearance = Math.Max(eye.Y - floor, 1);
@@ -1260,10 +1266,10 @@ static class WorldFrame
             if (nearSlice) post.CharactersDrawn = false;   // none this frame unless the near slice draws some below
             if (nearSlice && gpu.Characters is { } characters)
             {
-                host.Stage(7);
+                host.Stage(StageClock.Characters);
                 characters.Draw(viewProjection, eye, frustum, light.SunDirection, light.FogColour, light.FogDistance);
                 post.CharactersDrawn = characters.DrawnCharacters > 0;
-                StageClock.Lap(7);
+                StageClock.Lap(StageClock.Characters);   // the colour draw; the motion draw (post chain, upscalers only) laps itself in
             }
             // Transparent water refracts the slice's scene. Fully opaque distant slices need no copy or pass restart.
             if (render.Water && gpu.Water is { } refracting && refracting.NeedsRefraction(near))
@@ -1406,7 +1412,7 @@ static class WorldFrame
     {
         var shadow = gpu.Shadow!;
         var v = camera.View;
-        var view = new ShadowView(camera.Eye, camera.Forward, Vector3.Normalize(new Vector3(v.M12, v.M22, v.M32)), camera.FieldOfView, width / (float)Math.Max(height, 1), camera.Near);
+        var view = new ShadowView(camera.Eye, camera.Forward, Vector3.Normalize(new Vector3(v.M12, v.M22, v.M32)), camera.FieldOfView, width / (float)Math.Max(height, 1), camera.Near, camera.Distance);
         int objects = 0, foliage = 0;
         gpu.Terrain.DepthTriangles = 0;
         var cascades = DetailedStats ? new System.Text.StringBuilder() : null;
@@ -1421,10 +1427,11 @@ static class WorldFrame
             int oi = 0, oc = 0, fi = 0, fc = 0;
             if (render.Objects && gpu.Objects is { } o) { o.DrawDepth(worldToClip, lodEye, planes, render, gpu.Terrain, coarse); objects += o.DrawnInstances; (oi, oc) = (o.DrawnInstances, o.DrawCalls); }
             StageClock.Sub("objects");
-            gpu.Characters?.DrawDepth(worldToClip, lodEye, planes);
+            // Characters take the far cascades' floor in both shadow modes: their levels are Meitou's own, and every character is in every cascade that holds the crowd.
+            gpu.Characters?.DrawDepth(worldToClip, lodEye, planes, ShadowLod.ObjectLodFloor(ShadowLod.Applies(cascade.Index) ? (float)cascade.Texel : 0, render.TerrainPixelScale));
             long t2 = Stopwatch.GetTimestamp();
             if (gpu.Foliage is { } f) { f.DrawDepth(worldToClip, lodEye, planes, render, gpu.Terrain, maxRange: shadow.EffectiveRange * 1.2f, minSize: shadow.MinFoliageCaster(cascade), texel: (float)cascade.Texel, coarse: coarse > 0); foliage += f.DrawnInstances; (fi, fc) = (f.DrawnInstances, f.DrawCalls); }
-            StageClock.Phase(CascadeLabels[cascade.Index & 3]);
+            StageClock.Phase(CascadeLabels[cascade.Index]);
             long t3 = Stopwatch.GetTimestamp();
             double ms = 1000.0 / Stopwatch.Frequency;
             shadow.PhaseMs[0] += (t1 - t0) * ms;

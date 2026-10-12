@@ -80,7 +80,7 @@ static class LightShaftShaders
     /// term of a point in the air: one compare in the first cascade that holds it (no filter, no surface to offset from), with the Meitou receiver's
     /// fade at the shadow range, its terrain term (mountains out to the horizon) and its landmark map; the Faithful receiver's cascades end at the last split.
     /// </summary>
-    public static readonly string Inject = "#version 330 core\n" + AtmosphereShaders.Functions + Common + Alpha + """
+    public static readonly string Inject = "#version 330 core\n" + AtmosphereShaders.Functions + Common + Alpha + $$"""
 
         out vec4 fragColour;
         uniform int uShaftSamples;
@@ -96,14 +96,13 @@ static class LightShaftShaders
             int count = int(uShadowForward.w);
             if (!meitou || depth < uMsParams.y)
             {
-                for (int c = 0; c < 4; c++)
+                for (int c = 0; c < {{ShadowSettings.MaxCascades}}; c++)
                 {
                     if (c >= count) break;
                     if (depth > (meitou ? uMsSlice[c].y : uShadowCascade[c].x)) continue;
                     vec3 t = (uShadowTile[c] * vec4(world - uShadowOrigin.xyz, 1.0)).xyz;
                     if (any(lessThan(t.xy, vec2(0.0))) || any(greaterThan(t.xy, vec2(1.0))) || t.z >= 1.0) continue;
-                    vec4 rect = uShadowRect[c];
-                    lit = textureLod(uShadowMap, vec3(rect.xy + t.xy * rect.zw, t.z - 0.0005), 0.0);
+                    lit = shadowCascadeLayer(t.xy, c, t.z - 0.0005);
                     break;
                 }
             }

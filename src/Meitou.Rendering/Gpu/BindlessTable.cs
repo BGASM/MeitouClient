@@ -7,16 +7,16 @@ namespace Meitou.Rendering.Gpu;
 
 /// <summary>The arrays of the bindless set (set 0 of the native model, docs/renderer-native.md 2.6), by binding number. The integer arrays
 /// (<see cref="UTexture2D"/>, <see cref="ITexture2D"/>) take textures of UINT and SINT formats, which a float sampler may not read.</summary>
-public enum BindlessKind { Texture2D = 0, Texture2DArray = 1, Cube = 2, Shadow2D = 3, UTexture2D = 4, ITexture2D = 5 }
+public enum BindlessKind { Texture2D = 0, Texture2DArray = 1, Cube = 2, Shadow2D = 3, UTexture2D = 4, ITexture2D = 5, ShadowArray = 6 }
 
 /// <summary>An entry of the <see cref="BindlessTable"/>: the array and the index in it (what a shader reads through a push constant or a
 /// material table).</summary>
 public readonly record struct BindlessHandle(BindlessKind Kind, uint Index);
 
 /// <summary>
-/// The bindless texture table: combined image samplers in six partially bound, update-after-bind arrays (<c>sampler2D textures2D[]</c>,
+/// The bindless texture table: combined image samplers in seven partially bound, update-after-bind arrays (<c>sampler2D textures2D[]</c>,
 /// <c>sampler2DArray textures2DArray[]</c>, <c>samplerCube texturesCube[]</c>, <c>sampler2DShadow shadowTextures[]</c>,
-/// <c>usampler2D utextures2D[]</c>, <c>isampler2D itextures2D[]</c>; <see cref="GlslDeclarations"/>), one descriptor set per frame slot so a
+/// <c>usampler2D utextures2D[]</c>, <c>isampler2D itextures2D[]</c>, <c>sampler2DArrayShadow shadowArrays[]</c>; <see cref="GlslDeclarations"/>), one descriptor set per frame slot so a
 /// slot is never written while a frame in flight reads it. Registrations and rewrites go into a journal that is replayed into a slot's set
 /// when that slot's frame begins, and into the open frame's own set when that frame ends (before it is submitted): an index registered or
 /// updated while a frame is open is valid in that frame. A freed index is reused once the frames that could read it have finished. The
@@ -30,14 +30,14 @@ public readonly record struct BindlessHandle(BindlessKind Kind, uint Index);
 /// </remarks>
 public sealed unsafe class BindlessTable : IDisposable
 {
-    /// <summary>The number of arrays (bindings 0 to 5 of the set).</summary>
-    public const int ArrayCount = 6;
+    /// <summary>The number of arrays (bindings 0 to 6 of the set).</summary>
+    public const int ArrayCount = 7;
 
     /// <summary>The GLSL names of the arrays, by binding (<see cref="BindlessKind"/> order).</summary>
-    public static readonly string[] GlslArrays = ["textures2D", "textures2DArray", "texturesCube", "shadowTextures", "utextures2D", "itextures2D"];
+    public static readonly string[] GlslArrays = ["textures2D", "textures2DArray", "texturesCube", "shadowTextures", "utextures2D", "itextures2D", "shadowArrays"];
 
     /// <summary>The GLSL types of the arrays' elements, by binding.</summary>
-    public static readonly string[] GlslTypes = ["sampler2D", "sampler2DArray", "samplerCube", "sampler2DShadow", "usampler2D", "isampler2D"];
+    public static readonly string[] GlslTypes = ["sampler2D", "sampler2DArray", "samplerCube", "sampler2DShadow", "usampler2D", "isampler2D", "sampler2DArrayShadow"];
 
     /// <summary>The set's declarations for a native shader (set 0), with the extension <c>nonuniformEXT</c> needs. Index an array with
     /// <c>textures2D[nonuniformEXT(index)]</c> when the index may differ between invocations of a draw.</summary>
@@ -62,6 +62,7 @@ public sealed unsafe class BindlessTable : IDisposable
             BindlessKind.Texture2DArray => (SamplerDimension.Dim2D, true, false, ScalarKind.Float),
             BindlessKind.Cube => (SamplerDimension.Cube, false, false, ScalarKind.Float),
             BindlessKind.Shadow2D => (SamplerDimension.Dim2D, false, true, ScalarKind.Float),
+            BindlessKind.ShadowArray => (SamplerDimension.Dim2D, true, true, ScalarKind.Float),
             BindlessKind.UTexture2D => (SamplerDimension.Dim2D, false, false, ScalarKind.UInt),
             BindlessKind.ITexture2D => (SamplerDimension.Dim2D, false, false, ScalarKind.Int),
             _ => (SamplerDimension.Dim2D, false, false, ScalarKind.Float),
@@ -89,9 +90,9 @@ public sealed unsafe class BindlessTable : IDisposable
         device.Vk.GetPhysicalDeviceProperties2(device.PhysicalDevice, &props);
         uint limit = Math.Min(props12.MaxPerStageDescriptorUpdateAfterBindSamplers, props12.MaxDescriptorSetUpdateAfterBindSampledImages);
         // 2D textures get most of the room; the rest are few (terrain arrays, the atmosphere's cubes, shadow maps, integer lookup textures
-        // such as the terrain's blend cells). The shares add up to 15/16 of the limit.
+        // such as the terrain's blend cells, the sun's cascade array). The shares add up to 31/32 of the limit.
         Capacity = [Math.Min(16384u, limit / 2), Math.Min(1024u, limit / 8), Math.Min(256u, limit / 16), Math.Min(256u, limit / 16),
-            Math.Min(256u, limit / 16), Math.Min(256u, limit / 16)];
+            Math.Min(256u, limit / 16), Math.Min(256u, limit / 16), Math.Min(64u, limit / 32)];
         for (int i = 0; i < ArrayCount; i++) free[i] = new Stack<uint>();
 
         var bindings = stackalloc DescriptorSetLayoutBinding[ArrayCount];
@@ -148,14 +149,14 @@ public sealed unsafe class BindlessTable : IDisposable
 
     /// <summary>The array a texture of <paramref name="format"/> and <paramref name="kind"/> belongs in: integer formats (UINT, SINT) go to
     /// <see cref="BindlessKind.UTexture2D"/> / <see cref="BindlessKind.ITexture2D"/>, a depth texture read with comparison
-    /// (<paramref name="shadow"/>) to <see cref="BindlessKind.Shadow2D"/>, the rest by kind.</summary>
+    /// (<paramref name="shadow"/>) to <see cref="BindlessKind.Shadow2D"/> (a 2D array one to <see cref="BindlessKind.ShadowArray"/>), the rest by kind.</summary>
     public static BindlessKind KindFor(Format format, TextureKind kind = TextureKind.Texture2D, bool shadow = false)
     {
         if (shadow)
         {
-            if (kind != TextureKind.Texture2D || !GlConventions.IsDepthFormat(format))
-                throw new NotSupportedException($"bindless shadow textures are 2D depth textures (got {kind} {format})");
-            return BindlessKind.Shadow2D;
+            if (kind == TextureKind.Cube || !GlConventions.IsDepthFormat(format))
+                throw new NotSupportedException($"bindless shadow textures are 2D or 2D array depth textures (got {kind} {format})");
+            return kind == TextureKind.Texture2DArray ? BindlessKind.ShadowArray : BindlessKind.Shadow2D;
         }
         var scalar = ScalarOf(format);
         if (scalar != ScalarKind.Float)

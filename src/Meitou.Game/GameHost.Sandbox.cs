@@ -51,9 +51,17 @@ sealed partial class GameHost
     {
         var world = session.World;
         string record = SandboxRecord(scene.Database!);
-        float half = g.Sandbox == 2 ? 15 : 0;
+        float half = g.Sandbox >= 2 ? 15 : 0;
         sandboxHero = population!.SpawnSandbox(world, record, new Vector2(-half, 0), player: true, yaw: MathF.PI / 2);
-        if (g.Sandbox == 2) sandboxFoe = population.SpawnSandbox(world, record, new Vector2(half, 0), player: false, yaw: -MathF.PI / 2);
+        if (g.Sandbox >= 2) sandboxFoe = population.SpawnSandbox(world, record, new Vector2(half, 0), player: false, yaw: -MathF.PI / 2);
+        // n above 2: the rest stand idle in rings round the pair (the player's faction, so they keep out of the fight), 15 units apart, a look each.
+        for (int i = 0, ring = 1, placed = 0; i < g.Sandbox - 2; i++, placed++)
+        {
+            int perRing = (int)(2 * MathF.PI * (25 + 15 * ring) / 15);
+            if (placed == perRing) { ring++; placed = 0; perRing = (int)(2 * MathF.PI * (25 + 15 * ring) / 15); }
+            float r = 25 + 15 * ring, angle = 2 * MathF.PI * placed / perRing;
+            population.SpawnSandbox(world, record, new Vector2(r * MathF.Cos(angle), r * MathF.Sin(angle)), player: true, yaw: angle + MathF.PI, variant: i + 1);
+        }
         playerSquad = world.Squads.Find(world.Player.Squad);
         world.Commands.Enqueue(new SelectCommand([sandboxHero]) { Tick = world.Tick });
         bool patrol = false;
@@ -74,8 +82,34 @@ sealed partial class GameHost
         SandboxSendMovement();
         if (patrol) SandboxTogglePatrol();
         session.Ticked += _ => SandboxTick();
-        Console.WriteLine($"sandbox   {record}{(g.Sandbox == 2 ? ", two facing each other 30 units apart (G fights)" : "")}; flat floor {2 * SandboxHalf:0} x {2 * SandboxHalf:0}, grid {SandboxMinor:0} / {SandboxMajor:0}");
+        Console.WriteLine($"sandbox   {record}{(g.Sandbox >= 2 ? ", two facing each other 30 units apart (G fights)" : "")}{(g.Sandbox > 2 ? $", {g.Sandbox - 2} more round them" : "")}; flat floor {2 * SandboxHalf:0} x {2 * SandboxHalf:0}, grid {SandboxMinor:0} / {SandboxMajor:0}");
         return new Vector3(0, scene.FlatHeight, 0);
+    }
+
+    int crowd;
+
+    /// <summary>
+    /// The game's <c>--crowd n</c> (a test of the character renderer and the simulation at scale): n idle characters of the sandbox's record, each with a look of its own, of the
+    /// player's faction but in squads of their own, in rings 15 units apart round <paramref name="around"/> on walkable ground (a spot that is not is skipped).
+    /// </summary>
+    void SpawnCrowd(Vector3 around, int count)
+    {
+        var world = session.World;
+        string record = SandboxRecord(scene.Database!);
+        int placed = 0;
+        for (int ring = 1; placed < count && ring < 200; ring++)
+        {
+            float r = 15 + 15 * ring;
+            int perRing = (int)(2 * MathF.PI * r / 15);
+            for (int k = 0; k < perRing && placed < count; k++)
+            {
+                float angle = 2 * MathF.PI * k / perRing;
+                var at = new Vector2(around.X + r * MathF.Cos(angle), around.Z + r * MathF.Sin(angle));
+                if (!world.Walkability.IsWalkable(at.X, at.Y)) continue;
+                population!.SpawnSandbox(world, record, at, player: true, yaw: angle + MathF.PI, variant: ++placed);
+            }
+        }
+        Console.WriteLine($"crowd     {placed} idle characters of {record} round {around.X:0}, {around.Z:0}");
     }
 
     void SandboxSendMovement()
@@ -137,17 +171,22 @@ sealed partial class GameHost
         }
     }
 
-    /// <summary>Keeps the camera on the hero (the middle of the pair while there is a foe), when following.</summary>
+    /// <summary>Keeps the camera on the hero (the middle of the pair while there is a foe), when following. Only the pivot moves: a cut every frame
+    /// (<see cref="CameraRig.Place"/>) would draw the rotation and zoom at the tick rate instead of interpolated.</summary>
     void SandboxFollowCamera()
     {
         if (!IsSandbox || !sandboxFollow || session.Camera.IsFree) return;
         var characters = session.CurrentSnapshot.Characters;
         if (characters.FirstOrDefault(c => c.Id == sandboxHero) is not { } hero) return;
-        var p = DrawnPosition(hero);
-        if (!sandboxFoe.IsNone && characters.FirstOrDefault(c => c.Id == sandboxFoe) is { } foe) p = (p + DrawnPosition(foe)) / 2;
-        var s = session.Camera.Current;
-        session.Camera.Place(new Vector2(p.X, p.Z), s.Yaw, s.Pitch, s.Distance);
-        camera.Target = p;
+        var drawn = DrawnPosition(hero);
+        var latest = hero.Position;
+        if (!sandboxFoe.IsNone && characters.FirstOrDefault(c => c.Id == sandboxFoe) is { } foe)
+        {
+            drawn = (drawn + DrawnPosition(foe)) / 2;
+            latest = (latest + foe.Position) / 2;
+        }
+        session.Camera.MovePivot(new Vector2(latest.X, latest.Z));
+        camera.Target = drawn;
     }
 
     /// <summary>The debug panel, over the finished picture (the floor's grid is the terrain's: <see cref="WorldRenderOptions.Grid"/>).</summary>

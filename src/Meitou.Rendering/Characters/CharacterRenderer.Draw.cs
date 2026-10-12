@@ -31,6 +31,7 @@ internal sealed unsafe partial class CharacterRenderer
     readonly List<Batch> active = [];
     Transient instances;
     bool depthPass, motionPass;
+    float shadowLodFloor;
 
     /// <summary>The fog cull (set once by the world frame; the colour and motion passes use it, not the shadow cascades): characters wholly hidden by the fog the eye is in are skipped.</summary>
     internal FogVolumes? FogCull { get; set; }
@@ -39,12 +40,13 @@ internal sealed unsafe partial class CharacterRenderer
     public void Draw(Matrix4x4 viewProjection, Vector3 eye, Vector4[] frustum, Vector3 light, Vector3 fogColour, float fogDistance) =>
         DrawView(new ViewConstants { ViewProjection = viewProjection, Eye = eye, LightDir = light, FogColour = fogColour, FogDistance = fogDistance }, eye, frustum);
 
-    /// <summary>Draws the characters' depth for a shadow cascade (<see cref="CharacterShaders.DepthFragment"/>); levels chosen from <paramref name="lodEye"/>.</summary>
-    public void DrawDepth(Matrix4x4 worldToClip, Vector3 lodEye, Vector4[] frustum)
+    /// <summary>Draws the characters' depth for a shadow cascade (<see cref="CharacterShaders.DepthFragment"/>); levels chosen from <paramref name="lodEye"/>, never finer than
+    /// <paramref name="lodFloor"/> (<see cref="ShadowLod.ObjectLodFloor"/> of a far cascade's texel; 0: the distance rule alone), as the objects.</summary>
+    public void DrawDepth(Matrix4x4 worldToClip, Vector3 lodEye, Vector4[] frustum, float lodFloor = 0)
     {
-        depthPass = true;
+        (depthPass, shadowLodFloor) = (true, lodFloor);
         try { DrawView(new ViewConstants { ViewProjection = worldToClip, Eye = lodEye }, lodEye, frustum); }
-        finally { depthPass = false; }
+        finally { (depthPass, shadowLodFloor) = (false, 0); }
     }
 
     void DrawView(in ViewConstants view, Vector3 eye, Vector4[] frustum)
@@ -70,7 +72,10 @@ internal sealed unsafe partial class CharacterRenderer
                 if (!part.Shared) model = attach[l.AttachBase + part.AttachIndex] * l.World;
                 var mesh = part.Mesh;
                 float value = MeshLod.Value(eye, Vector3.Transform(part.BoundsCentre, model), part.BoundsRadius * model.ScaleLength(), depthPass ? LodBias * ShadowLodBias : LodBias);
+                // In a shadow map hair is a silhouette, so it takes the rule's own distances there (its levels start CharacterContent.HairLodScale times farther for the picture).
+                if (depthPass) value = Math.Max(part.Material.Shading == CharacterShaders.ShadeHair ? value * CharacterContent.HairLodScale : value, shadowLodFloor);
                 int level = MeshLod.Select(mesh.Distances, value);
+                if (depthPass && part.ShadowDistances is { } shadowLevels && MeshLod.Select(shadowLevels, value) is int k && k > 0) level = part.ShadowFirst + k - 1;   // the body's shadow-only levels
                 bool twoSided = part.Material.DoubleSided;
                 var instance = new CharInstance { Model = model, BoneBase = (uint)l.BoneBase, Material = (uint)part.MaterialSlot, MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
                 if (motionPass) instance.PreviousModel = part.Shared ? l.State.PreviousWorld : l.State.PreviousAttach[part.AttachIndex] * l.State.PreviousWorld;

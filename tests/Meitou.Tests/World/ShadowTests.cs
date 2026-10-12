@@ -88,6 +88,49 @@ public class ShadowTests
         Assert.Equal(box.Size.X / 4096, box.Texel, 3);
     }
 
+    [Theory]
+    [InlineData(6f, 45f)]     // a close-up: the focus sets the first split
+    [InlineData(48f, 900f)]   // a far view: the practical scheme's own first split
+    public void A_fifth_cascade_splits_the_second_slice_and_leaves_the_others_as_with_four(float near, float focus)
+    {
+        float q = MeitouShadowFit.QuantizedNear(near);
+        var four = MeitouShadowFit.Splits(q, 10000, 4, focus);
+        var five = MeitouShadowFit.Splits(q, 10000, 5, focus);
+        Assert.Equal(6, five.Length);
+        Assert.Equal(four[..2], five[..2]);
+        Assert.Equal(four[2..], five[3..]);
+        // The extra split at the second slice's geometric mean.
+        Assert.Equal(MathF.Sqrt(four[1] * four[2]), five[2], 2);
+        if (focus == 45)
+        {
+            // The close-up's numbers (docs/formats/shadows.md): 6, 87, 1016, 2982, 10000 with four; the fifth lands near 300.
+            Assert.InRange(four[1], 80, 95);
+            Assert.InRange(four[2], 950, 1100);
+            Assert.InRange(five[2], 100, 1000);
+        }
+        // Each cascade's box: the far ones (and the first) the same size as with four, as the same slices with the same margins.
+        var settings = new ShadowSettings(4096);
+        var view = Camera with { Near = q, Focus = focus };
+        for (int i = 0; i < 5; i++)
+        {
+            if (i is 1 or 2) continue;
+            int j = i == 0 ? 0 : i - 1;
+            var a = MeitouShadowFit.Fit(view, Sun, settings, four, j);
+            var b = MeitouShadowFit.Fit(view, Sun, settings, five, i);
+            if (i == 3) Assert.True(b.Texel <= a.Texel * 1.0001, $"cascade {i}: {b.Texel} against {a.Texel}");   // its blend band starts later: no larger
+            else Assert.Equal(a.Texel, b.Texel, 6);
+        }
+        // The new cascade 1 is finer than the four's cascade 1 (several times in the close-up, whose second slice is the deepest step).
+        Assert.True(MeitouShadowFit.Fit(view, Sun, settings, five, 1).Texel < MeitouShadowFit.Fit(view, Sun, settings, four, 1).Texel / (focus == 45 ? 2 : 1.2));
+    }
+
+    [Fact]
+    public void The_box_margins_grow_with_the_cadence_and_stay_as_they_were_for_four()
+    {
+        Assert.Equal([0.02f, 0.06f, 0.08f, 0.08f], Enumerable.Range(0, 4).Select(i => MeitouShadowFit.Margin(i, 4)));
+        Assert.Equal([0.02f, 0.04f, 0.06f, 0.08f, 0.08f], Enumerable.Range(0, 5).Select(i => MeitouShadowFit.Margin(i, 5)));
+    }
+
     /// <summary>Where a world point falls on cascade 0's texel grid (light-space x and y in texels, from the box's translation).</summary>
     static (double X, double Y) GridPosition(ShadowCascade c, Vector3 p)
     {

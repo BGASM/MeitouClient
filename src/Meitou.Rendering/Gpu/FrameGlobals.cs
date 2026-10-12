@@ -102,9 +102,9 @@ public sealed class FrameGlobals
         Version++;
     }
 
-    /// <summary>A reflected-sampler description for publishing by unit: 2D (or cube), float, optionally a shadow (compare) sampler.</summary>
-    public static SamplerInfo Sampler2D(string name, bool cube = false, bool shadow = false) =>
-        new(name, 0, 0, cube ? SamplerDimension.Cube : SamplerDimension.Dim2D, false, false, shadow, ScalarKind.Float, 0);
+    /// <summary>A reflected-sampler description for publishing by unit: 2D (or cube, or 2D array), float, optionally a shadow (compare) sampler.</summary>
+    public static SamplerInfo Sampler2D(string name, bool cube = false, bool shadow = false, bool arrayed = false) =>
+        new(name, 0, 0, cube ? SamplerDimension.Cube : SamplerDimension.Dim2D, arrayed, false, shadow, ScalarKind.Float, 0);
 
     public Func<SampledTexture>? Texture(string name) => textures.GetValueOrDefault(name);
     public Func<BufferBinding>? Block(string name)

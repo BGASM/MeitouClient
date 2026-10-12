@@ -8,9 +8,9 @@ using Silk.NET.Vulkan;
 namespace Meitou.Rendering;
 
 /// <summary>
-/// The Meitou shadows (the <c>shadows</c> enhancement, docs/formats/shadows.md "Meitou shadows"): the same atlas and caster draws as the
-/// game's CSM, but cascades fitted over the visible depths (<see cref="MeitouShadowFit"/>), drawn on a staggered schedule (the first every
-/// frame, the second every other frame, the last two every fourth, each kept with the matrices it was drawn with), a soft receiver with
+/// The Meitou shadows (the <c>shadows</c> enhancement, docs/formats/shadows.md "Meitou shadows"): the same cascade array and caster draws as the
+/// game's CSM, but five cascades (<see cref="MeitouCascades"/>) fitted over the visible depths (<see cref="MeitouShadowFit"/>), drawn on a staggered
+/// schedule (<see cref="Cadence"/>: 1, 2, 4, 16, 32 frames with five cascades, each kept with the matrices it was drawn with), a soft receiver with
 /// cascade blending and a fade at the range's end, contact-hardening penumbrae from a half-resolution blocker map, and the terrain's own
 /// shadow over the whole world beyond the range (<see cref="TerrainShadowMap"/>), and the landmarks' beyond it however far they are (the landmark map).
 /// </summary>
@@ -29,7 +29,10 @@ public sealed unsafe partial class ShadowPass
     public int FilterQuality { get => filterQuality; set => filterQuality = Math.Clamp(value, 0, 2); }
     int filterQuality = 2;
     /// <summary>How many cascades, nearest first, filter in full (blocker search, 16 taps) at the <see cref="FilterQuality"/>.</summary>
-    int FullFilterCascades => filterQuality switch { 0 => 0, 1 => 2, _ => 4 };
+    int FullFilterCascades => filterQuality switch { 0 => 0, 1 => Math.Max(1, MeitouCascades - 2), _ => ShadowSettings.MaxCascades };
+    /// <summary>The Meitou shadows' number of cascades (1 to <see cref="ShadowSettings.MaxCascades"/>; <see cref="MeitouShadowFit.DefaultCascades"/>). The Faithful CSM keeps the game's <see cref="ShadowSettings.Cascades"/>.</summary>
+    public int MeitouCascades { get => meitouCascades; set => meitouCascades = Math.Clamp(value, 1, ShadowSettings.MaxCascades); }
+    int meitouCascades = MeitouShadowFit.DefaultCascades;
     /// <summary>The sun's angular diameter the penumbrae are made for (radians): a little more than the real sun's 0.53°.</summary>
     public float SunAngle { get; set; } = 0.7f * MathF.PI / 180;
     /// <summary>Filter radius without a blocker search, and the least with one, in texels of the cascade.</summary>
@@ -40,15 +43,15 @@ public sealed unsafe partial class ShadowPass
     public float SunJump { get; set; } = 2 * MathF.PI / 180;
 
     /// <summary>How often each cascade was drawn (Meitou), for the log.</summary>
-    public readonly int[] CascadeDraws = new int[4];
+    public readonly int[] CascadeDraws = new int[ShadowSettings.MaxCascades];
     /// <summary>Per cascade why it was drawn (Meitou): the camera moved so it no longer covers the view, the sun turned, its cadence came, the splits or a sun jump redrew all.</summary>
-    public readonly int[,] RedrawReasons = new int[4, 4];
+    public readonly int[,] RedrawReasons = new int[ShadowSettings.MaxCascades, 4];
     /// <summary>How often every cascade was redrawn at once because the splits changed (index 0) or the sun jumped (1).</summary>
     public readonly int[] AllReasons = new int[2];
     public int MeitouFrames { get; private set; }
 
-    readonly ShadowCascade?[] stored = new ShadowCascade?[4];
-    readonly Vector3[] storedSunDir = new Vector3[4];
+    readonly ShadowCascade?[] stored = new ShadowCascade?[ShadowSettings.MaxCascades];
+    readonly Vector3[] storedSunDir = new Vector3[ShadowSettings.MaxCascades];
 
     /// <summary>
     /// Where the cascades' texel grids are anchored (<see cref="MeitouShadowFit.Fit"/>): near the eye, so a turning sun slides a grid only by the
@@ -78,12 +81,35 @@ public sealed unsafe partial class ShadowPass
     }
 
     /// <summary>
-    /// Frames between the redraws of each cascade when nothing makes it stale (Meitou): the nearest every frame, the others less often the
-    /// farther they are, since a far cascade's casters hardly move and its texels are big (1,2,4,4 was the schedule before 2026-10-08).
-    /// The phases below put the redraws on different frames.
+    /// Frames between the redraws of cascade <paramref name="i"/> of <paramref name="count"/> when nothing makes it stale (Meitou): the nearest every
+    /// frame, the last three every 4th, 16th and 32nd frame (a far cascade's casters hardly move and its texels are big; 1,2,4,4 was the schedule
+    /// for four before 2026-10-08), any between every 2nd (with five: 1, 2, 4, 16, 32). <see cref="Phase"/> puts the redraws on different frames.
     /// </summary>
-    public static readonly int[] Cadence = [1, 4, 16, 32];
-    static readonly int[] Phase = Enumerable.Range(0, 4).Select(i => i * 5 % Cadence[i]).ToArray();
+    public static int Cadence(int i, int count) => i == 0 ? 1 : (count - 1 - i) switch { 0 => 32, 1 => 16, 2 => 4, _ => 2 };
+
+    /// <summary>
+    /// The frame (modulo its <see cref="Cadence"/>) on which each of <paramref name="count"/> cascades is redrawn: nearest first, each takes the phase
+    /// that collides least with the nearer far cascades' over 32 frames (they share <see cref="FarBudget"/>), the old <c>i · 5 mod cadence</c> where
+    /// that is as good (so four cascades keep the phases 0, 1, 10, 15 they had; five get 0, 1, 2, 0, 20).
+    /// </summary>
+    public static int[] Phases(int count)
+    {
+        var phase = new int[count];
+        for (int i = 1; i < count; i++)
+        {
+            int cadence = Cadence(i, count), preferred = i * 5 % cadence, fewest = int.MaxValue;
+            for (int k = 0; k < cadence; k++)
+            {
+                int p = (preferred + k) % cadence, hits = 0;
+                for (int f = p; f < 32; f += cadence)
+                    for (int j = 1; j < i; j++)
+                        if (f % Cadence(j, count) == phase[j]) { hits++; break; }
+                if (hits < fewest) (phase[i], fewest) = (p, hits);
+            }
+        }
+        return phase;
+    }
+    int[] phases = [];
 
     /// <summary>How far (radians) the sun may turn before a cascade is redrawn: a caster 150 units tall shifts its shadow by half a texel; at most 2°, at least 0.25°.</summary>
     static float SunTolerance(ShadowCascade c) => (float)Math.Clamp(0.5 * c.Texel / 150, 0.25 * Math.PI / 180, 2 * Math.PI / 180);
@@ -94,8 +120,8 @@ public sealed unsafe partial class ShadowPass
     public int FarBudget { get; set; } = ShadowSchedule.DefaultBudget;
     /// <summary>The most frames a deferred redraw waits.</summary>
     public int MaxWait { get; set; } = ShadowSchedule.DefaultMaxWait;
-    readonly bool[] owed = new bool[4];
-    readonly int[] waited = new int[4];
+    readonly bool[] owed = new bool[ShadowSettings.MaxCascades];
+    readonly int[] waited = new int[ShadowSettings.MaxCascades];
     float[]? storedSplits;
     /// <summary>How far the shadow range may drift (share of the drawn one) before every cascade is drawn again.</summary>
     const float RangeTolerance = 0.1f;
@@ -112,7 +138,7 @@ public sealed unsafe partial class ShadowPass
     bool blockerPublished;
     LegacyProgram? blockerNative;
     SamplerSlot blockerAtlasSlot;
-    UniformHandle blockerSizeHandle;
+    UniformHandle blockerSizeHandle, blockerLayerHandle;
 
     /// <summary>The half-resolution blocker map (native; null until the first frame with contact hardening).</summary>
     public Texture? BlockerMap => blocker;
@@ -129,7 +155,7 @@ public sealed unsafe partial class ShadowPass
 
     /// <summary>One line on the schedule: how often each cascade was drawn, and the terrain map's rebuilds.</summary>
     public string DescribeMeitou() =>
-        $"drawn {string.Join("/", CascadeDraws)} times in {MeitouFrames} frames (because the view left the box / the sun turned / the cadence / all at once: {string.Join(" ", Enumerable.Range(0, 4).Select(i => $"c{i} {RedrawReasons[i, 0]}/{RedrawReasons[i, 1]}/{RedrawReasons[i, 2]}/{RedrawReasons[i, 3]}"))}); " +
+        $"drawn {string.Join("/", CascadeDraws.Take(MeitouCascades))} times in {MeitouFrames} frames (because the view left the box / the sun turned / the cadence / all at once: {string.Join(" ", Enumerable.Range(0, MeitouCascades).Select(i => $"c{i} {RedrawReasons[i, 0]}/{RedrawReasons[i, 1]}/{RedrawReasons[i, 2]}/{RedrawReasons[i, 3]}"))}); " +
         $"all at once: splits changed {AllReasons[0]}, sun jumped {AllReasons[1]}; " +
         $"terrain shadow rebuilt {terrainMap?.Builds ?? 0} times (cpu {terrainMap?.LastBuildCpuMs ?? 0:0.00} ms); " +
         $"landmark shadow map drawn {LandmarkDraws} times ({LandmarkCount} landmarks, {(landmarkBox is { } b ? $"{b.Texel:0} units per texel" : "off")})";
@@ -169,6 +195,7 @@ public sealed unsafe partial class ShadowPass
         var box = MeitouShadowFit.FitLandmarks(toSun, landmarkSpheres, LandmarkMapSize)!;
         if (landmarkMap is null)
         {
+            // A map of its own (4096², larger than a cascade layer), read through its own sampler (uShadowLandmark), not a layer of the cascade array.
             landmarkMap = Texture.Create(Gpu, new TextureDesc(Format.D32Sfloat, LandmarkMapSize, LandmarkMapSize, Use: TextureUse.Sampled | TextureUse.DepthTarget, Name: "landmark shadow map"));
             landmarkSampled = Sampled(landmarkMap, TextureMinFilter.Linear, TextureMagFilter.Linear, TextureWrapMode.ClampToEdge, compare: true);
         }
@@ -186,10 +213,11 @@ public sealed unsafe partial class ShadowPass
     {
         var watch = Stopwatch.StartNew();
         Array.Clear(PhaseMs);
-        Resize(Settings.MapSize);
-        int count = Math.Min(Settings.Cascades, 4);
+        int count = MeitouCascades;
+        Resize(Settings.TileSize, count);
+        if (phases.Length != count) phases = Phases(count);
         float near = MeitouShadowFit.QuantizedNear(view.Near);
-        var splits = MeitouShadowFit.Splits(near, Math.Max(EffectiveRange, near * 4), count);
+        var splits = MeitouShadowFit.Splits(near, Math.Max(EffectiveRange, near * 4), count, view.Focus);
         // (A range that varies from frame to frame, as the memory guard's or a fog clamp makes it, redraws them all only past RangeTolerance.)
         // The splits move with the camera's near plane; a cascade drawn with other splits keeps its own slice (the receiver reads each one's) and is drawn again when the
         // new slice no longer fits it (Covers below), so only a change of the range or of the number of cascades redraws them all.
@@ -200,13 +228,12 @@ public sealed unsafe partial class ShadowPass
         var gridAnchor = Anchor(view.Eye, toSun);
         int frame = meitouFrame++;
         MeitouFrames++;
-        Span<bool> drawNow = stackalloc bool[4], want = stackalloc bool[4], mustDraw = stackalloc bool[4];
-        int drawing = 0;
+        Span<bool> drawNow = stackalloc bool[ShadowSettings.MaxCascades], want = stackalloc bool[ShadowSettings.MaxCascades], mustDraw = stackalloc bool[ShadowSettings.MaxCascades];
         for (int i = 0; i < count; i++)
         {
             // A cascade is drawn again when its slice no longer fits its box (the camera moved or turned), when the sun has turned further than
             // its texels allow, and at the latest after its cadence (casters stream in and move; docs/formats/shadows.md "Cached far cascades").
-            bool due = frame % Cadence[i] == Phase[i];
+            bool due = frame % Cadence(i, count) == phases[i];
             bool stale = stored[i] is not null && !all && !due;
             bool uncovered = stored[i] is not null && !MeitouShadowFit.Covers(stored[i]!, view, splits, SearchRadius(stored[i]!) + 2 * stored[i]!.Texel);
             bool sunTurned = stored[i] is not null && Vector3.Dot(toSun, storedSunDir[i]) < MathF.Cos(SunTolerance(stored[i]!));
@@ -217,32 +244,26 @@ public sealed unsafe partial class ShadowPass
             if (due && !all) RedrawReasons[i, 2]++;
             if (all) RedrawReasons[i, 3]++;
         }
-        // At most FarBudget far cascades are drawn per frame; the others wait (longest first) and are owed, forced after MaxWait frames.
-        ShadowSchedule.Pick(want[..count], mustDraw[..count], waited, FarBudget, MaxWait, drawNow);
-        for (int i = 0; i < count; i++)
-        {
-            owed[i] = want[i] && !drawNow[i];
-            if (drawNow[i]) drawing++;
-        }
+        // At most FarBudget far cascades are drawn per frame; the others wait (longest first) and are owed, forced after MaxWait frames. The far
+        // cascades are the last three (the costly ones); the nearer ones are never deferred (ShadowSchedule.NearCascades).
+        ShadowSchedule.Pick(want[..count], mustDraw[..count], waited, FarBudget, MaxWait, drawNow, ShadowSchedule.NearCascades(count));
+        for (int i = 0; i < count; i++) owed[i] = want[i] && !drawNow[i];
 
         timer.Begin();
-        // The whole atlas is cleared by the load op when every cascade is drawn; else each drawn tile is cleared inside the pass.
-        var host = BeginHost("shadow cascades", clear: drawing == count);
+        // Each cascade drawn is a rendering of its own layer, cleared by the load op; the other layers keep what they hold.
         for (int i = 0; i < count; i++)
         {
             if (!drawNow[i]) continue;
             var c = MeitouShadowFit.Fit(view, toSun, Effective, splits, i, gridAnchor);
-            int x = (int)MathF.Round(c.Tile.X * atlasSize), y = (int)MathF.Round(c.Tile.Y * atlasSize), s = Settings.TileSize;
-            SetTile(x, y, s);
-            if (drawing != count)   // only this tile: the others keep what they hold
-                ClearTile(host, new Silk.NET.Vulkan.Rect2D(new Silk.NET.Vulkan.Offset2D(x, y), new Silk.NET.Vulkan.Extent2D((uint)s, (uint)s)));
+            var host = BeginHost("shadow cascade", clear: true, layer: i);
+            SetTile(0, 0, atlasSize);
             SetCasterBias(new Vector4(c.FixedBias, KenshiShadows.SlopeBias, KenshiShadows.MaxSlopeBias, 0));
             draw(c, c.WorldToClip(), c.CullPlanes(), view.Eye);
+            EndHost(host);
             stored[i] = c;
             storedSunDir[i] = toSun;
             CascadeDraws[i]++;
         }
-        EndHost(host);
         bool blockers = ContactHardening && filterQuality > 0 && UpdateBlockers(drawNow, count);
         if (coarse is not null)
         {
@@ -263,18 +284,18 @@ public sealed unsafe partial class ShadowPass
     }
 
     /// <summary>
-    /// Rebuilds the blocker map's tiles of the cascades drawn this frame: one native segment with its own rendering on the map (loaded: the
-    /// tiles not drawn keep what they hold), the atlas read raw through a plain sampler (no comparison), per tile its viewport and the
-    /// fullscreen triangle.
+    /// Rebuilds the blocker map's layers of the cascades drawn this frame: one native segment with a rendering per layer (the layers not drawn
+    /// keep what they hold), the cascade array read raw through a plain sampler (no comparison), the fullscreen triangle.
     /// </summary>
     bool UpdateBlockers(ReadOnlySpan<bool> drawn, int count)
     {
         int size = atlasSize / 2;
-        bool fresh = false;   // a new map: every tile
-        if (blocker is null || blocker.Desc.Width != size)
+        bool fresh = false;   // a new map: every layer
+        if (blocker is null || blocker.Desc.Width != size || blocker.Desc.Layers != count)
         {
             blocker?.Dispose();
-            blocker = Texture.Create(Gpu, new TextureDesc(Format.R32Sfloat, size, size, Use: TextureUse.Sampled | TextureUse.ColourTarget | TextureUse.TransferSrc, Name: "shadow blocker map"));
+            blocker = Texture.Create(Gpu, new TextureDesc(Format.R32Sfloat, size, size, Layers: count, Kind: TextureKind.Texture2DArray,
+                Use: TextureUse.Sampled | TextureUse.ColourTarget | TextureUse.TransferSrc, Name: "shadow blocker map"));
             blockerSampled = Sampled(blocker, TextureMinFilter.Nearest, TextureMagFilter.Nearest, TextureWrapMode.ClampToEdge);
             blockerPublished = false;
             fresh = true;
@@ -283,10 +304,9 @@ public sealed unsafe partial class ShadowPass
         {
             // Native (docs/renderer-native.md 7.1, wave 3 agent B, step P): VkGl's SPIR-V and layout, made here once, never inside a draw.
             var p = blockerNative = LegacyProgram.Create(Gpu, ShadowShaders.FullscreenVertex, MeitouShadowShaders.BlockerFragment, "shadow blockers");
-            (blockerAtlasSlot, blockerSizeHandle) = (p.Sampler("uAtlas"), p.Uniform("uAtlasSize"));
+            (blockerAtlasSlot, blockerSizeHandle, blockerLayerHandle) = (p.Sampler("uAtlas"), p.Uniform("uAtlasSize"), p.Uniform("uLayer"));
         }
-        int tile = Settings.TileSize / 2, grid = Settings.Grid;
-        RecordBlockers(drawn, count, fresh, tile, grid);
+        RecordBlockers(drawn, count, fresh);
         return true;
     }
 
@@ -295,28 +315,29 @@ public sealed unsafe partial class ShadowPass
         BlendState.Off, ColorComponentFlags.RBit | ColorComponentFlags.GBit | ColorComponentFlags.BBit | ColorComponentFlags.ABit,
         Silk.NET.Vulkan.PolygonMode.Fill, false, false);
 
-    void RecordBlockers(ReadOnlySpan<bool> drawn, int count, bool fresh, int tile, int grid)
+    void RecordBlockers(ReadOnlySpan<bool> drawn, int count, bool fresh)
     {
         var p = blockerNative!;
         var map = blocker!;
         p.Set(blockerSizeHandle, (float)atlasSize);
         p.Bind(blockerAtlasSlot, atlasPlain);
         var cmd = Gpu.BeginNative("shadow blockers");
-        var target = new RenderTarget(map.Attachment(), AttachmentLoadOp.Load, default, map.Image);
         var formats = new AttachmentFormats(map.Desc.Format, Format.Undefined, 1);
         int side = map.Desc.Width;
-        cmd.BeginRendering(new RenderingDesc(target, default, side, side));
         var whole = new Rect2D(default, new Extent2D((uint)side, (uint)side));
-        BlockerState.Record(cmd, new PassTargets(target, default, formats, side, side, new Viewport(0, 0, side, side, 0, 1), whole));
-        cmd.BindPipeline(Gpu.Pipelines.Get(BlockerState.Pipeline(p.Program, p.VertexLayout([]), PrimitiveTopology.TriangleList, formats, "shadow blockers")));
-        p.Flush(cmd);
+        var pipeline = Gpu.Pipelines.Get(BlockerState.Pipeline(p.Program, p.VertexLayout([]), PrimitiveTopology.TriangleList, formats, "shadow blockers"));
         for (int i = 0; i < count; i++)
         {
             if (!drawn[i] && !fresh) continue;
-            cmd.SetViewport(new Viewport(i % grid * tile, i / grid * tile, tile, tile, 0, 1));
+            var target = new RenderTarget(map.Attachment(0, i), AttachmentLoadOp.Load, default, map.Image);
+            cmd.BeginRendering(new RenderingDesc(target, default, side, side));
+            BlockerState.Record(cmd, new PassTargets(target, default, formats, side, side, new Viewport(0, 0, side, side, 0, 1), whole));
+            cmd.BindPipeline(pipeline);
+            p.Set(blockerLayerHandle, i);
+            p.Flush(cmd);
             cmd.Draw(3);
+            cmd.EndRendering();
         }
-        cmd.EndRendering();
         Gpu.EndNative(cmd);
     }
 
@@ -336,34 +357,35 @@ public sealed unsafe partial class ShadowPass
             var c = cascades[i];
             float world = c.Size.X;   // world units per unit of tile UV
             Put(data, i * 16, c.OriginToTile(origin));
-            Put(data, 64 + i * 4, c.Tile);
-            Put(data, 80 + i * 4, new Vector4(c.FarDepth, c.FilterRadius, c.Size.X, c.Size.Y));
-            Put(data, 96 + i * 4, new Vector4(c.Size.Z, 1f / tile, 0, 0));
+            Put(data, RectAt + i * 4, c.Tile);
+            Put(data, CascadeAt + i * 4, new Vector4(c.FarDepth, c.FilterRadius, c.Size.X, c.Size.Y));
+            Put(data, ExtentAt + i * 4, new Vector4(c.Size.Z, 1f / tile, 0, 0));
             Put(ms, i * 4, new Vector4(c.NearDepth, c.FarDepth, FilterTexels / tile, (float)c.Texel));
-            Put(ms, 16 + i * 4, new Vector4(world, c.Size.Z, (float)(SearchRadius(c) / world), sunTan / world));
+            Put(ms, ShadowSettings.MaxCascades * 4 + i * 4, new Vector4(world, c.Size.Z, (float)(SearchRadius(c) / world), sunTan / world));
         }
-        Put(data, 112, cascades[0].Rotation);
-        Put(data, 128, new Vector4(origin, 1));
-        Put(data, 132, new Vector4(Vector3.Normalize(view.Forward), cascades.Length));
-        Put(data, 136, new Vector4(atlasSize, 0, 0, 1));   // w: the Meitou receiver
+        Put(data, LightAt, cascades[0].Rotation);
+        Put(data, OriginAt, new Vector4(origin, 1));
+        Put(data, ForwardAt, new Vector4(Vector3.Normalize(view.Forward), cascades.Length));
+        Put(data, AtlasAt, new Vector4(atlasSize, atlasSize, 0, 1));   // x, y: one layer (no virtual atlas: cascade i is layer i); w: the Meitou receiver
+        const int P = MeitouShadowShaders.ParamsOffset;
         float noise = Temporal ? meitouFrame % 64 * 5.588238f : 0;
-        Put(ms, 32, new Vector4(noise, range, range * 0.85f, range * 0.55f));
+        Put(ms, P, new Vector4(noise, range, range * 0.85f, range * 0.55f));
         bool terrain = terrainMap?.Sampled is not null;
         float half = WorldLayout.HalfWorldSize;
         if (terrainMap is { } map)
         {
             float horizontal = MathF.Sqrt(toSun.X * toSun.X + toSun.Z * toSun.Z);
             float cosElevation = Math.Max(horizontal, 0.05f);
-            Put(ms, 36, new Vector4(-half, -half, 1 / map.Spacing, terrain ? 1 : 0));
+            Put(ms, P + 4, new Vector4(-half, -half, 1 / map.Spacing, terrain ? 1 : 0));
             // The penumbra's height across: occluder distance × the sun's angular radius over the cosine of its height.
-            Put(ms, 40, new Vector4(map.Size, 20, 6, sunTan / cosElevation));
+            Put(ms, P + 8, new Vector4(map.Size, 20, 6, sunTan / cosElevation));
         }
-        Put(ms, 44, new Vector4(blockers ? 1 : 0, range * 0.9f, FullFilterCascades, 0));
+        Put(ms, P + 12, new Vector4(blockers ? 1 : 0, range * 0.9f, FullFilterCascades, 0));
         if (landmarkBox is { } box)
         {
             // The landmark map: (p - origin) -> (u, v, depth); its filter radius (UV) and normal offset (world: one and a half texels).
-            Put(ms, 48, box.OriginToTile(origin));
-            Put(ms, 64, new Vector4(box.FilterRadius, (float)(box.Texel * 1.5), 0, 1));
+            Put(ms, P + 16, box.OriginToTile(origin));
+            Put(ms, P + 32, new Vector4(box.FilterRadius, (float)(box.Texel * 1.5), 0, 1));
             landmarkPublished = true;
         }
         Upload(data);

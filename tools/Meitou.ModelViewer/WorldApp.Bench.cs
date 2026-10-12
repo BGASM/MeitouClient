@@ -323,7 +323,7 @@ static partial class WorldApp
     }
 
     // The stages in the order a frame runs them (as the profiler lists them).
-    static readonly int[] StageOrder = [0, 1, 2, 3, StageClock.Uploads, StageClock.Cull, StageClock.Bake, 12, 14, 4, 5, 6, 7, 8, 9, StageClock.Shafts, StageClock.Fog, 13, 10, 11];
+    static readonly int[] StageOrder = [0, 1, 2, StageClock.UpdChars, 3, StageClock.Uploads, StageClock.Cull, StageClock.Bake, 12, 14, 4, 5, 6, 7, 8, StageClock.Characters, 9, StageClock.Shafts, StageClock.Fog, 13, 10, 11];
 
     /// <summary>Print order of the metrics: the frame, the GPU total and stages in frame order, the post sections, the render thread's total and stages.</summary>
     static int MetricOrder(string key)

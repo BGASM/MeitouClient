@@ -52,6 +52,9 @@ public sealed class CameraRig
         states.Snap(Strategy.State);
     }
 
+    /// <summary>Moves the strategy pivot without a cut: the view keeps its own yaw, pitch and boom, and the next tick blends from where it was (a camera that follows).</summary>
+    public void MovePivot(Vector2 pivotXZ) => Strategy.Place(pivotXZ, Strategy.Yaw, Strategy.Pitch, Strategy.Distance);
+
     /// <summary>One simulation tick of <paramref name="dt"/> seconds.</summary>
     public void Update(float dt, ActionState actions)
     {

@@ -57,6 +57,8 @@ public sealed class PostOptions
     public const float SsaoRadius = 12, SsaoStrength = 4;
     /// <summary>How much of the occlusion stays on the characters' own pixels (Meitou): 0 none, 1 the same as everywhere else. They still darken the ground round them.</summary>
     public const float SsaoCharacterStrength = 0.25f;
+    /// <summary>How much a character counts as an occluder of the ground and things round it (Meitou): 1 as anything else. At 1 a character lying down left a dark halo as wide as itself (radius 12, strength 4) with a light seam where the half-size mask met it.</summary>
+    public const float SsaoCharacterOccluder = 0.3f;
     /// <summary>The upscaler (render scale, TAA / FSR / DLSS); not part of the presets.</summary>
     public readonly UpscaleOptions Upscale = new();
 

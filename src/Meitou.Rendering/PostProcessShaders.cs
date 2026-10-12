@@ -32,6 +32,8 @@ static class PostProcessShaders
         in vec2 vUv;
         out vec4 fragColour;
         uniform sampler2D uDepth;
+        uniform sampler2D uMask;            // the scene colour at the render size, whose alpha is 1 on characters (unbound with uCharacterOccluder 1)
+        uniform float uCharacterOccluder;   // how much a character counts as an occluder of what is round it (1: as anything else)
         uniform vec2 uTan;      // tan(fov/2) * aspect, tan(fov/2)
         uniform vec2 uNearFar;  // of the near depth slice
         uniform vec2 uSize;     // full-resolution size
@@ -55,20 +57,26 @@ static class PostProcessShaders
             float n = 2.0 * d - 1.0;
             return 2.0 * uNearFar.x * uNearFar.y / (uNearFar.y + uNearFar.x - n * (uNearFar.y - uNearFar.x));
         }
-        vec3 viewPos(vec2 uv)
+        // A depth texel's own position: its depth with the screen position of its centre. The occlusion runs at half size, so its pixels' centres fall on
+        // the corners between depth texels; reading the depth there and placing it at the unsnapped position let rounding pick the texel row by row,
+        // which tilted the rebuilt normal on whole rows and banded flat ground seen at an angle.
+        vec3 viewPosAt(ivec2 t)
         {
-            float z = viewZ(textureLod(uDepth, uv, 0.0).r);
+            t = clamp(t, ivec2(0), ivec2(uSize) - 1);
+            float z = viewZ(texelFetch(uDepth, t, 0).r);
+            vec2 uv = (vec2(t) + 0.5) / uSize;
             return vec3((uv * 2.0 - 1.0) * uTan * z, -z);
         }
+        vec3 viewPos(vec2 uv) { return viewPosAt(ivec2(floor(uv * uSize))); }
         void main()
         {
-            float d = textureLod(uDepth, vUv, 0.0).r;
+            ivec2 c = ivec2(floor(vUv * uSize));
+            float d = texelFetch(uDepth, c, 0).r;
             if (d >= 0.99999) { fragColour = vec4(1.0, 60000.0, 0.0, 1.0); return; }
-            vec2 px = 1.0 / uSize;
-            vec3 p = viewPos(vUv);
+            vec3 p = viewPosAt(c);
             float z = -p.z;
-            vec3 l = viewPos(vUv - vec2(px.x, 0.0)), r = viewPos(vUv + vec2(px.x, 0.0));
-            vec3 u = viewPos(vUv + vec2(0.0, px.y)), b = viewPos(vUv - vec2(0.0, px.y));
+            vec3 l = viewPosAt(c - ivec2(1, 0)), r = viewPosAt(c + ivec2(1, 0));
+            vec3 u = viewPosAt(c + ivec2(0, 1)), b = viewPosAt(c - ivec2(0, 1));
             vec3 dx = abs(r.z - p.z) < abs(p.z - l.z) ? r - p : p - l;
             vec3 dy = abs(u.z - p.z) < abs(p.z - b.z) ? u - p : p - b;
             vec3 n = normalize(cross(dx, dy));
@@ -89,7 +97,8 @@ static class PostProcessShaders
                 float len = length(v);
                 float vn = dot(v, n) - 0.02 * z;
                 float range = 1.0 - smoothstep(radius, 2.0 * radius, len);
-                sum += max(vn, 0.0) / (len * len + 0.05 * radius * radius) * radius * range;
+                float occluder = uCharacterOccluder < 1.0 ? mix(1.0, uCharacterOccluder, textureLod(uMask, uv, 0.0).a) : 1.0;
+                sum += max(vn, 0.0) / (len * len + 0.05 * radius * radius) * radius * range * occluder;
             }
             float ao = 1.0 - clamp(uStrength * sum / float(N), 0.0, 1.0);
             ao = mix(ao, 1.0, smoothstep(uFadeStart, uFadeEnd, z));
@@ -466,6 +475,8 @@ static class PostProcessShaders
         in vec2 vUv;
         out vec4 fragColour;
         uniform sampler2D uDepth;
+        uniform sampler2D uMask;            // the scene colour at the render size, whose alpha is 1 on characters (unbound with uCharacterOccluder 1)
+        uniform float uCharacterOccluder;   // how much a character counts as an occluder of what is round it (1: as anything else)
         uniform vec2 uFullSize;
         uniform float uDiv;
         void main()

@@ -40,8 +40,11 @@ static class Program
         {
             // The animation sandbox: no world, a flat floor (docs/simulation.md "Sandbox"). The real game data is still loaded for the characters and animations.
             db = Meitou.Data.GameDatabase.Load(Meitou.Data.LoadOrder.FromInstall(install));
-            (world.NoTextures, world.NoObjects, world.NoFoliage, world.NoWater, world.WaterReflection, world.DistantZones) = (true, true, true, true, 0, 0);
+            (world.NoTextures, world.NoObjects, world.NoFoliage, world.NoWater, world.NoFogFeatures, world.WaterReflection, world.DistantZones) = (true, true, true, true, true, 0, 0);
             world.Post.Ssao = false;   // SSAO bands a perfectly flat floor; the Tab panel can turn it back on
+            world.NoParticles = true;   // no weather or map effects to show (the effect library and every map placer would be read)
+            world.Clouds ??= 0;   // no cloud layer: the volume march and the cloud shadows skip at density 0
+            world.Weather ??= "Default";   // clear; the scheduler would roll the weather of the world region under the floor
             world.Distance ??= 70;
             world.Pitch ??= 22;
             world.Yaw ??= 35;

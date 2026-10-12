@@ -60,6 +60,9 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
     {
         var context = display.Context;
         o.Day ??= (int)GameClock.DefaultStartDay;   // the weather schedule starts on the clock's first day (--day moves both)
+        // --crowd in the game: simulated characters (SpawnCrowd), not the viewer's posed harness, which would take the renderer's place.
+        crowd = o.Crowd;
+        o.Crowd = 0;
         gpu = WorldFrame.CreateGpu(context, install, scene, assets, o, interactive);
         if (gpu.Post is { } vendorPost) vendorPost.UpscalerFactory = Meitou.Rendering.Upscalers.VendorUpscalers.Factory(display.Context, streamline);
         (camera, render) = WorldFrame.Setup(scene, o);
@@ -122,6 +125,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             Console.WriteLine($"player    {playerSquad.Members.Count} characters, leader at {lead.X:0}, {lead.Z:0}");
         }
         if (IsSandbox && population is not null) target = SandboxSpawn();
+        if (!IsSandbox && crowd > 0 && population is not null) SpawnCrowd(target, crowd);
         if (scene.Database is { } characterDb && !g.NoPopulation && gpu.Characters is null)
             gpu.Characters = new CharacterRenderer(context, install, characterDb, assets) { Source = FillDrawList, Guard = gpu.Guard };
         var rig = session.Camera;

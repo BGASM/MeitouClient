@@ -624,12 +624,14 @@ through `SaveCaptureOptions.Bodies`; keep the population system from making resi
 `CharacterRenderer`, but no world. It exists to compare a character's motion with the original game at a known speed, without a town in the way.
 
 - **Floor.** `WorldFrame.LoadFlat` builds a `WorldScene` with no heightmap file: every height is the same (500 units, above the water at 100), terrain
-  textures, objects, foliage, water and the streamer are off, the sky and sun are the usual. The 1000 x 1000 floor around the origin is drawn as
+  textures, objects, foliage, water, the streamer, the placed fog volumes, particles and clouds are off and the weather is held clear (`Default`;
+  `--weather` and `--clouds` still override), the sky and sun are the usual. The 1000 x 1000 floor around the origin is drawn as
   screen-space overlay lines (`GameHost.Sandbox.cs`): a line every 10 units, a stronger one every 100, the X axis red and the Z axis blue. They have no
   depth test, so they also cross the characters. SSAO is off by default (it bands a perfectly flat floor).
 - **Characters.** `PopulationSystem.SpawnSandbox` makes one idle character (the first member of the default new-game start, or `--sandbox-character <name>`
   with the loadout the generator gives it, so combat works): the hero, the player's, selected, at the origin facing +X. With `n = 2` a second one of
-  a faction hostile to the player's stands 30 units away facing it. No navmesh, no towns: paths are straight lines on open ground.
+  a faction hostile to the player's stands 30 units away facing it. With `n > 2` (up to 1000) the rest stand idle in rings 15 units apart round the
+  pair, each with a look of its own, of the player's faction (so they keep out of the fight). No navmesh, no towns: paths are straight lines on open ground.
 - **Speed.** The movement system has two sandbox-only overrides in `CharacterCold` (`ModeOverride`, `SpeedOverride`, set by `SandboxMovement`; they are not
   hashed and nothing in the game sets them). The mode replaces the one of every order (the game's right click is mode 2, free); a fixed speed replaces the
   whole speed chain, so the character walks at exactly that many units per second after the usual 15 units/s per second ramp.

@@ -164,8 +164,8 @@ public sealed unsafe partial class GpuContext : IDisposable
         throw new InvalidOperationException("descriptor set allocation failed");
     }
 
-    /// <summary>Waits for the GPU, then copies level 0 / layer 0 of a colour texture into host memory (tests and tools; never inside a frame).</summary>
-    public byte[] ReadBack(Texture texture, int bytesPerTexel)
+    /// <summary>Waits for the GPU, then copies level 0 / layer <paramref name="layer"/> of a colour texture into host memory (tests and tools; never inside a frame).</summary>
+    public byte[] ReadBack(Texture texture, int bytesPerTexel, int layer = 0)
     {
         Device.Frames.WaitAll();
         int w = texture.Desc.Width, h = texture.Desc.Height;
@@ -176,7 +176,7 @@ public sealed unsafe partial class GpuContext : IDisposable
             var cb = Device.BeginImmediate();
             var region = new BufferImageCopy
             {
-                ImageSubresource = new ImageSubresourceLayers(texture.Desc.Aspect, 0, 0, 1),
+                ImageSubresource = new ImageSubresourceLayers(texture.Desc.Aspect, 0, (uint)layer, 1),
                 ImageExtent = new Extent3D((uint)w, (uint)h, 1),
             };
             Device.Vk.CmdCopyImageToBuffer(cb, texture.Image, ImageLayout.General, buffer.Buffer, 1, &region);

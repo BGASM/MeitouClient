@@ -36,10 +36,24 @@ On exit a `characters ...` line gives counts per LOD level and timings (means of
 ## Engine choices
 
 - **Generated LOD** (always on; the files' own levels are no longer an option): every mesh gets four reduced levels by edge collapse
-  (`MeshSimplifier`: quadric error, open edges and skinning-weight changes penalised, no flips), at half, a quarter, an eighth and a twentieth of its triangles,
-  used from 5, 11, 22 and 45 radii of the part (value = distance minus radius, the `distance_sphere` rule). The levels only re-point corners at existing vertices, so one
-  vertex buffer, the weights and the morph slots serve every level. Reason: the files' own levels are few and far (`human_female` has none; the male body's only
-  level starts at 200 units), so 500 characters were 3.5M triangles. Shadow cascades use LOD value x2 (`ShadowLodBias`).
+  (`FoliageLodBuilder` with the character settings: `MeshSimplifier` by quadric error, open edges and skinning-weight changes penalised, no flips, no collapse that leaves its
+  UV island, without which a face's eyes and mouth smeared from the second level), at half, a quarter, an eighth and a twentieth of its triangles (floor 40 per part; a level kept only
+  with at most 85 % of the one before, a deviation under a quarter of the radius). **Where a level starts** (2026-10-12): the objects' screen-size rule (`ObjectLodGen.Distances`,
+  [render-objects.md](render-objects.md)): its deviation from the original, measured in the bind pose, under 1.5 rendered pixels (or twice that where the level before has
+  sub-pixel triangles), at the render's pixels per radian when the mesh loads (`CharacterContent.LodPixelsPerRadian`, from `SetView`). Hair and beards (ATTACHMENT records) start
+  4x farther (`HairLodScale`): they are alpha-tested cards, and a collapse merging cards loses strands that the surface deviation does not see (reduced at the rule's distance,
+  dark hair thinned visibly at 200 units). Before: fixed 5, 11, 22 and 45 radii of the part (faces and weapons reduced within 50 units), then briefly fixed 500/1000/2000/4000.
+  The levels only re-point corners at existing vertices, so one vertex buffer, the weights and the morph slots serve every level.
+- **Shadow levels** (2026-10-12): shadow cascades use LOD value x2 (`ShadowLodBias`), never below the far cascades' floor (`ShadowLod.ObjectLodFloor` of the cascade's
+  texel, as the objects, in both shadow modes since the levels are Meitou's own); hair takes the rule's own distances there (a silhouette, so not `HairLodScale`). The body
+  mesh also gets shadow-only levels (`AssetPart.ShadowDistances`, appended to its index buffer at distance infinity so the picture never picks them), built without the
+  texture guard: the guard's refusals stop the body at about 1300 triangles, a shadow map shows no texture, and the body has no cut-outs. **Observed** (`meitou --new-game
+  --crowd 500`, `--distance 600`): every character is in every cascade that holds the crowd, and cascade 0 is drawn every frame (the far ones every few); before, 1.04M
+  triangles per cascade call whatever the cascade (bodies at their 1300-triangle level, hair 4x); with the floor and hair's own distances 0.995M; with the shadow-only body
+  levels (down to about 260 triangles from about 390 units of LOD value) 0.42M. The picture's shadows at `--sandbox 500 --distance 200`: 2.7 % of pixels differ by 4/255 or more.
+  **Observed** (`meitou --sandbox 500`, 1600x900, `--distance 400 --pitch 40`, RTX 4070, stills): every part at full detail 4.6M triangles, GPU colour 3.4 ms; the rule 1.74M,
+  1.8 ms (1.38M and 1.1 ms with hair at the rule's distance). The colour pass is geometry-bound: the same 3.3-3.8 ms from 800x450 to 3200x1800, ~0.7 ms per million triangles.
+  The per-call GPU timer of the character shadow pass is too noisy in stills to compare (0.5 to 1.4 ms per call for the same build); count triangles instead.
 - **Pose rate by distance**: characters beyond 120, 300 and 600 units are posed every 2nd, 4th and 8th frame (staggered by key); the last palette is reused.
   State per `Key` (`CharState`) holds the palette, the one before it, bone-attach matrices and last frame's model matrix.
 - **Texture memory**: character textures are loaded on demand (deferred) with the world's mip streaming (`MipStreaming` through `WorldTextureCache.Mips`): a texture

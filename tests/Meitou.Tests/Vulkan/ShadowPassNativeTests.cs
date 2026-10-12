@@ -24,10 +24,15 @@ public class ShadowPassNativeTests
             using var shadows = new ShadowPass(ctx) { Meitou = true, ContactHardening = true, Settings = new ShadowSettings(MapSize: 256, Range: 2000) };
             var view = new ShadowView(new Vector3(0, 100, 0), Vector3.UnitZ, Vector3.UnitY, 1.0f, 16 / 9f, 1);
             int calls = 0;
-            // No casters: the cascades are only cleared (every one drawn in the first frame: the whole atlas by the load op).
-            shadows.Render(view, Vector3.Normalize(new Vector3(0.3f, 0.8f, 0.2f)), (_, _, _, _) => calls++);
-            Assert.Equal(4, calls);
+            // No casters: the cascades are only cleared (every one drawn in the first frame, each layer by its load op).
+            var drawn = new List<int>();
+            shadows.Render(view, Vector3.Normalize(new Vector3(0.3f, 0.8f, 0.2f)), (c, _, _, _) => { calls++; drawn.Add(c.Index); });
+            Assert.Equal(MeitouShadowFit.DefaultCascades, calls);
+            Assert.Equal(Enumerable.Range(0, MeitouShadowFit.DefaultCascades), drawn);
+            // The cascade array: a layer per cascade, each the game's tile (the map side over 2).
             Assert.NotNull(shadows.AtlasTexture);
+            Assert.Equal((128, 128, MeitouShadowFit.DefaultCascades, TextureKind.Texture2DArray),
+                (shadows.AtlasTexture!.Desc.Width, shadows.AtlasTexture.Desc.Height, shadows.AtlasTexture.Desc.Layers, shadows.AtlasTexture.Desc.Kind));
 
             var names = device!.Allocator.Breakdown().Select(o => o.Name).ToList();
             Assert.Contains("shadow atlas", names);
@@ -43,12 +48,24 @@ public class ShadowPassNativeTests
             Assert.False(blocker.IsNull);
 
             ctx.Finish();
-            // The blocker map (half the atlas, R32F): the nearest depth of each 2 × 2 texels of an atlas cleared to 1.
+            // The blocker map (half a layer, R32F, a layer per cascade): the nearest depth of each 2 × 2 texels of layers cleared to 1.
             Assert.Equal(shadows.BlockerMap!.Image.Handle, blocker.Image.Handle);
-            var texels = ctx.ReadBack(shadows.BlockerMap, 4);
-            var depths = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(texels);
-            Assert.Equal(128 * 128, depths.Length);
-            Assert.All(depths.ToArray(), z => Assert.Equal(1f, z));
+            Assert.Equal(MeitouShadowFit.DefaultCascades, shadows.BlockerMap.Desc.Layers);
+            for (int layer = 0; layer < MeitouShadowFit.DefaultCascades; layer++)
+            {
+                var texels = ctx.ReadBack(shadows.BlockerMap, 4, layer);
+                var depths = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(texels);
+                Assert.Equal(64 * 64, depths.Length);
+                Assert.All(depths.ToArray(), z => Assert.Equal(1f, z));
+            }
+
+            // The Faithful CSM (F5): the game's four cascades in the tiles of its atlas, the array made again with that atlas as its one layer.
+            shadows.Meitou = false;
+            calls = 0;
+            shadows.Render(view, Vector3.Normalize(new Vector3(0.3f, 0.8f, 0.2f)), (_, _, _, _) => calls++);
+            Assert.Equal(KenshiShadows.CascadeCount, calls);
+            Assert.Equal((256, 1), (shadows.AtlasTexture!.Desc.Width, shadows.AtlasTexture.Desc.Layers));
+            ctx.Finish();
         }
         Assert.True(device!.ValidationErrors == 0, "Validation errors:\n" + string.Join("\n", device.ValidationLog));
     }
