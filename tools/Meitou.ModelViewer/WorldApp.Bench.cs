@@ -28,8 +28,6 @@ static partial class WorldApp
         AbToggles.RegisterEnhancements(LiveSwitches(o, () => gpu, () => camera, () => render));
         if (gpu.Water is { } water) AbToggles.Register("water-lean", () => water.Lean, v => water.Lean = v,
             "skip zero-contribution surf, ocean and distant detail work and opaque slices' refraction copies; B: always evaluate/copy");
-        if (gpu.Water is { Meitou: true }) AbToggles.Register("water-gate", () => WaterGate.Enabled, v => WaterGate.Enabled = v,
-            "the reflection's water rect ignores water past the haze-complete distance, and the ocean FFT and the refraction copy run only while water within their reach is in view (A) against the pass as before (B)");
         AbToggles.Register("shadow-zone-box", () => ShadowZoneBox.Enabled, v => ShadowZoneBox.Enabled = v,
             "each shadow cascade's foliage work list box-tested by zone against the cascade's planes (A) against every zone within 1.2 x the shadow range (B)");
         AbToggles.Register("occlusion", () => post.OcclusionCull, v => post.OcclusionCull = v, "foliage occlusion cull against the previous frame's depth pyramid");

@@ -1061,7 +1061,7 @@ public sealed unsafe class WaterRenderer : IDisposable
 
     /// <summary>
     /// The distance to the nearest water in view this frame, from the reflection's rect (<see cref="ReflectionPass.NearestWater"/>), set by the frame
-    /// loop: infinity with none, NaN when unknown (no reflection pass ran). With <see cref="WaterGate"/> the ocean's FFT and the refraction copy are
+    /// loop: infinity with none, NaN when unknown (no reflection pass ran). The ocean's FFT and the refraction copy are
     /// skipped while no water within their reach is in view; unknown gates nothing.
     /// </summary>
     public float NearestWater { get; set; } = float.NaN;
@@ -1071,14 +1071,14 @@ public sealed unsafe class WaterRenderer : IDisposable
     public const float OceanFadeEnd = 14000;
 
     /// <summary>Whether the ocean's FFT has anything to feed this frame: water within <see cref="OceanFadeEnd"/> is in view, or that is unknown.</summary>
-    bool OceanInView => !WaterGate.Enabled || float.IsNaN(NearestWater) || NearestWater <= OceanFadeEnd;
+    bool OceanInView => float.IsNaN(NearestWater) || NearestWater <= OceanFadeEnd;
 
     /// <summary>The slice near plane bounds every fragment's eye distance from below. Beyond both cutoffs neither
-    /// transmitted floor colour nor wet sand contributes, so the blended path is opaque and needs no copy. With <see cref="WaterGate"/> the same
+    /// transmitted floor colour nor wet sand contributes, so the blended path is opaque and needs no copy. The same
     /// bound holds for the nearest water in view: with none nearer, the slice shows no transmitting water at all.</summary>
     internal bool NeedsRefraction(float near) => Meitou && Refraction &&
         (!Lean || SliceCanTransmit(near, ClearDistance)) &&
-        (!WaterGate.Enabled || float.IsNaN(NearestWater) || SliceCanTransmit(NearestWater, ClearDistance));
+        (float.IsNaN(NearestWater) || SliceCanTransmit(NearestWater, ClearDistance));
 
     internal static bool SliceCanTransmit(float near, float clearDistance) =>
         near < Math.Max(Math.Max(clearDistance, 100f) * 1.5f, ShoreFadeEnd);
@@ -1144,7 +1144,7 @@ public sealed unsafe class WaterRenderer : IDisposable
     public void Draw(Matrix4x4 viewProjection, Vector3 eye, WorldLighting light, SkyColours colours, float time, float extent, ReflectionPass? reflection = null)
     {
         var p = Meitou ? meitou : faithful;
-        if (Meitou && OceanInView) ocean.Record();   // the FFT only while water near enough to show its detail is in view (WaterGate)
+        if (Meitou && OceanInView) ocean.Record();   // the FFT only while water near enough to show its detail is in view
         Prepare(p, viewProjection, eye, light, colours, Meitou ? waves.NormalTime : time, extent, reflection);
         if (Meitou) Record(p, gridSource, gridVertices, gridIndexCount);
         else Record(p, quadSource, quadVertices, 0);

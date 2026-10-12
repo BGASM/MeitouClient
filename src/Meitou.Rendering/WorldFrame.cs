@@ -1182,7 +1182,7 @@ static class WorldFrame
                 reflection.SceneStats = reflection.Level < 3 ? "no objects (level < 3)" : $"{objects.DrawnInstances} objects ({objects.DrawnTriangles:N0} triangles, {objects.DrawCalls} calls), {(reflection.Level >= 4 ? gpu.Foliage?.DrawnInstances ?? 0 : 0)} foliage meshes ({(reflection.Level >= 4 ? gpu.Foliage?.DrawCalls ?? 0 : 0)} calls)";
             });
         if (gpu.Probes is not null) gpu.Probes.InReflection = false;
-        // What the reflection's rect learnt for the water pass (WaterGate): the nearest water in view, or NaN when no pass ran to find out.
+        // What the reflection's rect learnt for the water pass: the nearest water in view, or NaN when no pass ran to find out.
         if (gpu.Water is { } gated) gated.NearestWater = reflecting ? gpu.Reflection!.NearestWater : float.NaN;
         StageClock.Lap(4);
         // The scene's passes are a native host that hands its guests the targets and state (phase 8 stage 3); wave 4 (docs/renderer-native.md 6):

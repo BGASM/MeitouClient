@@ -106,7 +106,7 @@ public sealed class ReflectionPass : IDisposable
     /// <summary>The distance from the eye beyond which the weather's fog hides every surface this frame (<see cref="FogVolumes.AtmosphereDistance"/>), set by the frame loop; null: none.</summary>
     public float? HideDistance { get; set; }
     /// <summary>
-    /// Meitou (<see cref="WaterGate"/>): the distance beyond which the haze has stopped growing (<see cref="SkyRenderer.HazeCompleteDistance"/>), set by
+    /// Meitou: the distance beyond which the haze has stopped growing (<see cref="SkyRenderer.HazeCompleteDistance"/>), set by
     /// the frame loop; null: no cap. Water past it shows the haze whatever it reflects, so <see cref="WaterRect"/> leaves it out: the sea past the map's
     /// edge no longer keeps the pass alive at the Hub (docs/render-water.md).
     /// </summary>
@@ -269,7 +269,7 @@ public sealed class ReflectionPass : IDisposable
             if (WaterRect(camera, (float)fullWidth / fullHeight, out float nearestWater) is { } wet) { rect = wet; NearestWater = nearestWater; }
             else
             {
-                // No water in view: nothing to reflect, and nothing for the water pass's ocean and refraction to serve (WaterGate; the water itself
+                // No water in view: nothing to reflect, and nothing for the water pass's ocean and refraction to serve (the water itself
                 // is still drawn: what is past WaterDistance shows the haze). The verdict is kept like an image, so the rays are not cast again next frame.
                 NearestWater = float.PositiveInfinity;
                 (noWater, noWaterWidth, noWaterHeight) = (true, fullWidth, fullHeight);
@@ -456,7 +456,7 @@ public sealed class ReflectionPass : IDisposable
     /// The rectangle (x0, y0, x1, y1) of the reflection's clip space that the water on the screen looks up, or null with no water in view:
     /// a grid of screen points (every 20 pixels or so) whose ray down to the water plane meets ground below the water, each projected
     /// with the reflection's matrix (the water does the same with its own position); padded by the ripples' largest shift of the lookup
-    /// (0.04 of the texture, 0.08 in clip space) and a cell. Water past <see cref="MaxDistance"/>, and with <see cref="WaterGate"/> past
+    /// (0.04 of the texture, 0.08 in clip space) and a cell. Water past <see cref="MaxDistance"/>, and past
     /// <see cref="WaterDistance"/>, does not count. <paramref name="nearest"/>: the distance to the nearest sample on water (infinity with none; NaN
     /// when the view could not be inverted).
     /// </summary>
@@ -466,7 +466,7 @@ public sealed class ReflectionPass : IDisposable
         nearest = float.NaN;
         if (!Matrix4x4.Invert(camera.View, out var inverse)) return new Vector4(-1, -1, 1, 1);
         nearest = float.PositiveInfinity;
-        float far = WaterGate.Enabled && WaterDistance is { } cap ? MathF.Min(MaxDistance, cap) : MaxDistance;
+        float far = WaterDistance is { } cap ? MathF.Min(MaxDistance, cap) : MaxDistance;
         var view = new Matrix4x4(1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 2 * plane, 0, 1) * camera.View;
         var mapped = view * Perspective(camera.FieldOfView, aspect, 1, 1000);
         float tan = MathF.Tan(camera.FieldOfView / 2), level = plane + WaterRise;
