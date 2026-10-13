@@ -12,6 +12,8 @@ namespace Meitou.Simulation.Combat;
 public sealed class Fighter
 {
     public WeaponInstance? Weapon { get; }
+    /// <summary>The crossbow carried in a weapon section (back or hip), if any: the ranged weapon (docs/simulation.md "Combat", ranged). The melee <see cref="Weapon"/> stays what it was.</summary>
+    public CrossbowInstance? Crossbow { get; init; }
     /// <summary>The worn pieces, in the order they are stacked in.</summary>
     public ReadOnlySpan<ArmourPiece> Armour => armour;
     readonly ArmourPiece[] armour;

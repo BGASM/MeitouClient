@@ -125,6 +125,14 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     int HeldClip(CharacterTask task) => task switch { CharacterTask.Treat => TreatingClip, CharacterTask.Rest => RestingClip, _ => -1 };
     // The fall (a stand-in for the ragdoll) and getting up.
     readonly int fall = library.IndexOfAny("Dodge back fall"), getUp = library.IndexOf("standing up 3");
+    // The crossbow clips (RANGED records, played by the combat system's timing).
+    readonly int aimClip = library.IndexOf(AnimationLibrary.RangedAimRecord), defaultReload = library.IndexOf(AnimationLibrary.RangedReloadRecord);
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> reloadClips = new(StringComparer.Ordinal);
+
+    /// <summary>The reload clip of the character's crossbow: its record's <c>reload anim</c>, else <c>reload 1 phase</c>.</summary>
+    int ReloadClip(CharacterCold cold) => cold.Fighter?.Crossbow is { Data.ReloadAnimId: { Length: > 0 } id }
+        ? reloadClips.GetOrAdd(id, static (key, lib) => lib.IndexOfRecord(key), Library) is >= 0 and var k ? k : defaultReload
+        : defaultReload;
 
     // Scratch lists of the thread running a partition, kept between ticks (Update clears them on entry).
     [ThreadStatic] static List<(int Index, float Weight)>? lowerScratch, upperScratch;
@@ -148,13 +156,13 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             if (cold.InCombat) speed = v.X * MathF.Sin(next[i].Yaw) + v.Z * MathF.Cos(next[i].Yaw);
             speed = a.SmoothSpeed(speed, CharacterAnimation.WindowFor(dt));
             var id = table.IdOf(i);
-            var root = Update(a, cold, speed, dt, world.Seed, Rng.Key(id), world.Tick, wantedLower, wantedUpper, ViewOf(id, world.Tick, cold), (CharacterTask)next[i].Task);
+            var root = Update(a, cold, speed, dt, world.Seed, Rng.Key(id), world.Tick, wantedLower, wantedUpper, ViewOf(id, world.Tick, cold, dt), (CharacterTask)next[i].Task);
             if (root != Vector2.Zero) Relocate(world, i, ref next[i], root);
         }
     }
 
     /// <summary>What the combat system says about a character for its animation: the technique playing and its progress, and the last hit taken (the last finished tick's state).</summary>
-    CombatView ViewOf(CharacterId id, long tick, CharacterCold cold)
+    CombatView ViewOf(CharacterId id, long tick, CharacterCold cold, float tickSeconds)
     {
         if (combat is null) return CombatView.None;
         var slot = combat.StateOf(id);
@@ -164,6 +172,17 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         {
             technique = Library.IndexOfTechnique(playing.Technique.StringId);
             progress = playing.Progress;
+        }
+        else if (combat.RangedPoseOf(id, tick, tickSeconds) is { } pose)
+        {
+            // The crossbow (engine choice of clips and timing): aiming raises "aimH" (clip aimshoot) through its first half over the steady time, the shot plays the second
+            // half, the reload plays the crossbow's own "reload anim" record (else "reload 1 phase") stretched over the reload time.
+            (technique, progress) = pose.Pose switch
+            {
+                RangedPose.Aim => (aimClip, pose.Progress * 0.5f),
+                RangedPose.Shot => (aimClip, 0.5f + pose.Progress * 0.5f),
+                _ => (ReloadClip(cold), pose.Progress),
+            };
         }
         string? part = slot.HitPart >= 0 && cold.Medical is { } body && slot.HitPart < body.Parts.Count ? body.Parts[slot.HitPart].Template.StringId : null;
         return new CombatView(technique, progress, slot.HitTick, slot.HitHeavy, slot.HitBehind, part);

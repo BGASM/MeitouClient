@@ -98,6 +98,8 @@ public sealed record AnimationDefinition
     public IReadOnlyList<string> Stumbles { get; init; } = [];
     public bool BigStumble { get; init; }
     public int StumbleFrom { get; init; }
+    /// <summary><c>category</c> (CharacterAnimCategory: 0 ANIM_NORMAL ... 8 RANGED). Only category 0 is chosen as movement, idle or stumble; the RANGED clips (crossbow aim and reload) are played by the combat system's timing like techniques.</summary>
+    public int Category { get; init; }
     /// <summary>A COMBAT_TECHNIQUE (attack, block or dodge): played by the combat system's timing, never chosen as movement or idle.</summary>
     public bool Technique { get; init; }
     /// <summary>
@@ -174,6 +176,7 @@ public sealed record AnimationDefinition
             LeftLegIdeal = r.GetFloat("L leg damage ideal", 100),
             RightLegIdeal = r.GetFloat("R leg damage ideal", 100),
             Stumbles = [.. r.GetReferences("stumbles").Select(x => x.TargetStringId)],
+            Category = r.GetInt("category"),
             BigStumble = r.GetBool("big stumble", true),
             StumbleFrom = r.GetInt("stumble from"),
         };
@@ -296,9 +299,16 @@ public sealed class AnimationLibrary
     /// <summary>The index of a COMBAT_TECHNIQUE's definition by its string id, or -1.</summary>
     public int IndexOfTechnique(string stringId) => techniques.TryGetValue(stringId, out int i) ? i : -1;
 
+    /// <summary>The index of an ANIMATION record's definition by its string id, or -1.</summary>
+    public int IndexOfRecord(string stringId) => all.FindIndex(d => d.Id == stringId && !d.Technique);
+
+    /// <summary>The RANGED ANIMATION record of the crossbow's aim (<c>aimH</c>, clip <c>aimshoot</c>) and the default reload (<c>reload 1 phase</c>), by record name.</summary>
+    public const string RangedAimRecord = "aimH", RangedReloadRecord = "reload 1 phase";
+
     /// <summary>
     /// The usable ANIMATION records (normal category, not disabled, no weather overlay), then the COMBAT_TECHNIQUE records of humanoids (<c>animal</c> 8 or
-    /// less, the set Kenshi's startup preprocessing gathers; docs/animation.md) as <see cref="AnimationDefinition.FromTechnique"/>.
+    /// less, the set Kenshi's startup preprocessing gathers; docs/animation.md) as <see cref="AnimationDefinition.FromTechnique"/>, then the RANGED (category 8)
+    /// records, which only the combat system plays (appended last so the indices of the others do not move).
     /// </summary>
     public static AnimationLibrary FromDatabase(GameDatabase db) => new(db.OfType(FcsRecordType.ANIMATION)
         .Where(r => !r.GetBool("disabled") && r.GetInt("category") == 0 && r.GetInt("weather type") == 0)
@@ -307,7 +317,14 @@ public sealed class AnimationLibrary
         .Concat(db.OfType(FcsRecordType.COMBAT_TECHNIQUE)
             .Where(r => r.GetInt("animal") <= 8)
             .OrderBy(r => r.StringId, StringComparer.Ordinal)
-            .Select(AnimationDefinition.FromTechnique)));
+            .Select(AnimationDefinition.FromTechnique))
+        .Concat(db.OfType(FcsRecordType.ANIMATION)
+            .Where(r => !r.GetBool("disabled") && r.GetInt("category") == RangedCategory && r.GetInt("weather type") == 0)
+            .OrderBy(r => r.StringId, StringComparer.Ordinal)
+            .Select(AnimationDefinition.From)));
+
+    /// <summary>CharacterAnimCategory 8, RANGED.</summary>
+    public const int RangedCategory = 8;
 
     readonly System.Collections.Concurrent.ConcurrentDictionary<(AnimationArea, AnimationStance), int[]> candidates = new();
     readonly System.Collections.Concurrent.ConcurrentDictionary<AnimationStance, (int Index, float Weight)[]> idles = new();
@@ -323,7 +340,7 @@ public sealed class AnimationLibrary
         for (int i = 0; i < self.all.Count; i++)
         {
             var d = self.all[i];
-            if (d.MoveSpeed == 0 || d.Idle || d.IsAction || d.Area == AnimationArea.Overlay) continue;
+            if (d.Category != 0 || d.MoveSpeed == 0 || d.Idle || d.IsAction || d.Area == AnimationArea.Overlay) continue;
             if ((key.Item1 == AnimationArea.Upper) != (d.Area == AnimationArea.Upper)) continue;
             if (d.FitsExceptLegs(key.Item2)) list.Add(i);
         }
@@ -364,7 +381,7 @@ public sealed class AnimationLibrary
         for (int i = 0; i < all.Count; i++)
         {
             var d = all[i];
-            if (d.Stumbles.Count == 0 || d.BigStumble != big || d.StumbleFrom != side || !d.Stumbles.Contains(part) || !d.FitsExceptLegs(stance)) continue;
+            if (d.Category != 0 || d.Stumbles.Count == 0 || d.BigStumble != big || d.StumbleFrom != side || !d.Stumbles.Contains(part) || !d.FitsExceptLegs(stance)) continue;
             float w = d.Chance / 100f * (i == playing ? 0.25f : 1);
             into.Add((i, w));
             total += w;
@@ -388,13 +405,13 @@ public sealed class AnimationLibrary
         for (int i = 0; i < self.all.Count; i++)
         {
             var d = self.all[i];
-            if (d.Idle && !d.IsAction && d.Area == AnimationArea.Upper && d.CombatMode != 0 && (d.Kinds & held) != 0) list.Add((i, Math.Max(d.IdleChance, 0)));
+            if (d.Category == 0 && d.Idle && !d.IsAction && d.Area == AnimationArea.Upper && d.CombatMode != 0 && (d.Kinds & held) != 0) list.Add((i, Math.Max(d.IdleChance, 0)));
         }
         if (list.Count == 0)
             for (int i = 0; i < self.all.Count; i++)
             {
                 var d = self.all[i];
-                if (d.Idle && !d.IsAction && d.Area == AnimationArea.All && d.Fits(s with { Combat = d.CombatMode == 1 })) list.Add((i, Math.Max(d.IdleChance, 0)));
+                if (d.Category == 0 && d.Idle && !d.IsAction && d.Area == AnimationArea.All && d.Fits(s with { Combat = d.CombatMode == 1 })) list.Add((i, Math.Max(d.IdleChance, 0)));
             }
         return list.ToArray();
     }, this);
@@ -406,7 +423,7 @@ public sealed class AnimationLibrary
         for (int i = 0; i < self.all.Count; i++)
         {
             var d = self.all[i];
-            if (d.Idle && !d.IsAction && d.Area == AnimationArea.All && d.Fits(s)) list.Add((i, Math.Max(d.IdleChance, 0)));
+            if (d.Category == 0 && d.Idle && !d.IsAction && d.Area == AnimationArea.All && d.Fits(s)) list.Add((i, Math.Max(d.IdleChance, 0)));
         }
         return list.ToArray();
     }, this);

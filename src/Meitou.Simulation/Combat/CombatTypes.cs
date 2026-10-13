@@ -14,7 +14,12 @@ public sealed record AttackOrder(IReadOnlyList<CharacterId> Attackers, Character
 }
 
 /// <summary>What a resolved blow did, for the log (a combat log, damage numbers, tests).</summary>
-public readonly record struct CombatLogEntry(long Tick, int Attacker, int Defender, int Blow, BlowOutcome Outcome, int Part, float Cut, float Blunt, float Pierce, float Stun, bool Knockout, bool Death);
+public readonly record struct CombatLogEntry(long Tick, int Attacker, int Defender, int Blow, BlowOutcome Outcome, int Part, float Cut, float Blunt, float Pierce, float Stun, bool Knockout, bool Death)
+{
+    /// <summary>A crossbow bolt (blow 0), and whether it hit the character it was shot at (false: a friend or another enemy in the way).</summary>
+    public bool Ranged { get; init; }
+    public bool Intended { get; init; }
+}
 
 /// <summary>Settings of the <see cref="CombatSystem"/> that are the host's choice rather than the game's.</summary>
 public sealed record CombatOptions

@@ -95,6 +95,7 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
         hasher.Add(read.Length);
         for (int i = 0; i < read.Length; i++) read[i].Hash(ref hasher);
         hasher.Add(log.Count);
+        HashRanged(ref hasher);
     }
 
     // ------------------------------------------------------------------ inputs
@@ -149,7 +150,7 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
         s.ReadyTick = now + PauseTicks(world, a, 0);
         table.Next[a].Task = (byte)CharacterTask.Attack;
         cold.InCombat = true;
-        cold.DrawnWeapon = cold.Fighter.Weapon is { } w && !cold.Fighter.Unarmed ? HandHold.OfCategory(w.Data.SkillCategory).Weapon : WeaponKinds.None;
+        cold.DrawnWeapon = s.Ranged ? HandHold.OfCategory((int)WeaponCategory.Bow).Weapon : MeleeDrawn(cold.Fighter);
         return true;
     }
 
@@ -177,6 +178,7 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
     {
         Sync(world.Characters);
         Array.Copy(read, write, world.Characters.HighWater);
+        FlyProjectiles(world);
     }
 
     public void Move(World world, Partition part)
@@ -202,7 +204,9 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
             ref var n = ref next[i];
             n.Yaw = MathF.Atan2(dir.X, dir.Y);
             if (!Settings.SelfApproach) continue;
-            bool busy = s.Down || s.AttackTech >= 0 || s.ReactTech >= 0 || now < s.StunUntil;
+            // A crossbowman stands while it aims or reloads and walks up only while closing in.
+            bool shooting = s.Ranged && s.RangedState != (byte)RangedStates.Closing;
+            bool busy = s.Down || s.AttackTech >= 0 || s.ReactTech >= 0 || now < s.StunUntil || shooting;
             float gap = distance - CombatTuning.Footprint(cold) - CombatTuning.Footprint(table.Cold(t));
             if (busy || gap <= CombatTuning.CloseInGap)
             {

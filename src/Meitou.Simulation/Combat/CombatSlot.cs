@@ -34,6 +34,19 @@ public struct CombatSlot
     public int HitTick, HitPart;
     public bool HitHeavy, HitBehind;
 
+    // The ranged controller (docs/simulation.md "Combat", ranged; the original keeps it at Character +0x2f0). All zero for a character that never used a crossbow.
+    /// <summary>Fighting with the crossbow rather than the melee weapon; the controller's state (<see cref="RangedStates"/>).</summary>
+    public bool Ranged;
+    public byte RangedState;
+    /// <summary>Out of ammunition with an empty crossbow (no reload can start).</summary>
+    public bool Dry;
+    /// <summary>Shots loaded; shots fired (part of the roll keys).</summary>
+    public int Loaded, Shots;
+    /// <summary>Seconds of the reload left and its full length (0: not reloading); the steady-aim timer; the time the line of fire has been clear while closing in.</summary>
+    public float ReloadLeft, ReloadTime, Steady, ClearTime;
+    /// <summary>The tick of the last shot (0 with <see cref="Shots"/> 0).</summary>
+    public int ShotTick;
+
     public static CombatSlot Fresh(int generation) => new()
     {
         Generation = generation, TargetSlot = -1, TargetGeneration = 0, AttackTech = -1, ReactTech = -1, ReactedSlot = -1, ReactedSeq = -1, HitTick = -1, HitPart = -1,
@@ -74,5 +87,33 @@ public struct CombatSlot
         h.Add(HitPart);
         h.Add(HitHeavy);
         h.Add(HitBehind);
+        // The ranged controller goes in only once it has been used, so worlds without crossbows hash as they did before it existed.
+        if (!RangedUsed) return;
+        h.Add(Ranged);
+        h.Add(RangedState);
+        h.Add(Dry);
+        h.Add(Loaded);
+        h.Add(Shots);
+        h.Add(ReloadLeft);
+        h.Add(ReloadTime);
+        h.Add(Steady);
+        h.Add(ClearTime);
+        h.Add(ShotTick);
     }
+
+    /// <summary>Any ranged field is set.</summary>
+    public readonly bool RangedUsed => Ranged || RangedState != 0 || Dry || Loaded != 0 || Shots != 0 || ReloadLeft != 0 || ReloadTime != 0 || Steady != 0 || ClearTime != 0 || ShotTick != 0;
+}
+
+/// <summary>The states of the ranged controller (<c>FUN_140438c70</c>, controller <c>+0</c>).</summary>
+public enum RangedStates : byte
+{
+    /// <summary>Loaded, target in range: holding the aim until the steady timer runs out, then firing when the line is clear.</summary>
+    Aiming = 0,
+    /// <summary>Out of range or the line of fire blocked: walking towards the target.</summary>
+    Closing = 1,
+    /// <summary>Empty: reloading (or unable to, with no ammunition).</summary>
+    Reloading = 2,
+    /// <summary>No target.</summary>
+    NoTarget = 3,
 }

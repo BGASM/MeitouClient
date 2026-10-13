@@ -47,4 +47,20 @@ public readonly record struct SkillSummary(float Attack, float Defence, float Do
 public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> Characters)
 {
     public static readonly WorldSnapshot Empty = new(-1, []);
+
+    /// <summary>Crossbow bolts in flight and stuck in the ground (the renderer may draw them; empty when there are none).</summary>
+    public IReadOnlyList<ProjectileSnapshot> Projectiles { get; init; } = [];
+}
+
+/// <summary>
+/// A bolt as the renderer needs it: the nose position, the unit direction of flight, the stretch of its mesh along its length (max(1, speed x 0.005) in flight, 1 once
+/// stuck; <c>FUN_1404380e0</c>), whether it is stuck in the ground, and the <c>live ammo</c> mesh of the crossbow that shot it.
+/// </summary>
+public readonly record struct ProjectileSnapshot(int Id, Vector3 Position, Vector3 Direction, float Stretch, bool Stuck, string Mesh);
+
+/// <summary>A system that has projectiles to publish (the combat system).</summary>
+public interface IProjectileSource
+{
+    /// <summary>The projectiles after the tick (a new list; empty when none).</summary>
+    IReadOnlyList<ProjectileSnapshot> PublishProjectiles();
 }

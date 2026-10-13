@@ -12,6 +12,8 @@ public sealed partial class CombatSystem
 
     public void Apply(World world, in Effect e)
     {
+        if (e.Kind == FireEffect) { ApplyFire(world, e); return; }
+        if (e.Kind == ReloadEffect) { ApplyReload(world, e); return; }
         if (e.Kind != BlowEffect) return;
         var table = world.Characters;
         int a = e.Source, d = e.Target, blow = e.Arg, seq = (int)e.Amount, now = (int)world.Tick;

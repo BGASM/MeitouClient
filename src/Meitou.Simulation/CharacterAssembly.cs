@@ -64,7 +64,13 @@ sealed class CharacterAssembly(PopulationData data)
                     weapon = WeaponInstance.Create(item.Level * 0.01f, w, combat.Manufacturer(item.CompanyId), combat.WeaponMaterial(item.MaterialId), combat.Constants);
         var armour = inventory.Items.Where(i => i.Type == FcsRecordType.ARMOUR && combat.Armour(i.Record) is not null)
             .Select(i => ArmourPiece.Create(combat.Armour(i.Record)!, i.Quality * 0.01f));
-        return new Fighter(weapon, armour);
+        // The crossbow: the first CROSSBOW in the weapon sections (back, then hip), its quality the level x 0.01 like a weapon's.
+        CrossbowInstance? crossbow = null;
+        foreach (var section in new[] { "back", "hip" })
+            foreach (var item in inventory.Items.Where(i => i.Section == section && i.Type == FcsRecordType.CROSSBOW))
+                if (crossbow is null && combat.Crossbow(item.Record) is { } x)
+                    crossbow = CrossbowInstance.Create(item.Level * 0.01f, x, combat.Constants, data.BodyOptions.GlobalDamageMultiplier);
+        return new Fighter(weapon, armour) { Crossbow = crossbow };
     }
 
     /// <summary>

@@ -100,6 +100,16 @@ public sealed partial class CombatSystem
                 EndFight(table, i);
             }
 
+            // 3b. A crossbowman fights with the crossbow or the melee weapon; with the crossbow the ranged controller runs instead of the melee attack (a blow aimed at it is still met).
+            ChooseMode(world, i, ref s, cold, fighting);
+            if (s.Ranged)
+            {
+                if (s.ReactTech >= 0 && now >= s.ReactStart + s.ReactTicks) s.ReactTech = -1;
+                if (s.ReactTech < 0 && s.AttackTech < 0) React(world, i, ref s, cold, key, now, dt);
+                TickRanged(world, i, ref s, cold, effects, now, dt);
+                continue;
+            }
+
             // 4. The reaction and the attack in progress.
             if (s.ReactTech >= 0 && now >= s.ReactStart + s.ReactTicks) s.ReactTech = -1;
             if (s.AttackTech >= 0)

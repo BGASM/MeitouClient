@@ -18,11 +18,13 @@ public sealed class CombatDatabase
     readonly Dictionary<string, WeaponManufacturer> manufacturersById = [];
     readonly Dictionary<string, WeaponMaterial> materialsById = [];
     readonly Dictionary<string, ArmourData> armoursById = [];
+    readonly Dictionary<string, CrossbowData> crossbowsById = [];
 
     public WeaponData? Weapon(string stringId) => weaponsById.GetValueOrDefault(stringId);
     public WeaponManufacturer? Manufacturer(string stringId) => manufacturersById.GetValueOrDefault(stringId);
     public WeaponMaterial? WeaponMaterial(string stringId) => materialsById.GetValueOrDefault(stringId);
     public ArmourData? Armour(string stringId) => armoursById.GetValueOrDefault(stringId);
+    public CrossbowData? Crossbow(string stringId) => crossbowsById.GetValueOrDefault(stringId);
 
     public static CombatDatabase From(GameDatabase db)
     {
@@ -45,6 +47,7 @@ public sealed class CombatDatabase
         foreach (var m in manufacturers) result.manufacturersById[m.StringId] = m;
         foreach (var m in materials) result.materialsById[m.StringId] = m;
         foreach (var a in armours) result.armoursById[a.StringId] = a;
+        foreach (var x in result.Crossbows) result.crossbowsById[x.StringId] = x;
         return result;
     }
 }

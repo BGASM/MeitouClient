@@ -152,11 +152,12 @@ Floats go in by their bits (-0 as 0). The first aid state (`TreatTarget` and `Re
 **Determinism tests** (`tests/Meitou.Tests/Simulation`). A dummy workload (`WanderSystem` in `WanderWorkload.cs`: seeded wandering,
 separation over the grid, a synthetic ground that dips under the water, blows on the nearest neighbour, births and deaths that reuse slots) and
 the real systems on a synthetic town (`SyntheticTown`) and on The Hub of the install run at 1, 4 and 16 threads; the hashes at the checkpoints
-agree, two runs agree, another seed differs. `GoldenHashTests` pins the hashes of ten scripted scenarios (wander, player, roaming, bodies,
+agree, two runs agree, another seed differs. `GoldenHashTests` pins the hashes of eleven scripted scenarios (wander, player, roaming, bodies,
 fight, duels, two worlds cut into many partitions with `MinPartitionSize` 4, a first aid and rest script on hand-made characters, and `aggro`: five squads of five
-factions round a crossroads with a player character, fights started by hostility, self-defence and an assault that changes the relations, cut into partitions of one slot), so a refactor meant to change nothing is checked to change
+factions round a crossroads with a player character, fights started by hostility, self-defence and an assault that changes the relations, cut into partitions of one slot, and `ranged`: crossbowmen against katana fighters in one-slot partitions), so a refactor meant to change nothing is checked to change
 nothing; a change of behaviour that is meant updates the numbers in the same commit. **Re-pinned 2026-10-13** (`bodies` from its sixth checkpoint, `fight` from its second, `town-parts` from its second): the XP on the move of `BodySystem` (athletics while running, strength under a load) raises stats a little, which feeds the speed chain; the first aid system, the rest flag and the fighter encumbrance moved nothing there (switching only the XP off made all eight old pins match again), and the new `first-aid` scenario agrees at 1, 4 and 16 threads before being pinned. **Pinned 2026-10-13**: `aggro` (agrees at 1, 4 and 16 threads first;
 `AggroTests`); the hostility work moved none of the nine others (they do not run the aggro system, and the deferred list and self-defence change nothing in them).
+**Pinned 2026-10-13**: `ranged` (agrees at 1, 4 and 16 threads first; `RangedTests`); the ranged code moved none of the ten others (their worlds have no crossbows, and the ranged state is hashed only once used, [Ranged](#ranged)).
 
 **Asynchronous services** (paths, navmesh building, building a town's characters) run on their own threads with request and result
 queues. In play a result is taken in at the first tick after it is ready, so timing can differ between runs. In the determinism tests they
@@ -218,7 +219,7 @@ result (the golden hashes pin it):
 | 4 | `MovementSystem` | Inputs, Schedule, Think, Move | Orders, paths, tasks, steering |
 | 5 | `FirstAidSystem` | Inputs, Schedule, Act, Apply, SlowWorld | First aid and resting: treat / rest / medic job orders, the walk to the patient, the bandaging, NPCs treating by themselves ([Bodies](#bodies)) |
 | 6 | `BodySystem` | Act, SlowWorld | Medical tick (resting from the `Rest` task), top speed, XP on the move, the fighter's encumbrance, down characters; removes corpses |
-| 7 | `CombatSystem` | Inputs, Schedule, Move, Act, Apply, SlowWorld | Fights (`Schedule` resyncs its slots with the table) |
+| 7 | `CombatSystem` | Inputs, Schedule, Move, Act, Apply, SlowWorld | Fights, melee and crossbow (`Schedule` resyncs its slots with the table and flies the bolts, [Ranged](#ranged)) |
 | 8 | `AnimationSystem` | Act | Animation layers |
 | 9 | `FeedSystem` | SlowWorld | Eating |
 | 10 | `RetaliationSystem` | SlowWorld | Attacked characters fight back (NPCs always, the player's while idle) |
@@ -440,6 +441,10 @@ The original's rules (decompilation) are in [animation.md](animation.md#run-time
   published by record name; the renderer's mask comes from `AnimationMask.FromTechnique`: a block that is not a dodge loses its lower-body
   tracks). The combat system's attack or reaction (`CombatSystem.Playing`, the last finished tick's state) sets the clip's time to progress x
   length, so the blow lands at its `anim blocked frame`. Attacks and dodges replace everything; a block plays over the legs' clips.
+- **Crossbow** (engine choice of clips and timing, 2026-10-13). The RANGED records (category 8) are appended to the library after the techniques, so no other index
+  moves, and are never chosen as movement, idles or stumbles. A character shooting (`CombatSystem.RangedPoseOf`) plays them like a technique: aiming raises `aimH`
+  (clip `aimshoot`) through its first half over the 0.4 s steady time, the 0.3 s after a shot play its second half, a reload plays the crossbow's `reload anim` record
+  (else `reload 1 phase`) stretched over the reload time. `aimwalk`, `shoot` and `stand 1 crossbow` are not used. What the clips look like was not checked in the viewer.
 - **Hit reactions** (**Verified** rules): a hit records its tick, body part, heaviness (above the stumble threshold) and side on the combat slot
   (`CombatSlot.HitTick`, `HitPart`, `HitHeavy`, `HitBehind`). Unless the hit is light while a reaction is playing, one of the part's
   `stumbles` clips with `big stumble` = heavy-and-free and `stumble from` = the side plays to its end (`AnimationLibrary.Stumbles`;
@@ -523,7 +528,8 @@ fields and food are in [character-stats.md](game/character-stats.md#hunger-and-s
   (`shirt`, `head`, `boots`, `armour` for body, `legs`; belt has no verified section name and goes to `main`), the backpack, crossbow and
   weapons at `hip`/`back` (row in `inventory y`, level and manufacturer kept); then the CHARACTER's `inventory` list, each ITEM entry with a
   first value above 0 being that many items. The player's squad gets what its CHARACTER records list (the start-off records have no item list,
-  [ui-screens.md](game/ui-screens.md)). Worlds without appearances get only the record list. Animals have no inventory.
+  [ui-screens.md](game/ui-screens.md)). Worlds without appearances get only the record list. Animals have no inventory. A rolled crossbow brings one item of its
+  bolts (engine choice, 2026-10-13, [Ranged](#ranged)). Note: ITEM `stackable` is an int in the data (1 for bolts); `ItemInfo` reads it as a bool, so those items do not stack.
 - **Food.** A food item's charges are the record's `charges` times CONSTANTS `food quality mult`; eating adds **charges / 100** to the stomach,
   in hunger levels (the UI shows level x 100): Gohan 0.75, Bread 0.30, Rice Bowl 0.25, Dustwich 0.70. The unit is an **engine choice**: the
   nutrition value is **Unknown** in the original. Raw meat is not eaten by this rule.
@@ -608,10 +614,64 @@ retaliation systems are in `Fighting.cs`.
 - **Hostility** (`AggroSystem`): NPCs start fights with enemies of their faction in sight; see [Hostility and relations](#hostility-and-relations).
 - **Host API.** `CombatSystem.StateOf(id)` (target, counters, `Down`), `Playing(id, tick)` (the technique playing and its progress) and, with
   `CombatOptions.RecordLog`, `Log` (every resolved blow: attacker, defender, outcome, part, damage, KO, death).
-- **Gaps.** The clips are played by the animation system ([Animation](#animation)). Also not built: ranged combat and turrets (only the records
+- **Gaps.** The clips are played by the animation system ([Animation](#animation)). Also not built: turrets (only the records
   are read), attack slots (`max num attack slots`), target choice, movement round the target beyond the path, fighting while prone, finishing off,
   prisoners, fist injury to the attacker, a stagger coupled to leg loss, mass-combat XP. Built 2026-10-13: auto-aggro by relations and the player's idle characters
   defending themselves (above).
+
+### Ranged
+
+Crossbows (2026-10-13), built from the facts of [combat.md "Ranged and turrets"](game/combat.md#ranged-and-turrets); turrets and harpoon turrets are not built. Code:
+`Combat/CombatSystem.Ranged.cs` (the controller, shots, flight, `RangedTuning`), `Combat/RangedFormulas.cs` (`RangedFormulas`, `CrossbowInstance`, `Ammunition`), the
+ranged fields of `CombatSlot` (`Ranged`, `RangedState`, `Loaded`, `ReloadLeft`, `Steady`, `Shots`, ...), `CrossbowData` in `Meitou.Data/Gameplay/Combat/RangedData.cs`.
+Tests: `RangedTests` (formulas, worlds, the 1 / 4 / 16 thread check) and `RangedInstallTests` (`[Slow]`, the base game's records and a real crossbowman).
+
+- **The gun.** At spawn `CharacterAssembly.MakeFighter` gives `Fighter.Crossbow` from the first CROSSBOW in `back`, then `hip`: quality = its level x 0.01 (the
+  generator's crossbows have level 0), stats by `CrossbowData.At(q, constants, G)` with `bow damage 1/99` (**Observed**). The melee `Weapon` is unchanged.
+- **Ammunition at spawn** (**engine choice**): a character whose loadout rolled a crossbow gets one item of the crossbow's `ammo` (10 to 40 bolts by its `charges`) unless
+  its record's list already gave some (`ItemFactory.AddAmmo`); only 3 of the 40 CHARACTER records with crossbows list bolts, and how the original arms its NPC
+  crossbowmen is **Unknown**. A reload uses one charge of the first matching item, main inventory then backpack (**Observed**); a stack of several units refills from
+  `ItemInstance.MaxCharges` and loses a unit (engine).
+- **Crossbow or melee** (`ChooseMode`, own slot in `Act`; the original's switch is **Unknown**, combat.md "AI"): a fighting character with a crossbow uses it while it has a
+  shot loaded or ammunition, no melee fighter targeting it is within **15** units (gap between bodies; a stand-in for `iAmBeingMeleeAttacked`) and its target's gap is at
+  least **20**; from melee it takes the crossbow up again past a gap of **60**. Running dry (empty and no ammunition, `CombatSlot.Dry`) means melee. Switching is
+  instant (draw time **Unknown**); `DrawnWeapon` becomes the bow kind. The player's attack orders go through the same rule, so a player character with a crossbow and
+  bolts shoots.
+- **The controller** (`TickRanged`, own slot in `Act`; the original's states 0 to 3): empty: a reload of clamp(lerp(s, max, min)) seconds with s = 0.01 (0.6 crossbows +
+  0.4 dexterity x the gear's dexterity product), the bolt taken through a self-targeted `ReloadEffect` in the commit; out of range (d^2 >= h range^2) or the line of fire
+  blocked: **closing in**, the pursuit system walks it to the target (`PursuitSystem` stands a shooter that aims or reloads; with `SelfApproach` the combat system walks it);
+  in range: the **0.4 s** steady aim, then the fire decision and a `FireEffect` to the target. While closing in, the line must be clear for **0.3 s** before it aims
+  again (the original's two ray flags are **Unknown**). XP per second: crossbows 1.2 and dexterity 0.5 while reloading, crossbows 1.2 and perception 3.0 while aiming in
+  range; FRIENDLY_FIRE 20 or 100 per friend passed or hit (**Observed** amounts). The shot leaves on the decision (the original's trigger flag is **Unknown**).
+- **Line of fire** (`LineOfFire`): the terrain sampled every 20 units, then the bodies along the line (the grid queried in 100-unit pieces). A friend first: hold the
+  shot (**Observed**); an enemy first: fire (it takes the bolt); terrain first: **close in** (engine: the original holds, which would leave a shooter behind a dune
+  standing for ever). Buildings are not tested (no building shapes in the simulation yet). Enemy = the character's target, someone fighting it, or hostile by
+  `AggroSystem.IsEnemy`; in a world without a relation table, another faction (engine).
+- **Geometry** (engine stand-ins): the barrel 15 units above the feet and 3 ahead (the record's `barrel pos` is in item space); the aim point 13 above the feet (for `Bip01
+  Spine2`) plus the lead; a body is an upright cylinder of the race's footprint radius, 18 tall (the original tests its physics shape, **Unknown**); a down character does
+  not stop bolts.
+- **The shot** (`ApplyFire`, commit order): the cone D, the damage, range and speed with the height factor, the avoidance (all **Observed** formulas); rolls from
+  `RngPurpose.Ranged` keyed by the shooter and its shot number (tilt, spin, damage). The bolt joins `projectiles` in commit order.
+- **Flight** (`FlyProjectiles`, serial, in the combat system's `Schedule` after the slot copy): every bolt in firing order moves speed x tick, straight while range is left,
+  then pitching down 8 degrees per second, dropped 5000 past its range. On each step the ground (sampled every 5 units) and the bodies (the grid, **the last tick's
+  positions, the grid's own source**) are tested; the nearest wins, ties by slot. A friend in the way: a roll from `RngPurpose.Ranged` (bolt id, victim) against the
+  avoidance passes it (it is not tested again), else it is hit. The ground: stuck, or dropped when |cos| to the normal is under 0.1. Up to **50** stuck bolts are kept
+  (`harpoonLimit`'s value not read), oldest first out; they are visuals only.
+- **A bolt hit** (`BoltHit`): pierce = the bolt's damage, bleed 2, no penetration, `HitResolver.Land` with direction 6 (part by weight, cover rolls keyed by the bolt),
+  so the global damage multiplier applies a second time (**Observed**, invisible at its default 1); no block, no dodge. Stagger over the stumble threshold as in melee,
+  the hit recorded for the hit reaction, the victim's "hit taken" XP with the shooter's crossbow skill as the opponent, no XP to the shooter, a player's kill a murder.
+  `CombatLogEntry.Ranged` / `Intended` mark bolts. The victim answers through retaliation (it is the shooter's target).
+- **Not applied** (no consumer found, **Observed**): the crossbow's `bleed mult` and target multipliers, armour `ranged skill mult`, `accuracy perfect skill`.
+- **Threading.** Everything a character decides is in its own slot in `Act`; the inventory changes and new bolts come through effects in the commit's order; the flight
+  is serial. Rolls are stateless. `RangedTests` checks 1, 4 and 16 threads on a skirmish cut into one-slot partitions.
+- **Hash.** The ranged fields of a slot go into the state hash only once one is set (`CombatSlot.RangedUsed`), the bolt list only once a bolt has flown, so worlds without
+  crossbows hash as before: none of the ten pinned scenarios moved. **Pinned 2026-10-13**: `ranged` (`RangedTests.Hashes`: six groups of three crossbowmen against three
+  katana fighters, 1200 ticks), after agreeing at 1, 4 and 16 threads.
+- **Drawing.** `WorldSnapshot.Projectiles` (`ProjectileSnapshot`: position, direction, stretch, stuck, the `live ammo` mesh). The host does not draw them yet.
+- **Cost.** Per shooter and tick: one grid query of 60 units for melee threats and, only when a shot is due or while closing in, a line of fire (a few grid queries and
+  terrain samples). Per bolt and tick: one grid query and up to 8 ground samples. The 1200-tick skirmish (36 characters, 20 bolts) runs in well under a second.
+- **Not built:** turrets and harpoons, the AI's target choice for shooters (a shooter keeps its ordered target), crimes for shooting, picking bolts up (they are not
+  recoverable in the original either), aiming while walking (`aimwalk`), the reload animation event, buildings in the line of fire, night and stealth in the decision.
 
 ### Hostility and relations
 

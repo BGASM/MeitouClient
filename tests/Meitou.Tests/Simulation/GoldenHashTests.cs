@@ -21,6 +21,7 @@ public class GoldenHashTests(ITestOutputHelper output)
         ("town-parts", () => Parts(TownParts(), 1, 40, 200, 700)),
         ("first-aid", () => FirstAidTests.Scripted(4)),
         ("aggro", () => AggroTests.Hashes(4)),
+        ("ranged", () => RangedTests.Hashes(4)),
     ];
 
     /// <summary>A roaming town with bodies and feeding, cut into many partitions (the other worlds here are mostly one partition at the default size).</summary>
@@ -56,6 +57,7 @@ public class GoldenHashTests(ITestOutputHelper output)
         ["town-parts"] = [0xF5A6D33BA820564CUL, 0x71DD4B5C34A67534UL, 0x71F24CA6EED9E801UL, 0x559124B673176D26UL],
         ["first-aid"] = [0xE266DA0ACE7DF122UL, 0x9251D7C3C8FB77BFUL, 0x628463501DA7B78DUL, 0x2321130E8C044E72UL, 0x8F41E078A2C641AEUL, 0x1554F7C5D7EBEB64UL],
         ["aggro"] = [0xAEB28C309A543A76UL, 0xE8604C064C418801UL, 0x4C07F8D322A48267UL, 0xAF295C80F0774749UL, 0x158C2C0F5E761BDDUL],
+        ["ranged"] = [0x55829FBFFC6536BAUL, 0xDF510FFA17E0276EUL, 0x94205CBFCC9ED4EEUL, 0x3C2DD772F311F282UL, 0x6218849B5FFBDAD4UL],
     };
 
     [Fact]

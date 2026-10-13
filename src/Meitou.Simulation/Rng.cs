@@ -17,6 +17,8 @@ public enum RngPurpose : uint
     Animation = 7,
     Flee = 8,
     Sense = 9,
+    /// <summary>Crossbow shots: the deviation cone, the damage roll and the friendly-fire pass (docs/simulation.md "Combat", ranged).</summary>
+    Ranged = 10,
 }
 
 /// <summary>

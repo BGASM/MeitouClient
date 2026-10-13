@@ -1,0 +1,682 @@
+using System.Numerics;
+using Meitou.Data.Gameplay;
+using Meitou.Data.Gameplay.Bodies;
+using Meitou.Data.Gameplay.Combat;
+using Meitou.Simulation.Bodies;
+
+namespace Meitou.Simulation.Combat;
+
+/// <summary>Engine choices of the ranged fight where the research stops (each is labelled in docs/simulation.md "Combat", ranged).</summary>
+public static class RangedTuning
+{
+    /// <summary>Height of the barrel above the feet and how far ahead of the body it is (units): the crossbow's <c>barrel pos</c> is in the item's own space, not used.</summary>
+    public const float BarrelHeight = 15, BarrelForward = 3;
+    /// <summary>Height above the feet the aim point (the original's bone <c>Bip01 Spine2</c>) stands for.</summary>
+    public const float AimHeight = 13;
+    /// <summary>The body a bolt hits: an upright cylinder of the footprint radius, this tall (the original tests the physics shape, <b>Unknown</b>).</summary>
+    public const float BodyHeight = 18;
+    /// <summary>
+    /// The ranged-or-melee choice (the original's is <b>Unknown</b>): a crossbowman with shots or ammunition fights with the crossbow while no melee attacker is within
+    /// <see cref="MeleeThreatGap"/> of it and its target's gap is at least <see cref="MeleeSwitchGap"/>; once in melee it takes the crossbow up again past <see cref="RangedSwitchGap"/>.
+    /// </summary>
+    public const float MeleeThreatGap = 15, MeleeSwitchGap = 20, RangedSwitchGap = 60;
+    /// <summary>While closing in, the line of fire must be clear this long (seconds) before the shooter stops and aims again (<c>FUN_140438c70</c>'s 0.3 s, its ray flags <b>Unknown</b>).</summary>
+    public const float ClearToAim = 0.3f;
+    /// <summary>Stuck bolts kept in the world, oldest dropped first (the settings' <c>harpoonLimit</c>; its value is not read here).</summary>
+    public const int StuckLimit = 50;
+    /// <summary>Spacing of the terrain samples along a line of fire and along a bolt's step (units).</summary>
+    public const float TerrainStep = 20, FlightTerrainStep = 5;
+    /// <summary>Length of the pieces a long line of fire is cut into for the neighbour grid (units).</summary>
+    public const float LineChunk = 100;
+    /// <summary>The largest body radius a bolt is tested against (the biggest animals' footprints are about this).</summary>
+    public const float MaxBodyRadius = 30;
+}
+
+public sealed partial class CombatSystem : IProjectileSource
+{
+    /// <summary>The <see cref="Effect.Kind"/> of a shot: <c>Arg</c> is the shooter's shot number; the target is the shooter's target.</summary>
+    public const int FireEffect = 2;
+    /// <summary>The <see cref="Effect.Kind"/> of a finished reload (target = the shooter): one bolt is taken from its inventory.</summary>
+    public const int ReloadEffect = 3;
+
+    /// <summary>A bolt in flight or stuck in the ground (the original's <c>Harpoon</c>, pooled by <c>HarpoonManager</c>).</summary>
+    struct Projectile
+    {
+        public int Id;
+        public int Shooter, ShooterGeneration, Target, TargetGeneration, ShooterFaction;
+        public bool ShooterIsPlayer;
+        public float ShooterSkill;
+        public Vector3 Position, Direction;
+        public float Speed, RangeLeft, Damage, Avoidance;
+        /// <summary>Stuck in the ground (a visual only: bolts are not recoverable, <b>Observed</b>).</summary>
+        public bool Stuck;
+        /// <summary>The last character it passed through (friendly fire avoided), so the next step does not test it again.</summary>
+        public int Passed;
+        public string Mesh;
+
+        internal readonly void Hash(ref StateHasher h)
+        {
+            h.Add(Id);
+            h.Add(Shooter);
+            h.Add(ShooterGeneration);
+            h.Add(Target);
+            h.Add(TargetGeneration);
+            h.Add(Position);
+            h.Add(Direction);
+            h.Add(Speed);
+            h.Add(RangeLeft);
+            h.Add(Damage);
+            h.Add(Avoidance);
+            h.Add(Stuck);
+            h.Add(Passed);
+        }
+    }
+
+    readonly List<Projectile> projectiles = [];
+    int nextProjectile;
+
+    /// <summary>Bolts in flight (for tests and the HUD).</summary>
+    public int ProjectilesInFlight
+    {
+        get
+        {
+            int n = 0;
+            foreach (var p in projectiles) if (!p.Stuck) n++;
+            return n;
+        }
+    }
+
+    /// <summary>Bolts fired so far.</summary>
+    public int ProjectilesFired => nextProjectile;
+
+    public IReadOnlyList<ProjectileSnapshot> PublishProjectiles()
+    {
+        if (projectiles.Count == 0) return [];
+        var list = new ProjectileSnapshot[projectiles.Count];
+        for (int k = 0; k < list.Length; k++)
+        {
+            var p = projectiles[k];
+            list[k] = new ProjectileSnapshot(p.Id, p.Position, p.Direction, p.Stuck ? 1 : MathF.Max(1, p.Speed * 0.005f), p.Stuck, p.Mesh);
+        }
+        return list;
+    }
+
+    void HashRanged(ref StateHasher h)
+    {
+        // Only once a bolt has flown, so worlds without crossbows hash as before.
+        if (nextProjectile == 0) return;
+        h.Add(nextProjectile);
+        h.Add(projectiles.Count);
+        foreach (var p in projectiles) p.Hash(ref h);
+    }
+
+    // ------------------------------------------------------------------ geometry
+
+    static Vector3 Barrel(in CharacterHot c) =>
+        c.Position + new Vector3(MathF.Sin(c.Yaw) * RangedTuning.BarrelForward, RangedTuning.BarrelHeight, MathF.Cos(c.Yaw) * RangedTuning.BarrelForward);
+
+    /// <summary>
+    /// The aim point (<c>FUN_140436d10</c>): the target's spine (here <see cref="RangedTuning.AimHeight"/> above its feet) plus its velocity times the bolt's flight time over the
+    /// distance from the barrel (the lead, <b>Verified</b> in the disassembly).
+    /// </summary>
+    static Vector3 AimPoint(Vector3 barrel, in CharacterHot target, float shotSpeed)
+    {
+        var spine = target.Position + new Vector3(0, RangedTuning.AimHeight, 0);
+        float flight = Vector3.Distance(barrel, spine) / MathF.Max(shotSpeed, 1);
+        return spine + target.Velocity * flight;
+    }
+
+    /// <summary>
+    /// Where a segment from <paramref name="from"/> along <paramref name="seg"/> first enters an upright cylinder (radius <paramref name="radius"/>, from <paramref name="feet"/>
+    /// up <paramref name="height"/>), as a fraction of the segment in [0, 1].
+    /// </summary>
+    internal static bool HitBody(Vector3 from, Vector3 seg, Vector3 feet, float radius, float height, out float t)
+    {
+        t = 0;
+        float ax = seg.X, az = seg.Z, wx = from.X - feet.X, wz = from.Z - feet.Z;
+        float a = ax * ax + az * az, c = wx * wx + wz * wz - radius * radius;
+        float t0, t1;
+        if (a < 1e-8f)
+        {
+            if (c > 0) return false;
+            t0 = 0;
+            t1 = 1;
+        }
+        else
+        {
+            float b = 2 * (wx * ax + wz * az);
+            float disc = b * b - 4 * a * c;
+            if (disc < 0) return false;
+            float root = MathF.Sqrt(disc);
+            t0 = (-b - root) / (2 * a);
+            t1 = (-b + root) / (2 * a);
+        }
+        t0 = MathF.Max(t0, 0);
+        t1 = MathF.Min(t1, 1);
+        if (t0 > t1) return false;
+        // Within [t0, t1] the segment is inside the circle; it must also be between the feet and the head there.
+        float lo = feet.Y, hi = feet.Y + height;
+        float y0 = from.Y + seg.Y * t0, y1 = from.Y + seg.Y * t1;
+        if (y0 >= lo && y0 <= hi) { t = t0; return true; }
+        if (MathF.Abs(seg.Y) < 1e-8f) return false;
+        float plane = y0 < lo ? lo : hi;
+        if ((y0 < lo && y1 < lo) || (y0 > hi && y1 > hi)) return false;
+        t = (plane - from.Y) / seg.Y;
+        return t >= t0 && t <= t1;
+    }
+
+    /// <summary>Whether <paramref name="shooter"/> (of <paramref name="faction"/>) counts <paramref name="other"/> as an enemy for the line of fire and friendly fire.</summary>
+    bool Hostile(CharacterTable table, int shooter, int shooterGeneration, int faction, int target, int other)
+    {
+        if (other == target) return true;
+        ref readonly var o = ref read[other];
+        if (o.TargetSlot == shooter && o.TargetGeneration == shooterGeneration) return true;
+        var oc = table.Cold(other);
+        if (oc is null) return false;
+        // The original asks the character's enemy test (Character slot 125); the engine uses the faction relations, and without a table (hand-built worlds) another faction.
+        return Relations is not null ? AggroSystem.IsEnemy(Relations, faction, oc.Faction) : oc.Faction != faction;
+    }
+
+    /// <summary>Can be hit by a bolt: alive, with a body, not down (a lying body does not stop bolts: <b>engine</b>, the original's hit shape is <b>Unknown</b>).</summary>
+    static bool Shootable(ReadOnlySpan<CharacterHot> state, CharacterTable table, int slot) =>
+        state[slot].Alive && table.Cold(slot) is { Medical.Incapacitated: false, Race: not null };
+
+    struct LineScan
+    {
+        public CharacterTable Table;
+        public int Self, Target;
+        public Vector3 From, Seg;
+        public float Best;
+        public int Hit;
+    }
+
+    /// <summary>
+    /// The fire decision's line of fire (<c>FUN_140437ad0</c>): 1 fire, 0 something nearer than the target is in the way (close in), 2 a friend is in the way (hold).
+    /// The original holds when terrain is hit first; the engine closes in instead, so a shooter behind a dune does not stand for ever (the ray flags are <b>Unknown</b>).
+    /// Buildings are not tested: the simulation has no building shapes yet.
+    /// </summary>
+    int LineOfFire(World world, int self, int target, Vector3 from, Vector3 to, int faction)
+    {
+        var seg = to - from;
+        float length = seg.Length();
+        if (length < 1e-3f) return 1;
+        // Terrain: samples along the line, the last few units at the target left out.
+        var walk = world.Walkability;
+        int samples = (int)(length / RangedTuning.TerrainStep);
+        for (int k = 1; k < samples; k++)
+        {
+            var p = from + seg * (k * RangedTuning.TerrainStep / length);
+            if (p.Y < walk.GroundHeight(p.X, p.Z)) return 0;
+        }
+        // Characters: the nearest body crossed before the target, the grid queried piece by piece.
+        var scan = new LineScan { Table = world.Characters, Self = self, Target = target, From = from, Seg = seg, Best = 1, Hit = -1 };
+        int chunks = Math.Max(1, (int)MathF.Ceiling(length / RangedTuning.LineChunk));
+        for (int k = 0; k < chunks; k++)
+        {
+            var mid = from + seg * ((k + 0.5f) / chunks);
+            world.Grid.Query(mid.X, mid.Z, length / chunks * 0.5f + RangedTuning.MaxBodyRadius, ref scan, static (int other, ref LineScan st) =>
+            {
+                if (other == st.Self || other == st.Target || other == st.Hit) return;
+                var state = st.Table.Previous;
+                if (!Shootable(state, st.Table, other)) return;
+                float r = CombatTuning.Footprint(st.Table.Cold(other));
+                if (HitBody(st.From, st.Seg, state[other].Position, r, RangedTuning.BodyHeight, out float t) && (t < st.Best || t == st.Best && other < st.Hit))
+                {
+                    st.Best = t;
+                    st.Hit = other;
+                }
+            });
+        }
+        if (scan.Hit < 0) return 1;
+        return Hostile(world.Characters, self, world.Characters.Previous[self].Generation, faction, target, scan.Hit) ? 1 : 2;
+    }
+
+    // ------------------------------------------------------------------ act: the controller
+
+    /// <summary>The gap between two bodies (centre distance minus both footprints), from the last tick's positions.</summary>
+    static float Gap(ReadOnlySpan<CharacterHot> prev, CharacterTable table, int a, int b) =>
+        Vector2.Distance(new(prev[a].Position.X, prev[a].Position.Z), new(prev[b].Position.X, prev[b].Position.Z)) - CombatTuning.Footprint(table.Cold(a)) - CombatTuning.Footprint(table.Cold(b));
+
+    struct ThreatScan
+    {
+        public CombatSlot[] Read;
+        public CharacterTable Table;
+        public int Self, SelfGeneration;
+        public bool Found;
+    }
+
+    /// <summary>A melee fighter has the character as its target and is within <see cref="RangedTuning.MeleeThreatGap"/> (the planner's "being melee attacked", whose test is <b>Unknown</b>).</summary>
+    bool MeleeThreat(World world, int self)
+    {
+        var prev = world.Characters.Previous;
+        var scan = new ThreatScan { Read = read, Table = world.Characters, Self = self, SelfGeneration = prev[self].Generation };
+        world.Grid.Query(prev[self].Position.X, prev[self].Position.Z, CombatTuning.ReactionScanRadius, ref scan, static (int other, ref ThreatScan st) =>
+        {
+            if (st.Found || other == st.Self) return;
+            ref readonly var o = ref st.Read[other];
+            if (o.TargetSlot != st.Self || o.TargetGeneration != st.SelfGeneration || o.Ranged || o.Down) return;
+            if (Gap(st.Table.Previous, st.Table, other, st.Self) <= RangedTuning.MeleeThreatGap) st.Found = true;
+        });
+        return scan.Found;
+    }
+
+    static WeaponKinds MeleeDrawn(Fighter f) => f.Weapon is { } w && !f.Unarmed ? HandHold.OfCategory(w.Data.SkillCategory).Weapon : WeaponKinds.None;
+
+    /// <summary>
+    /// Chooses crossbow or melee for a fighting character that carries a crossbow (an <b>engine rule</b>, <see cref="RangedTuning"/>): the crossbow while it has shots or
+    /// ammunition, no melee attacker is on it and the target is not close; melee otherwise. A character without a crossbow is left alone.
+    /// </summary>
+    void ChooseMode(World world, int i, ref CombatSlot s, CharacterCold cold, bool fighting)
+    {
+        var fighter = cold.Fighter!;
+        if (fighter.Crossbow is not { } x) return;
+        if (!fighting)
+        {
+            if (s.Ranged || s.ReloadLeft > 0 || s.RangedState != 0 || s.ClearTime != 0 || s.Steady != 0)
+            {
+                // The fight is over: the controller stops (a reload in progress is abandoned; the bolts loaded stay loaded).
+                s.Ranged = false;
+                s.RangedState = 0;
+                s.ReloadLeft = 0;
+                s.ClearTime = 0;
+                s.Steady = 0;
+            }
+            return;
+        }
+        bool hasAmmo = x.InfiniteAmmo || Ammunition.Find(cold.Inventory, x.Data.AmmoId) is not null;
+        bool can = s.Loaded > 0 || hasAmmo;
+        if (s.Dry == can) s.Dry = !can;
+        bool want;
+        if (!can || MeleeThreat(world, i)) want = false;
+        else
+        {
+            float gap = Gap(world.Characters.Previous, world.Characters, i, s.TargetSlot);
+            want = s.Ranged ? gap >= RangedTuning.MeleeSwitchGap : gap >= RangedTuning.RangedSwitchGap && s.AttackTech < 0;
+        }
+        if (want == s.Ranged) return;
+        s.Ranged = want;
+        s.RangedState = want ? (byte)RangedStates.Aiming : (byte)0;
+        s.Steady = want ? RangedFormulas.SteadyAim : 0;
+        s.ReloadLeft = 0;
+        s.ClearTime = 0;
+        cold.DrawnWeapon = want ? HandHold.OfCategory((int)WeaponCategory.Bow).Weapon : MeleeDrawn(fighter);
+    }
+
+    /// <summary>
+    /// One tick of the ranged controller (<c>FUN_140438c70</c>, the reload <c>FUN_140437ce0</c>, the fire decision <c>FUN_140437ad0</c>): reload when empty (one bolt
+    /// taken at the end, through <see cref="ReloadEffect"/>); out of range or with the line blocked, close in (the pursuit system walks); in range, hold the aim for the
+    /// steady time and fire (<see cref="FireEffect"/>) when the line is clear. XP: crossbows and dexterity while reloading, crossbows and perception while aiming.
+    /// </summary>
+    void TickRanged(World world, int i, ref CombatSlot s, CharacterCold cold, EffectBuffer effects, int now, float dt)
+    {
+        var table = world.Characters;
+        var prev = table.Previous;
+        var fighter = cold.Fighter!;
+        var x = fighter.Crossbow!;
+        var stats = cold.Stats!;
+        var race = cold.Race!;
+        int t = s.TargetSlot;
+
+        if (s.Loaded <= 0)
+        {
+            s.RangedState = (byte)RangedStates.Reloading;
+            if (s.ReloadLeft <= 0)
+            {
+                if (!x.InfiniteAmmo && Ammunition.Find(cold.Inventory, x.Data.AmmoId) is null)
+                {
+                    s.Dry = true;
+                    return;
+                }
+                float skill = RangedFormulas.SkillBlend(Eff(cold, StatsEnumerated.Crossbows), Eff(cold, StatsEnumerated.Dexterity), fighter.DexterityMult);
+                s.ReloadTime = RangedFormulas.ReloadTime(skill, x.Stats.ReloadMin, x.Stats.ReloadMax);
+                s.ReloadLeft = s.ReloadTime;
+            }
+            s.ReloadLeft -= dt;
+            xp.Continuous(stats, race, StatsEnumerated.Crossbows, dt, RangedFormulas.CrossbowXp);
+            xp.Continuous(stats, race, StatsEnumerated.Dexterity, dt, RangedFormulas.DexterityReloadXp);
+            if (s.ReloadLeft <= 0)
+            {
+                s.ReloadLeft = 0;
+                s.Loaded = x.NumShots;
+                s.Steady = RangedFormulas.SteadyAim;
+                s.RangedState = (byte)RangedStates.Aiming;
+                if (!x.InfiniteAmmo) effects.Emit(i, i, ReloadEffect);
+            }
+            return;
+        }
+
+        var barrel = Barrel(prev[i]);
+        float h = RangedFormulas.HeightFactor(barrel.Y, prev[t].Position.Y);
+        if (!RangedFormulas.InRange(Vector3.DistanceSquared(prev[i].Position, prev[t].Position), x.Stats.Range, h))
+        {
+            s.RangedState = (byte)RangedStates.Closing;
+            s.ClearTime = 0;
+            s.Steady = RangedFormulas.SteadyAim;
+            return;
+        }
+        var aim = AimPoint(barrel, prev[t], x.Stats.ShotSpeed);
+        if (s.RangedState == (byte)RangedStates.Closing)
+        {
+            // Walking up: stop and aim once the line has been clear for a moment.
+            if (LineOfFire(world, i, t, barrel, aim, cold.Faction) == 0)
+            {
+                s.ClearTime = 0;
+                return;
+            }
+            s.ClearTime += dt;
+            if (s.ClearTime < RangedTuning.ClearToAim) return;
+            s.ClearTime = 0;
+        }
+        s.RangedState = (byte)RangedStates.Aiming;
+        xp.Continuous(stats, race, StatsEnumerated.Perception, dt, RangedFormulas.PerceptionXp);
+        xp.Continuous(stats, race, StatsEnumerated.Crossbows, dt, RangedFormulas.CrossbowXp);
+        if (s.Steady > 0)
+        {
+            s.Steady -= dt;
+            if (s.Steady > 0) return;
+        }
+        switch (LineOfFire(world, i, t, barrel, aim, cold.Faction))
+        {
+            case 0:
+                s.RangedState = (byte)RangedStates.Closing;
+                s.ClearTime = 0;
+                return;
+            case 2:
+                return;
+        }
+        effects.Emit(i, t, FireEffect, 0, default, s.Shots);
+        s.Shots++;
+        s.Loaded--;
+        s.Steady = RangedFormulas.SteadyAim;
+        s.ShotTick = now;
+    }
+
+    // ------------------------------------------------------------------ commit: shots and reloads
+
+    void ApplyReload(World world, in Effect e)
+    {
+        var cold = world.Characters.Cold(e.Source);
+        if (cold?.Fighter?.Crossbow is not { } x) return;
+        Ammunition.UseOne(cold.Inventory, x.Data.AmmoId);
+    }
+
+    /// <summary>
+    /// A shot (<c>FUN_14043a730</c>): from the barrel towards the aim point, tilted by u x D degrees (D the deviation cone); damage U[min, max) x h, range x h,
+    /// speed x (0.8 h + 0.2) with h the height factor; the friendly-fire avoidance from the shooter's skill. The bolt joins the list (flown from the next tick's schedule).
+    /// </summary>
+    void ApplyFire(World world, in Effect e)
+    {
+        var table = world.Characters;
+        var prev = table.Previous;
+        int a = e.Source, t = e.Target, shot = e.Arg;
+        var ac = table.Cold(a);
+        if (ac?.Fighter?.Crossbow is not { } x || ac.Stats is null || ac.Medical is null || !prev[t].Alive) return;
+        var barrel = Barrel(prev[a]);
+        var aim = AimPoint(barrel, prev[t], x.Stats.ShotSpeed);
+        var to = aim - barrel;
+        if (to.LengthSquared() < 1e-6f) return;
+        float h = RangedFormulas.HeightFactor(barrel.Y, prev[t].Position.Y);
+        float deviation = RangedFormulas.Deviation(x.Stats.AccuracyDeviation, Eff(ac, StatsEnumerated.Crossbows), Eff(ac, StatsEnumerated.Perception));
+        ulong key = Rng.Key(table.IdOf(a));
+        ulong counter = (ulong)(uint)shot << 3;
+        float u = Rng.Float(Rng.Hash(world.Seed, key, RngPurpose.Ranged, counter));
+        float spin = Rng.Float(Rng.Hash(world.Seed, key, RngPurpose.Ranged, counter + 1));
+        float w = Rng.Float(Rng.Hash(world.Seed, key, RngPurpose.Ranged, counter + 2));
+        var dir = RangedFormulas.Deviate(Vector3.Normalize(to), u * deviation, spin);
+        var (damage, range, speed) = RangedFormulas.Bolt(x.Stats, h, w);
+        projectiles.Add(new Projectile
+        {
+            Id = nextProjectile++,
+            Shooter = a,
+            ShooterGeneration = prev[a].Generation,
+            Target = t,
+            TargetGeneration = prev[t].Generation,
+            ShooterFaction = ac.Faction,
+            ShooterIsPlayer = ac.IsPlayer,
+            ShooterSkill = Eff(ac, StatsEnumerated.Crossbows),
+            Position = barrel,
+            Direction = dir,
+            Speed = speed,
+            RangeLeft = range,
+            Damage = damage,
+            Avoidance = RangedFormulas.FriendlyAvoidance(Eff(ac, StatsEnumerated.FriendlyFire)),
+            Passed = -1,
+            Mesh = x.Data.LiveAmmoMesh,
+        });
+    }
+
+    // ------------------------------------------------------------------ schedule: the flight
+
+    struct FlightScan
+    {
+        public CharacterTable Table;
+        public int Shooter, Skip;
+        public Vector3 From, Seg;
+        public float After, Best;
+        public int Hit;
+    }
+
+    /// <summary>
+    /// Advances every bolt one tick, in the order they were fired (serial, against the last tick's positions, which is what the grid holds; <c>FUN_1404380e0</c>):
+    /// a straight line while range is left, then the nose pitching down 8 degrees a second; the first body or the ground on the step is hit. A friend in the way is
+    /// passed with the shooter's avoidance chance; the ground sticks the bolt (a grazing hit drops it). Stuck bolts stay up to <see cref="RangedTuning.StuckLimit"/>.
+    /// </summary>
+    void FlyProjectiles(World world)
+    {
+        if (projectiles.Count == 0) return;
+        var table = world.Characters;
+        var prev = table.Previous;
+        float dt = world.TickSeconds;
+        var walk = world.Walkability;
+        int stuck = 0;
+        for (int k = 0; k < projectiles.Count; k++)
+        {
+            var p = projectiles[k];
+            if (p.Stuck) { stuck++; continue; }
+            float step = p.Speed * dt;
+            p.RangeLeft -= step;
+            if (p.RangeLeft < 0)
+            {
+                if (p.RangeLeft < -RangedFormulas.DropAfter)
+                {
+                    projectiles.RemoveAt(k--);
+                    continue;
+                }
+                // Spent: the nose drops.
+                var flat = new Vector2(p.Direction.X, p.Direction.Z);
+                float pitch = MathF.Asin(Math.Clamp(p.Direction.Y, -1, 1)) - RangedFormulas.DropDegreesPerSecond * dt * (MathF.PI / 180);
+                pitch = MathF.Max(pitch, -MathF.PI / 2 + 1e-3f);
+                flat = flat.LengthSquared() > 1e-8f ? Vector2.Normalize(flat) : Vector2.UnitY;
+                p.Direction = new Vector3(flat.X * MathF.Cos(pitch), MathF.Sin(pitch), flat.Y * MathF.Cos(pitch));
+            }
+            var seg = p.Direction * step;
+            bool done = false;
+            float after = -1;
+            for (int pass = 0; pass < 4 && !done; pass++)
+            {
+                // The ground first along the step, then the nearest body before it.
+                float ground = GroundHit(walk, p.Position, seg);
+                var scan = new FlightScan { Table = table, Shooter = p.Shooter, Skip = p.Passed, From = p.Position, Seg = seg, After = after, Best = ground < 0 ? 1 : ground, Hit = -1 };
+                var mid = p.Position + seg * 0.5f;
+                world.Grid.Query(mid.X, mid.Z, step * 0.5f + RangedTuning.MaxBodyRadius, ref scan, static (int other, ref FlightScan st) =>
+                {
+                    if (other == st.Shooter || other == st.Skip || !Shootable(st.Table.Previous, st.Table, other)) return;
+                    float r = CombatTuning.Footprint(st.Table.Cold(other));
+                    if (HitBody(st.From, st.Seg, st.Table.Previous[other].Position, r, RangedTuning.BodyHeight, out float t) && t > st.After
+                        && (t < st.Best || t == st.Best && other < st.Hit))
+                    {
+                        st.Best = t;
+                        st.Hit = other;
+                    }
+                });
+                if (scan.Hit >= 0)
+                {
+                    int v = scan.Hit;
+                    bool intended = v == p.Target && prev[v].Generation == p.TargetGeneration;
+                    bool enemy = intended || Hostile(table, p.Shooter, p.ShooterGeneration, p.ShooterFaction, p.Target, v);
+                    if (!enemy)
+                    {
+                        // A friend in the way (FUN_1404380e0): passed with the shooter's avoidance chance (FRIENDLY_FIRE XP 20), else hit (XP 100).
+                        float roll = Rng.Float(Rng.Hash(world.Seed, (ulong)(uint)p.Id, RngPurpose.Ranged, ((ulong)(uint)v << 32) | (uint)prev[v].Generation));
+                        bool pass_ = roll < p.Avoidance;
+                        ShooterXp(table, p, pass_ ? RangedFormulas.FriendlyPassXp : RangedFormulas.FriendlyHitXp);
+                        if (pass_)
+                        {
+                            p.Passed = v;
+                            after = scan.Best;
+                            continue;
+                        }
+                    }
+                    BoltHit(world, p, v, intended);
+                    done = true;
+                    projectiles.RemoveAt(k--);
+                    break;
+                }
+                if (ground >= 0)
+                {
+                    var at = p.Position + seg * ground;
+                    var normal = GroundNormal(walk, at.X, at.Z);
+                    done = true;
+                    if (MathF.Abs(Vector3.Dot(normal, p.Direction)) < RangedFormulas.Grazing) projectiles.RemoveAt(k--);
+                    else
+                    {
+                        p.Position = at;
+                        p.Stuck = true;
+                        projectiles[k] = p;
+                        stuck++;
+                    }
+                    break;
+                }
+                break;
+            }
+            if (done) continue;
+            p.Position += seg;
+            projectiles[k] = p;
+        }
+        // Stuck bolts beyond the limit: the oldest go first (the list is in firing order).
+        for (int k = 0; k < projectiles.Count && stuck > RangedTuning.StuckLimit; k++)
+            if (projectiles[k].Stuck)
+            {
+                projectiles.RemoveAt(k--);
+                stuck--;
+            }
+    }
+
+    /// <summary>The fraction of the step where it goes under the ground, -1 when it stays above.</summary>
+    static float GroundHit(IWalkability walk, Vector3 from, Vector3 seg)
+    {
+        float length = seg.Length();
+        int n = Math.Max(1, (int)MathF.Ceiling(length / RangedTuning.FlightTerrainStep));
+        float before = from.Y - walk.GroundHeight(from.X, from.Z);
+        if (before < 0) return 0;
+        for (int k = 1; k <= n; k++)
+        {
+            var p = from + seg * (k / (float)n);
+            float above = p.Y - walk.GroundHeight(p.X, p.Z);
+            if (above < 0) return (k - 1 + before / (before - above)) / n;
+            before = above;
+        }
+        return -1;
+    }
+
+    static Vector3 GroundNormal(IWalkability walk, float x, float z)
+    {
+        float dx = walk.GroundHeight(x - 1, z) - walk.GroundHeight(x + 1, z);
+        float dz = walk.GroundHeight(x, z - 1) - walk.GroundHeight(x, z + 1);
+        return Vector3.Normalize(new Vector3(dx, 2, dz));
+    }
+
+    void ShooterXp(CharacterTable table, in Projectile p, float amount)
+    {
+        var state = table.Previous;
+        if (p.Shooter >= state.Length || !state[p.Shooter].Alive || state[p.Shooter].Generation != p.ShooterGeneration) return;
+        if (table.Cold(p.Shooter) is { Stats: { } stats, Race: { } race }) xp.Continuous(stats, race, StatsEnumerated.FriendlyFire, 1, amount);
+    }
+
+    /// <summary>
+    /// A bolt in a body (<c>FUN_140439c90</c>): a packet of pierce = the bolt's damage, bleed 2, no penetration, through the hit pipeline with hit direction 6 (the part by its
+    /// <c>hit</c> weight alone), armour and toughness, the global damage multiplier applied once more there (<b>Observed</b>, so bolts scale with its square). No block, no dodge.
+    /// The victim takes "hit taken" XP; the shooter gains none for a hit. A heavy hit staggers as a melee one does.
+    /// </summary>
+    void BoltHit(World world, in Projectile p, int v, bool intended)
+    {
+        var table = world.Characters;
+        var prev = table.Previous;
+        var dc = table.Cold(v);
+        if (dc is null || dc.Medical is null || dc.Race is null) return;
+        int now = (int)world.Tick;
+        ref var D = ref write[v];
+        var packet = new DamagePacket(0, 0, p.Damage, 0, RangedFormulas.BoltBleed, 0);
+        var ctx = MakeContext(world, v, dc);
+        var events = hitEvents;
+        events.Clear();
+        float toughness = dc.Stats is { } ds ? ds[StatsEnumerated.Toughness] * dc.Medical.StatMultiplier(StatsEnumerated.Toughness) : 0;
+        ReadOnlySpan<ArmourPiece> armour = dc.Fighter is { } df ? df.Armour : default;
+        var cover = new BoltCover(world.Seed, Rng.Key(table.IdOf(v)), p.Id);
+        var (part, damage) = HitResolver.Land(dc.Medical, ctx, packet, armour, cover, toughness, false, true, combat, events);
+
+        D.Taken++;
+        D.HitTick = now;
+        D.HitPart = part;
+        D.HitHeavy = false;
+        // From behind: the bolt flies the way the victim faces.
+        D.HitBehind = p.Direction.X * MathF.Sin(prev[v].Yaw) + p.Direction.Z * MathF.Cos(prev[v].Yaw) > 0;
+        bool knockout = false, death = false;
+        foreach (var ev in events)
+        {
+            switch (ev.Kind)
+            {
+                case MedicalEventKind.KnockedOut: knockout = true; break;
+                case MedicalEventKind.Died: death = true; break;
+                case MedicalEventKind.PartSevered: if (dc.Stats is { } st) xp.ToughnessFromLimbLoss(st, dc.Race); break;
+            }
+        }
+        if (dc.Medical.Incapacitated)
+        {
+            D.Down = true;
+            D.AttackTech = -1;
+            D.NextBlow = 0;
+            D.ReactTech = -1;
+        }
+        else if (damage.Cut + damage.Blunt + damage.Pierce + damage.ExtraStun > DamageFormulas.StumbleThreshold(toughness, combat))
+        {
+            D.StunUntil = Math.Max(D.StunUntil, now + (int)MathF.Ceiling(CombatTuning.HeavyHitStun / world.TickSeconds));
+            D.HitHeavy = true;
+        }
+        if (dc.Stats is { } vs && dc.Fighter is { } vf)
+            xp.Combat(vs, dc.Race, XpEvent.HitTaken, vf.Unarmed, StatsEnumerated.None, p.ShooterSkill, StrengthFactor(dc, vf));
+        bool shooterAlive = p.Shooter < prev.Length && prev[p.Shooter].Alive && prev[p.Shooter].Generation == p.ShooterGeneration;
+        if (shooterAlive && intended) write[p.Shooter].Landed++;
+        if (death && Relations is not null && p.ShooterIsPlayer && !dc.IsPlayer) PlayerRelations.Event(world, Relations, dc.Faction, RelationEventKind.Murder);
+        if (Settings.RecordLog)
+            log.Add(new CombatLogEntry(now, p.Shooter, v, 0, BlowOutcome.Hit, part, damage.Cut, damage.Blunt, damage.Pierce, damage.ExtraStun, knockout, death) { Ranged = true, Intended = intended });
+    }
+
+    /// <summary>The cover roll of a bolt: a function of the victim, the bolt and the armour piece.</summary>
+    readonly struct BoltCover(ulong seed, ulong victimKey, int bolt) : ICoverRoll
+    {
+        public float Roll(int piece) => CombatRolls.Float(seed, victimKey, CombatRoll.Cover, ((ulong)0xB017 << 48) ^ ((ulong)(uint)bolt << 8) ^ (uint)piece);
+    }
+
+    /// <summary>
+    /// What a character's crossbow is doing for its animation (the last finished tick): reloading (the progress of the reload), aiming (the steady time held), or just shot
+    /// (for <see cref="ShotSeconds"/> after a shot); null when it is not fighting with the crossbow.
+    /// </summary>
+    public (RangedPose Pose, float Progress)? RangedPoseOf(CharacterId id, long tick, float tickSeconds)
+    {
+        var s = StateOf(id);
+        if (!s.Ranged) return null;
+        if (s.RangedState == (byte)RangedStates.Reloading && s.ReloadTime > 0)
+            return (RangedPose.Reload, Math.Clamp(1 - s.ReloadLeft / s.ReloadTime, 0, 1));
+        if (s.ShotTick > 0 && (tick - s.ShotTick) * tickSeconds < ShotSeconds)
+            return (RangedPose.Shot, Math.Clamp((tick - s.ShotTick) * tickSeconds / ShotSeconds, 0, 1));
+        if (s.RangedState == (byte)RangedStates.Aiming) return (RangedPose.Aim, Math.Clamp(1 - s.Steady / RangedFormulas.SteadyAim, 0, 1));
+        return null;
+    }
+
+    /// <summary>Seconds the shot pose is shown after a bolt leaves (engine).</summary>
+    public const float ShotSeconds = 0.3f;
+}
+
+/// <summary>The crossbow pose the animation shows (engine choice of clips: docs/simulation.md "Combat", ranged).</summary>
+public enum RangedPose : byte { Aim, Shot, Reload }

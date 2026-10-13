@@ -75,7 +75,7 @@ below is what the engine uses.
 | blunt damage 1 / 99 | 20 / 80 | blunt base at skill 1 and 99 |
 | cut damage 1 / 99 | 20 / 80 | cut base likewise |
 | pierce damage multiplier | 1.2 | |
-| bow damage 1 / 99 | 1.1 / 1.3 | stored unscaled at fields 8 and 9; data xrefs show `14043c180` (crossbow gun data) reads both, but the decompile does not show how (**Observed**) |
+| bow damage 1 / 99 | 1.1 / 1.3 | stored unscaled at fields 8 and 9; `14043c180` scales a crossbow's level-0 pierce ends by `bow damage 1` and its level-1 ends by `bow damage 99` before the quality lerp ([Ranged and turrets](#ranged-and-turrets), **Observed** in the disassembly) |
 | stumble damage max | 80 | stumble threshold |
 | unarmed damage mult | 0.8 | |
 | attack chance factor | 0.05 | hit roll skew |
@@ -211,7 +211,10 @@ within [0.1, 0.98]; otherwise a hit (code 2). `1404394f0` then runs the medical 
 Skill-vs-skill roll (`140665370`): with F = 0.05 (`attack chance factor`, struct `+0x40`), A = 1 + F·max(0,
 s2 - s1), B = 1 + F·max(0, s1 - s2); true when r1·A < r2·B for two uniform randoms. P = 0.5 at equal skill;
 with k = B/A, P = 1 - 1/(2k) for k ≥ 1, else k/2 (the closed form is derived by hand from the comparison).
-**Observed**. Dodge skill (`140885ce0`) = 0.01·(0.6·equipment dodge + 0.4·dexterity·m).
+**Observed**. Dodge skill (`140885ce0`) = 0.01·(0.6·equipment dodge + 0.4·dexterity·m). Re-read 2026-10-13: `140885ce0(stats, stat)` is a general
+blend, 0.01·(0.6·stat + 0.4·dexterity·m) with both stats times their injury multipliers (perception also adds its integer gear bonus) and m the stats multiplier
+`CharStats +0x34` times the dexterity injury multiplier; the dodge skill is this called with DODGE (32), the crossbow reload with CROSSBOWS (35) or TURRETS (11).
+**Verified**: the stat switch in `140884ac0` maps 0x23 to `+0x110`, 0x24 to `+0xf4`, 0x18 to `+0x8c`, 0x0b to `+0x114`, the offsets of character-stats.md's stat table.
 
 ## Animation speed
 
@@ -329,14 +332,130 @@ All **Observed** unless noted.
 
 ## Ranged and turrets
 
-Mostly **Unknown**. Loaders: GUN_DATA (`14043baa0`: accuracy deviation at 0 skill, accuracy perfect skill, aim
-speed, shots, range, reload min/max, shot speed, positioning) and CROSSBOW (`14043c180`). **Observed** for the
-crossbow: pierce damage min and max, range, reload min/max, accuracy deviation and shot speed are each the
-lerp between the record's level-0 and level-1 values, by the item's quality; the two pierce damages are
-multiplied by the global damage multiplier and truncated to ints; barrel position comes from the model's
-`barrel pos Y`/`Z` fields. Crossbows use weapon category 6 (bow skill). The turret path (`14043cdb0`,
-`rangedCombat.cpp`, TURRETS skill 11) was not read. The constants `bow damage 1/99` are consumed there but
-their exact use is **Unknown**.
+Researched 2026-10-13 from `kenshi_x64.exe` (decompile and, where noted, disassembly). Facts in our own words; addresses are the original's functions. Units: a world
+unit is 0.1 m (the crossbow tooltip `FUN_1407b0750` prints `range` x 0.1 as metres). Reload and aim times are game seconds (`dtGame`, frame time x game speed); bolts
+move by `dtSim` (0 while paused) ([game-loop.md](game-loop.md#the-three-time-values)). What the engine does with this is in
+[simulation.md "Ranged"](../simulation.md#ranged).
+
+### Objects
+
+| Object | What | Where |
+|---|---|---|
+| `GunClass` | the firing data of any gun (29 virtual slots); base of the next two | loader `FUN_14043baa0` |
+| `GunClassPersonal` | a crossbow's gun, owned by the `Crossbow` item | loader `FUN_14043c180`, made by the item constructor `FUN_140898c90` |
+| `GunClassTurret` | a turret building's gun (GUN_DATA; source file `rangedCombat.cpp`) | `FUN_14043cdb0` |
+| ranged controller | one per character (`Character +0x2f0`): skill, target, aim point, reload timer, fire flags | tick `FUN_140438c70`, fire gate `FUN_14043aee0`, reload `FUN_140437ce0`, target choice `FUN_140437f40` / `FUN_1404374d0` |
+| `Harpoon` | one bolt or harpoon in flight or stuck: a plain struct, pooled by `HarpoonManager` | spawn `FUN_14043a2f0`, per-frame update `FUN_14043afe0`, flight `FUN_1404380e0`, hit `FUN_140439c90`, landed `FUN_14043acf0`, recycle `FUN_140436c10` |
+
+There is no projectile class in RTTI; the name `Harpoon` comes from an Ogre container type and the instance-manager prefix `HarpoonManager_`. **Observed**.
+
+### Record fields
+
+**GUN_DATA and the shared part** (`FUN_14043baa0`, **Observed**; field names **Verified** against `fcs.def`): `range` (an int, kept as a float: the longest
+flight, units), `accuracy perfect skill` (shown as "Required skill" on the tooltip; **no use in the firing maths was found**), `accuracy deviation at 0 skill`
+(degrees), `aim speed` (turret turning; no use for crossbows), `shot speed` (units per second; **0 or less becomes 1**), `num shots` (the magazine), `reload time
+min/max` (seconds), `reload anim` (an ANIMATION), `ammo` (an ITEM; none means unlimited ammunition, fcs.def "magic infinite ammo"), `barrel pos Y/Z`, `live ammo` (the
+mesh in flight). GUN_DATA `radius` is read by the mesh loader `FUN_14043d120` only. At run time a gun also keeps the shots loaded (0 when made), the user's skill / 100
+and a reload progress for the UI (1 at the start, falling to 0).
+
+**CROSSBOW** (`FUN_14043c180`, **Observed**; the float flow **Verified** in its disassembly). The `Crossbow` item is weapon category 6 (bow skill), item type 107. Every
+level-0 / level-1 pair is lerped by the item's quality fraction q (0 to 1): range, reload min, reload max, accuracy deviation, shot speed. **Pierce damage**: the level-0
+ends are first multiplied by CONSTANTS `bow damage 1` (1.1) and the level-1 ends by `bow damage 99` (1.3), then lerped, multiplied by the difficulty dialog's global
+damage multiplier G and truncated to ints: pierceMin = trunc(lerp(q, 1.1 x `pierce damage min 0`, 1.3 x `pierce damage min 1`) x G), the same for the maximum
+(fcs.def calls the two constants the crossbow damage multipliers at grade 0 and at the highest grade). `num shots`, `accuracy perfect skill`, `ammo`, `live ammo` and
+`reload anim` have no level-1 variant. **Not read by the gun**: `bleed mult`, `human/animal/robot damage mult`, `race damage`; the tooltip shows them, but no use in a
+bolt's damage was found (**Observed**; a wider search could still find one).
+
+**Base-game data** (**Verified** by reading `gamedata.base`, `Newwworld.mod`, `Dialogue.mod` and `rebirth.mod`; the counts agree with "Data facts" below): 7 CROSSBOW,
+6 GUN_DATA. Every crossbow has `num shots` 1, `aim speed` 1 and the three target multipliers 1.
+
+| Crossbow | pierce min 0/1 | pierce max 0/1 | range 0/1 | reload min 0/1 | reload max 0/1 | deviation 0/1 | perfect skill | shot speed 0/1 | ammo (charges) |
+|---|---|---|---|---|---|---|---|---|---|
+| Ranger | 20/30 | 30/45 | 600/800 | 3/2 | 4.5/4 | 5/3 | 60 | 400/500 | Bolts [Regulars] (30) |
+| Eagle's Cross | 50/60 | 70/100 | 1500/1900 | 5/4 | 10/8 | 2.5/1.5 | 80 | 700/800 | Bolts [Longs] (10) |
+| Tooth Pick | 10/15 | 20/25 | 375/500 | 2/1.25 | 3/3 | 11/6 | 90 | 350/450 | Bolts [Toothpicks] (40) |
+| Junkbow | 10/15 | 20/24 | 300/400 | 3/2 | 4/3 | 12/6 | 90 | 350/450 | Bolts [Toothpicks] (40) |
+| Oldworld Bow MkI | 20/35 | 35/50 | 800/1100 | 3.5/2.5 | 4.5/4 | 4/2.5 | 70 | 500/600 | Bolts [Regulars] (30) |
+| Oldworld Bow MkII | 35/45 | 45/60 | 800/1200 | 4/2.2 | 8/6.5 | 4/2.2 | 80 | 500/600 | Bolts [Regulars] (30) |
+| Spring Bat | 30/50 | 40/80 | 400/550 | 4.5/3.5 | 6/8 | 8/4 | 70 | 500/600 | Bolts [Heavies] (20) |
+
+Spring Bat's slowest reload gets slower with quality (8 above 6). `reload anim`: Eagle's Cross "reload 3 phase"; Junkbow, Oldworld Bow MkII and Spring Bat
+"reload 2 phase"; the others none (**Verified**, `RangedInstallTests`). Turrets: Turret 00 (range 1200, reload 2 to 4, deviation 3, 1 shot), Turret double (750, 2 to 6,
+5, 2 shots), Turret 02 six (650, 2.5 to 12, 10, 6 shots), crossbow 00 norm (650, 2 to 8, 5), crossbow 02 - advanced (1000, 1.5 to 6, 5) and a rebirth GUN_DATA (1000,
+1 to 5, 4, shot speed 1); no GUN_DATA has `ammo`, so turrets never use ammunition. The bolts are ITEMs with `item function` 16, `slot` 7 and `charges` = bolts per item
+(1 or 2 kg). Their `stackable` field is an **int** (1), not a bool. Only 3 of the 40 CHARACTER records that list `crossbows` also list bolts in `inventory`. The RANGED
+animations (CharacterAnimCategory 8): "aimH" (clip `aimshoot`), "shoot", "aimwalk" (upper body), "stand 1 crossbow", "reload 1/2/3 phase" (whole-body actions).
+
+### The shooting cycle (the ranged controller)
+
+- **Start** (**Observed**). `Task_RangedAttack` sets the controller's skill to CROSSBOWS (35), runs the tick `FUN_140438c70` and sets combat stance 0x23;
+  `Task_UseTurret` does the same with TURRETS (11) and the turret as the gun's owner. The gun is the equipped item's (`FUN_1404345c0`), else a turret's.
+- **Tick** (`FUN_140438c70`, **Observed**), states 0 aiming, 1 closing in, 2 empty, 3 no target: keep or choose a target (below), else state 3; no shot loaded:
+  state 2 (the reload runs in the fire gate); the target in range (`FUN_140436860`: squared distance below h x range^2, h the height factor; **a quirk**: h multiplies
+  the squared range here but the plain range of the bolt): XP and the fire decision. **Closing in**: out of range, or the decision found something nearer than the
+  target in the line, sends a crossbowman (never a turret gunner) walking to the target (`FUN_1405c68a0`), unless a stats byte or a check forbids it; walking in
+  range, a ray 5 units above both is tested each tick and after 0.3 s the shooter stops and aims again (what the two ray flags mean is **Unknown**).
+- **Aim point** (`FUN_140436d10`, **Observed**, the lead **Verified** in the disassembly): the target's bone `Bip01 Spine2` (`Bip01 Spine1` in a case not
+  identified), else its position, plus a lead: its velocity x (distance from the barrel / shot speed).
+- **Fire decision** (`FUN_140437ad0`, **Observed**): the gun must be on target (personal guns always are) and ready; a **steady-aim timer of 0.4 s** must have run out
+  (reset whenever the gun is not ready, after every shot and every reload); then a ray from the barrel: terrain or static first, or a character that is not the
+  shooter and **not an enemy of the shooter**: no shot; some other object nearer than the target: wait (close in); otherwise fire. The bolt leaves in the fire gate
+  `FUN_14043aee0` (once per character update) when a trigger flag is set; **what sets that flag is Unknown** (an animation event or a timer).
+- **Reload** (`FUN_140437ce0`, **Observed**): effective skill s = 0.01 (0.6 skill + 0.4 dexterity x m) (the blend `FUN_140885ce0`, see "Technique choice"); reload
+  time (`FUN_140436010`) = clamp(lerp(s, reload max, reload min), reload min, reload max): a Ranger at quality 0 with crossbows 10 and dexterity 10 takes 4.35 s, at
+  s = 1 3 s. With `ammo` set and none of it on the character (main inventory, then the worn backpack), **no reload starts and nothing fires**. Otherwise the timer
+  runs down by `dtGame`; at 0 **one charge** of the first matching item is used (main inventory first; the item goes at 0 charges), the gun is filled to `num shots`
+  and the steady timer reset: one bolt per shot. The reload animation's event (`FUN_1404371a0`) also fills the gun without touching ammunition; how the two
+  interleave is **Unknown**.
+- **Target choice** (`FUN_140437f40`, `FUN_1404374d0`, score `FUN_140435d70`, **Observed**): the ordered target is kept while valid; else the best of the sensed
+  characters by score = (f x d)^2 x a gun factor, x 1.5 if it attacks the shooter, + 0.1 for the current one; f 0.1 for a downed target; d = max(0, 1 - distance / (w x
+  range)), w 1 or 0.6 by the sense list; an unseen target x 0.1. Picking a target not yet hostile reports crime 4 ([economy.md](economy.md#11-bounties-and-crimes)).
+- **XP** (**Observed**; the generic entry `FUN_1408c7250` with `dtGame`): aiming with a loaded gun at a target in range: perception 3.0 and the skill (crossbows 1.2,
+  turrets 1.0); reloading: the skill and dexterity 0.5; FRIENDLY_FIRE through `FUN_1408c7310`: 20 when a bolt passes a friend, 100 when it hits one. **No XP to the
+  shooter for a hit**; the victim gets "hit taken" (event 4) with the shooter as the opponent.
+
+### The bolt
+
+- **Firing** (`FUN_14043a730`, **Observed**, floats checked in the disassembly): from the barrel; loaded shots - 1. **Deviation**: t = 0.005 (skill + perception)
+  (both with injury multipliers, perception with its gear bonus), D = max(0, deviation x (1 - t)) degrees, and the direction to the aim point is tilted by u x D degrees
+  (u uniform) about a random axis across it (Ogre `randomDeviant`): a cone of half-angle D, denser at the centre. **Verified**: the same 0.005 (skill + perception) is
+  `FUN_140435160` and the turret tooltip's "User Accuracy Deviation". At skill + perception 200 the cone is closed.
+- **Per bolt**, with R the gun's damage factor (crossbow 1; turret 0.8 condition + 0.2), W the wall bonus (crossbow 1) and h the height factor: damage = U[pierceMin,
+  pierceMax) x R h W (a float, not rounded), range = range x R h W, speed = shot speed x (0.8 R h W + 0.2). Friendly-fire avoidance = min(1, FRIENDLY_FIRE x 0.015).
+- **Height factor** (`FUN_140435f60`, **Observed**): dy = barrel height - target height, f = (|dy| - 20) / 280 capped at 1 and not floored; above, h = 1 + 0.5 f (1.5 at
+  30 m above); level or below, h = 1 - 0.4 f (0.6 at 30 m below); a target at height exactly 0 gives 1. At dy = 0 h is 1.029 (the missing floor).
+- **Flight** (`FUN_1404380e0` per frame, **Observed**): step = speed x `dtSim`, range left - step, moved along its nose (drawn stretched by max(1, speed x 0.005)).
+  **A straight line while range is left**, then the nose pitches down 8 degrees per second; dropped 5000 units past its range. A physics ray along the step (a hit within
+  2 steps counts): terrain sticks the bolt, unless |cos| between the surface normal and the flight is below 0.1 (a graze: dropped); other statics stick it; some
+  building parts let it through; a character: below. Stuck bolts are **visual only** (not recoverable), kept per mesh up to the settings' `harpoonLimit`, oldest first out.
+- **Friendly fire** (**Observed**): a character hit who is not the intended target and to whom the shooter is not hostile: with chance = avoidance the bolt passes
+  (XP 20), else hits (XP 100). An enemy in the way is hit; the intended target always.
+- **Damage** (`FUN_140439c90`, **Observed**): a packet of pierce = the bolt's damage, cut, blunt and stun 0, **bleed 2.0**, armour penetration 0, through the hit
+  pipeline with **hit direction 6** (the part by its `hit` weight alone), the armour's flat pierce defence and cut-into-stun fraction, toughness, and **the global damage
+  multiplier a second time** (it is already in the pierce ends: bolts scale with G squared). The bolt stays in the body as the wound's decal. The victim turns to the
+  shooter; KO and death as for melee; the hit reaction with direction 6. **No block, no dodge, no skill roll**: only the cone and the ray decide a hit; the STATS field
+  `arrow defence` is not read. Crime 4 against the shooter when the intended target was not yet hostile.
+
+### Turrets (secondary; **Observed** from `GunClassTurret` and the tooltip `FUN_14030d620`)
+
+Damage per harpoon an integer in [0.75 x base, 1.25 x base], base = the BUILDING's `output rate` ("for guns, the amount of pierce damage"); R = 0.8 condition + 0.2;
+W = 1 + the wall's `output rate` x 0.01 when wall-mounted. Skill TURRETS; deviation, reload and XP as for crossbows. Turret aiming (`aim speed`, the aim error) and
+the turret's states were not read.
+
+### AI (**Observed**)
+
+Planner rows ([ai-tasks.md](ai-tasks.md)): RANGED_ATTACK (262) needs `!me swim`, `!iAmBeingMeleeAttacked immediate`, `hasTwoWorkingArm`, `!IS_CROUCHING_OR_LYING`
+and a crossbow drawn; EQUIP_CROSSBOW (264) is `Task_EquipBestWeapon` with its "want a gun" flag. **Two state ids are named `hasWeaponEquipped`** (**Verified** in both
+evaluators): id 5 (`FUN_140596a30`) is a melee weapon drawn, id 156 (`FUN_140596a70`) a crossbow drawn. `isWithinMyBowRange` (state 160) is 0.95 x the crossbow's
+range horizontally, but no planner row uses it and MOVE_IN_BOW_RANGE (267) is not registered: probably unused. A squad mate's attacker counts within 150 units when it
+fights in melee and within its gun's range when it shoots (`FUN_14099c3b0`). **Unknown**: what makes an NPC with a crossbow and a melee weapon switch between them
+(distance, being meleed, running dry); `AI::vfunc_55/56` (`FUN_1405a34e0`, `FUN_1405a3710`) are the next place to read.
+
+### Unknowns of the ranged path
+
+The ranged-or-melee switch; what sets the trigger flag (the time between the decision and the shot); the reload animation against the timer; a character's hit shape
+(capsule or ragdoll) and whether downed bodies stop bolts; whether the crossbow's bleed and target multipliers and the armour's `ranged skill mult` do anything; turret
+aiming and states; how NPC crossbowmen get their bolts.
 
 ## Experience
 
@@ -382,7 +501,8 @@ Read through the typed views of `Meitou.Data.Gameplay.Combat` and checked by `Co
 ## As built (stage 8)
 
 Items 1 to 5 of the outline exist: [simulation.md "Combat"](../simulation.md#combat) lists what the engine does and where it chose (attack choice, timing, the reaction's alignment to the blow, the stagger, XP for blocks and dodges, the reach
-test). The attacker-side technique choice is no longer a gap of the code but is still **Unknown** in the original. Ranged combat, turrets and the AI's targeting are not built.
+test). The attacker-side technique choice is no longer a gap of the code but is still **Unknown** in the original. Turrets and the AI's targeting are not built.
+Crossbows are built since 2026-10-13 from the facts of [Ranged and turrets](#ranged-and-turrets), with engine choices where they are **Unknown** ([simulation.md "Ranged"](../simulation.md#ranged)).
 Since 2026-10-13 fights also start without an order: NPCs attack the nearest enemy of their faction in sight and the player's idle characters defend themselves, an engine
 stand-in for the AI's senses and target choice ([simulation.md "Hostility and relations"](../simulation.md#hostility-and-relations)).
 
@@ -392,7 +512,7 @@ stand-in for the AI's senses and target choice ([simulation.md "Hostility and re
 - Attacker-side technique choice (which technique an attacker starts, using min/max skill, encumbrance, distance); whether `140887970` tests min/max skill. Attack-slot AI (`14060a9e0` and neighbours), aggression,
   stance and target selection. The bluntBase of non-blunt-dominant weapons; the stat that scales max blood; the part `+0x28` link.
 - The role of the class-table columns 4-6 (athletics, combat speed, stealth is an inference) and of the slot-adjusted factor (armour item field index 0x5d) in `140898e90`.
-- Turrets; bow accuracy and range maths and the use of `bow damage 1/99`; the meaning of the weight/price-like armour table fields; the remaining difficulty floats beyond the dialog bindings listed above (their consumers).
+- Turrets (aiming and states; see [Ranged and turrets](#ranged-and-turrets) for what is known and its own unknowns); the meaning of the weight/price-like armour table fields; the remaining difficulty floats beyond the dialog bindings listed above (their consumers).
 - Whether the +20 guarding state of the block chance is the state the HUD's Block stance sets ([ui-screens.md](ui-screens.md#4-hud-mainbargui)).
 - What the technique fields `power 1/2`, `limb 1/2`, `anim hesitate point`, `max encumbrance` and `max simultaneous hits` do; where `min cut damage mult` x the manufacturer's `min cut damage` is applied (the engine floors the cut at it); the term shapes of the fist damage (the engine takes half the stat each); how a "Heavy_Hit" works (the engine: 0.5 s helpless for a damage sum above the stumble threshold). The engine's answers are in [simulation.md](../simulation.md#combat).
 - Whether the decompiled maths matches in-game numbers: nothing has been compared in play.
@@ -409,4 +529,4 @@ stand-in for the AI's senses and target choice ([simulation.md "Hostility and re
    same key names as the original.
 4. (Done.) Defender reaction choice (block roll, wrong-direction block on a failed roll, weighted dodge) and outcome selection from animation state: block direction and progress above 0.5, dodge window 0.1..0.98; the per-part `hitmult` rise and decay.
 5. (Done.) XP distribution after each resolved blow.
-6. Defer ranged, turrets and AI target choice until the Unknowns are read.
+6. (Done for crossbows, 2026-10-13.) Ranged combat ([Ranged and turrets](#ranged-and-turrets)). Turrets and the AI's target choice wait.

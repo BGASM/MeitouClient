@@ -27,6 +27,8 @@ public sealed class ItemInstance
     public float Quality { get; set; }
     /// <summary>Charges left; for food the record's charges times CONSTANTS <c>food quality mult</c>, which is what is eaten (100 points are one hunger level).</summary>
     public float Charges { get; set; } = 1;
+    /// <summary>The charges of a full unit (the record's, as <see cref="Charges"/> starts); a stack of ammunition refills <see cref="Charges"/> from it when one unit is used up. 0 when not known (an item made elsewhere).</summary>
+    public float MaxCharges { get; set; }
     public int Width { get; init; } = 1;
     public int Height { get; init; } = 1;
     /// <summary>Weight of one unit in kg as it counts in the inventory total (weapons already scaled by <c>weapon inventory weight mult</c>).</summary>

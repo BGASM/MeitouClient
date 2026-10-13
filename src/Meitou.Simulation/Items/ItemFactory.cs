@@ -37,6 +37,7 @@ public sealed class ItemFactory(GameDatabase db, GameConstants constants)
             Quality = quality,
             ItemFunction = info.Function,
             Charges = info.IsFood ? info.Charges * Constants.FoodQualityMult : info.Charges,
+            MaxCharges = info.IsFood ? info.Charges * Constants.FoodQualityMult : info.Charges,
             Width = info.Width,
             Height = info.Height,
             UnitWeight = weapon ? info.Weight * Constants.WeaponInventoryWeightMult : info.Weight,
@@ -77,7 +78,22 @@ public sealed class ItemFactory(GameDatabase db, GameConstants constants)
                 if (r.Values.Value0 <= 0) continue;
                 if (Create(r.TargetStringId, r.Values.Value0) is { } item) inventory.Add(item);
             }
+        if (loadout?.Crossbow is { } bow) AddAmmo(inventory, bow.Weapon);
         return inventory;
+    }
+
+    /// <summary>
+    /// An <b>engine choice</b>: a character whose loadout rolled a crossbow gets one item of the crossbow's <c>ammo</c> (one stack of bolts: 10 to 40 shots by the record's
+    /// <c>charges</c>) unless its record's list already gave it some. Only 3 of the 40 base-game CHARACTER records with crossbows list bolts; how the original equips
+    /// NPC crossbowmen with ammunition is <b>Unknown</b> (docs/simulation.md "Combat", ranged).
+    /// </summary>
+    void AddAmmo(Inventory inventory, GameRecord crossbow)
+    {
+        var refs = crossbow.GetReferences("ammo");
+        if (refs.Count == 0) return;
+        string ammo = refs[0].TargetStringId;
+        foreach (var i in inventory.All()) if (i.Record == ammo) return;
+        if (Create(ammo) is { } bolts) inventory.Add(bolts);
     }
 
     void AddWeapon(Inventory inventory, Meitou.Data.Characters.LoadoutWeapon w)

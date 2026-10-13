@@ -33,7 +33,11 @@ public sealed record GunData
     };
 }
 
-/// <summary>A CROSSBOW record, read only. The level-0 and level-1 values are lerped by the item's quality (<b>Observed</b>, <c>FUN_14043c180</c>); <see cref="At"/> does that.</summary>
+/// <summary>
+/// A CROSSBOW record (docs/game/combat.md "Ranged and turrets"). The level-0 and level-1 values are lerped by the item's quality (<b>Observed</b>, <c>FUN_14043c180</c>);
+/// <see cref="At(float, CombatConstants, float)"/> does that the way the gun loader does. <c>num shots</c>, <c>accuracy perfect skill</c>, <c>ammo</c>, <c>reload anim</c> and
+/// <c>live ammo</c> have no level-1 variant (the shared GUN_DATA loader <c>FUN_14043baa0</c> reads them).
+/// </summary>
 public sealed record CrossbowData
 {
     public required string StringId { get; init; }
@@ -52,20 +56,50 @@ public sealed record CrossbowData
     public float AccuracyDeviation1 { get; init; }
     public float ShotSpeed0 { get; init; }
     public float ShotSpeed1 { get; init; }
+    /// <summary><c>bleed mult</c> and the target-kind multipliers: shown on the tooltip, but no use of them in a bolt's damage was found (<b>Observed</b>); the engine does not apply them.</summary>
     public float BleedMult { get; init; } = 1;
     public float HumanDamageMult { get; init; } = 1;
     public float AnimalDamageMult { get; init; } = 1;
     public float RobotDamageMult { get; init; } = 1;
+    /// <summary><c>num shots</c>: the magazine (1 for every base-game crossbow).</summary>
+    public int NumShots { get; init; } = 1;
+    /// <summary><c>accuracy perfect skill</c>: shown as "Required skill" on the tooltip; no use in the firing maths was found (<b>Observed</b>).</summary>
+    public int AccuracyPerfectSkill { get; init; }
+    /// <summary>The string id of the <c>ammo</c> ITEM; empty means infinite ammunition (fcs.def: "if nothing here then magic infinite ammo").</summary>
+    public string AmmoId { get; init; } = "";
+    /// <summary>The string id of the <c>reload anim</c> ANIMATION record; empty when the record names none.</summary>
+    public string ReloadAnimId { get; init; } = "";
+    /// <summary><c>live ammo</c>: the mesh of the bolt in flight.</summary>
+    public string LiveAmmoMesh { get; init; } = "";
 
-    /// <summary>The stats at quality fraction <paramref name="q"/> (0 to 1); the pierce damages times the global damage multiplier and truncated to integers, as the loader does.</summary>
-    public CrossbowStats At(float q, float globalDamageMultiplier = 1)
+    /// <summary>
+    /// The stats at quality fraction <paramref name="q"/> (0 to 1) with the pierce damages times the global damage multiplier and truncated to integers, without the
+    /// CONSTANTS <c>bow damage 1/99</c> scaling (the plain lerp; the gun itself uses <see cref="At(float, CombatConstants, float)"/>).
+    /// </summary>
+    public CrossbowStats At(float q, float globalDamageMultiplier = 1) => Lerp(q, globalDamageMultiplier, 1, 1);
+
+    /// <summary>
+    /// The gun's numbers at quality fraction <paramref name="q"/> (<c>FUN_14043c180</c>, <b>Observed</b>, the float flow checked in the disassembly): every level-0/level-1 pair is
+    /// lerped by q; the pierce ends are first scaled by <c>bow damage 1</c> (level 0) and <c>bow damage 99</c> (level 1), then lerped, multiplied by the global damage
+    /// multiplier and truncated: pierceMin = trunc(lerp(q, bow1 x min0, bow99 x min1) x G). A shot speed of 0 or less becomes 1.
+    /// </summary>
+    public CrossbowStats At(float q, CombatConstants constants, float globalDamageMultiplier = 1) => Lerp(q, globalDamageMultiplier, constants.BowDamage1, constants.BowDamage99);
+
+    CrossbowStats Lerp(float q, float g, float bow1, float bow99)
     {
         static float L(float a, float b, float t) => a + (b - a) * t;
+        float speed = L(ShotSpeed0, ShotSpeed1, q);
         return new CrossbowStats(
-            (int)(L(PierceDamageMin0, PierceDamageMin1, q) * globalDamageMultiplier),
-            (int)(L(PierceDamageMax0, PierceDamageMax1, q) * globalDamageMultiplier),
+            (int)(L(bow1 * PierceDamageMin0, bow99 * PierceDamageMin1, q) * g),
+            (int)(L(bow1 * PierceDamageMax0, bow99 * PierceDamageMax1, q) * g),
             L(Range0, Range1, q), L(ReloadTimeMin0, ReloadTimeMin1, q), L(ReloadTimeMax0, ReloadTimeMax1, q),
-            L(AccuracyDeviation0, AccuracyDeviation1, q), L(ShotSpeed0, ShotSpeed1, q));
+            L(AccuracyDeviation0, AccuracyDeviation1, q), speed > 0 ? speed : 1);
+    }
+
+    static string FirstReference(GameRecord r, string list)
+    {
+        var refs = r.GetReferences(list);
+        return refs.Count > 0 ? refs[0].TargetStringId : "";
     }
 
     public static CrossbowData From(GameRecord r) => new()
@@ -90,8 +124,13 @@ public sealed record CrossbowData
         HumanDamageMult = RecordReading.Float(r, "human damage mult", 1),
         AnimalDamageMult = RecordReading.Float(r, "animal damage mult", 1),
         RobotDamageMult = RecordReading.Float(r, "robot damage mult", 1),
+        NumShots = Math.Max(RecordReading.Int(r, "num shots", 1), 1),
+        AccuracyPerfectSkill = RecordReading.Int(r, "accuracy perfect skill", 0),
+        AmmoId = FirstReference(r, "ammo"),
+        ReloadAnimId = FirstReference(r, "reload anim"),
+        LiveAmmoMesh = r.GetString("live ammo"),
     };
 }
 
-/// <summary>A crossbow's numbers at one quality.</summary>
+/// <summary>A crossbow's numbers at one quality: pierce damage ends (ints), range (units), reload time ends (seconds), accuracy deviation at skill 0 (degrees), shot speed (units per second).</summary>
 public readonly record struct CrossbowStats(int PierceMin, int PierceMax, float Range, float ReloadMin, float ReloadMax, float AccuracyDeviation, float ShotSpeed);
