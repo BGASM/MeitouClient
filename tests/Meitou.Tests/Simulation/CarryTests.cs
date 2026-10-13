@@ -283,7 +283,7 @@ public class CarryTests
     // ------------------------------------------------------------------ looting
 
     static ItemInstance Item(string record, int w, int h, int quantity = 1, bool stack = false) =>
-        new() { Record = record, Name = record, Width = w, Height = h, Quantity = quantity, Stackable = stack, UnitWeight = 1 };
+        new() { Record = record, Name = record, Width = w, Height = h, Quantity = quantity, StackLimit = stack ? 99 : 1, UnitWeight = 1 };
 
     [Fact]
     public void Take_all_moves_what_fits_and_leaves_the_rest_and_the_worn_gear()

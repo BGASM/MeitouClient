@@ -33,12 +33,21 @@ public sealed class ItemInstance
     public int Height { get; init; } = 1;
     /// <summary>Weight of one unit in kg as it counts in the inventory total (weapons already scaled by <c>weapon inventory weight mult</c>).</summary>
     public float UnitWeight { get; init; }
-    public bool Stackable { get; init; }
+    /// <summary>How many units one cell holds (<see cref="ItemInfo.StackLimit"/>; 1: it does not stack). Inside a backpack the bag's bonus applies (<see cref="Inventory.LimitOf"/>).</summary>
+    public int StackLimit { get; init; } = 1;
     public bool IsFood { get; init; }
     /// <summary>A worn backpack's contents (null for other items).</summary>
     public Inventory? Contents { get; init; }
     /// <summary>The factor of the contents' weight (a bag's <c>encumbrance effect</c>).</summary>
     public float ContentsFactor { get; init; } = 1;
+
+    /// <summary>A copy of this item with another quantity (a stack split off; never used for a backpack, whose contents are not copied).</summary>
+    public ItemInstance WithQuantity(int quantity) => new()
+    {
+        Record = Record, Name = Name, Type = Type, MaterialId = MaterialId, CompanyId = CompanyId, Section = Section, X = X, Y = Y, Quantity = quantity, Level = Level,
+        ItemFunction = ItemFunction, Quality = Quality, Charges = Charges, MaxCharges = MaxCharges, Width = Width, Height = Height, UnitWeight = UnitWeight, StackLimit = StackLimit,
+        IsFood = IsFood, ContentsFactor = ContentsFactor,
+    };
 
     /// <summary>The weight this item and what is in it add to the load.</summary>
     public float Weight => UnitWeight * Quantity + (Contents?.ContentWeight() ?? 0) * ContentsFactor;

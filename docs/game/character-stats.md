@@ -643,6 +643,19 @@ Animals use `CharStatsAnimal`, fed by CHARACTER / ANIMAL_CHARACTER fields (`anim
 - `weapon inventory weight mult` (0.5) scales the inventory weight of weapons (weapon weight is derived from
   blunt damage; editor text). A bag's `encumbrance effect` multiplies the weight of its contents.
 
+### Stacks (ITEM `stackable`)
+
+- **`stackable` is the stack limit, an int** (**Verified** 2026-10-13, three ways: `fcs.def` declares it under `[ITEM,MAP_ITEM]` as `stackable: 1` "number that can be
+  stacked in inventory"; the exe reads it from the record's **int** table, in the item loader `FUN_14075c9d0` as a "can stack" byte (value != 0) and in the max-stack function
+  `FUN_14075e090` as the number; and the base data stores an int on every ITEM, never a bool: 294 hold 1, 12 hold 4 (books, Leather, Armour Plating), Old Map 10, `Cats` and
+  `String of Cats` 100, every MAP_ITEM 1; `StackLimitInstallTests`). **1 means one unit per cell**: the crossbow bolts (all `stackable` 1) do not stack; each bolt item is a
+  quiver whose `charges` are the shots ([combat.md](combat.md#ranged-and-turrets)).
+- **The limit** (`FUN_14075e090`, **Observed**): WEAPON, ARMOUR, CONTAINER, MAP_ITEM, CROSSBOW and LIMB_REPLACEMENT return 1 before the field is read; any other item in an
+  inventory section gets `FUN_1407466b0(section, stackable)` = trunc(max(stackable, `stackable bonus minimum`) x `stackable bonus mult`), with the base forced to 1 first when a
+  flag of the section (`+0x98`) is set (**Unknown** which sections set it). The bonus fields are the CONTAINER's (backpacks: Bull Backpack 1 / 5, Garru Backpack 1 / 6, the wooden
+  backpacks 3 / 3, traders' backpacks 2 / 3, the rest 1 / 1) and the storage building's ([buildings-production.md](buildings-production.md#storage)). So a ration, which does not
+  stack on a character, stacks five to a cell in a Bull Backpack.
+
 ## New-game advanced options that change these mechanics
 
 **Observed**, UI constructor `FUN_1409151d0` and writer `FUN_140912f80` (nine floats copied to the globals at

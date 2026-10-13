@@ -41,9 +41,11 @@ public sealed class ItemFactory(GameDatabase db, GameConstants constants)
             Width = info.Width,
             Height = info.Height,
             UnitWeight = weapon ? info.Weight * Constants.WeaponInventoryWeightMult : info.Weight,
-            Stackable = info.Stackable,
+            StackLimit = info.StackLimit,
             IsFood = info.IsFood,
-            Contents = info.Type == FcsRecordType.CONTAINER ? new Inventory(Math.Max(info.StorageWidth, 1), Math.Max(info.StorageHeight, 1)) : null,
+            Contents = info.Type == FcsRecordType.CONTAINER
+                ? new Inventory(Math.Max(info.StorageWidth, 1), Math.Max(info.StorageHeight, 1)) { StackBonusMinimum = info.StackBonusMinimum, StackBonusMult = info.StackBonusMult }
+                : null,
             ContentsFactor = info.EncumbranceEffect,
         };
     }

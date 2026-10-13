@@ -21,7 +21,7 @@ public class InventoryTests
     public void Items_take_free_cells_and_stack_and_a_full_grid_refuses()
     {
         var inv = new Inventory(4, 2);
-        ItemInstance Item(string id, int w, int h, bool stack = false) => new() { Record = id, Name = id, Width = w, Height = h, Stackable = stack };
+        ItemInstance Item(string id, int w, int h, bool stack = false) => new() { Record = id, Name = id, Width = w, Height = h, StackLimit = stack ? 99 : 1 };
         Assert.True(inv.Add(Item("a", 2, 2)));
         Assert.True(inv.Add(Item("b", 2, 2)));
         Assert.Equal([(0, 0), (2, 0)], inv.Items.Select(i => (i.X, i.Y)));
@@ -30,6 +30,71 @@ public class InventoryTests
         Assert.True(bolts.Add(Item("bolt", 1, 1, stack: true)));
         Assert.True(bolts.Add(Item("bolt", 1, 1, stack: true)));
         Assert.Equal(2, Assert.Single(bolts.Items).Quantity);
+    }
+
+    static ItemInstance Unit(string id, int quantity, int limit, Meitou.Data.Fcs.FcsRecordType type = Meitou.Data.Fcs.FcsRecordType.ITEM) =>
+        new() { Record = id, Name = id, Type = type, Quantity = quantity, StackLimit = limit };
+
+    [Fact]
+    public void Stacks_hold_at_most_the_stack_limit_and_the_rest_takes_new_cells()
+    {
+        var inv = new Inventory(3, 1);
+        // 10 books with the data's limit 4: stacks of 4, 4 and 2, one per cell.
+        Assert.True(inv.Add(Unit("book", 10, 4)));
+        Assert.Equal([4, 4, 2], inv.Items.Select(i => i.Quantity));
+        Assert.Equal([0, 1, 2], inv.Items.Select(i => i.X));
+        // One more tops up the last stack; three more fill it and leave one that has no cell: the call says so and the unit stays with the caller.
+        Assert.True(inv.Add(Unit("book", 1, 4)));
+        Assert.Equal(3, inv.Items[2].Quantity);
+        var rest = Unit("book", 3, 4);
+        Assert.False(inv.Add(rest));
+        Assert.Equal(4, inv.Items[2].Quantity);
+        Assert.Equal(2, rest.Quantity);
+        // Limit 1 (most items, and the default): no stacking at all.
+        var single = new Inventory(4, 1);
+        Assert.True(single.Add(Unit("ration", 2, 1)));
+        Assert.True(single.Add(Unit("ration", 1, 1)));
+        Assert.Equal([1, 1, 1], single.Items.Select(i => i.Quantity));
+    }
+
+    [Fact]
+    public void A_backpack_bonus_raises_the_limit_inside_it_but_not_for_gear()
+    {
+        // A Bull Backpack (stackable bonus minimum 1, mult 5): an item that does not stack elsewhere holds five per cell inside it; a weapon never stacks.
+        var bag = new Inventory(2, 1) { StackBonusMinimum = 1, StackBonusMult = 5 };
+        Assert.Equal(5, bag.LimitOf(Unit("ration", 1, 1)));
+        Assert.Equal(20, bag.LimitOf(Unit("book", 1, 4)));
+        Assert.Equal(1, bag.LimitOf(Unit("katana", 1, 1, Meitou.Data.Fcs.FcsRecordType.WEAPON)));
+        // A Wooden Backpack (3, 3): max(limit, 3) x 3.
+        var wooden = new Inventory(2, 1) { StackBonusMinimum = 3, StackBonusMult = 3 };
+        Assert.Equal(9, wooden.LimitOf(Unit("ration", 1, 1)));
+        Assert.Equal(300, wooden.LimitOf(Unit("cats", 1, 100)));
+        // Into a character whose main grid is full, the rations go into the backpack five to a cell.
+        var inv = new Inventory(1, 1);
+        inv.Items.Add(new ItemInstance { Record = "pack", Section = "backpack_attach", Type = Meitou.Data.Fcs.FcsRecordType.CONTAINER, Contents = bag });
+        Assert.True(inv.Add(Unit("rock", 1, 1)));
+        Assert.True(inv.Add(Unit("ration", 7, 1)));
+        Assert.Equal([5, 2], bag.Items.Select(i => i.Quantity));
+    }
+
+    [Fact]
+    public void A_town_with_items_agrees_at_one_four_and_sixteen_threads()
+    {
+        static List<ulong> Run(int threads)
+        {
+            var db = SyntheticTown.Database(roaming: true, anatomy: true, items: true);
+            using var world = SyntheticTown.World(21, threads, db: db, bodies: true, bodyTimeScale: 2000, feed: new FeedSettings(), minPartition: 4);
+            var hashes = new List<ulong>();
+            foreach (int n in new[] { 1, 39, 160, 500 })
+            {
+                world.RunTicks(n);
+                hashes.Add(world.StateHash());
+            }
+            return hashes;
+        }
+        var one = Run(1);
+        Assert.Equal(one, Run(4));
+        Assert.Equal(one, Run(16));
     }
 
     [Fact]
@@ -47,5 +112,30 @@ public class InventoryTests
         using var unfed = World(feed: new FeedSettings { ProvisionNpcs = false }, options: options);
         unfed.RunTicks(40000);
         Assert.Contains(Humans(unfed), s => unfed.Characters.Cold(s)!.Medical!.Dead && unfed.Characters.Cold(s)!.Medical!.Cause == DeathCause.Starvation);
+    }
+}
+
+/// <summary>The ITEM <c>stackable</c> field against the install's base records (docs/simulation.md "Items and eating"). Skipped without the game.</summary>
+[Slow]
+public class StackLimitInstallTests
+{
+    [Fact]
+    public void Stackable_is_a_stack_limit_in_the_data()
+    {
+        Assert.SkipWhen(InstallData.Install is null, "Kenshi install not found");
+        var db = InstallData.BaseGame!;
+        // An int on every ITEM (never a bool): 294 records hold 1, 12 hold 4 (books, leather, armour plating), Old Map 10, the two cat items 100. MAP_ITEMs hold 1.
+        var items = db.OfType(Meitou.Data.Fcs.FcsRecordType.ITEM).ToList();
+        Assert.All(items, r => Assert.False(r.Bools.ContainsKey("stackable")));
+        var counts = items.Where(r => r.Ints.ContainsKey("stackable")).GroupBy(r => r.Ints["stackable"]).ToDictionary(g => g.Key, g => g.Count());
+        Assert.Equal(new Dictionary<int, int> { [1] = 294, [4] = 12, [10] = 1, [100] = 2 }, counts);
+        Assert.Equal(100, ItemInfo.From(items.First(r => r.Name == "Cats")).StackLimit);
+        // Crossbow bolts do not stack: each item is a quiver whose charges are the shots.
+        Assert.All(db.OfType(Meitou.Data.Fcs.FcsRecordType.CROSSBOW).SelectMany(c => c.GetReferences("ammo")).Select(r => db.Find(r.TargetStringId)!),
+            b => Assert.Equal(1, ItemInfo.From(b).StackLimit));
+        // Gear never stacks, whatever its record says; backpacks carry the bonus.
+        Assert.All(db.OfType(Meitou.Data.Fcs.FcsRecordType.WEAPON).Take(20), w => Assert.Equal(1, ItemInfo.From(w).StackLimit));
+        var bull = ItemInfo.From(db.OfType(Meitou.Data.Fcs.FcsRecordType.CONTAINER).First(r => r.Name == "Bull Backpack"));
+        Assert.Equal((1, 5f), (bull.StackBonusMinimum, bull.StackBonusMult));
     }
 }

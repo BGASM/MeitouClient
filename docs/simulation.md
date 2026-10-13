@@ -158,6 +158,9 @@ factions round a crossroads with a player character, fights started by hostility
 nothing; a change of behaviour that is meant updates the numbers in the same commit. **Re-pinned 2026-10-13** (`bodies` from its sixth checkpoint, `fight` from its second, `town-parts` from its second): the XP on the move of `BodySystem` (athletics while running, strength under a load) raises stats a little, which feeds the speed chain; the first aid system, the rest flag and the fighter encumbrance moved nothing there (switching only the XP off made all eight old pins match again), and the new `first-aid` scenario agrees at 1, 4 and 16 threads before being pinned. **Pinned 2026-10-13**: `aggro` (agrees at 1, 4 and 16 threads first;
 `AggroTests`); the hostility work moved none of the nine others (they do not run the aggro system, and the deferred list and self-defence change nothing in them).
 **Pinned 2026-10-13**: `ranged` (agrees at 1, 4 and 16 threads first; `RangedTests`); the ranged code moved none of the ten others (their worlds have no crossbows, and the ranged state is hashed only once used, [Ranged](#ranged)).
+**Re-pinned 2026-10-13**: `town-parts` from its first checkpoint, for the stack limits ([Items and eating](#items-and-eating)): its guards' record lists give two rations, which
+were one item of quantity 2 and are now two cells (ITEM `stackable` 1); the world agrees at 1, 4 and 16 threads first (`InventoryTests.A_town_with_items_agrees_at_one_four_and_sixteen_threads`),
+and none of the eleven other pins moved.
 **Pinned 2026-10-13**: `carry` (agrees at 1, 4 and 16 threads first; `CarryTests.Scripted`: an ordered lift, carry and put-down, a rescue by the job whose carrier is then knocked out, the dropped body lifted again, an NPC leader rescue, a witnessed loot and a loot of an emptied body); the carry code moved none of the eleven others (they do not build the carry system, and its fields are hashed only while set, [Carrying](#carrying-rescue-and-looting)).
 
 **Asynchronous services** (paths, navmesh building, building a town's characters) run on their own threads with request and result
@@ -537,14 +540,19 @@ fields and food are in [character-stats.md](game/character-stats.md#hunger-and-s
   `encumbrance effect`. `Inventory.ContentWeight()` is the load; `BodySystem` turns it into `Encumbrance.Factor(constants, load, false,
   strength, strength injury multiplier)` for the speed chain and the hunger rate.
 - **Grids.** Footprints are `inventory footprint width x height`; a backpack's grid is its `storage size width x height`. Items take the first
-  free cell (`Inventory.FindCell`); stackables join a stack of the same record and quality. The character's own `main` grid is 8 x 6 cells: an
-  engine choice (the real size is **Unknown**). An item that does not fit is not created.
+  free cell (`Inventory.FindCell`). The character's own `main` grid is 8 x 6 cells: an engine choice (the real size is **Unknown**). An item that does not fit is not created.
+- **Stacks** (2026-10-13; facts in [character-stats.md "Stacks"](game/character-stats.md#stacks-item-stackable)). `ItemInfo.StackLimit` / `ItemInstance.StackLimit` is ITEM
+  `stackable` read as the int it is (**Verified**: before this it was read as a bool, which an int field never is, so nothing stacked); gear types are 1; `Inventory.LimitOf` applies
+  a backpack's `stackable bonus minimum` / `mult` (`Inventory.StackBonusMinimum`, `StackBonusMult`, set from the CONTAINER) to what is inside it; the section flag that forces the
+  base to 1 is not read. `Inventory.Add` tops up stacks of the same record and quality in the main grid, then in the backpack, then opens new cells (main, then backpack), at most a
+  full stack per cell (split-off copies, `ItemInstance.WithQuantity`); it returns true only when every unit found a place, and what did not fit stays in the item's `Quantity`
+  (`CarrySystem.TakeAll` counts such an item as left). So a record list of two rations (limit 1) gives two cells, not one item of quantity 2.
 - **Starting inventory** (`ItemFactory.Build`). What `CharacterGenerator` rolled (`Loadout`): clothing in the section of its ARMOUR `slot`
   (`shirt`, `head`, `boots`, `armour` for body, `legs`; belt has no verified section name and goes to `main`), the backpack, crossbow and
   weapons at `hip`/`back` (row in `inventory y`, level and manufacturer kept); then the CHARACTER's `inventory` list, each ITEM entry with a
   first value above 0 being that many items. The player's squad gets what its CHARACTER records list (the start-off records have no item list,
   [ui-screens.md](game/ui-screens.md)). Worlds without appearances get only the record list. Animals have no inventory. A rolled crossbow brings one item of its
-  bolts (engine choice, 2026-10-13, [Ranged](#ranged)). Note: ITEM `stackable` is an int in the data (1 for bolts); `ItemInfo` reads it as a bool, so those items do not stack.
+  bolts (engine choice, 2026-10-13, [Ranged](#ranged)). Bolt items have `stackable` 1, so they do not stack in the original either.
 - **Food.** A food item's charges are the record's `charges` times CONSTANTS `food quality mult`; eating adds **charges / 100** to the stomach,
   in hunger levels (the UI shows level x 100): Gohan 0.75, Bread 0.30, Rice Bowl 0.25, Dustwich 0.70. The unit is an **engine choice**: the
   nutrition value is **Unknown** in the original. Raw meat is not eaten by this rule.
@@ -646,7 +654,7 @@ Tests: `RangedTests` (formulas, worlds, the 1 / 4 / 16 thread check) and `Ranged
 - **Ammunition at spawn** (**engine choice**): a character whose loadout rolled a crossbow gets one item of the crossbow's `ammo` (10 to 40 bolts by its `charges`) unless
   its record's list already gave some (`ItemFactory.AddAmmo`); only 3 of the 40 CHARACTER records with crossbows list bolts, and how the original arms its NPC
   crossbowmen is **Unknown**. A reload uses one charge of the first matching item, main inventory then backpack (**Observed**); a stack of several units refills from
-  `ItemInstance.MaxCharges` and loses a unit (engine).
+  `ItemInstance.MaxCharges` and loses a unit (engine; bolts have `stackable` 1, so such a stack exists only inside a backpack with a stack bonus).
 - **Crossbow or melee** (`ChooseMode`, own slot in `Act`; the original's switch is **Unknown**, combat.md "AI"): a fighting character with a crossbow uses it while it has a
   shot loaded or ammunition, no melee fighter targeting it is within **15** units (gap between bodies; a stand-in for `iAmBeingMeleeAttacked`) and its target's gap is at
   least **20**; from melee it takes the crossbow up again past a gap of **60**. Running dry (empty and no ammunition, `CombatSlot.Dry`) means melee. Switching is

@@ -134,8 +134,8 @@ public class RangedTests(ITestOutputHelper output)
         var inv = new Inventory();
         var bag = new ItemInstance { Record = "pack", Type = FcsRecordType.CONTAINER, Section = "backpack_attach", Contents = new Inventory(6, 6) };
         inv.Items.Add(bag);
-        bag.Contents!.Items.Add(new ItemInstance { Record = "bolts", Section = "backpack_content", Charges = 2, MaxCharges = 30, Stackable = true });
-        inv.Items.Add(new ItemInstance { Record = "bolts", Section = "main", Charges = 1, MaxCharges = 30, Quantity = 2, Stackable = true });
+        bag.Contents!.Items.Add(new ItemInstance { Record = "bolts", Section = "backpack_content", Charges = 2, MaxCharges = 30, StackLimit = 99 });
+        inv.Items.Add(new ItemInstance { Record = "bolts", Section = "main", Charges = 1, MaxCharges = 30, Quantity = 2, StackLimit = 99 });
         Assert.Equal(1 + 30 + 2, Ammunition.Count(inv, "bolts"));
         Assert.True(Ammunition.UseOne(inv, "bolts"));          // the main stack's unit is empty: one unit less, refilled
         Assert.Equal(1, inv.Items.Find(i => i.Record == "bolts")!.Quantity);
@@ -161,7 +161,7 @@ public class RangedTests(ITestOutputHelper output)
         cold.Fighter = new Fighter(cold.Fighter!.Weapon) { Crossbow = CrossbowInstance.Create(0, x, Constants, 1) };
         cold.Faction = faction;
         cold.Inventory = new Inventory();
-        if (bolts > 0) cold.Inventory.Items.Add(new ItemInstance { Record = x.AmmoId, Section = "main", Charges = bolts, MaxCharges = 30, Stackable = true });
+        if (bolts > 0) cold.Inventory.Items.Add(new ItemInstance { Record = x.AmmoId, Section = "main", Charges = bolts, MaxCharges = 30, StackLimit = 99 });
         return cold;
     }
 
