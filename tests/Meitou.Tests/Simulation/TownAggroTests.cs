@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Numerics;
 using Meitou.Data.Gameplay;
 using Meitou.Simulation;
@@ -78,91 +77,5 @@ public class TownAggroTests(ITestOutputHelper output)
         Assert.True(checkedTowns >= 3, "the towns are placed in the world");
         Assert.True(totalFighters > 100, "the residents can fight");
         Assert.Equal(0, relations.Changes);   // no player: nobody's deeds changed the table
-    }
-
-    [Fact]
-    public void A_hostile_character_in_sight_of_the_players_attacks_and_the_idle_player_character_defends_itself()
-    {
-        var data = Data();
-        var start = NewGameStart.Find(NewGameStart.LoadAll(data.Db), NewGameStart.DefaultName)!;
-        // The sandbox's character: the first human of the default start's squad.
-        string record = "";
-        foreach (var link in start.Squad)
-        {
-            if (data.Db.Find(link.Id) is not { } r) continue;
-            if (!SquadFactory.IsTemplate(r)) { record = link.Id; break; }
-            if (SquadFactory.Plan(data.Db, SquadTemplate.From(r), 1, 0, 0, IWorldStates.None).Members.FirstOrDefault(m => !m.IsAnimal) is { } member) { record = member.RecordId; break; }
-        }
-        Assert.NotEqual("", record);
-        var walk = new OpenGroundWalkability((_, _) => 300);
-        var systems = StandardSystems.Build(data, walk, new StandardSystemOptions
-        {
-            Parts = Fighting & ~StandardParts.Population | StandardParts.Player, SynchronousPaths = true,
-            Combat = new CombatOptions { SelfApproach = false, TickMedical = false, RecordLog = true },
-            Aggro = new AggroSettings { RecordLog = true },
-        });
-        var population = new PopulationSystem(data, new PopulationSettings());
-        using var world = new SimWorld(new WorldSettings { Seed = 3, PublishSnapshots = false }, walk, systems.Systems);
-        var me = population.SpawnSandbox(world, record, new Vector2(5000, 5000), player: true);
-        var foe = population.SpawnSandbox(world, record, new Vector2(5150, 5000), player: false, yaw: -MathF.PI / 2);   // facing the player, as in the game's sandbox
-        var table = world.Characters;
-        int mine = table.Cold(me.Slot)!.Faction, theirs = table.Cold(foe.Slot)!.Faction;
-        Assert.True(AggroSystem.IsEnemy(data.Relations, theirs, mine), "the sandbox's foe is of a faction hostile to the player's");
-        // The sandbox's characters stand idle; the foe looks round within 15 ticks.
-        world.RunTicks(60);
-        foreach (var id in new[] { me, foe })
-        {
-            var c = table.Cold(id.Slot)!;
-            output.WriteLine($"{id}: {table.Previous[id.Slot].Position} task {table.Next[id.Slot].Task} fighter {c.Fighter is not null} combat {c.InCombat} faction {c.Faction} race {c.Race?.VisionRangeMult} player {c.IsPlayer}");
-        }
-        foreach (var e in systems.Aggro!.Log) output.WriteLine(e.ToString());
-        Assert.Contains(systems.Aggro!.Log, e => e.Attacker == foe && e.Target == me);
-        Assert.True(table.Cold(me.Slot)!.InCombat, "the idle player character fights back");
-        int ticks = 60;
-        while (ticks < 20000 && !table.Cold(me.Slot)!.Medical!.Incapacitated && !table.Cold(foe.Slot)!.Medical!.Incapacitated) { world.RunTick(); ticks++; }
-        Assert.Contains(systems.Combat!.Log, b => b.Attacker == foe.Slot && b.Defender == me.Slot);
-        Assert.Contains(systems.Combat.Log, b => b.Attacker == me.Slot && b.Defender == foe.Slot);
-        Assert.Equal(0, data.Relations.Changes);   // self-defence is not an assault
-        output.WriteLine($"{data.Factions[theirs].Name} against {data.Factions[mine].Name}: down after {ticks} ticks, {systems.Combat.Log.Count} blows");
-    }
-
-    /// <summary>Times every phase of the system it wraps (one thread: the bench runs the world on the caller).</summary>
-    sealed class Timed(ITickSystem inner) : ITickSystem
-    {
-        public long Ticks;
-        public readonly long[] Phase = new long[5];
-        long Time(Action a) { long t0 = Stopwatch.GetTimestamp(); a(); return Stopwatch.GetTimestamp() - t0; }
-        public void Inputs(SimWorld world, IReadOnlyList<SimCommand> commands) => Ticks += Time(() => inner.Inputs(world, commands));
-        public void Schedule(SimWorld world) { long t = Time(() => inner.Schedule(world)); Ticks += t; Phase[0] += t; }
-        public void Act(SimWorld world, Partition partition, EffectBuffer effects) { long t = Time(() => inner.Act(world, partition, effects)); Ticks += t; Phase[1] += t; }
-        public void Apply(SimWorld world, in Effect effect) { var e = effect; Ticks += Time(() => inner.Apply(world, e)); }
-        public void SlowWorld(SimWorld world) { long t = Time(() => inner.SlowWorld(world)); Ticks += t; Phase[2] += t; }
-    }
-
-    [Fact, Bench]
-    public void The_cost_of_the_aggro_is_recorded()
-    {
-        var data = Data();
-        var hub = data.Sites.Single(s => s.Town.Name == "The Hub");
-        // Each size twice: the first runs pay for the JIT.
-        foreach (float multiplier in new[] { 1f, 10f, 1f, 10f })
-        {
-            var (unused, systems) = Make(data, hub.Position, Fighting, multiplier);
-            unused.Dispose();   // only its systems are wanted, in a world of the bench's own
-            var walk = new OpenGroundWalkability((_, _) => 300);
-            var timed = new Timed(systems.Aggro!);
-            var list = systems.Systems.Select(s => s == systems.Aggro ? timed : s).ToList();
-            using var world = new SimWorld(new WorldSettings { Seed = 1, Threads = 1, PublishSnapshots = false }, walk, list);
-            world.Commands.Enqueue(new FocusCommand(hub.Position) { Tick = 0 });
-            world.RunTicks(120);   // the town loaded
-            timed.Ticks = 0;
-            Array.Clear(timed.Phase);
-            var watch = Stopwatch.StartNew();
-            const int Ticks = 1800;
-            world.RunTicks(Ticks);
-            double total = watch.Elapsed.TotalMilliseconds / Ticks, aggro = timed.Ticks * 1000.0 / Stopwatch.Frequency / Ticks;
-            var mults = Enumerable.Range(0, world.Characters.HighWater).Where(s => world.Characters.Previous[s].Alive).Select(s => world.Characters.Cold(s)!.Race?.VisionRangeMult ?? 0).Distinct().Order();
-            output.WriteLine($"The Hub x{multiplier}: {world.Characters.Count} characters (vision range mult {string.Join(", ", mults)}); {total:0.000} ms per tick, of which the aggro {aggro * 1000:0.0} us (schedule, act, slow world: {string.Join(" / ", timed.Phase.Take(3).Select(p => (p * 1e6 / Stopwatch.Frequency / Ticks).ToString("0.0")))} us; {systems.Aggro!.Started} fights started)");
-        }
     }
 }

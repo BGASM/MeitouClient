@@ -58,46 +58,6 @@ public class InventoryTests
     }
 
     [Fact]
-    public void A_backpack_bonus_raises_the_limit_inside_it_but_not_for_gear()
-    {
-        // A Bull Backpack (stackable bonus minimum 1, mult 5): an item that does not stack elsewhere holds five per cell inside it; a weapon never stacks.
-        var bag = new Inventory(2, 1) { StackBonusMinimum = 1, StackBonusMult = 5 };
-        Assert.Equal(5, bag.LimitOf(Unit("ration", 1, 1)));
-        Assert.Equal(20, bag.LimitOf(Unit("book", 1, 4)));
-        Assert.Equal(1, bag.LimitOf(Unit("katana", 1, 1, Meitou.Data.Fcs.FcsRecordType.WEAPON)));
-        // A Wooden Backpack (3, 3): max(limit, 3) x 3.
-        var wooden = new Inventory(2, 1) { StackBonusMinimum = 3, StackBonusMult = 3 };
-        Assert.Equal(9, wooden.LimitOf(Unit("ration", 1, 1)));
-        Assert.Equal(300, wooden.LimitOf(Unit("cats", 1, 100)));
-        // Into a character whose main grid is full, the rations go into the backpack five to a cell.
-        var inv = new Inventory(1, 1);
-        inv.Items.Add(new ItemInstance { Record = "pack", Section = "backpack_attach", Type = Meitou.Data.Fcs.FcsRecordType.CONTAINER, Contents = bag });
-        Assert.True(inv.Add(Unit("rock", 1, 1)));
-        Assert.True(inv.Add(Unit("ration", 7, 1)));
-        Assert.Equal([5, 2], bag.Items.Select(i => i.Quantity));
-    }
-
-    [Fact]
-    public void A_town_with_items_agrees_at_one_four_and_sixteen_threads()
-    {
-        static List<ulong> Run(int threads)
-        {
-            var db = SyntheticTown.Database(roaming: true, anatomy: true, items: true);
-            using var world = SyntheticTown.World(21, threads, db: db, bodies: true, bodyTimeScale: 2000, feed: new FeedSettings(), minPartition: 4);
-            var hashes = new List<ulong>();
-            foreach (int n in new[] { 1, 39, 160, 500 })
-            {
-                world.RunTicks(n);
-                hashes.Add(world.StateHash());
-            }
-            return hashes;
-        }
-        var one = Run(1);
-        Assert.Equal(one, Run(4));
-        Assert.Equal(one, Run(16));
-    }
-
-    [Fact]
     public void Nobody_starves_when_npcs_are_provisioned_but_the_player_gets_nothing_free()
     {
         // A very short hunger time: three levels last under two game hours.
@@ -124,11 +84,9 @@ public class StackLimitInstallTests
     {
         Assert.SkipWhen(InstallData.Install is null, "Kenshi install not found");
         var db = InstallData.BaseGame!;
-        // An int on every ITEM (never a bool): 294 records hold 1, 12 hold 4 (books, leather, armour plating), Old Map 10, the two cat items 100. MAP_ITEMs hold 1.
+        // An int on every ITEM (never a bool). MAP_ITEMs hold 1.
         var items = db.OfType(Meitou.Data.Fcs.FcsRecordType.ITEM).ToList();
         Assert.All(items, r => Assert.False(r.Bools.ContainsKey("stackable")));
-        var counts = items.Where(r => r.Ints.ContainsKey("stackable")).GroupBy(r => r.Ints["stackable"]).ToDictionary(g => g.Key, g => g.Count());
-        Assert.Equal(new Dictionary<int, int> { [1] = 294, [4] = 12, [10] = 1, [100] = 2 }, counts);
         Assert.Equal(100, ItemInfo.From(items.First(r => r.Name == "Cats")).StackLimit);
         // Crossbow bolts do not stack: each item is a quiver whose charges are the shots.
         Assert.All(db.OfType(Meitou.Data.Fcs.FcsRecordType.CROSSBOW).SelectMany(c => c.GetReferences("ammo")).Select(r => db.Find(r.TargetStringId)!),

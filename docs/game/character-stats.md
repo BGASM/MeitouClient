@@ -655,7 +655,7 @@ the age as the stats multiplier) and their `HP mult`, `scale min/max` scale the 
 - **`stackable` is the stack limit, an int** (**Verified** 2026-10-13, three ways: `fcs.def` declares it under `[ITEM,MAP_ITEM]` as `stackable: 1` "number that can be
   stacked in inventory"; the exe reads it from the record's **int** table, in the item loader `FUN_14075c9d0` as a "can stack" byte (value != 0) and in the max-stack function
   `FUN_14075e090` as the number; and the base data stores an int on every ITEM, never a bool: 294 hold 1, 12 hold 4 (books, Leather, Armour Plating), Old Map 10, `Cats` and
-  `String of Cats` 100, every MAP_ITEM 1; `StackLimitInstallTests`). **1 means one unit per cell**: the crossbow bolts (all `stackable` 1) do not stack; each bolt item is a
+  `String of Cats` 100, every MAP_ITEM 1; the counts were pinned by `StackLimitInstallTests` until the 2026-10-13 cleanup, which still checks the type and the Cats, bolt, weapon and Bull Backpack limits). **1 means one unit per cell**: the crossbow bolts (all `stackable` 1) do not stack; each bolt item is a
   quiver whose `charges` are the shots ([combat.md](combat.md#ranged-and-turrets)).
 - **The limit** (`FUN_14075e090`, **Observed**): WEAPON, ARMOUR, CONTAINER, MAP_ITEM, CROSSBOW and LIMB_REPLACEMENT return 1 before the field is read; any other item in an
   inventory section gets `FUN_1407466b0(section, stackable)` = trunc(max(stackable, `stackable bonus minimum`) x `stackable bonus mult`), with the base forced to 1 first when a

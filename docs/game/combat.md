@@ -385,7 +385,7 @@ bolt's damage was found (**Observed**; a wider search could still find one).
 | Spring Bat | 30/50 | 40/80 | 400/550 | 4.5/3.5 | 6/8 | 8/4 | 70 | 500/600 | Bolts [Heavies] (20) |
 
 Spring Bat's slowest reload gets slower with quality (8 above 6). `reload anim`: Eagle's Cross "reload 3 phase"; Junkbow, Oldworld Bow MkII and Spring Bat
-"reload 2 phase"; the others none (**Verified**, `RangedInstallTests`). Turrets: Turret 00 (range 1200, reload 2 to 4, deviation 3, 1 shot), Turret double (750, 2 to 6,
+"reload 2 phase"; the others none (**Verified** over the base records, 2026-10-13). Turrets: Turret 00 (range 1200, reload 2 to 4, deviation 3, 1 shot), Turret double (750, 2 to 6,
 5, 2 shots), Turret 02 six (650, 2.5 to 12, 10, 6 shots), crossbow 00 norm (650, 2 to 8, 5), crossbow 02 - advanced (1000, 1.5 to 6, 5) and a rebirth GUN_DATA (1000,
 1 to 5, 4, shot speed 1); no GUN_DATA has `ammo`, so turrets never use ammunition. The bolts are ITEMs with `item function` 16, `slot` 7 and `charges` = bolts per item
 (1 or 2 kg). Their `stackable` field is an **int** (1), not a bool: the stack limit, so bolt items do not stack ([character-stats.md](character-stats.md#stacks-item-stackable)). Only 3 of the 40 CHARACTER records that list `crossbows` also list bolts in `inventory`. The RANGED

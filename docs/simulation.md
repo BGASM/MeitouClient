@@ -159,7 +159,7 @@ nothing; a change of behaviour that is meant updates the numbers in the same com
 `AggroTests`); the hostility work moved none of the nine others (they do not run the aggro system, and the deferred list and self-defence change nothing in them).
 **Pinned 2026-10-13**: `ranged` (agrees at 1, 4 and 16 threads first; `RangedTests`); the ranged code moved none of the ten others (their worlds have no crossbows, and the ranged state is hashed only once used, [Ranged](#ranged)).
 **Re-pinned 2026-10-13**: `town-parts` from its first checkpoint, for the stack limits ([Items and eating](#items-and-eating)): its guards' record lists give two rations, which
-were one item of quantity 2 and are now two cells (ITEM `stackable` 1); the world agrees at 1, 4 and 16 threads first (`InventoryTests.A_town_with_items_agrees_at_one_four_and_sixteen_threads`),
+were one item of quantity 2 and are now two cells (ITEM `stackable` 1); the world agrees at 1, 4 and 16 threads first (its test was folded into the `town-parts` pin of `GoldenHashTests` in the 2026-10-13 test cleanup, which also runs items),
 and none of the eleven other pins moved.
 **Pinned 2026-10-13**: `carry` (agrees at 1, 4 and 16 threads first; `CarryTests.Scripted`: an ordered lift, carry and put-down, a rescue by the job whose carrier is then knocked out, the dropped body lifted again, an NPC leader rescue, a witnessed loot and a loot of an emptied body); the carry code moved none of the eleven others (they do not build the carry system, and its fields are hashed only while set, [Carrying](#carrying-rescue-and-looting)).
 **Pinned 2026-10-13**: `crime` (agrees at 1, 4 and 16 threads and with 16-slot partitions first; `CrimeTests.Scripted`: an assault on a townsman in view of two policemen, booked, the police
@@ -686,7 +686,7 @@ retaliation systems are in `Fighting.cs`.
 Crossbows (2026-10-13), built from the facts of [combat.md "Ranged and turrets"](game/combat.md#ranged-and-turrets); turrets and harpoon turrets are not built. Code:
 `Combat/CombatSystem.Ranged.cs` (the controller, shots, flight, `RangedTuning`), `Combat/RangedFormulas.cs` (`RangedFormulas`, `CrossbowInstance`, `Ammunition`), the
 ranged fields of `CombatSlot` (`Ranged`, `RangedState`, `Loaded`, `ReloadLeft`, `Steady`, `Shots`, ...), `CrossbowData` in `Meitou.Data/Gameplay/Combat/RangedData.cs`.
-Tests: `RangedTests` (formulas, worlds, the 1 / 4 / 16 thread check) and `RangedInstallTests` (`[Slow]`, the base game's records and a real crossbowman).
+Tests: `RangedTests` (a hit that spends a bolt, a shooter running dry, the 1 / 4 / 16 thread check) and `RangedInstallTests` (`[Slow]`, a real crossbowman).
 
 - **The gun.** At spawn `CharacterAssembly.MakeFighter` gives `Fighter.Crossbow` from the first CROSSBOW in `back`, then `hip`: quality = its level x 0.01 (the
   generator's crossbows have level 0), stats by `CrossbowData.At(q, constants, G)` with `bow damage 1/99` (**Observed**). The melee `Weapon` is unchanged.
@@ -820,7 +820,7 @@ An **engine stand-in** for the stage 9 senses and target choice, with the origin
   The sandbox's foe (Bloodraiders, facing the hero as the game's sandbox places it) attacks an idle Nameless character 150 units away and is fought back. The same holds
   with the original's sight and hearing (re-run 2026-10-13). In the game (`--new-game "The Cannibal Hunters"`) the Cannibals of the start town attack the player's squad
   at once; the Wanderer's start in The Hub stays quiet.
-- **Fleeing** (`FleeSystem.cs`, `StandardParts.Flee`, after aggro; serial `SlowWorld`, slot and squad-id order; tests in `AggroTests`). The original's facts are in
+- **Fleeing** (`FleeSystem.cs`, `StandardParts.Flee`, after aggro; serial `SlowWorld`, slot and squad-id order; its tests were cut in the 2026-10-13 cleanup). The original's facts are in
   [perception.md section 7](game/perception.md#7-fleeing): `Task_Runaway`'s movement and end are known, but what makes an ordinary squad run is not (its retreat package is
   only given to raids, and no reader of the FACTION run-away ratios was found). So:
   - **When** (**engine reading** of the FACTION fields' names): every 15 ticks, an NPC squad in a fight whose faction has `run away ratio of squad size` r1 or `run away ratio
@@ -890,16 +890,15 @@ Code: `src/Meitou.Simulation/Carrying/` (`CarrySystem`, `CarryTypes.cs`), built 
   up and dropping are not done); the renderer's bone attachment; the `carrying left arm only` overlay; swimming with a body. Carrying and
   looting are not saved ([Saves](#saves)).
 - **Hash.** `CharacterCold` hashes `Carrying`, `CarriedBy`, the task's `CarryTarget` / `LiftTime` / resume task and `RescueJob` only while set,
-  so worlds without carrying keep their pinned hashes. **Tests** (`CarryTests`, 12): lift timing and weight and speed, who can be lifted and
-  the left arm, the drops, put-down timing and the KO, friend vs captive waking, run mode, the rescue target, NPC leader rescue, take-all grid
-  fit, witness vs unseen loot, and the scripted scenario at 1, 4 and 16 threads (pinned `carry`).
+  so worlds without carrying keep their pinned hashes. **Tests** (`CarryTests`, 4): lift timing and weight and speed, the drops, witness vs unseen loot,
+  and the scripted scenario at 1, 4 and 16 threads (pinned `carry`).
 
 ## Crimes and bounties
 
 The original's rules are in [economy.md section 11](game/economy.md#11-bounties-and-crimes) (the crime table, the ledger, the lifetime, booking, the `+0x40` faction flag, the
 hit-on-police rule) and [carry-loot.md 4.3 and 4.6](game/carry-loot.md#43-crimes-for-taking-items) (the pending-crime setter, the permission to loot, the witness function by code,
 kidnapping). Code: `src/Meitou.Simulation/Crime/` (`CrimeSystem`, `CrimeTypes.cs`: `CrimeCode`, `CrimeTable`, `BountyLedger`, `BountyEntry`, `PendingCrime`, `CrimeFactions`,
-`CrimeSettings`), `Saving/BountySave.cs`; built 2026-10-13 as `StandardParts.Crime`, last in the [order](#systems-and-their-order). Tests: `CrimeTests` (29) and
+`CrimeSettings`), `Saving/BountySave.cs`; built 2026-10-13 as `StandardParts.Crime`, last in the [order](#systems-and-their-order). Tests: `CrimeTests` (7 cases) and
 `CrimeInstallTests` (`[Slow]`, the base game's factions and towns).
 
 - **State.** On the character: `CharacterCold.Pending` (one pending crime: code, victim faction, victim, timer in game seconds, booked and witnessed flags) and
@@ -1173,7 +1172,7 @@ A duel with the install's records (Greenlander, a Katana of a level-50 model, he
 and 16 threads at six checkpoints. These tests set `MinPartitionSize` to 1 (duels) or 4 (the crowd) so the fighters really spread over 2, 8 and
 32 partitions.
 
-**Hostility** (2026-10-13; `TownAggroTests.The_cost_of_the_aggro_is_recorded`, `[Bench]`, flat ground, The Hub with the looks, one thread, 1800 ticks after
+**Hostility** (2026-10-13; a `[Bench]` test of `TownAggroTests` cut in the 2026-10-13 cleanup, flat ground, The Hub with the looks, one thread, 1800 ticks after
 the town loaded, the aggro system's phases timed inside the tick; the machine was busy, so the first (cold) runs read 5 to 20 us and are left out). Squad size 1, 37
 characters: 0.5 to 1.1 us per tick of 22 to 35 us. Squad size 10, 127 characters: 1.3 to 1.4 us of 110 to 120 us (Schedule 0.5, Act 0.1, SlowWorld 0.7: the two passes over the
 slots). The Hub has no hostile pair, so the looks are skipped; before that skip a look cost about 0.9 us (a 300-unit query over a crowd of 127: 7 columns of the grid, which
@@ -1193,7 +1192,7 @@ At scale 1 blood and healing rates look far too slow for game hours (**Observed*
 days (3 -> 0 at about 0.0164 per hour, extrapolated). At 100 the numbers read like play (a bleed clots and blood is back in hours, an untreated
 wound rots in about a day). A scale between 1 and 100 is probably right (the original's `dt` is likely not hours).
 
-**The wild** (2026-10-13; `WildTests.A_populated_wilderness_costs_little_per_tick`, `[Slow]`, not a pass/fail timing): the zone of a Wolf Den with every
+**The wild** (2026-10-13; a `[Slow]` measurement in `WildTests` cut in the 2026-10-13 cleanup, not a pass/fail timing): the zone of a Wolf Den with every
 fighting system on, 4 threads, flat ground: 11 characters, all wild (a wolf pack of 5 and the sector's homeless squad), 0.085 ms per tick. The wild's own
 look is a lookup of the active zones in a table of the sites (2674 sectors and 324 nests with the base game) every 15 ticks; the squads are built on the
 population thread. The caps keep it small: a sector makes at most ceil(P x amount) squads (3 with the base data at P = 1), a nest floor(0.7 N) members (5 to 21

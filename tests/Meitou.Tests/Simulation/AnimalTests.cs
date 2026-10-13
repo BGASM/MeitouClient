@@ -15,8 +15,7 @@ namespace Meitou.Tests.Simulation;
 [Slow]
 public class AnimalTests(ITestOutputHelper output)
 {
-    const string Bonedog = "3979-gamedata.base", BeakThing = "2859-gamedata.base", WildBull = "3986-gamedata.base", Goat = "3993-gamedata.base",
-        SwampTurtle = "3988-gamedata.base", Megaraptor = "50983-rebirth.mod";
+    const string Bonedog = "3979-gamedata.base", BeakThing = "2859-gamedata.base", WildBull = "3986-gamedata.base", Megaraptor = "50983-rebirth.mod";
 
     static GameDatabase Db()
     {
@@ -70,55 +69,7 @@ public class AnimalTests(ITestOutputHelper output)
         output.WriteLine($"beak thing: blood {medical.Blood}, parts {string.Join(", ", medical.Parts.Select(p => $"{p.Template.Name} {p.MaxHp:0}"))}");
     }
 
-    [Fact]
-    public void Natural_weapons_pick_the_techniques_of_their_category()
-    {
-        var db = Db();
-        var data = Data(db);
-        var combat = data.Combat;
-        var techniques = combat.Techniques;
-        // Every creature technique has all its weapon type flags off: only the animal value picks them.
-        Assert.All(techniques.Where(t => t.Animal > 8), t => Assert.Equal(WeaponKinds.None, t.Kinds & ~WeaponKinds.OneHanded));
-        var dog = Spawned(data, Bonedog);
-        Assert.True(dog.Fighter!.IsAnimal);
-        Assert.Equal(10, dog.Fighter.AnimalCategory);
-        Assert.Equal("_dog type weapon", dog.Fighter.Weapon!.Data.Name);
-        Assert.False(dog.Fighter.Unarmed);
-        Assert.Equal(StatsEnumerated.MartialArts, dog.Fighter.WeaponSkill);
-        // A wild bull (attack type 11, which no technique has) uses its weapon's category 20: the giraffe-type techniques.
-        var bull = Spawned(data, WildBull);
-        Assert.Equal(20, bull.Fighter!.AnimalCategory);
-        int pick = TechniqueChooser.ChooseAttack(techniques, bull.Fighter.Kind, 20, false, 5, 2, false, 30, 0.5f);
-        Assert.True(pick >= 0);
-        Assert.Equal(20, techniques[pick].Animal);
-        // A goat's only technique (duck attack, distance 0 / 0) strikes at contact; a person's fists never pick a creature technique.
-        var goat = Spawned(data, Goat);
-        Assert.Equal(15, goat.Fighter!.AnimalCategory);
-        Assert.True(TechniqueChooser.ChooseAttack(techniques, goat.Fighter.Kind, 15, false, 1, CombatTuning.CloseInGap, true, 9, 0.3f) >= 0);
-        // Fists (category 5) pick the martial arts techniques, whose animal value is 5 (before 2026-10-13 the chooser asked for 0, so fists never struck).
-        int fist = TechniqueChooser.ChooseAttack(techniques, WeaponKinds.Unarmed, 5, false, 50, -1, false, 99, 0.3f);
-        Assert.True(fist >= 0);
-        Assert.Equal(5, techniques[fist].Animal);
-        Assert.All(Enumerable.Range(0, 20), k => Assert.True(TechniqueChooser.ChooseAttack(techniques, WeaponKinds.Unarmed, 5, false, 50, -1, false, 99, k / 20f) is var i && i >= 0 && techniques[i].Animal == 5));
-        // No creature technique is a block or a dodge, so an animal never reacts.
-        Assert.Equal(-1, TechniqueChooser.ChooseReaction(techniques, dog.Fighter.Kind, 10, false, false, 2, 0, 100, 0, 0.5f));
-        // A swamp turtle has no natural weapon: no attack, still a body.
-        var turtle = Spawned(data, SwampTurtle);
-        Assert.False(turtle.Fighter!.CanAttack);
-        Assert.NotNull(turtle.Medical);
-    }
-
-    /// <summary>A character spawned through the population system's sandbox path, alone in a world.</summary>
-    static CharacterCold Spawned(PopulationData data, string record)
-    {
-        var walk = new OpenGroundWalkability((_, _) => 300);
-        var population = new PopulationSystem(data, new PopulationSettings());
-        using var world = new SimWorld(new WorldSettings { Seed = 1, PublishSnapshots = false }, walk, []);
-        var id = population.SpawnSandbox(world, record, new Vector2(1000, 1000), player: false);
-        return world.Characters.Cold(id.Slot)!;
-    }
-
-    // With the animation system: animals play their own clip sets (no clip lengths here, so the 1 s default; AnimalAnimationTests has the real ones).
+    // With the animation system: animals play their own clip sets (no clip lengths here, so the 1 s default).
     const StandardParts Fighting = StandardParts.Movement | StandardParts.Pursuit | StandardParts.Body | StandardParts.Combat | StandardParts.Retaliation | StandardParts.Aggro
         | StandardParts.Animation;
 

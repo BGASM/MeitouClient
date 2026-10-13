@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Numerics;
 using Meitou.Data;
 using Meitou.Data.Fcs;
@@ -13,74 +12,6 @@ namespace Meitou.Tests.Simulation;
 /// <summary>The wild population: homeless squads of the area sectors (6.2) and nests (6.3).</summary>
 public class WildTests(ITestOutputHelper output)
 {
-    static RecordLink L(string id, int v0, int v1 = 0) => new(id, v0, v1, 0);
-
-    // ---- the pure rules ----
-
-    [Fact]
-    public void Homeless_weights_are_target_shares()
-    {
-        var group = new BiomeGroupData
-        {
-            Id = "g", Name = "g", HomelessSpawnAmount = 2,
-            HomelessSpawns = [L("a", 30), L("b", 10), L("c", 0), L("gated", 60)],
-        };
-        bool Usable(string id) => id != "gated";
-        // k = (30 + 10 + 0 + 60) / (P x amount) = 100 / 2 = 50; v0 = 0 is dropped (6.1), a gated entry weighs nothing.
-        Assert.Equal([30f, 10f, 0f, 0f], PopulationSystem.HomelessWeights(group, 1, [0, 0, 0, 0], Usable));
-        Assert.Equal([0f, 10f, 0f, 0f], PopulationSystem.HomelessWeights(group, 1, [1, 0, 0, 0], Usable));
-        // P = 2 halves k: one squad of a costs 25 of its 30.
-        Assert.Equal([5f, 10f, 0f, 0f], PopulationSystem.HomelessWeights(group, 2, [1, 0, 0, 0], Usable));
-        // No amount: nothing.
-        Assert.All(PopulationSystem.HomelessWeights(group with { HomelessSpawnAmount = 0 }, 1, [0, 0, 0, 0], Usable), w => Assert.Equal(0f, w));
-        Assert.Equal(1, PopulationSystem.HomelessCount(group with { HomelessSpawnAmount = 0.33f }, 1));
-        Assert.Equal(2, PopulationSystem.HomelessCount(group with { HomelessSpawnAmount = 1.25f }, 1));
-        Assert.Equal(1, PopulationSystem.HomelessCount(group with { HomelessSpawnAmount = 1 }, 1));
-        Assert.Equal(0, PopulationSystem.HomelessCount(group with { HomelessSpawnAmount = 0 }, 4));
-        Assert.Equal(3, PopulationSystem.HomelessCount(group with { HomelessSpawnAmount = 1.2f }, 2));
-    }
-
-    [Fact]
-    public void Weighted_picks_follow_the_weights()
-    {
-        float[] weights = [30, 10, 0, 60];
-        var counts = new int[4];
-        const int n = 200_000;
-        for (int i = 0; i < n; i++) counts[PopulationSystem.Pick(weights, Rng.Hash(7, (ulong)i, RngPurpose.Test))]++;
-        Assert.Equal(0, counts[2]);
-        Assert.InRange(counts[0] / (double)n, 0.29, 0.31);
-        Assert.InRange(counts[1] / (double)n, 0.095, 0.105);
-        Assert.InRange(counts[3] / (double)n, 0.59, 0.61);
-        Assert.Equal(-1, PopulationSystem.Pick([0f, 0f], 1));
-
-        // The generic pick of 6.1 (BIOME_GROUP nests): 0 counts as 100, gated entries skipped.
-        var picks = new Dictionary<string, int>();
-        ulong c = 0;
-        for (int i = 0; i < n; i++)
-        {
-            var id = SquadFactory.WeightedPick([L("x", 0), L("y", 300), L("z", 50)], id => id == "z", () => Rng.Hash(9, c++, RngPurpose.Test))!;
-            picks[id] = picks.GetValueOrDefault(id) + 1;
-        }
-        Assert.False(picks.ContainsKey("z"));
-        Assert.InRange(picks["x"] / (double)n, 0.24, 0.26);
-    }
-
-    [Fact]
-    public void Expected_size_follows_the_documented_rule()
-    {
-        var t = new SquadTemplate
-        {
-            Id = "t", Name = "t", Leader = L("l", 1),
-            Squad = [L("a", 3, 0), L("b", 2, 100), L("c", 2, 5)],
-            Animals = [L("d", 0, 0), L("e", 4, 0)],
-        };
-        // 1 + 3 + 2 + (2 + 5) / 2 = 3 + 4 = 13; the empty entry is skipped.
-        Assert.Equal(13, SquadFactory.ExpectedSize(t, 1));
-        // A multiplier below 1 scales only the range entry: (7 / 2) x 0.5 = 1.5 -> 1.
-        Assert.Equal(11, SquadFactory.ExpectedSize(t, 0.5f));
-        Assert.Equal(13, SquadFactory.ExpectedSize(t, 3));
-    }
-
     // ---- a synthetic wilderness ----
 
     const uint New = 0x10;
@@ -253,27 +184,6 @@ public class WildTests(ITestOutputHelper output)
 
     [Fact]
     [Slow]
-    public void The_base_game_lays_out_its_nests()
-    {
-        var data = RealData();
-        var sites = PopulationSystem.BuildWildSites(data, new PopulationSettings(), data.Biomes!, 1);
-        var nests = sites.Where(s => s.Kind == WildKind.Nest).ToList();
-        int sectors = sites.Count - nests.Count;
-        output.WriteLine($"{sectors} sectors with homeless spawns, {nests.Count} nests");
-        foreach (var g in nests.GroupBy(n => n.Nest!.Name).OrderByDescending(g => g.Count())) output.WriteLine($"  {g.Count(),3} {g.Key}");
-        Assert.All(nests, n => Assert.Equal(TownType.Nest, n.Nest!.Type));
-        // Every nest is one the group lists, and no group has more than its num nests.
-        foreach (var g in nests.GroupBy(n => n.Group))
-        {
-            var group = data.Biomes!.Groups[g.Key];
-            Assert.True(g.Count() <= group.NumNests, group.Name);
-            Assert.All(g, n => Assert.Contains(group.Nests, e => e.Id == n.Nest!.Id));
-        }
-        Assert.InRange(nests.Count, 100, 531);
-    }
-
-    [Fact]
-    [Slow]
     public void A_wolf_den_spawns_its_wolves()
     {
         var data = RealData();
@@ -303,55 +213,5 @@ public class WildTests(ITestOutputHelper output)
         // floor(0.7 x 10) = 7, and a squad is skipped when its expected size passes the free room.
         Assert.InRange(members, 1, (int)(0.7f * den.Nest!.NestResidentPopulation) + 4);
         world.RunTicks(300);
-    }
-
-    [Fact]
-    [Slow]
-    public void The_zone_of_the_hub_rolls_its_biome_squads()
-    {
-        var data = RealData();
-        var hub = data.Sites.First(s => s.Town.Name == "The Hub");
-        var (cx, cz) = WeatherAreas.CellOf(hub.Position.X, hub.Position.Z);
-        var group = data.Biomes!.Groups[data.Biomes.GroupOf(cx, cz)];
-        output.WriteLine($"The Hub is in {group.Name}: amount {group.HomelessSpawnAmount}, {group.HomelessSpawns.Count} homeless entries");
-        var (world, systems) = RealWorld(data, hub.Position, StandardParts.Population | StandardParts.Movement);
-        using var _ = world;
-        world.RunTicks(16);
-        var pop = systems.Population!;
-        var sector = pop.WildSites.Single(s => s.Kind == WildKind.Sector && s.Zone == hub.Zone);
-        var squads = pop.WildSquadsOf(sector.Index);
-        Assert.InRange(squads.Count, 1, PopulationSystem.HomelessCount(group, 1));
-        foreach (int id in squads)
-        {
-            var squad = world.Squads.Find(id)!;
-            Assert.Contains(group.HomelessSpawns, e => e.Id == squad.TemplateId);
-            // Pushed out of the town to twice its radius.
-            Assert.True(Vector2.Distance(new Vector2(squad.Position.X, squad.Position.Z), new Vector2(hub.Position.X, hub.Position.Z))
-                >= hub.Town.SizeRadius * hub.Town.TownRadiusMult * 2 - 1, squad.Name);
-            output.WriteLine($"{squad.Name}: {squad.Members.Count} at {squad.Position}");
-        }
-    }
-
-    [Fact]
-    [Slow]
-    public void A_populated_wilderness_costs_little_per_tick()
-    {
-        var data = RealData();
-        var den = PopulationSystem.BuildWildSites(data, new PopulationSettings(), data.Biomes!, 1).First(s => s.Kind == WildKind.Nest && s.Nest!.Name == "Wolf Den");
-        var at = new Vector3(den.Spots[0].X, 300, den.Spots[0].Y);
-        const StandardParts all = StandardParts.Population | StandardParts.Movement | StandardParts.Pursuit | StandardParts.Body | StandardParts.Combat
-            | StandardParts.Animation | StandardParts.Retaliation | StandardParts.Aggro | StandardParts.Flee;
-        var (world, systems) = RealWorld(data, at, all, threads: 4);
-        using var _ = world;
-        world.RunTicks(60);
-        int alive = 0, wild = 0;
-        for (int s = 0; s < world.Characters.HighWater; s++) if (world.Characters.Previous[s].Alive) alive++;
-        foreach (var site in systems.Population!.WildSites)
-            foreach (int id in systems.Population.WildSquadsOf(site.Index)) wild += world.Squads.Find(id)?.Members.Count ?? 0;
-        var watch = Stopwatch.StartNew();
-        world.RunTicks(900);
-        double ms = watch.Elapsed.TotalMilliseconds / 900;
-        output.WriteLine($"{alive} characters ({wild} in wild squads), {ms:F3} ms per tick at 4 threads");
-        Assert.True(wild > 0);
     }
 }

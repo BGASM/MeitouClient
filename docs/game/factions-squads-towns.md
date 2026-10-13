@@ -486,7 +486,7 @@ What the engine does with section 3 ([simulation.md "Hostility and relations"](.
 - `FactionRelations` (`Meitou.Data/Gameplay/FactionData.cs`) is the table of 3.2 with the predicates of 3.3 and is the game's live table (`PopulationData.Relations`). The player's
   faction row is answered by the other side's entry about the player (3.1); the relation, trust and war flags of 3.1 beyond the relation value are not modelled (trust lives
   in the save only).
-- `FactionRelations.Event` is slot 5 of 3.4 with the kind table above (**Observed** values, tested entry by entry in `AggroTests`), including the `not real` no-op and the
+- `FactionRelations.Event` is slot 5 of 3.4 with the kind table above (**Observed** values, tested entry by entry until the 2026-10-13 test cleanup), including the `not real` no-op and the
   overshoot of the floor by up to one delta. Slots 3, 4, 6 to 9 are not wired (no dialogue, wars or reputation yet).
 - **Engine choice** (the call sites are **Unknown**): a player's attack order on a character of another faction is kind 5 (assault), a player's killing blow kind 4 (murder),
   amount 1, on the victim faction's view of the player. The threshold messages of 3.3 are posted to the player.

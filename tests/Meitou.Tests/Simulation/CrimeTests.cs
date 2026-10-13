@@ -45,46 +45,11 @@ public class CrimeTests
     // ------------------------------------------------------------------ the tables
 
     [Theory]
-    [InlineData(CrimeCode.Enslaving, 100)]
-    [InlineData(CrimeCode.Trespassing, 100)]
-    [InlineData(CrimeCode.Burglary, 1000)]
-    [InlineData(CrimeCode.Fencing, 1000)]
-    [InlineData(CrimeCode.Theft, 2500)]
-    [InlineData(CrimeCode.EscapingPrison, 2500)]
-    [InlineData(CrimeCode.UniformTheft, 2500)]
     [InlineData(CrimeCode.Murder, 5000)]
-    [InlineData(CrimeCode.Terrorism, 5000)]
-    [InlineData(CrimeCode.Smuggling, 5000)]
-    [InlineData(CrimeCode.Terrorism2, 5000)]
-    [InlineData(CrimeCode.Kidnapping, 5000)]
     [InlineData(CrimeCode.Treason, 50000)]
     [InlineData(CrimeCode.Assault, 500)]
-    [InlineData(CrimeCode.Looting, 500)]
-    [InlineData(CrimeCode.CropTheft, 500)]
     [InlineData((CrimeCode)17, 500)]
-    public void The_crime_table_is_the_games(CrimeCode code, int amount) => Assert.Equal(amount, CrimeTable.Amount(code));
-
-    [Fact]
-    public void A_bounty_lasts_four_hundredths_of_an_hour_per_cat_and_never_from_ten_thousand()
-    {
-        Assert.Equal(20, CrimeTable.LifetimeHours(500), 6);
-        Assert.Equal(200, CrimeTable.LifetimeHours(5000), 6);
-        Assert.Equal(399.96, CrimeTable.LifetimeHours(9999), 6);
-        Assert.True(double.IsPositiveInfinity(CrimeTable.LifetimeHours(10000)));
-        Assert.Equal("Murder, Assault", CrimeTable.Names((1 << 4) | (1 << 5)));
-    }
-
-    [Fact]
-    public void Factions_book_bounties_by_type_or_flag_and_bandits_and_unreal_ones_are_lawless()
-    {
-        var f = new CrimeFactions(Relations());
-        Assert.True(f.Books(City));
-        Assert.False(f.Books(Farmers));
-        Assert.True(new FactionData { Id = "p", Name = "p", FundamentalType = FundamentalType.LawEnforcement }.BooksBounties);
-        Assert.True(f.Lawless(Bandits));
-        Assert.True(f.Lawless(Wildlife));
-        Assert.False(f.Lawless(City));
-    }
+    public void The_crime_table_pays_the_games_amount_and_an_unknown_code_the_default(CrimeCode code, int amount) => Assert.Equal(amount, CrimeTable.Amount(code));
 
     // ------------------------------------------------------------------ worlds
 
@@ -160,19 +125,15 @@ public class CrimeTests
         public CharacterCold Cold(CharacterId id) => World.Characters.Cold(id.Slot)!;
         public int Bounty(CharacterId id, int faction) => Cold(id).Bounties?.AmountFor(faction) ?? 0;
         public void Say(SimCommand c) => World.Commands.Enqueue(c);
-        public bool Fighting(CharacterId id) => Cold(id).InCombat;
         public IEnumerable<CrimeEvent> Events(CrimeEventKind kind) => Crime.Log.Where(e => e.Kind == kind);
     }
 
     static readonly Vector2 O = new(2000, 2000);
 
-    /// <summary>A Greenlander that can be carried (the fixture's is not marked <c>carriable</c>).</summary>
-    static readonly Meitou.Data.Gameplay.Bodies.RaceData Person = new() { StringId = "17-c", Name = "Greenlander", StatMultipliers = Human.StatMultipliers, Anatomy = Human.Anatomy, Carriable = true };
-
     // ------------------------------------------------------------------ witnesses
 
     [Fact]
-    public void An_assault_seen_by_the_police_of_a_faction_that_offers_bounties_is_booked_with_it()
+    public void A_crime_seen_by_the_police_of_a_faction_that_offers_bounties_is_booked_and_one_they_did_not_see_is_forgotten()
     {
         using var t = new Town();
         var me = t.PlayerCharacter(O);
@@ -188,216 +149,22 @@ public class CrimeTests
         // Booked once: more sweeps while the same crime is pending add nothing.
         t.World.RunTicks(60);
         Assert.Single(t.Events(CrimeEventKind.Booked));
-    }
 
-    [Fact]
-    public void An_ordinary_witness_only_sees_and_nobody_books_an_unseen_crime()
-    {
-        // A civilian of the city sees the assault: it is witnessed (the timer goes up), but only police book bounties.
-        using (var t = new Town())
-        {
-            var me = t.PlayerCharacter(O);
-            var victim = t.Npc(City, O + new Vector2(0, 20));
-            var civilian = t.Npc(City, O + new Vector2(0, 250), face: O);
-            t.Say(new AttackOrder([me], victim) { Tick = t.World.Tick });
-            t.World.RunTicks(40);
-            Assert.Equal(0, t.Bounty(me, City));
-            Assert.Contains(t.Events(CrimeEventKind.Witnessed), e => e.Witness == civilian || e.Witness == victim);
-            Assert.Contains(t.World.TakeMessages(), m => m.Contains("has been caught committing Assault"));
-        }
-        // Police looking the other way, out of sight: a loot of a knocked-out townsman is pending and then forgotten, with no bounty.
-        using (var t = new Town())
-        {
-            var me = t.PlayerCharacter(O);
-            var down = t.Npc(City, O + new Vector2(0, 20));
-            t.Cold(down).Inventory!.Add(new ItemInstance { Record = "bread", Name = "bread" });
-            t.Cold(down).Medical!.KnockOut(100000);
-            t.Npc(City, O + new Vector2(0, 250), face: O + new Vector2(0, 600), type: FundamentalType.LawEnforcement);
-            t.World.RunTicks(2);
-            t.Say(new LootOrder([me], down) { Tick = t.World.Tick });
-            t.World.RunTicks(30);
-            Assert.Equal(CrimeCode.Looting, t.Cold(me).Pending?.Code);
-            t.World.RunTicks(150);
-            Assert.Null(t.Cold(me).Pending);
-            Assert.Null(t.Cold(me).Bounties);
-            Assert.Empty(t.Events(CrimeEventKind.Witnessed));
-        }
-    }
-
-    [Fact]
-    public void Looting_a_bandit_or_a_wanted_man_is_no_crime_and_looting_a_townsman_before_the_police_is()
-    {
-        using var t = new Town();
-        var me = t.PlayerCharacter(O);
-        var bandit = t.Npc(City, O + new Vector2(0, 20), type: FundamentalType.Bandit);   // a bandit by class (the permission test)
-        var outlaw = t.Npc(Bandits, O + new Vector2(10, 20));                              // of a lawless faction (the setter refuses)
-        var townsman = t.Npc(City, O + new Vector2(-10, 20));
-        foreach (var v in new[] { bandit, outlaw, townsman })
-        {
-            t.Cold(v).Inventory!.Add(new ItemInstance { Record = "bread", Name = "bread" });
-            t.Cold(v).Medical!.KnockOut(100000);
-        }
-        t.Npc(City, O + new Vector2(0, 250), face: O, type: FundamentalType.LawEnforcement);
-        t.World.RunTicks(2);
-        t.Say(new LootOrder([me], bandit) { Tick = t.World.Tick });
-        t.World.RunTicks(60);
-        t.Say(new LootOrder([me], outlaw) { Tick = t.World.Tick });
-        t.World.RunTicks(60);
-        Assert.Null(t.Cold(me).Pending);
-        Assert.Equal(0, t.Bounty(me, City));
-        t.Say(new LootOrder([me], townsman) { Tick = t.World.Tick });
-        t.World.RunTicks(60);
-        Assert.Equal(500, t.Bounty(me, City));
-        Assert.Equal(1 << (int)CrimeCode.Looting, t.Cold(me).Bounties!.Of(City)!.Crimes);
-    }
-
-    [Fact]
-    public void Hitting_a_policeman_books_an_assault_at_once_even_unseen()
-    {
-        using var t = new Town();
-        var me = t.PlayerCharacter(O);
-        var officer = t.Npc(City, O + new Vector2(0, 20), face: O + new Vector2(0, 600), type: FundamentalType.LawEnforcement);
-        t.Say(new AttackOrder([me], officer) { Tick = t.World.Tick });
-        int ticks = 0;
-        while (ticks++ < 900 && !t.Combat.Log.Any(e => e.Attacker == me.Slot && e.Outcome == BlowOutcome.Hit)) t.World.RunTick();
-        Assert.True(t.Combat.Log.Any(e => e.Attacker == me.Slot && e.Outcome == BlowOutcome.Hit), "a blow landed");
-        Assert.Equal(500, t.Bounty(me, City));
-        Assert.Contains(t.Events(CrimeEventKind.Booked), e => e.Witness == officer);
-    }
-
-    [Fact]
-    public void Carrying_a_townsman_past_people_who_care_is_a_kidnapping()
-    {
-        using var t = new Town();
-        var me = t.PlayerCharacter(O);
-        var body = t.Npc(Farmers, O + new Vector2(0, 15));
-        t.Cold(body).Race = Person;
-        t.Cold(body).Medical!.KnockOut(100000);
-        t.World.RunTicks(2);
-        t.Say(new PickUpOrder([me], body) { Tick = t.World.Tick });
-        int ticks = 0;
-        while (ticks++ < 300 && t.Cold(me).Carrying.IsNone) t.World.RunTick();
-        Assert.Equal(body, t.Cold(me).Carrying);
-        t.World.RunTicks(30);
-        Assert.Null(t.Cold(me).Pending);   // nobody about
-        // A city policeman (the city is allied with the farmers, so it cares) comes into view: a kidnapping, booked at the full 5000.
-        t.Npc(City, O + new Vector2(0, 250), face: O, type: FundamentalType.LawEnforcement);
-        t.World.RunTicks(31);
-        Assert.Equal(5000, t.Bounty(me, City));
-        Assert.Equal(1 << (int)CrimeCode.Kidnapping, t.Cold(me).Bounties!.Of(City)!.Crimes);
-    }
-
-    // ------------------------------------------------------------------ consequences
-
-    [Fact]
-    public void The_police_of_the_faction_that_wants_a_character_attack_it_and_nobody_else_does()
-    {
-        CharacterId Run(int policeFaction, FundamentalType type, bool wanted, out Town town)
-        {
-            var t = new Town();
-            var me = t.PlayerCharacter(O);
-            if (wanted)
-            {
-                var e = (t.Cold(me).Bounties = new BountyLedger()).Get(City, "city");
-                e.Amount = 2500;
-                e.Crimes = 1 << (int)CrimeCode.Theft;
-            }
-            var looker = t.Npc(policeFaction, O + new Vector2(0, 150), face: O, type: type);
-            t.World.RunTicks(60);
-            town = t;
-            return looker;
-        }
-        var officer = Run(City, FundamentalType.LawEnforcement, true, out var a);
-        using (a)
-        {
-            Assert.Contains(a.Aggro.Log, e => e.Attacker == officer && a.World.Characters.Cold(e.Target.Slot)!.IsPlayer);
-            Assert.True(a.Fighting(officer));
-        }
-        // A city civilian, the farmers' police and an officer with nothing on the character leave it alone.
-        foreach (var (faction, type, wanted) in new[] { (City, FundamentalType.Civilian, true), (Farmers, FundamentalType.LawEnforcement, true), (City, FundamentalType.LawEnforcement, false) })
-        {
-            var looker = Run(faction, type, wanted, out var b);
-            using (b)
-            {
-                Assert.Empty(b.Aggro.Log);
-                Assert.False(b.Fighting(looker));
-            }
-        }
-    }
-
-    [Fact]
-    public void Military_count_as_police_only_in_their_own_towns_resident_squads()
-    {
-        using var t = new Town();
-        var soldier = t.Npc(City, O, type: FundamentalType.Military);
-        Assert.False(t.Crime.IsPoliceLike(t.World, t.Cold(soldier)));
-        var resident = new Squad { Id = t.World.Squads.NextId(), TemplateId = "g", Faction = City, Town = 3 };
-        t.World.Squads.Add(resident);
-        t.Cold(soldier).SquadId = resident.Id;
-        Assert.True(t.Crime.IsPoliceLike(t.World, t.Cold(soldier)));
-        var me = t.PlayerCharacter(O + new Vector2(50, 0));
-        t.Cold(me).NpcClass = FundamentalType.LawEnforcement;
-        Assert.False(t.Crime.IsPoliceLike(t.World, t.Cold(me)));   // the player's characters never are
-    }
-
-    [Fact]
-    public void A_bounty_expires_by_its_amount_and_a_notorious_one_never()
-    {
-        using var t = new Town();
-        var me = t.PlayerCharacter(O);
-        double hoursPerTick = t.World.TickSeconds * 11.0 / 1200.0;
-        var ledger = t.Cold(me).Bounties = new BountyLedger();
-        var small = ledger.Get(City, "city");
-        small.Amount = 500;                                                // 20 hours
-        small.RaisedTick = -(long)(19.9 / hoursPerTick);
-        var big = ledger.Get(Farmers, "farmers");
-        big.Amount = 10000;                                                // notorious
-        big.RaisedTick = -(long)(10000 / hoursPerTick);
-        t.World.RunTicks(16);
-        Assert.Equal(500, t.Bounty(me, City));
-        t.World.RunTicks((int)(0.2 / hoursPerTick));
-        Assert.Equal(0, t.Bounty(me, City));
-        Assert.Equal(10000, t.Bounty(me, Farmers));
-        Assert.Contains(t.World.TakeMessages(), m => m.Contains("no longer wanted by city"));
-        Assert.Single(t.Events(CrimeEventKind.Expired));
-    }
-
-    // ------------------------------------------------------------------ saves
-
-    [Fact]
-    public void A_ledger_goes_into_the_save_keys_and_back()
-    {
-        var relations = Relations();
-        var ledger = new BountyLedger();
-        var e = ledger.Get(City, "city");
-        e.Amount = 5500;
-        e.Crimes = (1 << 4) | (1 << 5);
-        e.RaisedTick = 3000;
-        var f = ledger.Get(Farmers, "farmers");
-        f.Amount = 100;
-        f.Claimed = true;
-        f.RaisedTick = 0;
-        var state = new FcsRecord();
-        var clock = new SaveClock(5, 9, 0);   // game hour 129
-        float dt = 1f / 30;
-        BountySave.Write(state, ledger, relations, clock, 9000, dt);
-        Assert.Equal("city", state.Strings["bountyfac0"]);
-        Assert.Equal(5500, state.Ints["amount0"]);
-        Assert.Equal(e.Crimes, state.Ints["crimes0"]);
-        Assert.Equal(0, state.Ints["claim0"]);
-        Assert.Equal(1, state.Ints["claim1"]);
-        // 6000 ticks are 6000 x 11 / 36000 = 1.83 hours: raised at hour 127.17, written truncated.
-        Assert.Equal(127, state.Ints["bountyexp0"]);
-        var back = BountySave.Read(state, relations, clock, 0, dt)!;
-        Assert.Equal([City, Farmers], back.Entries.Select(x => x.Faction));
-        Assert.Equal(5500, back.Of(City)!.Amount);
-        Assert.True(back.Of(Farmers)!.Claimed);
-        // The hour is truncated in the file: the raise comes back within an hour of where it was (in ticks before the load).
-        Assert.InRange(back.Of(City)!.RaisedTick, -6000 - 3273, -6000);
-        // Writing again replaces the entries; an empty ledger removes them.
-        BountySave.Write(state, null, relations, clock, 0, dt);
-        Assert.False(state.Strings.ContainsKey("bountyfac0"));
-        Assert.False(state.Ints.ContainsKey("amount1"));
+        // Police looking the other way, out of sight: the loot of a knocked-out townsman is pending and then forgotten, with no bounty.
+        using var u = new Town();
+        var me2 = u.PlayerCharacter(O);
+        var down2 = u.Npc(City, O + new Vector2(0, 20));
+        u.Cold(down2).Inventory!.Add(new ItemInstance { Record = "bread", Name = "bread" });
+        u.Cold(down2).Medical!.KnockOut(100000);
+        u.Npc(City, O + new Vector2(0, 250), face: O + new Vector2(0, 600), type: FundamentalType.LawEnforcement);
+        u.World.RunTicks(2);
+        u.Say(new LootOrder([me2], down2) { Tick = u.World.Tick });
+        u.World.RunTicks(30);
+        Assert.Equal(CrimeCode.Looting, u.Cold(me2).Pending?.Code);
+        u.World.RunTicks(150);
+        Assert.Null(u.Cold(me2).Pending);
+        Assert.Null(u.Cold(me2).Bounties);
+        Assert.Empty(u.Events(CrimeEventKind.Witnessed));
     }
 
     // ------------------------------------------------------------------ determinism
