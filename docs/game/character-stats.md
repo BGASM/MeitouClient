@@ -114,9 +114,15 @@ starting values can exceed 100; the *gain* curve below is what saturates near 10
 
 1. If the CHARACTER has a `stats` reference, every field of that STATS record is copied into its offset
    (`FUN_14064b6a0`).
-2. Otherwise the CHARACTER integers `combat stats`, `unarmed stats`, `stealth stats`, `ranged stats` and
-   `strength` (the "if no stats data assigned" fields) each fan one number out to a group of stats
-   (exact groups not decoded).
+2. Otherwise the CHARACTER integers `combat stats` c, `unarmed stats` u, `stealth stats` s, `ranged stats` r and
+   `strength` (the "if no stats data assigned" fields) each fan one number out to a group of stats, each only when
+   above 0, in this order (**Observed**, `FUN_14064cb30`, decoded 2026-10-13 by the stat offsets of the table above):
+   c: strength, dexterity, toughness, attack, defence, athletics, swimming, medic, turrets, friendly fire, katanas,
+   sabres, hackers, heavy weapons, blunt, polearms and the legacy `endurance` to c, assassination to c/2, martial arts
+   and dodge to c/10; u: martial arts, dodge and dexterity to u; s: dexterity to max(u, s), stealth, thieving,
+   lockpicking, assassination and medic to s; `strength`: strength; r: crossbows, perception, friendly fire and
+   turrets. Stats no group sets keep the values of a defaults STATS record the constructor finds by name (the name
+   was not read; the engine uses 1). ANIMAL_CHARACTER records go through the same constructor ([animals.md](animals.md)).
 3. `stats randomise` n (CHARACTER; base game: 0 on 120 records, most others 3 to 10, up to 25) adds a random
    offset in [-n, +n] to about 30 stats (`FUN_140643cf0`; the helper is `FUN_1409b1c80(-n, n)`, assumed uniform).
 4. Every stat number 1 to 38 is then **multiplied by the race multiplier** of that number (next section). So the
@@ -621,8 +627,9 @@ Base-game values (probe over RACE, merged core load):
 Thing, Leviathan, Crab, raptors, spiders, Skimmer, Land Bat) and two robot spiders; `vampiric` for Spider, Small
 Spider, Skimmer, Land Bat (**Verified**, probe).
 
-Animals use `CharStatsAnimal`, fed by CHARACTER / ANIMAL_CHARACTER fields (`animal strength`, `HP mult`,
-`lifespan`, `scale min/max`, `smell blood`); not decoded here.
+Animals use `CharStatsAnimal` (the ordinary constructor plus `animal strength`; martial arts as the weapon skill;
+the age as the stats multiplier) and their `HP mult`, `scale min/max` scale the body and blood: see
+[animals.md](animals.md) (2026-10-13).
 
 ## Encumbrance and carrying
 

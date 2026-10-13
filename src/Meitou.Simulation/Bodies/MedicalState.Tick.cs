@@ -190,7 +190,7 @@ public sealed partial class MedicalState
             if (p.Limb == LimbState.Stump && p.Flesh + p.Bandage < 0) stump += -(p.Flesh + p.Bandage) * 0.002f;
         Bleeding = (c.ExtraBloodLossFromBodyparts * stump + woundSum) * ctx.Options.ChanceOfDeath * 1.2f * race.BleedRate;
         Blood -= Bleeding * dt;
-        float cap = BloodCapacity(race, ctx.Strength, ctx.HasStats);
+        float cap = Capacity(ctx);
         if (Bleeding <= 0 && Blood < cap)
             Blood = MathF.Min(cap, Blood + c.BloodRecoveryRate * dt * race.HealRate * (ctx.Resting || Unconscious ? c.RestingHealRateMult : 1));
     }
@@ -200,7 +200,7 @@ public sealed partial class MedicalState
         var c = ctx.Constants;
         float t = c.StarvationTime * ctx.Options.HungerTime;
         if (t <= 0) return;
-        float hungerRate = ctx.Race.HungerRate;
+        float hungerRate = ctx.Race.HungerRate * ScaleK;
         if (Fed <= 0)
         {
             float situation = HungerSituationFactor(c, ctx.Resting || Unconscious, ctx.UsingMachine, ctx.EncumbranceFactor);

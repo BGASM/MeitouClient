@@ -226,7 +226,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
                 IsPlayer = player,
                 FootprintRadius = race?.GetFloat("pathfind footprint radius") ?? 0,
             };
-            assembly.Attach(table.PeekNextId(), cold, ref hot, record, race, world.Seed);
+            assembly.Attach(table.PeekNextId(), cold, ref hot, record, race, world.Seed, plan.IsAnimal ? plan.Age : 1);
             var id = table.Spawn(hot, cold, world.Tick);
             squad.Members.Add(id);
             if (plan.Role == SquadRole.Leader && squad.Leader.IsNone) squad.Leader = id;

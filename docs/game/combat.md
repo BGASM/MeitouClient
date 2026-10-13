@@ -180,6 +180,11 @@ also per-technique `attack direction 1/2`, `limb 1/2`, `power 1/2`, `anim blocke
 1/2`, `num techniques`, `anim name`, `anim speed mult`, `events`, `animal`, and in the data `use L arm` /
 `use R arm` / `disabled`.
 
+`animal` (**Verified** over the records, 2026-10-13): 0 on the weapon techniques, **5 on every martial arts
+technique** ("ma ...", which also has the `unarmed` flag), 9 to 20 on the 14 creature techniques, which have no
+weapon type flag at all. It reads as the one weapon category a technique is for; the details and the creature
+list are in [animals.md](animals.md#4-techniques).
+
 Selector `140887970` (**Observed**) is the *defender's* reaction chooser (the incoming attack's direction and
 the attacker's skill are its inputs): the candidates are the techniques whose weapon-type validity flag
 matches the defender's current weapon category and whose prone flag matches its posture. A block roll runs

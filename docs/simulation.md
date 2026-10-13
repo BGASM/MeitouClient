@@ -26,7 +26,7 @@ Each stage ends with tests and something the owner can run.
 | **5. Navmesh** | Collision reader, our own generator with the seed prune, path queries off the tick | Done in three passes plus the game wiring ([Navmesh](#navmesh)); gaps listed there |
 | **6. Player** | New game from NEW_GAME_STARTOFF, selection, move orders, minimal HUD | Done ([Player](#player)); formation and queued orders included |
 | **7. Bodies** | Stats and XP, hunger, blood, body parts, KO and death | Done and wired into `World` ([Bodies](#bodies)); first aid, resting and XP on the move are in play (2026-10-13, `FirstAidSystem`); beds and the time scale are open |
-| **8. Combat** | Melee per [combat.md](game/combat.md); ranged later | Melee done and wired ([Combat](#combat)); fights start by faction hostility, the player's idle characters defend themselves, the player's assaults and killings change the relations (2026-10-13, `AggroSystem`, [Hostility](#hostility-and-relations)); ranged, turrets and attack slots not built |
+| **8. Combat** | Melee per [combat.md](game/combat.md); ranged later | Melee done and wired ([Combat](#combat)); fights start by faction hostility, the player's idle characters defend themselves, the player's assaults and killings change the relations (2026-10-13, `AggroSystem`, [Hostility](#hostility-and-relations)); crossbows done ([Ranged](#ranged)); animals fight with their natural weapons and bodies (2026-10-13, [Animals](#animals)); turrets and attack slots not built |
 | **9. AI proper** | Packages, blackboard, scoring and planner ([ai.md](game/ai.md)), off-screen squads | Not started (gate: towns run their daily routines, squads travel off screen). `PursuitSystem`, `RetaliationSystem`, `AggroSystem` (senses and target choice) and the roaming squads are engine stand-ins, not the original's AI |
 | **10. Saves** | Read and write the world state ([save.md](formats/save.md)) | API done ([Saves](#saves)); the game host quicksaves (F5) and quickloads (F9) the player's squad into its own slot ([Quicksave and quickload](#quicksave-and-quickload)); no save menu, no loading of the original game's saves in play |
 | **11+** | Economy and trade, buildings and production, the MyGUI screens, audio | Not started, except crimes and bounties (2026-10-13, [Crimes and bounties](#crimes-and-bounties)) |
@@ -275,9 +275,9 @@ positions and the cold state no other `Act` writes). The game's `CombatOptions` 
 - **Characters.** Members come from the squad plan; appearances from `CharacterGenerator` through `IAppearanceSource` (seeded from the world
   seed, the town, the squad and the member). Building runs on one background thread in the game (`PopulationSettings.Background`) and inside
   the tick in tests; results are taken in at the first tick after they are ready. Every member with a race gets a body, a fighter and an
-  inventory (`CharacterAssembly`, [Bodies](#bodies), [Items and eating](#items-and-eating)) and its top speed from `Speed.Run`; animals have
-  no race, appearance, body or inventory, run at the stand-in 45 (`CharacterAssembly.StandInMaxSpeed`) and walk at 15, and are drawn as
-  markers. Resident squads are `Squad` objects (leader, members, home) in `World.Squads`, hashed.
+  inventory (`CharacterAssembly`, [Bodies](#bodies), [Items and eating](#items-and-eating)) and its top speed from `Speed.Run`. Animals (ANIMAL_CHARACTER) get
+  their record's race and an animal's body and natural weapon ([Animals](#animals)), an empty inventory and no appearance: they are drawn as markers.
+  A member without a race runs at the stand-in 45 (`CharacterAssembly.StandInMaxSpeed`) and walks at 15. Resident squads are `Squad` objects (leader, members, home) in `World.Squads`, hashed.
 - **Roaming squads** (`PopulationRoaming.cs`; 6.2, 6.4, [game-loop.md](game/game-loop.md#factions-and-squads), [ai.md](game/ai.md)). A loaded town
   with `roaming squads` draws one squad per look (every 60 ticks, 2 game seconds) while its pool is below the cap: 0.7 of the faction's
   `roaming population` (50 by default: 35 characters; the 0.7 is the nests' rule, for towns **Unknown**) times the population multiplier. The
@@ -495,8 +495,8 @@ Formulas, constants, units and the engine choices of the body code are in
 
 - **Spawn** (`BodyFactory.Create`, through `CharacterAssembly`). Every character with a race gets `Race` (`RaceData`, read once per race),
   `Stats` (`CharacterStats.Create` from the STATS record the CHARACTER names, else from its five group fields, `CharacterStats.FromGroups`)
-  and `Medical` (`MedicalState.Create(race, strength)`), seeded by the world seed and `Rng.Key(id)` (the id from `PeekNextId`). Animals have no
-  race and no body (the original gives them a stats object without the human rules; not modelled).
+  and `Medical` (`MedicalState.Create(race, strength)`), seeded by the world seed and `Rng.Key(id)` (the id from `PeekNextId`). The five group
+  fields fan out by the original's rule since 2026-10-13 (before, an engine guess). Animals get an animal's body ([Animals](#animals)).
 - **Medical tick** (`BodySystem.Act`, own slots). For each living character with a body: `MedicalState.Tick(HoursPerTick, ctx, events)` with a
   `MedicalContext` (constants, options, race, toughness, strength, resting, encumbrance factor from the inventory, seed, character key,
   `BodyTimeScale`); blood, bleeding, part healing and degeneration, hunger, the KO timer. It sets `MaxSpeed = Speed.Run(race, stats, medical,
@@ -556,7 +556,7 @@ fields and food are in [character-stats.md](game/character-stats.md#hunger-and-s
   (`shirt`, `head`, `boots`, `armour` for body, `legs`; belt has no verified section name and goes to `main`), the backpack, crossbow and
   weapons at `hip`/`back` (row in `inventory y`, level and manufacturer kept); then the CHARACTER's `inventory` list, each ITEM entry with a
   first value above 0 being that many items. The player's squad gets what its CHARACTER records list (the start-off records have no item list,
-  [ui-screens.md](game/ui-screens.md)). Worlds without appearances get only the record list. Animals have no inventory. A rolled crossbow brings one item of its
+  [ui-screens.md](game/ui-screens.md)). Worlds without appearances get only the record list. Animals get an empty inventory (their records list no items; a pack animal's `backpack` is not read). A rolled crossbow brings one item of its
   bolts (engine choice, 2026-10-13, [Ranged](#ranged)). Bolt items have `stackable` 1, so they do not stack in the original either.
 - **Food.** A food item's charges are the record's `charges` times CONSTANTS `food quality mult`; eating adds **charges / 100** to the stomach,
   in hunger levels (the UI shows level x 100): Gohan 0.75, Bread 0.30, Rice Bowl 0.25, Dustwich 0.70. The unit is an **engine choice**: the
@@ -590,7 +590,7 @@ retaliation systems are in `Fighting.cs`.
 
 - **Fighters.** At spawn (`CharacterAssembly.MakeFighter`) a character with a race gets a `Fighter`: the first WEAPON item at `hip`, else `back`
   (quality = its level x 0.01, manufacturer and model from the loadout; none means fists) and every worn ARMOUR piece (quality / 100) in
-  stacking order, with the gear's bonus sums. A character without a race takes no part and cannot be targeted.
+  stacking order, with the gear's bonus sums. An animal's fighter is its natural weapon ([Animals](#animals)). A character without a race takes no part and cannot be targeted.
 - **One tick** (`CombatSlot`s double-buffered inside the system, hashed through `IStateHashed`):
 
 | Phase | What |
@@ -601,8 +601,9 @@ retaliation systems are in `Fighting.cs`.
 | `Apply` (commit order) | The outcome; for a hit: packet, `ChoosePart`, a coverage roll per piece, armour, toughness, `ApplyHit`, stagger, XP |
 | `SlowWorld` | The slot arrays swap |
 
-- **Attack choice** (`TechniqueChooser.ChooseAttack`; the original's is **Unknown**): not `disabled`, not a block or dodge, the weapon's type bit
-  among the technique's flags (a record with no flag is never valid; the `1 handed` flag is not tested), the creature kind and the prone flag
+- **Attack choice** (`TechniqueChooser.ChooseAttack`; the original's is **Unknown**): not `disabled`, not a block or dodge, the technique for the fighter's weapon
+  category (`TechniqueChooser.Fits`: a record's `animal` of 0 is matched by the weapon's type bit among its flags, a record with no flag never, the `1 handed` flag not
+  tested; a non-zero `animal` only by the fighter's category, 5 for fists, 9 to 20 for a creature, which takes only its own; [animals.md](game/animals.md#4-techniques)), the prone flag
   equal, skill within `min skill` .. `max skill`, and the gap between the bodies (centre distance minus both footprint radii, default
   `CombatTuning.DefaultFootprint` 4) within the weapon's reach (`length` / 2; fists unlimited) and the technique's distance (`attack distance min
   vs static` against a target standing still, `attack distance` against a mover, a negative value meaning "not for that case"). Weighted pick on
@@ -677,8 +678,7 @@ Tests: `RangedTests` (formulas, worlds, the 1 / 4 / 16 thread check) and `Ranged
   `AggroSystem.IsEnemy`; in a world without a relation table, another faction (engine).
 - **Geometry** (engine stand-ins): the barrel 15 units above the feet and 3 ahead (the record's `barrel pos` is in item space); the aim point 13 above the feet (for `Bip01
   Spine2`) plus the lead; a body is an upright cylinder of the race's footprint radius, 18 tall (the original tests its physics shape, **Unknown**); a down character and a
-  character without a body (an animal: no race or medical state, so nothing to damage) do
-  not stop bolts.
+  character without a body (no race or medical state, so nothing to damage) do not stop bolts; animals have bodies since 2026-10-13 and stop them.
 - **The shot** (`ApplyFire`, commit order): the cone D, the damage, range and speed with the height factor, the avoidance (all **Observed** formulas); rolls from
   `RngPurpose.Ranged` keyed by the shooter and its shot number (tilt, spin, damage). The bolt joins `projectiles` in commit order.
 - **Flight** (`FlyProjectiles`, serial, in the combat system's `Schedule` after the slot copy): every bolt in firing order moves speed x tick, straight while range is left,
@@ -701,6 +701,39 @@ Tests: `RangedTests` (formulas, worlds, the 1 / 4 / 16 thread check) and `Ranged
   terrain samples). Per bolt and tick: one grid query and up to 8 ground samples. The 1200-tick skirmish (36 characters, 20 bolts) runs in well under a second.
 - **Not built:** turrets and harpoons, the AI's target choice for shooters (a shooter keeps its ordered target), crimes for shooting, picking bolts up (they are not
   recoverable in the original either), aiming while walking (`aimwalk`), the reload animation event, buildings in the line of fire, night and stealth in the decision.
+
+### Animals
+
+Built 2026-10-13 from [animals.md](game/animals.md). Code: `AnimalData` (`Meitou.Data/Gameplay/Bodies/AnimalData.cs`), `BodyFactory.Create(..., age)`,
+`CharacterAssembly.MakeAnimalFighter`, `Fighter.IsAnimal` / `AnimalCategory` / `TechniqueCategory` / `CanAttack`, `TechniqueChooser.Fits`, `MedicalState.HasStatsObject` /
+`ScaleK` / `ScaleZ`, `CharacterStats.Scale`. Tests: `AnimalTests` (`[Slow]`, the install's records).
+
+- **Before.** This doc said animals had no race and no body. In fact the race fallback (`CharacterAssembly.RaceRecord`: the record's own `race`) gave them a person's
+  body, stats and fists. Fists could not strike at all: the martial arts techniques have `animal` 5 and the chooser asked for 0. Both are fixed: people with fists now use the
+  "ma" techniques (no pinned scenario moved: the synthetic ones have no fist fighter with real techniques).
+- **Stats.** The ordinary constructor (`CharacterStats.FromGroups`, the original's fan-out, so `combat stats` c gives martial arts c/10 and dexterity, strength, toughness c)
+  and the race multipliers; `CharacterStats.Scale` = the animal's age (the squad's `animal age`, 1 in the sandbox) multiplies every stat the combat formulas read
+  (`CombatSystem.Eff`), not the stored values (training and saves see the raw stats). Speed comes from `Speed.Run` as for people (it does not read the scale).
+- **Body.** `MedicalState.Create(race, strength, hasStats: false, hpMultiplier: lerp(age, scale min, scale max), bodyScale: HP mult)`: the parts scale by size and
+  `HP mult`, the blood capacity is the race's spread x both (s = 1), the hunger rate x the size, and hits cannot sever limbs. These factors are not saved (a loaded animal
+  gets 1s; [Saves](#saves)).
+- **Natural weapon** (`MakeAnimalFighter`): the record's `weapon` as a `WeaponInstance` made by its `weapon level` manufacturer; the level and model are the manufacturer's
+  first model's (Ancient: Mid-Grade Salvage, level 15), an **engine choice** (the original's level is **Unknown**). It is not of the unarmed category, so its blows use
+  the weapon formulas (cut, blunt, pierce) with martial arts as the skill (`WeaponInstance.SkillOf`). The target kind `Animal` selects the weapons' `animal damage mult`.
+  An animal without a weapon (Swamp Turtle) has a fighter that cannot attack (`CanAttack` false): it is targetable, it neither looks for fights nor answers.
+- **Techniques.** `Fighter.TechniqueCategory` = the weapon's `skill category`; a creature takes only techniques whose `animal` equals it (a bull's weapon is category 20:
+  the giraffe techniques). A creature technique's distance of 0 reads as contact, `CombatTuning.CloseInGap` (**engine choice**; literally, a goat could never strike).
+  Creature weapons cannot block and no creature technique is a block or dodge, so animals never react (the data's rule).
+- **Hostility.** The aggro and retaliation tests now pass animals (they have a fighter and a body): their squad's faction decides, as for anyone. A bonedog of a faction
+  hostile to the player's attacks a player character it sees (`AnimalTests`). Fleeing is the faction rule ([Hostility and relations](#hostility-and-relations)); no
+  animal-specific rule was found.
+- **Determinism.** Everything new is spawn-time data or reads of the character's own slot; `AnimalTests` runs a pack fight (bonedogs, beak things and wild bulls
+  against people, one-slot partitions) at 1, 4 and 16 threads and gets the same hashes. It is not pinned among the golden scenarios: those run without the install.
+- **Cost.** Nothing per tick beyond what any fighter costs; the scale is one multiply per stat read.
+- **Not done.** Animal animations: animals have no appearance and are drawn as markers, and their technique clips (`attack1`...) live in their own skeletons, which the
+  animation library does not load (creature techniques are left out of it, as the original's preprocess does); attack timing uses the 1 s default clip length. Nests
+  and the area spawns (wild packs), smell, `VO_Creature_Alert`, `animal strength`, lifespan and ageing, `turn rate`, pack animals' backpacks, death items and
+  butchering, animal AI goals, taming and buying animals, saving the animal factors.
 
 ### Hostility and relations
 
@@ -735,8 +768,9 @@ An **engine stand-in** for the stage 9 senses and target choice, with the origin
   - **Hearing** (`AggroSystem.NoiseRange`, `HearChance`): a moving target is heard within N = lerp(speed / top speed, 350, 600) with chance 0.75 x (1 - d^2/N^2) per look,
     rolled from `RngPurpose.Sense` (`FUN_140851d10`, `FUN_140857500`). A standing one makes no noise, so a still enemy behind an NPC goes unnoticed, as in the original.
   The grid of the last tick's positions; ties keep the grid's order (lower slot within a cell). It emits one effect. A crowd whose factions present have no enemy among
-  each other skips the looks (worked out when the set of factions present or the table changes). Downed characters and animals (no race, no body, no fighter) are never
-  looked for and never look.
+  each other skips the looks (worked out when the set of factions present or the table changes). Downed characters and characters without a body or fighter are never
+  looked for and never look; animals take part like anyone (2026-10-13, [Animals](#animals)): their squad's faction decides, and one without an attack
+  (`Fighter.CanAttack`, a swamp turtle) neither looks nor answers.
 - **The decision** (`Apply`, serial, commit order): the looker if still free, and its free squad mates within **twice their own R** of the target (the original's
   squad-shared sightings: a target a mate saw or heard counts as seen within 2 R, `GroupSense`, [perception.md](game/perception.md#6-tags-memory-and-the-squads-shared-senses);
   was 250 units of the looker until 2026-10-13; never the player's), get an `AttackOrder` for the next tick (`World.Defer`). The target answers through retaliation.
@@ -764,7 +798,7 @@ An **engine stand-in** for the stage 9 senses and target choice, with the origin
     hashed only while set) neither looks for fights nor answers attacks (retaliation skips it; engine reading of the task's urgency). The player's characters never flee.
 - **Not done:** night, weather, buildings, stealth, line of sight and the tags of the original's senses ([perception.md](game/perception.md)), its target choice and attack
   slots, the squad retreat package for raids, guards defending other factions' townsfolk (crimes and bounties are built: [Crimes and bounties](#crimes-and-bounties)), wars
-  (slots 7, 8), dialogue relation effects, trust, the drift, animals fighting, NPCs finishing off or looting the downed. The original's enemy test (Character slot 125) does
+  (slots 7, 8), dialogue relation effects, trust, the drift, animals' own senses (smell, `VO_Creature_Alert`), NPCs finishing off or looting the downed. The original's enemy test (Character slot 125) does
   not consult `coexistence`; the engine keeps it (above) until the place the flag acts is found.
 
 ## Carrying, rescue and looting

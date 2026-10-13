@@ -41,6 +41,7 @@ game content (dialogue text, large dumps) here; identifiers, counts and byte lay
 | [game/game-loop.md](game/game-loop.md) | Frame structure, frame time, game speed and pause, the in-game clock, one world update in order, threads (AI back thread), the character update budget, zones near and far |
 | [game/character-stats.md](game/character-stats.md) | Stats and skills (numbering, XP gain and levelling), hunger, blood and bleeding, body parts and injuries, first aid, limb replacements, races and their modifiers, encumbrance |
 | [game/combat.md](game/combat.md) | Combat: the CONSTANTS tuning, weapons, technique choice, block and dodge, armour, the hit pipeline, KO, bleeding and death, ranged weapons and turrets, combat XP |
+| [game/animals.md](game/animals.md) | Animals: ANIMAL_CHARACTER records, `CharStatsAnimal`, the creature body (size, HP mult, blood), natural weapons, the creature techniques and their `animal` category, factions |
 | [game/ai.md](game/ai.md) | AI: AI_PACKAGE / AI_TASK records, the squad Blackboard, the per-character decision loop, the GOAP planner, jobs and player orders, unloaded squads, senses, dialogue triggers |
 | [game/ai-tasks.md](game/ai-tasks.md) | AI tables: `taskType` to task class, the TaskData registry, state type ids |
 | [game/carry-loot.md](game/carry-loot.md) | Carrying downed characters (lift, the left arm, weight and speed, dropping, putting down), beds and cages, rescue and its target finders, looting, theft crimes, witnesses, the steal roll, the stolen flag, ground items |

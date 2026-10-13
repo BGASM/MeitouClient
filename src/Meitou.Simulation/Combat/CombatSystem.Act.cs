@@ -10,7 +10,8 @@ public sealed partial class CombatSystem
 {
     // ------------------------------------------------------------------ act
 
-    static float Eff(CharacterCold c, StatsEnumerated stat) => c.Stats![stat] * c.Medical!.StatMultiplier(stat);
+    /// <summary>A stat as the combat formulas read it: times the injury and hunger multiplier and the stats' read-time scale (an animal's age, docs/game/animals.md).</summary>
+    static float Eff(CharacterCold c, StatsEnumerated stat) => c.Stats![stat] * c.Stats.Scale * c.Medical!.StatMultiplier(stat);
 
     int PauseTicks(World world, int slot, int counter)
     {
@@ -143,13 +144,14 @@ public sealed partial class CombatSystem
         var prev = table.Previous;
         int t = s.TargetSlot;
         var fighter = cold.Fighter!;
+        if (!fighter.CanAttack) return;
         var tc = table.Cold(t)!;
         float gap = Vector2.Distance(new(prev[i].Position.X, prev[i].Position.Z), new(prev[t].Position.X, prev[t].Position.Z)) - CombatTuning.Footprint(cold) - CombatTuning.Footprint(tc);
         bool moving = new Vector2(prev[t].Velocity.X, prev[t].Velocity.Z).Length() >= 1;
         float weaponReach = fighter.Unarmed ? 99 : fighter.Weapon!.Data.Length * 0.5f;
         float skill = Eff(cold, fighter.WeaponSkill);
         float roll = CombatRolls.Float(world.Seed, key, CombatRoll.Technique, (ulong)(s.AttackSeq + 1));
-        int pick = TechniqueChooser.ChooseAttack(techniques, fighter.Kind, 0, false, skill, gap, moving, weaponReach, roll);
+        int pick = TechniqueChooser.ChooseAttack(techniques, fighter.Kind, fighter.TechniqueCategory, false, skill, gap, moving, weaponReach, roll);
         if (pick < 0) return;
         var tech = techniques[pick];
         s.AttackSeq++;
@@ -213,7 +215,7 @@ public sealed partial class CombatSystem
             float effective = DefenceFormulas.EffectiveDefence(Eff(cold, StatsEnumerated.MartialArts), fighter.EncumbranceFactor, Speed.LegFactor(cold.Medical!), fighter.DefenceBonus, fighter.Guarding);
             dodge = DefenceFormulas.BlockChance(effective, attack.AttackSkill, combat, 0, 95);
         }
-        int pick = TechniqueChooser.ChooseReaction(techniques, fighter.Kind, 0, false, fighter.CanBlock, direction, block, dodge, chanceRoll, pickRoll);
+        int pick = TechniqueChooser.ChooseReaction(techniques, fighter.Kind, fighter.TechniqueCategory, false, fighter.CanBlock, direction, block, dodge, chanceRoll, pickRoll);
         if (pick < 0) return;
         var reaction = techniques[pick];
         int ticks = Ticks(reaction, PlayRate(cold, reaction, attack: false), dt);

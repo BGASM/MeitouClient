@@ -80,7 +80,7 @@ public sealed partial class MedicalState
         if (!destroyed) return;
         if (p.IsVital) { Die(DeathCause.VitalPart, events); return; }
         var setting = ctx.Options.Dismemberment;
-        bool allowed = inHitPath ? setting >= Dismemberment.Rare && ctx.HasStats : setting >= Dismemberment.Frequent;
+        bool allowed = inHitPath ? setting >= Dismemberment.Rare && ctx.HasStats && HasStatsObject : setting >= Dismemberment.Frequent;
         if (allowed && p.Limb == LimbState.Original && p.Template.Severance) Sever(index, ctx, events);
     }
 
@@ -170,7 +170,7 @@ public sealed partial class MedicalState
     {
         if (Dead) return;
         if (Blood > 25) BloodKo = false;
-        float cap = BloodCapacity(ctx.Race, ctx.Strength, ctx.HasStats);
+        float cap = Capacity(ctx);
         if (Blood <= -cap) { Die(DeathCause.BloodLoss, events); return; }
         if (Blood <= 0 && !BloodKo) { BloodKo = true; StartKo(ctx, events); }
         else if (BloodKo && Blood <= -25 && !Unconscious) StartKo(ctx, events);

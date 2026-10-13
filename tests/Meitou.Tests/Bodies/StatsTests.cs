@@ -65,7 +65,19 @@ public class StatsTests
         Assert.Equal(40, v[(int)StatsEnumerated.MeleeAttack]);
         Assert.Equal(30, v[(int)StatsEnumerated.Stealth]);
         Assert.Equal(25, v[(int)StatsEnumerated.Strength]);
-        Assert.Equal(1, v[(int)StatsEnumerated.MartialArts]);
+        // The constructor's fan-out (FUN_14064cb30): combat sets the body stats too, a tenth of it martial arts and dodge, half assassination; stealth overwrites
+        // assassination and medic and lifts dexterity to max(unarmed, stealth); the strength field wins over combat's.
+        Assert.Equal(4, v[(int)StatsEnumerated.MartialArts]);
+        Assert.Equal(4, v[(int)StatsEnumerated.Dodge]);
+        Assert.Equal(40, v[(int)StatsEnumerated.Toughness]);
+        Assert.Equal(30, v[(int)StatsEnumerated.Dexterity]);
+        Assert.Equal(30, v[(int)StatsEnumerated.Assassination]);
+        Assert.Equal(30, v[(int)StatsEnumerated.Medic]);
+        Assert.Equal(40, v[(int)StatsEnumerated.Athletics]);
+        Assert.Equal(1, v[(int)StatsEnumerated.Crossbows]);
+        var u = CharacterStats.FromGroups(combat: 40, unarmed: 50, stealth: 0, ranged: 20, strength: 0);
+        Assert.Equal((50f, 50f, 50f, 40f), (u[(int)StatsEnumerated.MartialArts], u[(int)StatsEnumerated.Dodge], u[(int)StatsEnumerated.Dexterity], u[(int)StatsEnumerated.Strength]));
+        Assert.Equal((20f, 20f, 20f), (u[(int)StatsEnumerated.Crossbows], u[(int)StatsEnumerated.Perception], u[(int)StatsEnumerated.Turrets]));
 
         var stats = CharacterStats.FromValues(v);
         stats[StatsEnumerated.MassCombat] = 3;

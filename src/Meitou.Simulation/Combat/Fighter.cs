@@ -19,6 +19,17 @@ public sealed class Fighter
     readonly ArmourPiece[] armour;
     /// <summary>A creature (an ANIMAL_CHARACTER): the target kind for the weapon multipliers, and the techniques of its own weapon category apply.</summary>
     public bool IsAnimal { get; init; }
+    /// <summary>
+    /// The creature kind its techniques are picked by (COMBAT_TECHNIQUE <c>animal</c>): its natural weapon's <c>skill category</c> (9 to 20), 0 for a person (docs/game/animals.md).
+    /// </summary>
+    public int AnimalCategory => IsAnimal && Weapon is { } w ? w.Data.SkillCategory : 0;
+    /// <summary>
+    /// The weapon category a technique's <c>animal</c> value is compared with (<see cref="TechniqueChooser.Fits"/>): the weapon's <c>skill category</c>, 5 (unarmed) for fists.
+    /// The martial arts techniques have <c>animal</c> 5, the creature ones 9 to 20, the weapon ones 0 (docs/game/animals.md).
+    /// </summary>
+    public int TechniqueCategory => Weapon?.Data.SkillCategory ?? (int)WeaponCategory.Unarmed;
+    /// <summary>Whether it has an attack: an animal without a natural weapon (a swamp turtle) has none; it can still be hit.</summary>
+    public bool CanAttack => !IsAnimal || Weapon is not null;
     /// <summary>The guarding state (+20 melee defence in the block chance).</summary>
     public bool Guarding { get; set; }
     /// <summary>The encumbrance factor in [0, 1] (<see cref="Encumbrance.Factor"/>); 1 is unburdened.</summary>
