@@ -68,11 +68,13 @@ sealed partial class GameHost
         int fpsWindowFrames = 0;
         // The cinematic camera (docs/viewer.md "Cinematic camera", F6 its editor): while it flies, previews or cuts to a key it holds the drawn
         // camera and the rig's state is not applied; the first camera input after that hands the camera back to the rig (CameraRig.TakeOver).
-        // The hour is the game clock's (time does not follow the keys); PageUp/PageDown/Home set the lens only while the editor is open.
+        // The hour is the game clock's (time does not follow the keys); PageUp/PageDown/Home set the lens while the editor is open and in the free camera.
         var cinema = new Cinema(() => camera, () => (float)session.Clock.HourOfDay, null, () => BorderlessFullScreen.IsOn(window), () => BorderlessFullScreen.Toggle(window),
             Cinema.GameFile, lensKeysAlways: false);
         bool cinemaHolds = false, interfaceHidden = false;
         cinema.Moved = () => cinemaHolds = true;
+        // PageUp/PageDown zoom only the strategy camera: in the free camera and on a camera the cinema holds they set the lens (Home puts it back).
+        cinema.LensKeys = () => session.Camera.IsFree || cinemaHolds;
         cinema.Load();
 
         var silkInput = Silk.NET.Input.InputWindowExtensions.CreateInput(window);

@@ -23,6 +23,11 @@ enum CinemaKey
 /// </summary>
 sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>? setHour, Func<bool> fullScreenOn, Action toggleFullScreen, string file, bool lensKeysAlways = true)
 {
+    /// <summary>The game's other times for the lens keys besides the open editor: its free camera and a camera the cinema holds, where PageUp/PageDown zoom nothing.</summary>
+    public Func<bool>? LensKeys { get; set; }
+
+    bool LensKeysLive => lensKeysAlways || EditorVisible || LensKeys?.Invoke() == true;
+
     /// <summary>The viewer's keys file.</summary>
     public static string ViewerFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Meitou", "viewer-shots.json");
     /// <summary>The game's keys file (its own: a world position means the same in both, so the viewer's file can be copied over it).</summary>
@@ -109,9 +114,9 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
                 Say(Summary());
                 foreach (var k in Sorted) Console.WriteLine($"  {k.Label,2}  {k.Time,6:0.00} s{(k.Ease ? " ease" : "     ")}  {Describe(k.Shot)}");
                 return true;
-            case CinemaKey.PageUp when lensKeysAlways || EditorVisible: cam.FieldOfView = MathF.Max(cam.FieldOfView - 2.5f * MathF.PI / 180, MinFov); Say($"field of view {Degrees(cam.FieldOfView):0.#} deg"); return true;
-            case CinemaKey.PageDown when lensKeysAlways || EditorVisible: cam.FieldOfView = MathF.Min(cam.FieldOfView + 2.5f * MathF.PI / 180, MaxFov); Say($"field of view {Degrees(cam.FieldOfView):0.#} deg"); return true;
-            case CinemaKey.Home when lensKeysAlways || EditorVisible: cam.FieldOfView = DefaultFov; Say($"field of view {Degrees(DefaultFov):0} deg"); return true;
+            case CinemaKey.PageUp when LensKeysLive: cam.FieldOfView = MathF.Max(cam.FieldOfView - 2.5f * MathF.PI / 180, MinFov); Say($"field of view {Degrees(cam.FieldOfView):0.#} deg"); return true;
+            case CinemaKey.PageDown when LensKeysLive: cam.FieldOfView = MathF.Min(cam.FieldOfView + 2.5f * MathF.PI / 180, MaxFov); Say($"field of view {Degrees(cam.FieldOfView):0.#} deg"); return true;
+            case CinemaKey.Home when LensKeysLive: cam.FieldOfView = DefaultFov; Say($"field of view {Degrees(DefaultFov):0} deg"); return true;
         }
         return false;
     }

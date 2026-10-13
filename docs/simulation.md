@@ -739,9 +739,11 @@ the pain of the medical state are not in the save's keys and start empty and at 
 `meitou --duel [x,z]` (added 2026-10-13, for the trailer; `GameHost.Duel.cs`) is a scene on rails: two Samurai fight on the real map at sunset and every lap is
 the same fight to the tick, so a camera flight recorded from any angle lines up with every other take. Engine choices throughout; nothing of it runs in the game.
 
-- **Place and light.** The built-in spot is the owner's pick (2026-10-13): in the desert dunes at 42360, -110400, 33 units back from the edge of a dune
-  crest that runs north-south and drops about 280 units to the east within 500 (the pair fight along the crest), with dunes beyond and the setting sun
-  to the west (the sun sets towards −X, `SkyClock`). Before it, the owner's first dune spot at 41062, -110207 and a flat cliff top at -38016, -67824 with pines along the ridge was used,
+- **Place and light.** The built-in spot is the owner's pick (2026-10-13, from a screenshot): a flat rock mesa in the desert dunes, top about 1350
+  over x 35100 to 36100, z -112100 to -111900, dropping about 200 units to the south; the fight is at 35400, -111920, about 60 units from the south
+  cliff and 370 east of the rock spire at the mesa's west end (35030, -111940, found by triangulating three wide screenshots: no BUILDING placement is
+  near it), the setting sun to the west (the sun sets towards −X, `SkyClock`). Before it, a dune crest at 42398, -110400, the owner's first dune spot at
+  41062, -110207 and a flat cliff top at -38016, -67824 with pines along the ridge was used,
   picked from a heightmap search for flat ground with a drop and no terrain above 0.6 degrees towards the setting sun, then by sunset screenshots; a
   hilltop above a bay at -90144, -120240 was the runner-up there (the sun on the water). Unless `--time` or `--weather` say otherwise the time of day is
   22:00 (the sun about 5 degrees up) and the weather is held clear (`Default`). The time of day is held still (`GameClock.HoldHourOfDay` after each
@@ -762,7 +764,7 @@ the same fight to the tick, so a camera flight recorded from any angle lines up 
 - **Restart.** A new world from `WorldSession.ReplaceWorld` with the same setup, the fight before the lap run headless, the game clock back at the
   start hour (`GameClock.SetTime`), the simulation clock's phase dropped (`SimulationClock.ResetPhase`, so the ticks fall on the same frames), the
   animation clock (clouds, water, foliage sway) at 0 and fresh per-character renderer state (`worldEpoch`). It happens at the lap's end, on
-  Backspace, and whenever a cinema flight starts or a recording starts (also over a flight already playing; docs/viewer.md "Cinematic camera"): the
+  Backspace (the HUD says so), and whenever a cinema flight starts or a recording starts (also over a flight already playing; docs/viewer.md "Cinematic camera"): the
   cinema sets its state in the key handler, before the frame, so each take's first frame is the lap's first. The Tab panel's time of day slider sets the
   held hour.
 - **Checked.** The measured run keeps the world's state hash at the lap's end; each lap that ends on that tick is compared with it and the log says

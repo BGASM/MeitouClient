@@ -273,7 +273,7 @@ the taskbar on top (**Observed** 2026-10-10, window rectangle read with `GetWind
 **In the game** (added 2026-10-12; the editor moved from F2 to F6 then, as F2..F4 are the game's speeds). `Cinema` lives in
 `src/Meitou.Rendering/Cinema.cs` and `meitou.exe` has the same keys and editor, with these differences: the keys are kept in
 `%LOCALAPPDATA%\Meitou\game-shots.json` (positions are world positions, so the viewer's file can be copied over it); PageUp, PageDown and
-Home set the lens only while the editor is open (closed, PageUp/PageDown zoom the rig as before); Space and Delete are the editor's while
+Home set the lens while the editor is open, and since 2026-10-13 also in the free camera and on a camera the cinema holds, where they zoomed nothing (in the strategy camera with the editor closed they zoom the rig as before); Space and Delete are the editor's while
 it is open (Space does not pause then); "time follows" is unavailable, as the hour is the simulation clock's (keys still store it).
 While the cinema flies, previews a scrub or has cut to a key it holds the camera and the rig is not applied; the first camera input
 after that (move, turn, pitch, zoom, wheel, middle drag) hands it back as the free camera at the cinema's eye (`CameraRig.TakeOver`),
