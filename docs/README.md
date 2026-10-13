@@ -11,6 +11,7 @@ game content (dialogue text, large dumps) here; identifiers, counts and byte lay
 
 | Doc | Topic |
 | --- | --- |
+| [faithful-ui-parity.md](faithful-ui-parity.md) | Faithful UI implementation, remaining screen interactions and separate gameplay backend gaps |
 | [formats/overview.md](formats/overview.md) | Install layout, load order, resource lookup, mod overrides, format inventory |
 | [formats/fcs-mod.md](formats/fcs-mod.md) | FCS game data: `.base` / `.mod` binary layout, record types, overrides, `fcs.def` schema |
 | [formats/rekenshi.md](formats/rekenshi.md) | RE_Kenshi / KenshiLib compatibility feasibility: native plugins, extension data, porting options and proposed experiments |
@@ -52,6 +53,8 @@ game content (dialogue text, large dumps) here; identifiers, counts and byte lay
 | [game/buildings-production.md](game/buildings-production.md) | Buildings: construction, production and crafting, power, storage, farming, research and tech |
 | [game/ui-input.md](game/ui-input.md) | Input: the binding encoding, `controls.cfg`, the action table, key and mouse handling, selection, pointer modes, camera input, `settings.cfg` and the options window |
 | [game/ui-screens.md](game/ui-screens.md) | UI screens: MyGUI stack and resources, the screen catalog, main menu and new game flow, HUD, overview, inventory, trade, dialogue, build, tutorials |
+| [formats/mygui.md](formats/mygui.md) | MyGUI layout/resource reader, atlas skins, independent Faithful and Meitou HUD modes, current compatibility limits |
+| [native-ui.md](native-ui.md) | Styled native UI, code extension API, control/style/action registration, slots and module lifetime |
 | [viewer.md](viewer.md) | `meitou-viewer`: usage and options, how textures are resolved from FCS records, the world mode's keys, profiler and spike log, known gaps; links the render docs below |
 | [render-terrain.md](render-terrain.md) | World view terrain: CDLOD, texturing, streaming of heights, textures and meshes, upload and unloading, frame times |
 | [render-water.md](render-water.md) | World view water: the game's flat water and Meitou water (FFT ocean, shore distance field, breakers, foam, river map) |

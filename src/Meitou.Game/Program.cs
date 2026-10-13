@@ -27,6 +27,11 @@ static class Program
             Console.WriteLine(GameOptions.Usage);
             return 2;
         }
+        if (game.UiShowcase && world.Screenshot is null)
+        {
+            Console.Error.WriteLine("--ui-showcase needs --screenshot <path>.");
+            return 2;
+        }
         if (world.X is null && world.Zone is null && world.Town is null) world.Town = "The Hub";
         var install = GameInstall.LocateOrAsk();
         if (install is null)

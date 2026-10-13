@@ -126,6 +126,12 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         // F9 is the game's quickload now (F5 quicksave); older saved configs took F9 for the fps counter, which is on Ctrl+F9 and unbound here.
         if (session.Bindings.Get(InputAction.ToggleFps).SequenceEqual([Binding.Of(EngineKey.F9)])) session.Bindings.Set(InputAction.ToggleFps);
         player = new PlayerInterface(session, heights.HeightAt, DrawnPosition);
+        player.LoadUi(g.UiMode ?? config.UiMode, assets.Find);
+        player.ConfigureFrontend(scene.Database,
+            () => Meitou.Data.Save.SaveCatalog.Scan(Meitou.Simulation.Saving.QuickSave.DefaultRoot, install.SaveDirectory,
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "kenshi", "save")),
+            assets.Find("credits.txt") is { } creditsFile ? File.ReadAllText(creditsFile) : "");
+        if (interactive && start is null && !IsSandbox && !IsDuel && !g.NoPopulation && player.UiMode == Meitou.Data.Ui.UiMode.Faithful) player.ShowTitle();
         if (nav is not null && (start is not null || !interactive))
         {
             // The squad is placed on the mesh, and a still has its town at once: wait for the zones round the start (a cold build is about 2 s, then cached).

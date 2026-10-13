@@ -28,12 +28,13 @@ sealed partial class GameHost
         using var display = new VulkanDisplay(null, vsync: false, streamline: WantsDlss());
         streamline = display.Streamline;
         Boot(display, interactive: false);
+        if (g.UiShowcase && playerSquad is not null) player.Select([playerSquad.Leader], additive: false);
         if (playerSquad is not null && g.MoveTo is { } to)
         {
             session.World.Commands.Enqueue(new Meitou.Simulation.SelectCommand(playerSquad.Members.ToList()) { Tick = session.World.Tick });
             session.World.Commands.Enqueue(new Meitou.Simulation.MoveOrder([], new Vector3(to.X, 0, to.Z)) { Tick = session.World.Tick });
         }
-        for (int i = 0; i < g.Ticks; i++)
+        for (int i = 0; i < Math.Max(g.Ticks, g.UiShowcase ? 1 : 0); i++)
         {
             session.Tick();
             session.AdvanceSimulation(session.Ticks.TickSeconds);   // one control tick of real time, at speed 1
@@ -57,14 +58,20 @@ sealed partial class GameHost
         for (int i = 0; i < gpu.Post.WarmupFrames; i++) { DrawWorld(w, h); display.EndFrame(); }   // a temporal upscaler converges first
         DrawWorld(w, h);
         display.EndFrame();
-        DrawWorld(w, h);
-        if (playerSquad is not null && DebugOverlay.TryCreate(context) is { } overlay)
+        using var overlay = playerSquad is not null || player.UiMode == Meitou.Data.Ui.UiMode.Faithful ? DebugOverlay.TryCreate(context) : null;
+        if (overlay is not null) player.CreateUiPainter(overlay, assets.Find);
+        string?[] panels = g.UiShowcase ? player.UiMode == Meitou.Data.Ui.UiMode.Faithful
+            ? [null, "inventory", "stats", "overview", "menu", "new-game", "save", "load", "title"]
+            : [null, "inventory", "stats"] : [null];
+        foreach (string? panelName in panels)
         {
-            using (overlay)
+            DrawWorld(w, h);
+            if (overlay is not null)
             {
                 overlay.Target = target;
                 UpdateView(w, h);
-                if (IsSandbox) DrawSandbox(overlay, w, h);
+                player.ShowUiPanel(panelName);
+                if (IsSandbox && !g.UiShowcase) DrawSandbox(overlay, w, h);
                 player.Draw(overlay, w, h);
                 if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.IsPlayer) is { } me && player.Project(DrawnPosition(me) + new Vector3(0, 1, 0)) is { } px)
                 {
@@ -74,14 +81,16 @@ sealed partial class GameHost
                     Console.WriteLine($"pickcheck pixel {px.X:0}, {px.Y:0} picks {(picked is { } id && id == me.Id ? "the leader" : "NOTHING")}; ground 60 px lower: {(hit is { } gh ? $"{gh.X:0}, {gh.Z:0} (leader at {me.Position.X:0}, {me.Position.Z:0})" : "no hit")}");
                 }
             }
+            display.EndFrame();
+            context.Finish();
+            string output = g.UiShowcase ? Path.Combine(Path.GetDirectoryName(o.Screenshot!) ?? "", $"{Path.GetFileNameWithoutExtension(o.Screenshot!)}-{panelName ?? "hud"}.png") : o.Screenshot!;
+            FramebufferCapture.SavePng(context, target, output, w, h);
+            Console.WriteLine($"saved     {Path.GetFullPath(output)}");
         }
-        display.EndFrame();
-        context.Finish();
+        player.DisposeUi();
         var s = session.Camera.Current;
         Console.WriteLine($"camera    {(session.Camera.IsFree ? "free" : "strategy")}: pivot {s.Target.X:0}, {s.Target.Y:0}, {s.Target.Z:0}, eye {s.Eye.X:0}, {s.Eye.Y:0}, {s.Eye.Z:0}, " +
             $"yaw {s.Yaw * 180 / MathF.PI:0.#}, pitch {s.Pitch * 180 / MathF.PI:0.#}, boom {s.Distance:0.#}; {session.Ticks.TotalTicks} control ticks, {session.Simulation.TotalTicks} simulation ticks, game time {session.Clock.TimeText} ({session.Clock.DayText})");
-        FramebufferCapture.SavePng(context, target, o.Screenshot!, w, h);
-        Console.WriteLine($"saved     {Path.GetFullPath(o.Screenshot!)}");
         gpu.Dispose();
         return 0;
     }

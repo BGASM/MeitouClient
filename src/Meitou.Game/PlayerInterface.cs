@@ -57,16 +57,13 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         mouse = p;
         if (button == MouseButton.Left)
         {
-            if (HudButtonAt(p) is { } index)
-            {
-                PressButton(index);
-                return true;
-            }
+            if (UiMouseDown(p)) return true;
             if (OverHud(p)) return true;
             dragFrom = p;
             dragging = false;
             return true;
         }
+        if (button == MouseButton.Right && MapMoveOrder(p, shift)) return true;
         if (button == MouseButton.Right && !OverHud(p))
         {
             // Alt + right click on a downed or dead character: the nearest selected loots it (take all). Ctrl + right click: picks it up, or puts it down when a selected
@@ -91,18 +88,21 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
             }
             return true;
         }
-        return false;
+        return OverHud(p);
     }
 
     public void MouseMove(Vector2 p)
     {
         mouse = p;
+        if (MapPointerMove(p)) return;
+        if (UiVisible && UiMode == Meitou.Data.Ui.UiMode.Faithful && faithfulScreens.PointerMove(p)) return;
         if (dragFrom is { } from && !dragging && Vector2.Distance(from, p) >= DragThreshold) dragging = true;
     }
 
     public void MouseUp(MouseButton button, Vector2 p, bool shift)
     {
         mouse = p;
+        if (button == MouseButton.Left) { InventoryPointerUp(p); faithfulScreens.PointerUp(); mapDrag = null; }
         if (button == MouseButton.Right && steering)
         {
             Steer(final: true);

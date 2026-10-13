@@ -15,6 +15,7 @@ sealed class UserConfig
     /// <summary>Frames per second when vsync is off; 0 = unlimited. Engine default 240.</summary>
     public int FpsLimit { get; set; } = 240;
     public bool VSync { get; set; }
+    public Meitou.Data.Ui.UiMode UiMode { get; set; } = Meitou.Data.Ui.UiMode.Faithful;
     /// <summary>Borderless full screen (the Tab panel, Alt+Enter); <c>--windowed</c> starts in a window for one run.</summary>
     public bool FullScreen { get; set; } = true;
     public int TickRate { get; set; } = 30;

@@ -8,6 +8,8 @@ sealed class GameOptions
     public int? FpsLimit;
     public ulong Seed;
     public bool? VSync;
+    public Meitou.Data.Ui.UiMode? UiMode;
+    public bool UiShowcase;
     /// <summary>With <c>--screenshot</c>: control ticks (and their real time of simulation, at speed 1) run before the picture, with no input.</summary>
     public int Ticks;
     public bool NoPopulation, NewGame, ListStarts;
@@ -32,6 +34,8 @@ sealed class GameOptions
           --fps-limit <n>            frame limit when vsync is off (default 240 from meitou.user.json; 0 = unlimited)
           --vsync / --no-vsync       vsync (default off)
           --seed <n>                 the world seed (default 0)
+          --ui <faithful|meitou>      UI mode, independent of graphics; also available in Tab settings (default faithful)
+          --ui-showcase              with --screenshot: capture HUD and UI windows (Faithful includes map and menus)
           --no-population            no town residents or movement (an empty world)
           --new-game [start]         a new game as the NEW_GAME_STARTOFF start (default Wanderer): the player squad at its town, camera on it
           --list-starts              print the available starts and exit
@@ -64,8 +68,12 @@ sealed class GameOptions
             string Next() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"{a} needs a value");
             switch (a)
             {
+                case "--ui-showcase": g.UiShowcase = true; break;
                 case "--fps-limit": g.FpsLimit = int.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--seed": g.Seed = ulong.Parse(Next(), CultureInfo.InvariantCulture); break;
+                case "--ui":
+                    g.UiMode = Next().ToLowerInvariant() switch { "faithful" => Meitou.Data.Ui.UiMode.Faithful, "meitou" => Meitou.Data.Ui.UiMode.Meitou, _ => throw new ArgumentException("--ui must be faithful or meitou") };
+                    break;
                 case "--vsync": g.VSync = true; break;
                 case "--no-vsync": g.VSync = false; break;
                 case "--ticks": g.Ticks = int.Parse(Next(), CultureInfo.InvariantCulture); break;

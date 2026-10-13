@@ -174,6 +174,15 @@ Each id is the integer at +8 of a tutorial item. The meaning of the two lists (f
 
 ## Implementation outline
 
+The initial dual-mode HUD and MyGUI reader are implemented (2026-10-13); see
+[MyGUI format and implementation](../formats/mygui.md) for supported features and
+remaining gaps. `--ui faithful` reads the original HUD layout and atlas skins;
+`--ui meitou` selects the styled native HUD, independently of graphics mode.
+The [native UI library](../native-ui.md) exposes controls, styles, actions and
+contribution slots for future code mods.
+Faithful screen implementation and missing gameplay dependencies are tracked
+separately in [the parity ledger](../faithful-ui-parity.md).
+
 1. Parse MyGUI layout XML and the skin/resource lists to build a widget tree (or map each named layout to a native
    UI control set); layer names give draw order.
 2. Implement screens as a stack: Splash, Title, NewGame (data from NEW_GAME_STARTOFF via `GameDatabase` and

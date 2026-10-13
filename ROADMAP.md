@@ -35,7 +35,7 @@ and how far each is analyzed. Detailed layouts live next to it in `docs/formats/
   GLSL (Kenshi's HLSL is read for facts only); `VkGl` translates them onto Vulkan 1.3.
 - **Physics:** BepuPhysics2 (pure C#), tuned to match PhysX character/ragdoll behaviour.
 - **Audio:** own Wwise bank/WEM decoder → OpenAL Soft (Silk.NET).
-- **UI:** own renderer for MyGUI `.layout` / skins, so GUI mods keep working.
+- **UI:** two independent native modes: Faithful reads MyGUI `.layout` / skins for original UI and GUI mods; Meitou uses our styled native UI library. Public control/style/action registration supports future code mods ([native UI](docs/native-ui.md)); DLL loading remains to do. The basic HUD and readers are implemented; full control, font and mod fidelity remains to do ([MyGUI](docs/formats/mygui.md)).
 - **Input/windowing:** Silk.NET.
 
 ## Phases

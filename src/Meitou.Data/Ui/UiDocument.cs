@@ -1,0 +1,103 @@
+using System.Numerics;
+
+namespace Meitou.Data.Ui;
+
+public sealed record UiListItem(string Id, string Caption);
+
+public sealed record UiControl(string Name, string Type, UiRect Bounds, string Caption, string Action,
+    string Skin, bool Enabled, IReadOnlyDictionary<string, string> Properties, Vector4 Background,
+    Vector4? TextColour = null, Vector4? HoverColour = null, Vector4? ActiveColour = null, Vector4? DisabledColour = null,
+    bool? Pickable = null, string Argument = "", float? TextScale = null, UiRect? Clip = null);
+
+/// <summary>A frame shared by both frontends; bindings supply data and visibility without changing source documents.</summary>
+public sealed class UiBindings
+{
+    public Dictionary<string, string> Text { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, string> Actions { get; } = new(StringComparer.Ordinal);
+    public HashSet<string> Hidden { get; } = new(StringComparer.Ordinal);
+    public HashSet<string> Disabled { get; } = new(StringComparer.Ordinal);
+    public HashSet<MyGuiWidget> HiddenWidgets { get; } = [];
+    public Dictionary<string, UiRect> Positions { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, int> SelectedTabs { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, float> Progress { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, string> States { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, IReadOnlyDictionary<string, string>> Properties { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, IReadOnlyList<UiListItem>> Lists { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, int> SelectedItems { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, float> ScrollOffsets { get; } = new(StringComparer.Ordinal);
+}
+
+public static class MyGuiPresentation
+{
+    public static IReadOnlyList<UiControl> Arrange(MyGuiLayout layout, int width, int height, UiBindings bindings, IReadOnlyList<string> layers)
+    {
+        var result = new List<UiControl>();
+        void Visit(MyGuiWidget w, UiRect parent, UiRect clip, bool parentEnabled = true)
+        {
+            if (bindings.Hidden.Contains(w.Name) || bindings.HiddenWidgets.Contains(w)) return;
+            var props = new Dictionary<string, string>(w.Properties, StringComparer.Ordinal);
+            if (bindings.Properties.TryGetValue(w.Name, out var overrides)) foreach (var p in overrides) props[p.Key] = p.Value;
+            if (props.GetValueOrDefault("Visible") == "false") return;
+            var bounds = bindings.Positions.TryGetValue(w.Name, out var positioned) ? positioned : w.RealPosition ? w.Position.RelativeTo(parent, true)
+                : props.TryGetValue("TemplateReferenceWidth", out var rw) && props.TryGetValue("TemplateReferenceHeight", out var rh)
+                    ? w.Position.AlignTo(parent, float.Parse(rw, System.Globalization.CultureInfo.InvariantCulture), float.Parse(rh, System.Globalization.CultureInfo.InvariantCulture), w.Align)
+                    : w.Position.RelativeTo(parent, false);
+            if (bindings.Progress.TryGetValue(w.Name, out float fraction)) bounds = bounds with { Width = bounds.Width * Math.Clamp(fraction, 0, 1) };
+            string caption = bindings.Text.GetValueOrDefault(w.Name) ?? props.GetValueOrDefault("Caption") ?? "";
+            if (props.TryGetValue("CaptionOwner", out string? owner)) caption = bindings.Text.GetValueOrDefault(owner) ?? layout.Find(owner)?.Properties.GetValueOrDefault("Caption") ?? "";
+            if (props.GetValueOrDefault("SkipCaption") == "true") caption = "";
+            string action = bindings.Actions.GetValueOrDefault(w.Name) ?? "";
+            if (props.TryGetValue("TemplateEvent", out string? ev) && props.TryGetValue("TemplateOwner", out var target))
+                action = bindings.Actions.GetValueOrDefault(target + "@" + ev) ?? $"mygui:{ev}:{target}";
+            if (bindings.States.TryGetValue(w.Name, out var state)) props["State"] = state;
+            bool enabled = parentEnabled && !bindings.Disabled.Contains(w.Name) && props.GetValueOrDefault("Enabled") != "false";
+            bool pickable = action.Length > 0 || w.Type is "Button" or "Window" or "ListBox" or "MultiListBox" or "ScrollBar" or "ComboBox" or "ScrollView" || w.Type == "EditBox" && props.GetValueOrDefault("Static") != "true" || w.Skin.Length > 0 && w.Skin != "PanelEmpty" && w.Type != "TextBox";
+            result.Add(new(w.Name, w.Type, bounds, caption, action, w.Skin, enabled, props, default, Pickable: pickable, Clip: clip));
+            var childClip = props.GetValueOrDefault("Clipped") == "false" ? clip : bounds.Intersect(clip);
+            if (w.Type == "TabControl")
+            {
+                var pages = w.Children.Where(c => c.Type == "TabItem" && !bindings.Hidden.Contains(c.Name) && !bindings.HiddenWidgets.Contains(c)).ToArray();
+                int selected = Math.Clamp(bindings.SelectedTabs.GetValueOrDefault(w.Name), 0, Math.Max(0, pages.Length - 1));
+                float tabWidth = pages.Length == 0 ? 0 : bounds.Width / pages.Length;
+                foreach (var child in w.Children.Where(c => c.Type != "TabItem")) Visit(child, bounds, childClip, enabled);
+                for (int i = 0; i < pages.Length; i++)
+                    result.Add(new(w.Name + "@tab" + i, "Button", new(bounds.X + i * tabWidth, bounds.Y, tabWidth, 30),
+                        pages[i].Properties.GetValueOrDefault("Caption") ?? pages[i].Name, $"mygui:tab:{w.Name}:{i}", "Kenshi_SquadTabButton1Skin", enabled,
+                        new Dictionary<string, string> { ["State"] = i == selected ? "pushed" : "normal", ["FontName"] = "Kenshi_PaintedTextFont_Medium", ["TextAlign"] = "Center" }, default, Clip: clip));
+                if (pages.Length > 0) Visit(pages[selected], bounds, childClip, enabled);
+            }
+            else foreach (var child in w.Children) Visit(child, bounds, childClip, enabled);
+            if (bindings.Lists.TryGetValue(w.Name, out var items))
+            {
+                var client = result.LastOrDefault(c => c.Properties.GetValueOrDefault("TemplateOwner") == w.Name && c.Properties.GetValueOrDefault("TemplatePart") == "Client");
+                var area = client?.Bounds ?? bounds;
+                var rowClip = area.Intersect(clip);
+                float offset = bindings.ScrollOffsets.GetValueOrDefault(w.Name);
+                for (int i = 0; i < items.Count; i++)
+                {
+                    var row = new UiRect(area.X + 3, area.Y + i * 22 - offset, Math.Max(0, area.Width - 6), 22);
+                    if (row.Intersect(rowClip).Height <= 0) continue;
+                    result.Add(new(w.Name + "@row" + i, "Button", row, items[i].Caption, $"mygui:list:{w.Name}:{i}", "", enabled,
+                        new Dictionary<string, string> { ["ListOwner"] = w.Name, ["ListCount"] = items.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), ["FontName"] = "Kenshi_StandardFont_Medium", ["TextAlign"] = "Left VCenter",
+                            ["TextColour"] = props.GetValueOrDefault("TextColour") ?? MyGuiColours.InkText, ["TextPadding"] = "4 2 4 2" },
+                        bindings.SelectedItems.GetValueOrDefault(w.Name, -1) == i ? new(0.25f, 0.24f, 0.16f, 0.95f) : default, Argument: items[i].Id, Clip: rowClip));
+                }
+            }
+        }
+        foreach (var root in layout.Roots.OrderBy(w => { int i = layers.IndexOfLayer(w.Layer); return i < 0 ? 0 : i; }))
+            Visit(root, new(0, 0, width, height), new(0, 0, width, height));
+        return result;
+    }
+
+    static int IndexOfLayer(this IReadOnlyList<string> layers, string layer)
+    {
+        for (int i = 0; i < layers.Count; i++) if (layers[i] == layer) return i;
+        return -1;
+    }
+
+    /// <summary>Transparent full-screen roots never swallow world input. Reverse order matches painting.</summary>
+    public static UiControl? HitTest(IReadOnlyList<UiControl> controls, float x, float y) => controls.Reverse().FirstOrDefault(c =>
+        c.Bounds.Contains(x, y) && (c.Clip is null || c.Clip.Value.Contains(x, y)) && c.Properties.GetValueOrDefault("NeedMouse") != "false" &&
+        (c.Pickable ?? (c.Action.Length > 0 || c.Type == "Button" || c.Skin.Length > 0 && c.Skin != "PanelEmpty" || c.Background.W > 0)));
+}
+

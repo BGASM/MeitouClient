@@ -42,6 +42,7 @@ sealed partial class GameHost
         if (fullScreen) BorderlessFullScreen.Toggle(window);
         Boot(display, interactive: true);
         var overlay = DebugOverlay.TryCreate(display.Context);
+        if (overlay is not null) player.CreateUiPainter(overlay, assets.Find);
         // The viewer's debug overlays (docs/engine.md): F10 the key list, F11 the frame statistics, F12 the profiler chart.
         var profiler = overlay is null ? null : new FrameProfiler(display.Context, () => display.Context.GpuFrameMs);
         // The Faithful / Meitou switches; Shift+F1 turns Meitou off and back on (plain F2..F4 and F8 are the game's speed and screenshot keys), the Tab panel sets them one by one.
@@ -51,7 +52,13 @@ sealed partial class GameHost
         var panel = overlay is null ? null : WorldFrame.CreateSettingsPanel(overlay, gpu, render,
             getHour: () => (float)session.Clock.HourOfDay, setHour: v => { session.Clock.SetHourOfDay(v); if (IsDuel) duelHour = v; },
             getVSync: () => display.VSync, setVSync: v => display.VSync = v, switches: switches,
-            getFullScreen: () => BorderlessFullScreen.IsOn(window), setFullScreen: _ => BorderlessFullScreen.Toggle(window));
+            getFullScreen: () => BorderlessFullScreen.IsOn(window), setFullScreen: _ => BorderlessFullScreen.Toggle(window),
+            extraChoices: [new PanelChoice(() => $"UI mode: {player.UiMode}", () => ["Faithful", "Meitou"], () => (int)player.UiMode,
+                index =>
+                {
+                    player.SetUiMode(index switch { 0 => Meitou.Data.Ui.UiMode.Faithful, 1 => Meitou.Data.Ui.UiMode.Meitou, _ => throw new ArgumentOutOfRangeException(nameof(index)) });
+                    return $"UI mode: {player.UiMode}";
+                })]);
         if (panel is not null)
             foreach (var slider in panel.Sliders)
                 if (!SessionSliders.Contains(slider.Label) && config.Graphics.TryGetValue(slider.Label, out float v) && !(o.Post.Upscale.Explicit && WorldFrame.UpscalerSliders.Contains(slider.Label)))
@@ -91,6 +98,8 @@ sealed partial class GameHost
                 if (k == SilkKey.Enter && (keyboard.IsKeyPressed(SilkKey.AltLeft) || keyboard.IsKeyPressed(SilkKey.AltRight))) { BorderlessFullScreen.Toggle(window); return; }
                 // F7 hides the game's interface; F6 and the numpad are the cinema's (Space, Delete and the lens keys too while its editor is open).
                 if (k == SilkKey.F7) { interfaceHidden = !interfaceHidden; Console.WriteLine(interfaceHidden ? "interface hidden (F7 shows it)" : "interface shown"); return; }
+                player.UiVisible = PanelLive() && !g.NoPopulation;
+                if (KeyMap.Map(k) is { } uiKey && player.UiKey(uiKey, keyboard.IsKeyPressed(SilkKey.ControlLeft) || keyboard.IsKeyPressed(SilkKey.ControlRight), shiftDown)) return;
                 bool ctrl = keyboard.IsKeyPressed(SilkKey.ControlLeft) || keyboard.IsKeyPressed(SilkKey.ControlRight);
                 if (Enum.TryParse(k.ToString(), out CinemaKey cinemaKey) && cinema.OnKey(cinemaKey, ctrl, shiftDown)) return;
                 // F9 is the game's quickload; the fps counter is on Ctrl+F9 (a modifier, so the key never reaches the input bindings).
@@ -109,11 +118,13 @@ sealed partial class GameHost
                 if (k is SilkKey.ShiftLeft or SilkKey.ShiftRight) shiftDown = false;
                 if (KeyMap.Map(k) is { } key) session.Input.SetKey(key, false);
             };
+            kb.KeyChar += (_, value) => player.UiText(value);
         }
         foreach (var mouse in silkInput.Mice)
         {
             mouse.MouseDown += (m, b) =>
             {
+                player.UiVisible = PanelLive() && !g.NoPopulation;
                 var at = Pixels(m.Position);
                 if (b == SilkButton.Left && PanelLive() && panel?.MouseDown(at) == true) { panelDrag = true; return; }
                 if (PanelLive() && panel?.Contains(at) == true) return;
@@ -141,11 +152,12 @@ sealed partial class GameHost
                 session.Input.SetMousePosition(p.X, p.Y);
                 if (cinema.MouseMove(Pixels(p))) { lastMouse = p; return; }
                 player.MouseMove(Pixels(p));
+                if (player.UiCapturesPointer) { lastMouse = p; return; }
                 if (PanelLive() && panel?.MouseMove(Pixels(p)) == true || panelDrag) { lastMouse = p; return; }
                 if (lastMouse is { } last) session.Input.AddMouseDelta(p.X - last.X, p.Y - last.Y);
                 lastMouse = p;
             };
-            mouse.Scroll += (m, wheel) => { if (!(PanelLive() && panel?.Contains(Pixels(m.Position)) == true) && !cinema.Contains(Pixels(m.Position))) session.Input.AddWheel(wheel.Y); };
+            mouse.Scroll += (m, wheel) => { if (!(PanelLive() && panel?.Contains(Pixels(m.Position)) == true) && !cinema.Contains(Pixels(m.Position)) && !player.UiScroll(Pixels(m.Position), wheel.Y) && !(PanelLive() && player.ContainsUi(Pixels(m.Position)))) session.Input.AddWheel(wheel.Y); };
         }
         Console.WriteLine(GameOptions.Usage[GameOptions.Usage.IndexOf("Keys:", StringComparison.Ordinal)..]);
         Console.WriteLine($"display   vsync {(vsync ? "on" : "off")}, frame limit {(vsync || fpsLimit <= 0 ? "none" : fpsLimit + " fps")}, control tick {session.Ticks.TickRate:0} Hz, world tick {SimulationClock.TickRate:0} per game second; settings in {config.Path}");
@@ -154,6 +166,14 @@ sealed partial class GameHost
         double last = 0, titleTimer = 0, cpuSum = 0;
         int frames = 0, totalFrames = 0;
         bool quit = false;
+        player.ScreenAction += e =>
+        {
+            if (e.Action == "save") saveRequestedFolder = Meitou.Data.Save.SaveCatalog.Folder(Meitou.Simulation.Saving.QuickSave.DefaultRoot, e.Text);
+            else if (e.Action == "load") loadRequestedFolder = e.Text;
+            else if (e.Action == "new-game") newGameRequested = e.Text;
+            else if (e.Widget == "OptionsButton" && panel is not null) panel.Visible = true;
+            else if (e.Widget == "ExitGameButton") quit = true;
+        };
         bool cinemaWasPlaying = false, cinemaWasRecording = false;
         session.Ticked += actions =>
         {
@@ -206,6 +226,7 @@ sealed partial class GameHost
             advanceTotal += Stopwatch.GetElapsedTime(a0).TotalMilliseconds;
             WorldNews();
             HandleSaves();   // a quicksave or quickload asked for by a key: between ticks, none in flight
+            HandleNewGame();
             animSeconds += frameDt;
             animClock = true;
             UpdateNav();
@@ -230,6 +251,7 @@ sealed partial class GameHost
                 bool shot = screenshotRequested, take = takeFile is not null;
                 // The game's interface (markers, HUD, panels, debug overlays): hidden by F7, the cinema's clean picture and in recorded frames.
                 bool ui = !interfaceHidden && !cinema.Clean && !take;
+                player.UiVisible = ui && !g.NoPopulation;
                 screenshotRequested = false;
                 if (ui && overlay is not null && !g.NoPopulation) DrawMarkers(overlay, size.X, size.Y);
                 if (ui && overlay is not null && IsSandbox) DrawSandbox(overlay, size.X, size.Y);
@@ -311,7 +333,9 @@ sealed partial class GameHost
             foreach (var toggle in panel.Toggles) config.Graphics[SwitchKey(toggle.Label)] = toggle.Get() ? 1 : 0;
         profiler?.Dispose();
         config.Bindings = session.Bindings.ToDictionary();
+        config.UiMode = player.UiMode;
         config.Save();
+        player.DisposeUi();
         overlay?.Dispose();
         gpu.Dispose();
         silkInput.Dispose();

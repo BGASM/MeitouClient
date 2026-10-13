@@ -48,10 +48,11 @@ public sealed unsafe class DebugOverlay : IDisposable
         in vec4 vColour;
         out vec4 fragColour;
         uniform sampler2D uAtlas;
+        uniform int uImage;
         void main()
         {
-            float a = vUv.x < 0.0 ? 1.0 : texture(uAtlas, vUv).r;
-            fragColour = vec4(vColour.rgb, vColour.a * a);
+            vec4 texel = vUv.x < 0.0 ? vec4(1.0) : texture(uAtlas, vUv);
+            fragColour = uImage != 0 ? vColour * texel : vec4(vColour.rgb, vColour.a * texel.r);
         }
         """;
 
@@ -61,6 +62,8 @@ public sealed unsafe class DebugOverlay : IDisposable
     readonly SampledTexture atlasSampled;
     readonly LegacyProgram program;
     readonly UniformHandle uScreen;
+    readonly UniformHandle uImage;
+    SampledTexture? imageBatch;
     readonly SamplerSlot samplerAtlas;
     readonly StbTrueType.stbtt_bakedchar[] glyphs = new StbTrueType.stbtt_bakedchar[CharCount];
     readonly List<float> batch = [];
@@ -96,6 +99,7 @@ public sealed unsafe class DebugOverlay : IDisposable
 
         program = LegacyProgram.Create(gpu, Vertex, Fragment, "debug overlay");
         uScreen = program.Uniform("uScreen");
+        uImage = program.Uniform("uImage");
         samplerAtlas = program.Sampler("uAtlas");
     }
 
@@ -104,6 +108,53 @@ public sealed unsafe class DebugOverlay : IDisposable
     {
         var path = FontCandidates.FirstOrDefault(File.Exists);
         return path is null ? null : new DebugOverlay(gpu, File.ReadAllBytes(path));
+    }
+
+    public static DebugOverlay FromFont(GpuContext gpu, string path) => new(gpu, File.ReadAllBytes(path));
+
+    public float MeasureText(string text, float scale = 1)
+    {
+        float width = 0;
+        foreach (char c in text)
+        {
+            int index = c - FirstChar;
+            if (index < 0 || index >= CharCount) index = '?' - FirstChar;
+            width += glyphs[index].xadvance * scale;
+        }
+        return width;
+    }
+
+    public string FitText(string text, float width, float scale = 1)
+    {
+        if (MeasureText(text, scale) <= width) return text;
+        const string suffix = "...";
+        float available = width - MeasureText(suffix, scale), used = 0;
+        if (available <= 0) return "";
+        int count = 0;
+        foreach (char c in text)
+        {
+            used += MeasureText(c.ToString(), scale);
+            if (used > available) break;
+            count++;
+        }
+        return text[..count] + suffix;
+    }
+
+    public IReadOnlyList<string> WrapText(string text, float width, float scale = 1)
+    {
+        var result = new List<string>();
+        foreach (string paragraph in text.ReplaceLineEndings("\n").Split('\n'))
+        {
+            string line = "";
+            foreach (string word in paragraph.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                string next = line.Length == 0 ? word : line + " " + word;
+                if (line.Length > 0 && MeasureText(next, scale) > width) { result.Add(FitText(line, width, scale)); line = word; }
+                else line = next;
+            }
+            result.Add(FitText(line, width, scale));
+        }
+        return result;
     }
 
     /// <summary>
@@ -207,33 +258,45 @@ public sealed unsafe class DebugOverlay : IDisposable
     public void Rect(float x0, float y0, float x1, float y1, Vector4 colour) => Quad(x0, y0, x1, y1, -1, 0, -1, 0, colour);
 
     /// <summary>Queues a line of text whose top is at <paramref name="top"/>; returns its width in pixels.</summary>
-    public float Text(string s, float x, float top, Vector4 colour)
+    public float Text(string s, float x, float top, Vector4 colour) => TextScaled(s, x, top, colour, 1);
+
+    public float TextScaled(string s, float x, float top, Vector4 colour, float scale)
     {
-        float start = x, baseline = top + PixelHeight;
+        if (imageBatch is not null) throw new InvalidOperationException("Flush UI images before queuing text.");
+        float start = x, baseline = top + PixelHeight * scale;
         foreach (char c in s)
         {
             int index = c - FirstChar;
             if (index < 0 || index >= CharCount) index = '?' - FirstChar;
             var g = glyphs[index];
-            float x0 = MathF.Round(x + g.xoff), y0 = MathF.Round(baseline + g.yoff);
-            Quad(x0, y0, x0 + (g.x1 - g.x0), y0 + (g.y1 - g.y0),
+            float x0 = MathF.Round(x + g.xoff * scale), y0 = MathF.Round(baseline + g.yoff * scale);
+            Quad(x0, y0, x0 + (g.x1 - g.x0) * scale, y0 + (g.y1 - g.y0) * scale,
                 g.x0 / (float)AtlasSize, g.y0 / (float)AtlasSize, g.x1 / (float)AtlasSize, g.y1 / (float)AtlasSize, colour);
-            x += g.xadvance;
+            x += g.xadvance * scale;
         }
         return x - start;
     }
 
     /// <summary>Draws everything queued since the last flush over <see cref="Target"/> (viewport <paramref name="width"/> × <paramref name="height"/>).</summary>
-    public void Flush(int width, int height)
+    public void Flush(int width, int height, Meitou.Data.Ui.UiRect? clip = null)
     {
-        if (batch.Count == 0 || width <= 0 || height <= 0 || Target is null) { batch.Clear(); return; }
+        if (batch.Count == 0 || width <= 0 || height <= 0 || Target is null) { batch.Clear(); imageBatch = null; return; }
         // A native segment of its own. It is begun first: the overlay is also drawn after a frame ended (a screenshot's key list), and the
         // segment opens the frame whose constants hold the vertices.
         var cmd = Gpu.BeginNative("debug overlay");
         var t = PassTargets.Of(Target, null).At(new Viewport(0, 0, width, height, 0, 1));
+        if (clip is { } rect)
+        {
+            var clipped = rect.Intersect(new(0, 0, width, height));
+            // The target keeps the renderer's lower-left convention; UI rectangles use top-left.
+            int left = (int)Math.Floor(clipped.X), right = (int)Math.Ceiling(clipped.X + clipped.Width);
+            int top = (int)Math.Floor(clipped.Y), bottom = (int)Math.Ceiling(clipped.Y + clipped.Height);
+            t = t with { Scissor = new Rect2D(new Offset2D(left, height - bottom), new Extent2D((uint)(right - left), (uint)(bottom - top))) };
+        }
         cmd.BeginRendering(t.Rendering);
         program.Set(uScreen, (float)width, height);
-        program.Bind(samplerAtlas, atlasSampled);
+        program.Set(uImage, imageBatch is null ? 0 : 1);
+        program.Bind(samplerAtlas, imageBatch ?? atlasSampled);
         var floats = CollectionsMarshal.AsSpan(batch);
         var vertices = Gpu.Frame.Constants.Allocate((ulong)(floats.Length * 4), 16);
         MemoryMarshal.AsBytes(floats).CopyTo(new Span<byte>(vertices.Pointer, floats.Length * 4));
@@ -254,6 +317,16 @@ public sealed unsafe class DebugOverlay : IDisposable
         cmd.EndRendering();
         Gpu.EndNative(cmd);
         batch.Clear();
+        imageBatch = null;
+    }
+
+    /// <summary>Queues a texture rectangle. Flush before switching between image and font batches.</summary>
+    public void Image(SampledTexture texture, Vector4 destination, Vector4 uv, Vector4 colour)
+    {
+        if (batch.Count > 0 && (imageBatch is null || imageBatch.Value != texture))
+            throw new InvalidOperationException("Flush before switching overlay textures.");
+        imageBatch = texture;
+        Quad(destination.X, destination.Y, destination.Z, destination.W, uv.X, uv.Y, uv.Z, uv.W, colour);
     }
 
     /// <summary>Queues a solid triangle (pixels, top-left origin).</summary>

@@ -17,6 +17,7 @@ namespace Meitou.Game;
 sealed partial class GameHost
 {
     bool quickSaveRequested, quickLoadRequested;
+    string? saveRequestedFolder, loadRequestedFolder, readingFolder;
     Task? saveWrite;
     Task<SaveGame>? saveRead;
     // What the world was loaded from: the next capture carries the save's records the world does not model through (null for a world that started new).
@@ -61,6 +62,8 @@ sealed partial class GameHost
         while (saveNotices.TryDequeue(out var notice)) player.Notice(notice.Text, notice.Error);
         if (quickSaveRequested) { quickSaveRequested = false; QuickSaveNow(); }
         if (quickLoadRequested) { quickLoadRequested = false; BeginQuickLoad(); }
+        if (saveRequestedFolder is { } to) { saveRequestedFolder = null; QuickSaveNow(to); }
+        if (loadRequestedFolder is { } sourceFolder) { loadRequestedFolder = null; BeginQuickLoad(sourceFolder); }
         if (saveRead is { IsCompleted: true } read) { saveRead = null; FinishQuickLoad(read); }
         if (preparedBase is null && SavesAvailable(out _) && session.World.Player.Exists)
         {
@@ -78,7 +81,7 @@ sealed partial class GameHost
 
     bool Busy() => saveWrite is { IsCompleted: false } || saveRead is not null;
 
-    void QuickSaveNow()
+    void QuickSaveNow(string? destination = null)
     {
         if (!SavesAvailable(out string reason)) { player.Notice(reason, true); return; }
         var world = session.World;
@@ -101,7 +104,7 @@ sealed partial class GameHost
             return;
         }
         double captureMs = watch.Elapsed.TotalMilliseconds;
-        string folder = QuickSave.Folder();
+        string folder = destination ?? QuickSave.Folder();
         saveWrite = Task.Run(() =>
         {
             try
@@ -119,12 +122,13 @@ sealed partial class GameHost
         });
     }
 
-    void BeginQuickLoad()
+    void BeginQuickLoad(string? source = null)
     {
         if (!SavesAvailable(out string reason)) { player.Notice(reason, true); return; }
         if (Busy()) { player.Notice("Save or load still in progress", true); return; }
-        string folder = QuickSave.Folder();
-        if (!File.Exists(Path.Combine(folder, SaveFolder.QuickSaveName))) { player.Notice("No quicksave yet (F5 saves)", true); return; }
+        string folder = source ?? QuickSave.Folder();
+        if (!File.Exists(Path.Combine(folder, SaveFolder.QuickSaveName))) { player.Notice(source is null ? "No quicksave yet (F5 saves)" : "Save is no longer available", true); return; }
+        readingFolder = folder;
         saveRead = Task.Run(() => SaveGame.Load(folder));
     }
 
@@ -180,7 +184,8 @@ sealed partial class GameHost
         indexedFor = null;
         previousById.Clear();
         player.Reset();
-        Console.WriteLine($"load      {QuickSave.Folder()}: {loaded.PlayerPlatoons.Sum(p => p.Squad.Members.Count)} player character(s), {loaded.RoamingPlatoons.Count} roaming platoon(s), day {loaded.Clock.Day} {loaded.Clock.Hour:00}:{loaded.Clock.Minute:00}, in {watch.ElapsedMilliseconds} ms");
+        player.CloseFrontend();
+        Console.WriteLine($"load      {readingFolder}: {loaded.PlayerPlatoons.Sum(p => p.Squad.Members.Count)} player character(s), {loaded.RoamingPlatoons.Count} roaming platoon(s), day {loaded.Clock.Day} {loaded.Clock.Hour:00}:{loaded.Clock.Minute:00}, in {watch.ElapsedMilliseconds} ms");
         player.Notice("Loaded");
     }
 

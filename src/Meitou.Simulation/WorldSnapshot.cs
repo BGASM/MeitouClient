@@ -14,6 +14,9 @@ public enum CareKind { None, Treating, Resting }
 /// characters also whether first aid has anything to bandage (<see cref="NeedsAid"/>), what the character is doing (<see cref="Care"/>) and its medic job switch.
 /// </summary>
 public readonly record struct BodyStatus(float Blood, float WorstPart, float Hunger, bool Unconscious, bool Dead, bool NeedsAid = false, CareKind Care = CareKind.None, bool MedicJob = false, bool RescueJob = false);
+public sealed record HealthPartView(string Id, string Name, float Flesh, float Stun, float Bandage, float Rig, float Maximum, bool Robotic);
+public sealed record InventoryItemView(int Index, string Record, string Name, string Section, int X, int Y, int Width, int Height, int Quantity, float Weight, float Quality);
+public sealed record InventoryView(int Width, int Height, int BagWidth, int BagHeight, IReadOnlyList<InventoryItemView> Items);
 
 /// <summary>A character as the renderer needs it after one tick; <c>Appearance</c> is null for one that is simulated but has nothing to draw (a failed build, a world without looks): the host shows a marker (docs/simulation.md, "Threading", step 8).</summary>
 public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appearance, Vector3 Position, float Yaw, IReadOnlyList<AnimationLayer> Animations)
@@ -37,6 +40,9 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     public IReadOnlyList<Crime.BountyLine> Bounties { get; init; } = [];
     /// <summary>A selected character's trained stats (the host formats them); null for the others and for a character without stats.</summary>
     public SkillSummary? Skills { get; init; }
+    public IReadOnlyList<float> AllSkills { get; init; } = [];
+    public IReadOnlyList<HealthPartView> HealthParts { get; init; } = [];
+    public InventoryView? ItemGrid { get; init; }
     /// <summary>
     /// The character carrying this one (none when not carried). A carried body has its carrier's position and facing; the renderer should hang it from the carrier's
     /// <see cref="AttachBone"/> (the original attaches it there) with the <c>carry me</c> pose.

@@ -906,7 +906,8 @@ static class WorldFrame
 
     public static SettingsPanel CreateSettingsPanel(DebugOverlay ui, Gpu g, WorldRenderOptions r, Func<float>? getHour = null, Action<float>? setHour = null,
         Func<bool>? getVSync = null, Action<bool>? setVSync = null, IReadOnlyList<Enhancement>? switches = null,
-        Func<float>? getTimeSpeed = null, Action<float>? setTimeSpeed = null, Func<bool>? getFullScreen = null, Action<bool>? setFullScreen = null)
+        Func<float>? getTimeSpeed = null, Action<float>? setTimeSpeed = null, Func<bool>? getFullScreen = null, Action<bool>? setFullScreen = null,
+        IReadOnlyList<PanelChoice>? extraChoices = null)
     {
         var sliders = new List<Slider>();
         // The viewer's time of day (the `--time` option and the , / . keys), to the minute. The game passes none: its clock runs on its own.
@@ -1048,7 +1049,7 @@ static class WorldFrame
                     ? $"{Meitou.Data.Textures.TextureQuality.Labels[level]} (terrain at start)" : Meitou.Data.Textures.TextureQuality.Labels[level]),
         };
         // The camera region's weathers of its season (the current one marked): a click starts one now.
-        var choices = new List<PanelChoice>();
+        var choices = new List<PanelChoice>(extraChoices ?? []);
         if (g.Weather is { } weather) choices.Add(new PanelChoice(weather.ChoiceLabel, weather.Choices, weather.Current, weather.Choose));
         return new SettingsPanel(ui, "Settings   (Tab hides this)", sliders, toggles, "Meitou improvements (unticked: as the game)", actions, side, choices);
     }
