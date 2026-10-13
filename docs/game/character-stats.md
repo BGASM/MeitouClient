@@ -762,6 +762,24 @@ Scorchlander, Shek, Garru, Leviathan and Skeleton rows). Engine choices where th
   new maximum. Only arms' entries count for arm stats, legs' also for stealth, athletics and swimming.
 - **Health fractions** used by the stat multiplier are clamped to [0, 1]; a race without a head part has Hd = 1; the pain value P is held at 1 (no penalty).
 - **Not built:** the new-game option defaults (1 = neutral), `Care` beds beyond the two multipliers, item nutrition, the dodge skill's leg term, stealth XP,
+
+**First aid, resting and XP on the move in play** (2026-10-13, `Meitou.Simulation.FirstAid.FirstAidSystem`, `BodySystem`; the section "First aid, medkits and robot repair" above is the source of the formulas, labels as there):
+
+- **Used as documented (Observed):** bandaging rate `lerp(1, 15, min(skill, kit quality) x 0.01) x medic speed mult` (x `robot medic speed mult` for a robot kit), capped so h + b <= M per part; an ordinary kit (`item function` 1) treats organic
+  parts only, a robot kit (12) robotic ones only; kit drain `lerp(medkit drain 99, medkit drain 1, (100 - skill) / 100) x dt` (x0.33 robot); the skill is the patient race's `heal stat` of the medic; Medic XP through `XpService.Medic` while treating;
+  a medic with no working arm does not treat (`hasOneWorkingArm`, ai-tasks.md).
+- **Engine choices:** (1) `dt` of treatment, drain and Medic XP is **game seconds** (the unit is **Unknown**): with game hours a 100 HP part would take 2 to 33 game hours to bandage and a 150 to 1000 charge kit would last for ever,
+  while seconds give a few seconds to half a minute per wound, a Basic kit (150) about 75 s of beginner use; it is not scaled by `BodyTimeScale`. (2) The kit's quality is the record's `quality` (5 Basic, 40 Standard, 100 Advanced, 50 Skeleton
+  Repair Kit), its `remaining` the instance's `Charges` (the record's `charges`: 150, 400, 1000, 500); a used-up kit is removed. (3) The skill is the stat times the stat multiplier of hunger and injuries (`StatMultiplier`). (4) Bandaging does not
+  touch the wound list (the doc gives first aid only the bandaged pool; whether it also stops bleeding is **Unknown**). (5) A patient needs aid while the untreated damage a kit type can bandage is above 0.5 HP; stun is not treated. (6) Reach 14
+  units; the medic and the patient must be nearly still (a knocked-out patient always is), the original's `targetStandingStill`. (7) Kits: own best, else a squad mate's within 60 units. (8) The original's other preconditions (`!target swimming`,
+  `!hasWeaponEquipped`) are not tested; ordering a treatment is refused while the medic fights. (9) NPCs with a kit treat hurt squad mates by themselves, the player's characters only with the medic job.
+- **Resting** (`Character+0x2f8 == 1`): the `Rest` task passes `MedicalContext.Resting`, which the tick already honoured: blood recovery x `resting heal rate mult` (2), hunger at `bed hunger rate` (0.33). Test: `Resting_doubles_the_blood_recovery...`.
+  Not done: the bed objects (kinds 6 and 0x19: degeneration 0, the part-heal multiplier), the twice-as-fast healing of "state 2", the repair bed's wear repair (`MedicalContext.RepairRate`): buildings have no world state.
+- **XP on the move** (`FUN_1408c6660`, **Observed**): `AthleticsFromRunning` with the encumbrance factor and the speed fraction of the maximum (x1.5 over 80 %), applied while the character moves faster than its race walk speed + 1 (**Unknown** whether walking trains);
+  `StrengthFromCarrying` while it moves with a factor below 1. Swimming XP and stealth XP are not built.
+- **Data:** a CHARACTER's kits come from its `inventory` list (first value = count), as for any item. Of the base-game starts the Wanderer, Rock Bottom, Hive Exile and Empire Citizen squads have none; Cannibal Hunters (a Standard kit each), The Holy Sword,
+  Son of a Captain and The Freedom Seekers do. Many NPC records list a kit as `{0, 100}` (the first value 0, so no kit by the rule above); the meaning of the second value is **Unknown**.
   the legacy STATS keys (`endurance`, `xp`...), and the situational hunger factors beyond machine use.
 
 ## Implementation outline

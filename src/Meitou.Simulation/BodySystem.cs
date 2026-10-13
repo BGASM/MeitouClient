@@ -1,5 +1,6 @@
 using System.Numerics;
 using Meitou.Data.Gameplay;
+using Meitou.Data.Gameplay.Bodies;
 using Meitou.Simulation.Bodies;
 
 namespace Meitou.Simulation;
@@ -27,6 +28,7 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
     public BodyOptions Options { get; } = options ?? BodyOptions.Default;
     /// <summary>The <see cref="MedicalContext.BodyTimeScale"/> every character gets (default 1: the documented rates).</summary>
     public float BodyTimeScale { get; } = bodyTimeScale;
+    readonly XpService xp = new(constants, options ?? BodyOptions.Default);
 
     public void Act(World world, Partition part, EffectBuffer effects)
     {
@@ -58,11 +60,15 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
                 Seed = world.Seed,
                 CharacterKey = Rng.Key(table.IdOf(i)),
                 BodyTimeScale = BodyTimeScale,
+                Resting = n.Task == (byte)CharacterTask.Rest,
             };
+            // The combat system's own context (hits) reads the encumbrance from the fighter, so it matches the one used here.
+            if (cold.Fighter is { } fighter) fighter.EncumbranceFactor = encumbrance;
             events ??= [];
             events.Clear();
             medical.Tick(HoursPerTick, ctx, events);
             n.MaxSpeed = Speed.Run(race, stats, medical, encumbrance);
+            TrainOnTheMove(stats, race, medical, in n, encumbrance, world.TickSeconds);
             n.Health = Math.Clamp(medical.Blood / MathF.Max(MedicalState.BloodCapacity(race, stats.Strength), 1) * 100, 0, 100);
             foreach (var e in events)
             {
@@ -73,6 +79,20 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// XP outside combat (character-stats.md "Levelling"; the movement tick <c>FUN_1408c6660</c>): athletics while running, strength while carrying a load. A character counts as
+    /// running when it moves faster than its race walk speed (+1); whether walking trains too is <b>Unknown</b> (the doc names running). Strength rises only when the load
+    /// encumbers it, and only while it moves. The speed the stat sees is the velocity the movement system left this tick.
+    /// </summary>
+    void TrainOnTheMove(CharacterStats stats, RaceData race, MedicalState medical, in CharacterHot n, float encumbrance, float dt)
+    {
+        if (medical.Incapacitated) return;
+        float speed = MathF.Sqrt(n.Velocity.X * n.Velocity.X + n.Velocity.Z * n.Velocity.Z);
+        if (speed < 1) return;
+        if (speed > n.WalkSpeed + 1) xp.AthleticsFromRunning(stats, race, encumbrance, speed / MathF.Max(n.MaxSpeed, 1), dt);
+        if (encumbrance < 1) xp.StrengthFromCarrying(stats, race, encumbrance, dt);
     }
 
     public void SlowWorld(World world)

@@ -93,6 +93,12 @@ public sealed class CharacterCold
     public bool InCombat { get; set; }
     /// <summary>Weapon and worn armour (track F, docs/simulation.md "Combat").</summary>
     public Meitou.Simulation.Combat.Fighter? Fighter { get; set; }
+    /// <summary>The patient of the <see cref="CharacterTask.Treat"/> task (itself for self-treatment); meaningful only while the task is set (<see cref="FirstAid.FirstAidSystem"/>).</summary>
+    public CharacterId TreatTarget { get; set; } = CharacterId.None;
+    /// <summary>The task a self-started treatment goes back to when it ends (<see cref="CharacterTask.Wander"/>, <see cref="CharacterTask.Follow"/> or Idle).</summary>
+    public CharacterTask ResumeTask { get; set; }
+    /// <summary>The medic job (the original's <c>medic</c> toggle): an idle character with a kit treats hurt squad mates by itself. NPCs with a kit do so without it (an engine rule until the AI).</summary>
+    public bool MedicJob { get; set; }
 }
 
 /// <summary>
@@ -264,6 +270,9 @@ public sealed class CharacterTable
             hasher.Add(k.InCombat);
             if (k.Animation is { } anim) anim.Hash(ref hasher); else hasher.Add(-1);
             hasher.Add(k.Name.Length);
+            // First aid state adds to the hash only while it is set, so worlds that never use it hash as before.
+            if (c.Task == (byte)CharacterTask.Treat) { hasher.Add(k.TreatTarget); hasher.Add((int)k.ResumeTask); }
+            if (k.MedicJob) hasher.Add(true);
         }
         hasher.Add(free.Count);
         foreach (int slot in free) hasher.Add(slot);

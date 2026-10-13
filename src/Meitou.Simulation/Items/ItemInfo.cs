@@ -19,6 +19,11 @@ public sealed record ItemInfo(string Id, string Name, FcsRecordType Type)
     /// <summary>The record's <c>charges</c> (default 1).</summary>
     public float Charges { get; init; } = 1;
     public int Value { get; init; }
+    /// <summary>
+    /// The record's <c>quality</c> (1 to 100). For a first aid kit this is the quality that caps the medic's skill in the bandaging rate (character-stats.md "First aid, medkits and robot
+    /// repair"). It is read from the record when needed and is not copied to <see cref="ItemInstance.Quality"/>, which is the clothing grade.
+    /// </summary>
+    public float Quality { get; init; }
     /// <summary>A CONTAINER's <c>storage size width</c> / <c>height</c> (cells of its contents grid; 0 for other items).</summary>
     public int StorageWidth { get; init; }
     public int StorageHeight { get; init; }
@@ -31,6 +36,11 @@ public sealed record ItemInfo(string Id, string Name, FcsRecordType Type)
     /// </summary>
     public bool IsFood => Type == FcsRecordType.ITEM && Function == 3;
 
+    /// <summary>An ordinary first aid kit (<c>item function</c> 1): bandages organic body parts (<b>Observed</b>, character-stats.md).</summary>
+    public const int FirstAidKitFunction = 1;
+    /// <summary>A robot repair kit (<c>item function</c> 12): repairs robotic parts.</summary>
+    public const int RobotKitFunction = 12;
+
     public static ItemInfo From(GameRecord r) => new(r.StringId, r.Name, r.Type)
     {
         Weight = r.GetFloat("weight kg"),
@@ -40,6 +50,7 @@ public sealed record ItemInfo(string Id, string Name, FcsRecordType Type)
         Function = r.GetInt("item function"),
         Charges = r.GetFloat("charges", 1),
         Value = r.GetInt("value"),
+        Quality = r.GetFloat("quality"),
         StorageWidth = r.GetInt("storage size width"),
         StorageHeight = r.GetInt("storage size height"),
         EncumbranceEffect = r.Type == FcsRecordType.CONTAINER ? r.GetFloat("encumbrance effect", 1) : 1,

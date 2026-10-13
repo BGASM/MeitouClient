@@ -202,6 +202,19 @@ Meitou's host binds the same two keys (engine choice: `InputAction.QuickSave` / 
 ([simulation.md](../simulation.md#quicksave-and-quickload)), not to the original's `kenshi\save\quicksave`. The host's own debug fps counter was on F9 and moved to Ctrl+F9
 (F10 to F12 are unchanged). **Observed** only that the action table above lists F5 / F9 for the two events.
 
+Meitou's first aid and rest bindings (2026-10-13, `PlayerInterface`, engine choices; simulation side in [simulation.md](../simulation.md#bodies)). The original's own: `medic` (NUM7, event 0x1f) and `rescue` (NUM8, 0x20) are
+orders-panel toggles forwarded to FUN_1407226e0 (the Medic and Rescue buttons of the panel, [ui-screens.md](ui-screens.md#4-hud-maingui)), i.e. job switches, not targeted orders (**Observed**); the targeted order is the context menu
+verb 25 "First Aid" (pointer mode 1 `med`, section 7). Neither exists here: the numpad belongs to the cinema camera (`Cinema`, docs/viewer.md) and there is no context menu or orders panel. So:
+
+| Input | Effect |
+|---|---|
+| right click on one of the player's own characters with something to bandage | the selected characters treat it (`TreatOrder`); a lone selected character on itself treats itself |
+| `H` | medic job on / off for the selection (the original's `medic` toggle: idle characters with a kit treat hurt squad mates by themselves) |
+| `L` | the selection rests (sits down; **no binding in the original**); any move order or `R` ends it |
+
+`H` and `L` were unbound (not in the action table above, not used by the camera, the free camera (R / F), the sandbox (Z X C G Y P [ ]) or the cinema); they are ignored in the free camera.
+Rescue (NUM8, carrying a downed ally) and the orders panel are not built. Not rebindable yet (the keys are read in `PlayerInterface.Key` like `R` and the digits).
+
 Screenshot (event 0x10) is handled in frameEnded: hides the camera grid widget for two frames and writes
 `_screens/screenshot_<N>`; count and multiplier come from `screens.cfg` (**Observed**).
 

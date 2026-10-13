@@ -118,6 +118,11 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
 
     /// <summary>The clip a knocked-out or dead character lies in: <c>sleeponfloor</c>, -1 when the data has none.</summary>
     int LyingClip { get; } = library.IndexOf("sleeponfloor");
+    /// <summary>The whole-body clips held while a character bandages a patient (<c>medic</c>) or rests (<c>sitting idle</c>); -1 when the data has none. A held clip like the lying one (engine choice).</summary>
+    int TreatingClip { get; } = library.IndexOf("medic");
+    int RestingClip { get; } = library.IndexOf("sitting idle");
+
+    int HeldClip(CharacterTask task) => task switch { CharacterTask.Treat => TreatingClip, CharacterTask.Rest => RestingClip, _ => -1 };
     // The fall (a stand-in for the ragdoll) and getting up.
     readonly int fall = library.IndexOfAny("Dodge back fall"), getUp = library.IndexOf("standing up 3");
 
@@ -143,7 +148,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             if (cold.InCombat) speed = v.X * MathF.Sin(next[i].Yaw) + v.Z * MathF.Cos(next[i].Yaw);
             speed = a.SmoothSpeed(speed, CharacterAnimation.WindowFor(dt));
             var id = table.IdOf(i);
-            var root = Update(a, cold, speed, dt, world.Seed, Rng.Key(id), world.Tick, wantedLower, wantedUpper, ViewOf(id, world.Tick, cold));
+            var root = Update(a, cold, speed, dt, world.Seed, Rng.Key(id), world.Tick, wantedLower, wantedUpper, ViewOf(id, world.Tick, cold), (CharacterTask)next[i].Task);
             if (root != Vector2.Zero) Relocate(world, i, ref next[i], root);
         }
     }
@@ -212,7 +217,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     /// combat). Returns how far its relocating clips moved it this tick, in model space (X, Z; Z forward), weighted by their weights.
     /// </summary>
     public Vector2 Update(CharacterAnimation a, CharacterCold cold, float speed, float dt, ulong seed, ulong key, long tick,
-        List<(int Index, float Weight)>? lowerScratch = null, List<(int Index, float Weight)>? upperScratch = null, CombatView? combatView = null)
+        List<(int Index, float Weight)>? lowerScratch = null, List<(int Index, float Weight)>? upperScratch = null, CombatView? combatView = null, CharacterTask task = CharacterTask.Idle)
     {
         var fight = combatView ?? CombatView.None;
         var lower = lowerScratch ?? [];
@@ -274,6 +279,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             if (!moving && !(stance.Combat && lower.Count > 0)) lower.Clear();
             legs = lower.Count;
             if (moving) wanted.AddRange(upper);
+            else if (technique < 0 && HeldClip(task) is >= 0 and var held) { wanted.Add((held, 1)); a.Idle = -1; }
             else if (technique < 0) StandingIdle(a, stance, lower.Count > 0, dt, seed, key, tick, wanted);
         }
         if (technique >= 0)

@@ -25,7 +25,7 @@ Each stage ends with tests and something the owner can run.
 | **4. Characters drawn** | Native character renderer | Done ([character-renderer.md](character-renderer.md)); animation layers from [Animation](#animation) |
 | **5. Navmesh** | Collision reader, our own generator with the seed prune, path queries off the tick | Done in three passes plus the game wiring ([Navmesh](#navmesh)); gaps listed there |
 | **6. Player** | New game from NEW_GAME_STARTOFF, selection, move orders, minimal HUD | Done ([Player](#player)); formation and queued orders included |
-| **7. Bodies** | Stats and XP, hunger, blood, body parts, KO and death | Done and wired into `World` ([Bodies](#bodies)); the time scale is open |
+| **7. Bodies** | Stats and XP, hunger, blood, body parts, KO and death | Done and wired into `World` ([Bodies](#bodies)); first aid, resting and XP on the move are in play (2026-10-13, `FirstAidSystem`); beds and the time scale are open |
 | **8. Combat** | Melee per [combat.md](game/combat.md); ranged later | Melee done and wired ([Combat](#combat)); ranged, turrets and attack slots not built |
 | **9. AI proper** | Packages, blackboard, scoring and planner ([ai.md](game/ai.md)), off-screen squads | Not started (gate: towns run their daily routines, squads travel off screen). `PursuitSystem`, `RetaliationSystem` and the roaming squads are engine stand-ins, not the original's AI |
 | **10. Saves** | Read and write the world state ([save.md](formats/save.md)) | API done ([Saves](#saves)); the game host quicksaves (F5) and quickloads (F9) the player's squad into its own slot ([Quicksave and quickload](#quicksave-and-quickload)); no save menu, no loading of the original game's saves in play |
@@ -128,7 +128,7 @@ slot, system, sequence), none of which depends on the partitioning. A source emi
 so the order must be a function of the state alone.
 
 **Commands.** `SimCommand`s are stamped with the tick they apply at: `FocusCommand`, `MoveOrder`, `RepathCommand`, `SelectCommand`,
-`StopCommand` (`Commands.cs`) and `AttackOrder` (`Combat/CombatTypes.cs`). The host enqueues them between ticks at `World.Tick`.
+`StopCommand` (`Commands.cs`), `AttackOrder` (`Combat/CombatTypes.cs`) and `TreatOrder`, `RestOrder`, `MedicJobCommand` (`FirstAid/FirstAidTypes.cs`). The host enqueues them between ticks at `World.Tick`.
 `RetaliationSystem` enqueues `AttackOrder`s for the next tick from inside `SlowWorld` (an open item, [below](#open-questions-and-known-gaps)).
 
 **Randomness.** Stateless: `Rng.Hash(world seed, entity key, RngPurpose, counter)` with SplitMix64 mixing; the entity key of a character is
@@ -143,14 +143,14 @@ The original's own random sequence is not reproduced (open for the character gen
 slot in order (alive, generation, and for live ones every `CharacterHot` field, then faction, spawn tick, squad, role, formation offset, path
 length and request, `IsPlayer`, the order queue, `DrawnWeapon`, stats and medical state through `BodyHash`, the inventory, provision and death
 ticks, `InCombat`, the animation layers and the name's length) and the free list, then the squad and platoon registries, the player state and every system that implements `IStateHashed` (the combat slots).
-Floats go in by their bits (-0 as 0). It is a test and debugging tool, not run in play.
+Floats go in by their bits (-0 as 0). The first aid state (`TreatTarget` and `ResumeTask` while the task is `Treat`, `MedicJob` when on) goes in only while it is set, so a world that never uses first aid hashes as it did before it existed. It is a test and debugging tool, not run in play.
 
 **Determinism tests** (`tests/Meitou.Tests/Simulation`). A dummy workload (`WanderSystem` in `WanderWorkload.cs`: seeded wandering,
 separation over the grid, a synthetic ground that dips under the water, blows on the nearest neighbour, births and deaths that reuse slots) and
 the real systems on a synthetic town (`SyntheticTown`) and on The Hub of the install run at 1, 4 and 16 threads; the hashes at the checkpoints
-agree, two runs agree, another seed differs. `GoldenHashTests` pins the hashes of eight scripted scenarios (wander, player, roaming, bodies,
-fight, duels, and two worlds cut into many partitions with `MinPartitionSize` 4), so a refactor meant to change nothing is checked to change
-nothing; a change of behaviour that is meant updates the numbers in the same commit.
+agree, two runs agree, another seed differs. `GoldenHashTests` pins the hashes of nine scripted scenarios (wander, player, roaming, bodies,
+fight, duels, two worlds cut into many partitions with `MinPartitionSize` 4, and a first aid and rest script on hand-made characters), so a refactor meant to change nothing is checked to change
+nothing; a change of behaviour that is meant updates the numbers in the same commit. **Re-pinned 2026-10-13** (`bodies` from its sixth checkpoint, `fight` from its second, `town-parts` from its second): the XP on the move of `BodySystem` (athletics while running, strength under a load) raises stats a little, which feeds the speed chain; the first aid system, the rest flag and the fighter encumbrance moved nothing there (switching only the XP off made all eight old pins match again), and the new `first-aid` scenario agrees at 1, 4 and 16 threads before being pinned.
 
 **Asynchronous services** (paths, navmesh building, building a town's characters) run on their own threads with request and result
 queues. In play a result is taken in at the first tick after it is ready, so timing can differ between runs. In the determinism tests they
@@ -210,15 +210,16 @@ result (the golden hashes pin it):
 | 2 | `PlayerSystem` | Inputs, SlowWorld | Selection and stop; prunes the selection |
 | 3 | `PursuitSystem` | Schedule | Paths for attackers towards their targets |
 | 4 | `MovementSystem` | Inputs, Schedule, Think, Move | Orders, paths, tasks, steering |
-| 5 | `BodySystem` | Act, SlowWorld | Medical tick, top speed, down characters; removes corpses |
-| 6 | `CombatSystem` | Inputs, Schedule, Move, Act, Apply, SlowWorld | Fights (`Schedule` resyncs its slots with the table) |
-| 7 | `AnimationSystem` | Act | Animation layers |
-| 8 | `FeedSystem` | SlowWorld | Eating |
-| 9 | `RetaliationSystem` | SlowWorld | Attacked characters fight back |
+| 5 | `FirstAidSystem` | Inputs, Schedule, Act, Apply, SlowWorld | First aid and resting: treat / rest / medic job orders, the walk to the patient, the bandaging, NPCs treating by themselves ([Bodies](#bodies)) |
+| 6 | `BodySystem` | Act, SlowWorld | Medical tick (resting from the `Rest` task), top speed, XP on the move, the fighter's encumbrance, down characters; removes corpses |
+| 7 | `CombatSystem` | Inputs, Schedule, Move, Act, Apply, SlowWorld | Fights (`Schedule` resyncs its slots with the table) |
+| 8 | `AnimationSystem` | Act | Animation layers |
+| 9 | `FeedSystem` | SlowWorld | Eating |
+| 10 | `RetaliationSystem` | SlowWorld | Attacked characters fight back |
 
 The rules: **population first** (it spawns in `SlowWorld`, so later systems see its characters); **player before movement** (a
 `MoveOrder` without ids reads the selection the player system just changed); **pursuit before movement** (pursuit raises `NeedPath` in
-`Schedule` and movement answers the same tick); **body before combat** (the body system ticks the medical state, combat runs with
+`Schedule` and movement answers the same tick); **first aid after movement, before body** (2026-10-13: a move order is the movement system's and sets the task, so it replaces a treatment or a rest; the treatment is applied in the serial commit, after every `Act` of the tick including the body system's medical tick; first aid reads the patient only in its own `Act` barrier, where nothing writes it); **body before combat** (the body system ticks the medical state, combat runs with
 `TickMedical` off and reads the result); **combat before animation and retaliation** (combat swaps its read and write arrays at the end of
 its `SlowWorld`: a system after it sees the new combat state, one before it the old); **feed after body**; **retaliation last** (it queues
 orders for the next tick after combat swapped). The game's `CombatOptions` are `SelfApproach = false, TickMedical = false`.
@@ -299,6 +300,9 @@ orders for the next tick after combat swapped). The game's `CombatOptions` are `
 | right click | on a living other character: attack it; else a `MoveOrder` to the ground under the cursor (ray marched against the CPU heightmap, then bisected); shift queues |
 | `1`..`9` / `` ` `` | select the n-th player character / the whole squad |
 | `R` | stop: `StopCommand` (combat disengages, the player system stops); not in the free camera, where `R` is up |
+| right click on one of your own hurt characters (blood or a part below full; `BodyStatus.NeedsAid`) | the selection treats it with a first aid kit (`TreatOrder`); a lone selected character on itself treats itself. The original's verb is "First Aid" in the hold-right-button context menu (not built); engine choice |
+| `H` | switches the medic job on or off for the selection (`MedicJobCommand`; the original's `medic` toggle is NUM7, which the cinema camera owns here); the HUD shows `medic job (H)` |
+| `L` | the selection sits down and rests (`RestOrder`; no binding in the original, engine choice); a move or stop order ends it |
 
 Right mouse is the command button, so **orbit is the middle button only**; saved configs that bound `Mouse:Right` to orbit lose that entry on
 load. The HUD (top left, `DebugOverlay` text and quads): game clock and day, money, clickable speed buttons (pause, 1x, 2x, 5x, the active one
@@ -435,6 +439,8 @@ The original's rules (decompilation) are in [animation.md](animation.md#run-time
 - **Down and up.** A character that goes down falls with the `Dodge back fall` technique's clip and lies in `sleeponfloor` (the original
   switches to its ragdoll: engine stand-in); coming round plays `standing up 3` to 86 % (**Verified**), cut short by walking or a technique.
 - **Stance.** `CharacterCold.DrawnWeapon` and `InCombat` (set by combat) select the combat-mode and armed variants; the leg ramps use the lowest
+- **Care** (engine choice, 2026-10-13). A standing character with the `Treat` task holds the whole-body `medic` clip (`is action`, loops), one with the `Rest` task `sitting idle`, through the same held-clip branch as the lying clip
+  (`AnimationSystem.HeldClip`); walking, a technique or going down replaces them. There is no walk-to-kneel blend and the clip is not matched to the patient's position.
   `Fraction x 100` of each side's leg parts.
 - **Host.** Clip time and weight are interpolated between the two snapshots (a wrapped clip time shows the new value).
 - **Not made:** strafing (`strafe lower` by the sideways speed), overlays (breathing, wound `pain anim`s, carrying), `head turning`, other
@@ -466,8 +472,25 @@ Formulas, constants, units and the engine choices of the body code are in
   `Treat` and `KitDrain`. `CharacterStats` and `MedicalState` hold no references to shared mutable state, so characters tick in parallel.
 - **Save keys.** `MedicalState.WriteSave` / `ReadSave` and `CharacterStats.WriteSave` / `ReadSave` use the keys of [save.md](formats/save.md)
   (`blood`, `bleeding`, `hung`, `fed`, `KO`, `flesh<k>`..., `strength`, `toughness2`...); limb states and wounds have no key there yet.
-- **Not done.** Resting and beds (`MedicalContext.Resting`), the shallow-water speed cap, healing by first aid in play, XP outside combat,
-  limb items for severed parts.
+- **First aid** (`FirstAid/FirstAidSystem.cs`, 2026-10-13; facts in [character-stats.md](game/character-stats.md#first-aid-medkits-and-robot-repair), choices in its "As built"). Tasks
+  `CharacterTask.Treat` (with `CharacterCold.TreatTarget`) and `Rest`. **Orders:** `TreatOrder(medics, patient)` (empty list = the selection; a patient among the medics treats itself),
+  `RestOrder`, `MedicJobCommand`. A move, stop or attack order replaces the task, so it ends a treatment or a rest; a medic that is knocked out or fighting ignores the orders.
+  **Walking:** `Schedule` is the pursuit system's pattern (a path to the patient at free speed, asked again when it has moved 12 units), ending at 14 units. **Treating:** `Act` (own slot, reads the
+  patient, writes nothing of it) emits one effect per tick while the medic is in reach, still, awake, not fighting and has a working arm, and the patient is still or down; `Apply` (serial
+  commit, in target then source order) picks the kit, bandages (`MedicalState.Treat`), drains the kit and trains Medic (`XpService.Medic`). So nothing on another character is
+  written in a parallel phase, and the result does not depend on partitions or threads. It ends when nothing is left to bandage (under `MedicalState.FirstAidThreshold`, 0.5 HP), no kit of
+  the right type is in reach, the patient is gone or the medic goes down. **Kit:** the medic's own best (highest record `quality`, `ItemInfo.Quality`; ordinary kit `item function` 1 for organic
+  parts, robot kit 12 for robotic ones), else a squad mate's within 60 units; its `Charges` is the original's `remaining`, a used-up kit is removed. **Treating by themselves**
+  (`SlowWorld`, every 15 ticks, serial): an idle, wandering or following character with a kit treats the most hurt squad mate within 250 units (knocked out first, then lowest blood; one medic
+  per patient), unless someone in the squad is fighting; NPCs do (engine stand-in until stage 9), the player's characters only with the medic job (the original's `medic` toggle; whether its
+  squad "Heal Allies" option is on by default is **Unknown**, so off), and go back to Wander or Follow afterwards.
+- **Rest.** The `Rest` task sits the character down (animation `sitting idle`; a treating medic plays `medic`): `BodySystem` passes `MedicalContext.Resting`, so blood recovers at `resting heal rate mult`
+  (x2) and hunger falls at `bed hunger rate` (0.33). **Beds are not done**: buildings have no world state yet, so there is no object to rest on (the bed bonus, degeneration 0 and the part-heal multiplier
+  of character-stats.md "Sleep, beds and resting" need one).
+- **XP on the move** (`BodySystem`): `XpService.AthleticsFromRunning` while moving faster than the race walk speed + 1 (whether walking trains is **Unknown**), `StrengthFromCarrying` while moving under
+  a load that encumbers (factor below 1). The fighter's `EncumbranceFactor` is set from the inventory weight each tick.
+- **Not done.** Beds, the shallow-water speed cap, the splint, rescue (NUM8) and "sleep when injured" jobs, the first aid context menu, healing a patient that is moving (the original also needs it to stand still),
+  limb items for severed parts. Treatment and rest are not saved ([Saves](#saves)).
 - **The time scale question.** See [Measurements](#measurements): at scale 1 nothing but hunger happens over days, at 100 the numbers read like
   play. The default stays 1 until a game session settles it.
 
@@ -503,7 +526,10 @@ fields and food are in [character-stats.md](game/character-stats.md#hunger-and-s
 - **Money.** `Squad.Money` is a squad's purse (hashed); `Platoon.Money` holds it while the platoon is unloaded (save key `money`). How money is
   earned or spent is the economy stage.
 - **Not done.** An unloaded roaming squad's inventories are lost with its characters (it re-rolls on loading); no pickup, drop, trade or
-  equipment bonuses; the fighter's encumbrance (`Fighter.EncumbranceFactor`) is never set, so combat uses 1 until equipment weight is applied.
+  equipment bonuses. The fighter's encumbrance (`Fighter.EncumbranceFactor`) is set by `BodySystem` from the inventory weight each tick (2026-10-13; before, combat used 1). Kits: `ItemInfo.Quality` is the record's `quality`, read when needed (not
+  copied to `ItemInstance.Quality`, the clothing grade); a CHARACTER gets its kits through the usual `inventory` list. In the base game the Wanderer, Rock Bottom, Hive and Empire starts carry none; the Cannibal Hunters, Holy
+  Sword, Son of a Captain and Freedom Seekers starts do. Many NPC entries are `{0, 100}` (e.g. Mercenary Heavy, Militia): under the rule above (first value 0 never spawns) they give no kit, and what the
+  second value means is **Unknown**.
 
 ## Combat
 
@@ -607,7 +633,7 @@ real saves (`[Slow]`): each loads (195 to 354 roaming stand-ins), loading and ca
 `quick.save` and nothing in the player's characters, a change made in the world survives writing and reading, and a world loaded from a real
 save runs 150 ticks and captures again with the same platoons and characters.
 
-**Not carried yet** (kept as the save had it, or regenerated): the NPC platoons' characters (regenerated from the template; their files stay as
+**Not carried yet** (kept as the save had it, or regenerated): first aid and resting (the `Treat` / `Rest` tasks, the medic job: no key in MEDICAL_STATE or GAMESTATE_CHARACTER holds them; the squad toggles `heal`, `sleep`, `sit` of the CAMERA record have **Unknown** short-key meanings and are not mapped) and a kit's used charges with the rest of the inventory, the NPC platoons' characters (regenerated from the template; their files stay as
 they were), towns and their state, war state, weather and season (the weather rolls anew on loading), research, zone buildings and loose items, inventories and equipment (a loaded character's are rebuilt from its record and look), AI jobs,
 the saved look of a loaded character (rolled again from the saved serial through `IAppearanceSource`; the serial of a character Meitou saved is its look's seed), bounties, `5-redirect`. **Unknown**:
 whether the original loads a save written from nothing ([save.md](formats/save.md#implementation-as-built-stage-10)); the orientation convention
@@ -774,8 +800,9 @@ combat, doors that open and close in play, physics.
   would fix it and may reorder same-tick commands.
 - No end-of-tick hook: the combat system swaps its arrays at the end of its `SlowWorld`, so the result depends on the system order
   ([Systems and their order](#systems-and-their-order)). Moving the swap would change what retaliation reads.
-- The two `MedicalContext` builders (`BodySystem` and `CombatSystem.MakeContext`) are only equivalent at time scale 1 and with the fighter's
-  encumbrance never set.
+- The two `MedicalContext` builders (`BodySystem` and `CombatSystem.MakeContext`) agree on toughness, strength, encumbrance (the body system now writes it to
+  `Fighter.EncumbranceFactor`, 2026-10-13) and seed, and differ in `BodyTimeScale` (combat's is 1) and `Resting` (combat's is false). So they are equivalent only at time scale 1 and for a
+  character that is not resting; with the game's `TickMedical = false` the combat one only serves hits, where neither matters.
 - Combat ticks are `int` (`CombatSlot.ReadyTick`, `StunUntil`) while the world's tick is `long`.
 - `BodyHash` does not cover the private `starveGrace` and `starvationKo` of `MedicalState` (nor every flag such as `BloodKo`), so a divergence
   there shows in the hash only later.

@@ -71,6 +71,8 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         {
             if (PickTarget(p) is { } victim && SelectedIds() is { Count: > 0 } attackers)
                 Say(new Meitou.Simulation.Combat.AttackOrder(attackers, victim) { Tick = session.World.Tick });
+            else if (PickHurtAlly(p) is { } patient && SelectedIds() is { Count: > 0 } medics)
+                Say(new Meitou.Simulation.FirstAid.TreatOrder(medics, patient) { Tick = session.World.Tick });
             else if (Ray(p) is { } ray && GroundHit(ray.Origin, ray.Direction) is { } hit)
             {
                 Move(hit, shift);
@@ -134,5 +136,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         }
         else if (key == Meitou.Engine.Input.Key.Grave) Select(PlayerCharacters(), shift);
         else if (key == Meitou.Engine.Input.Key.R && !session.Camera.IsFree) Say(new StopCommand(SelectedIds()) { Tick = session.World.Tick });
+        else if (key == Meitou.Engine.Input.Key.H && !session.Camera.IsFree) Say(new Meitou.Simulation.FirstAid.MedicJobCommand(SelectedIds()) { Tick = session.World.Tick });
+        else if (key == Meitou.Engine.Input.Key.L && !session.Camera.IsFree) Say(new Meitou.Simulation.FirstAid.RestOrder(SelectedIds()) { Tick = session.World.Tick });
     }
 }

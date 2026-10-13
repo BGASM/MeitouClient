@@ -18,8 +18,10 @@ public enum StandardParts
     Animation = 64,
     Feed = 128,
     Retaliation = 256,
+    /// <summary>First aid and resting (<see cref="Meitou.Simulation.FirstAid.FirstAidSystem"/>).</summary>
+    FirstAid = 512,
     /// <summary>What the game runs.</summary>
-    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation,
+    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid,
 }
 
 /// <summary>What <see cref="StandardSystems.Build"/> builds and with which settings; the defaults are the game's.</summary>
@@ -41,6 +43,7 @@ public sealed class StandardSystemOptions
     /// <summary>Null: the animation system's default; the game passes the CONSTANTS value.</summary>
     public float? AnimationBlendRate { get; init; }
     public FeedSettings? Feed { get; init; }
+    public Meitou.Simulation.FirstAid.FirstAidSettings? FirstAid { get; init; }
 }
 
 /// <summary>The built systems in tick order, with the ones the host talks to.</summary>
@@ -88,6 +91,7 @@ public static class StandardSystems
             combat = new CombatSystem(data.Combat.Techniques, data.Combat.Constants, data.Bodies.Constants, data.BodyOptions, o.AnimationLengths ?? new AnimationLengths(), o.Combat);
         if (Has(StandardParts.Pursuit)) systems.Add(new PursuitSystem(combat!));
         if (Has(StandardParts.Movement)) systems.Add(movement = new MovementSystem(new PathService(walkability, o.SynchronousPaths)));
+        if (Has(StandardParts.FirstAid)) systems.Add(new FirstAid.FirstAidSystem(data.Bodies.Constants, data.BodyOptions, data.Items, o.FirstAid));
         if (Has(StandardParts.Body)) systems.Add(new BodySystem(data.Bodies.Constants, data.BodyOptions, o.BodyTimeScale));
         if (Has(StandardParts.Combat)) systems.Add(combat!);
         if (Has(StandardParts.Animation))

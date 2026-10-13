@@ -23,23 +23,45 @@ public sealed partial class MedicalState
 
     /// <summary>
     /// Treats the patient for <paramref name="dt"/>: each matching part's bandaged pool rises by the rate x dt, capped so h + b stays at most M. An ordinary kit treats only
-    /// organic parts, a robot kit only robotic ones. The unit of <c>dt</c> for treatment is <b>Unknown</b> (taken as game hours here). Returns the total bandaged.
+    /// organic parts, a robot kit only robotic ones. The unit of <c>dt</c> for treatment is <b>Unknown</b> in the original; the first aid code calls it with <b>game seconds</b>
+    /// (an engine choice: with hours a 100 HP part would take 2 to 33 game hours to bandage and a kit would never run out; the medic XP function takes seconds too). Returns the total bandaged.
     /// </summary>
-    public float Treat(float dt, float skill, float kitQuality, bool robotKit, in MedicalContext ctx)
+    public float Treat(float dt, float skill, float kitQuality, bool robotKit, in MedicalContext ctx) =>
+        Bandage(TreatmentRate(ctx.Constants, skill, kitQuality, robotKit) * dt, robotKit, ctx.Race);
+
+    /// <summary>Raises the bandaged pool of every part the kit type treats by <paramref name="amount"/> (each), capped so h + b stays at most M. Returns the total added; a dead patient takes nothing.</summary>
+    public float Bandage(float amount, bool robotKit, RaceData race)
     {
         if (Dead) return 0;
-        float rate = TreatmentRate(ctx.Constants, skill, kitQuality, robotKit) * dt;
         float total = 0;
         foreach (var p in Parts)
         {
-            if (p.IsRobotic(ctx.Race) != robotKit) continue;
+            if (p.IsRobotic(race) != robotKit) continue;
             float room = p.MaxHp - p.Flesh - p.Bandage;
-            float add = Math.Clamp(rate, 0, MathF.Max(room, 0));
+            float add = Math.Clamp(amount, 0, MathF.Max(room, 0));
             p.Bandage += add;
             total += add;
         }
         return total;
     }
+
+    /// <summary>The untreated damage a kit of this type could still bandage: the sum over the parts it treats of max(0, M - h - b). Read-only.</summary>
+    public float BandageRoom(RaceData race, bool robotKit)
+    {
+        float total = 0;
+        foreach (var p in Parts)
+        {
+            if (p.IsRobotic(race) != robotKit) continue;
+            total += MathF.Max(0, p.MaxHp - p.Flesh - p.Bandage);
+        }
+        return total;
+    }
+
+    /// <summary>Below this much untreated damage (HP summed over the parts) a patient counts as treated (an engine choice that keeps float dust from starting treatments).</summary>
+    public const float FirstAidThreshold = 0.5f;
+
+    /// <summary>Whether first aid with a kit of this type has something to do: <see cref="BandageRoom"/> above <see cref="FirstAidThreshold"/>. A dead patient needs none.</summary>
+    public bool NeedsAid(RaceData race, bool robotKit) => !Dead && BandageRoom(race, robotKit) > FirstAidThreshold;
 
     /// <summary>How much of a kit a treatment uses (<c>FUN_140644250</c>): lerp(<c>medkit drain 99</c>, <c>medkit drain 1</c>, (100 - skill) / 100) x dt, x <c>robot medic speed mult</c> for robot kits. An expert uses a kit 20 times slower than a beginner.</summary>
     public static float KitDrain(GameConstants c, float skill, float dt, bool robotKit)

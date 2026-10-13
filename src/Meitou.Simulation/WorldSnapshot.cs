@@ -6,8 +6,14 @@ namespace Meitou.Simulation;
 /// <summary>One animation playing on a character: the skeleton animation's name, its time in seconds and its blend weight.</summary>
 public readonly record struct AnimationLayer(string Name, float Time, float Weight);
 
-/// <summary>The health the interface shows: blood (0..1 of capacity), the worst body part (fraction of its maximum HP), hunger (3 fed .. 0 starving) and whether it is out cold or dead.</summary>
-public readonly record struct BodyStatus(float Blood, float WorstPart, float Hunger, bool Unconscious, bool Dead);
+/// <summary>What a character is doing about its body: nothing, bandaging someone (<see cref="CharacterTask.Treat"/>) or resting (<see cref="CharacterTask.Rest"/>).</summary>
+public enum CareKind { None, Treating, Resting }
+
+/// <summary>
+/// The health the interface shows: blood (0..1 of capacity), the worst body part (fraction of its maximum HP), hunger (3 fed .. 0 starving) and whether it is out cold or dead; for the player's
+/// characters also whether first aid has anything to bandage (<see cref="NeedsAid"/>), what the character is doing (<see cref="Care"/>) and its medic job switch.
+/// </summary>
+public readonly record struct BodyStatus(float Blood, float WorstPart, float Hunger, bool Unconscious, bool Dead, bool NeedsAid = false, CareKind Care = CareKind.None, bool MedicJob = false);
 
 /// <summary>A character as the renderer needs it after one tick; <c>Appearance</c> is null for one that is simulated but has nothing to draw (an animal, a failed build): the host shows a marker (docs/simulation.md, "Threading", step 8).</summary>
 public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appearance, Vector3 Position, float Yaw, IReadOnlyList<AnimationLayer> Animations)

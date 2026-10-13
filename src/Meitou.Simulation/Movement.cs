@@ -14,6 +14,10 @@ public enum CharacterTask : byte
     Follow = 3,
     /// <summary>Fights the target of an <see cref="Combat.AttackOrder"/> (the combat system owns the character's attacks and reactions; movement leaves it alone).</summary>
     Attack = 4,
+    /// <summary>Walks to <see cref="CharacterCold.TreatTarget"/> and bandages it with a first aid kit (<see cref="FirstAid.FirstAidSystem"/> owns it; the movement system leaves it alone).</summary>
+    Treat = 5,
+    /// <summary>Sits on the ground resting: blood recovers at <c>resting heal rate mult</c> and hunger falls at <c>bed hunger rate</c> (<see cref="FirstAid.FirstAidSystem"/>); any other order replaces it.</summary>
+    Rest = 6,
 }
 
 /// <summary>Bits of <see cref="CharacterHot.Flags"/> the movement system uses.</summary>

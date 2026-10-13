@@ -81,6 +81,9 @@ sealed partial class PlayerInterface
     /// <summary>A living character of anyone else's under the pixel: what a right click attacks (hostility is not checked yet).</summary>
     public CharacterId? PickTarget(Vector2 pixel) => PickWhere(pixel, c => !c.IsPlayer && c.Body is { Dead: false });
 
+    /// <summary>One of the player's own living characters under the pixel that first aid has something to bandage on (a right click on it orders the selection to treat it).</summary>
+    public CharacterId? PickHurtAlly(Vector2 pixel) => PickWhere(pixel, c => c.IsPlayer && c.Body is { Dead: false, NeedsAid: true });
+
     CharacterId? PickWhere(Vector2 pixel, Func<CharacterSnapshot, bool> accept)
     {
         if (Ray(pixel) is not { } ray) return null;
