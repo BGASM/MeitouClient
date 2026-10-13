@@ -1,4 +1,5 @@
 using System.Numerics;
+using Meitou.Data.Characters;
 using Meitou.Data.Fcs;
 using Meitou.Simulation;
 using Meitou.Simulation.Combat;
@@ -13,12 +14,12 @@ namespace Meitou.Game;
 /// </summary>
 sealed partial class GameHost
 {
-    /// <summary>The built-in spot: a flat cliff top above a valley with pines along its edge and an open horizon to the sunset (−X).</summary>
-    public static readonly Vector2 DuelSpot = new(-38016, -67824);
+    /// <summary>The built-in spot (the owner's pick, 2026-10-13): dunes in the desert, ridges with dead trees and a rock spire before the setting sun (−X).</summary>
+    public static readonly Vector2 DuelSpot = new(41062, -110207);
     /// <summary>Game hour of the duel's start: the sun about 5 degrees above the horizon (SkyClock: sunrise 5, sunset 23, latitude 54); a 44 s lap ends near 22:24 (109 s of game time an hour).</summary>
     public const float DuelHour = 22;
-    /// <summary>The CHARACTER record both fighters are made from, and the faction whose looks they get.</summary>
-    const string DuelRecord = "Samurai", DuelFaction = "United Cities";
+    /// <summary>The CHARACTER record both fighters are made from (the base game's Samurai Heavy: Samurai Armour and Helmet, legplates, boots, a nodachi), and the faction whose looks they get.</summary>
+    const string DuelRecord = "Samurai Heavy", DuelFaction = "United Cities";
     /// <summary>The two start this far apart along Z (across the sun), facing each other, and charge on <see cref="DuelOrderTick"/>.</summary>
     const float DuelGap = 40;
     const int DuelOrderTick = 45;
@@ -41,6 +42,8 @@ sealed partial class GameHost
     ulong duelEndHash;
     int duelLaps;
     bool duelRestartRequested;
+    // The looks (SpawnSandbox's variant numbers): the first two whose rolled clothing has a helmet.
+    (int A, int B) duelVariants = (1, 2);
     // The hour a lap starts at: --time, or what the Tab panel's time of day slider last set (it would snap back at the next lap otherwise).
     float duelHour;
     Meitou.Simulation.WorldSettings worldSettings = null!;
@@ -56,6 +59,7 @@ sealed partial class GameHost
         int faction = popData!.Factions.Select((f, i) => (f, i)).FirstOrDefault(p => p.f.Name == DuelFaction, (null!, -1)).Item2;
         duelFaction = faction >= 0 ? faction : null;
         if (duelFaction is null) Console.Error.WriteLine($"duel      no faction named '{DuelFaction}': the pair gets another faction's looks");
+        duelVariants = HelmetedVariants();
         // The pair drifts as it fights (about 140 units in the built-in duel): the spawn is moved so the middle of the lap's fight is on the spot.
         duelHour = o.Hour;
         duelShift = Vector2.Zero;
@@ -69,13 +73,24 @@ sealed partial class GameHost
         return duelSpot;
     }
 
+    /// <summary>The Samurai's clothing is rolled from the record's lists, and many rolls have no helmet: the first two variants whose roll has one (else 1 and 2).</summary>
+    (int, int) HelmetedVariants()
+    {
+        var found = new List<int>();
+        for (int v = 1; v <= 200 && found.Count < 2; v++)
+            if (duelFaction is { } f && population!.SandboxLook(worldSettings.Seed, duelRecord, false, v, f) is { } look && look.Parts.Any(p => p.Slot == AttachSlot.Hat))
+                found.Add(v);
+        if (found.Count < 2) Console.Error.WriteLine($"duel      no two looks of {DuelRecord} with a helmet in 200 rolls");
+        return found.Count == 2 ? (found[0], found[1]) : (1, 2);
+    }
+
     /// <summary>Fills a new world with the pair and the script: the focus on the spot, both ordered to attack each other on <see cref="DuelOrderTick"/>.</summary>
     void DuelSetup(World world, PopulationSystem population)
     {
         var at = new Vector2(duelSpot.X, duelSpot.Z) + duelShift;
         // Facing +Z is yaw 0 (the sandbox's yaw π/2 faces +X).
-        duelA = population.SpawnSandbox(world, duelRecord, at - new Vector2(0, DuelGap / 2), player: false, yaw: 0, variant: 1, faction: duelFaction);
-        duelB = population.SpawnSandbox(world, duelRecord, at + new Vector2(0, DuelGap / 2), player: false, yaw: MathF.PI, variant: 2, faction: duelFaction);
+        duelA = population.SpawnSandbox(world, duelRecord, at - new Vector2(0, DuelGap / 2), player: false, yaw: 0, variant: duelVariants.A, faction: duelFaction);
+        duelB = population.SpawnSandbox(world, duelRecord, at + new Vector2(0, DuelGap / 2), player: false, yaw: MathF.PI, variant: duelVariants.B, faction: duelFaction);
         world.Commands.Enqueue(new FocusCommand(duelSpot) { Tick = 0 });
         world.Commands.Enqueue(new AttackOrder([duelA], duelB) { Tick = DuelOrderTick });
         world.Commands.Enqueue(new AttackOrder([duelB], duelA) { Tick = DuelOrderTick });

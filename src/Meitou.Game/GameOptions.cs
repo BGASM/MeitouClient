@@ -17,9 +17,9 @@ sealed class GameOptions
     public string? SandboxCharacter;
     /// <summary>The sandbox hero's start state, comma-separated: walk, run or free; a fixed speed in units/s; patrol (a 400-unit line), for pictures.</summary>
     public string? SandboxMode;
-    /// <summary>The looping duel for trailers (<c>--duel [x,z]</c>, docs/simulation.md "Duel"): two Samurai fight on rails at sunset, the same fight every lap.</summary>
+    /// <summary>The looping duel for trailers (<c>--duel [x,z]</c>, docs/simulation.md "Duel"): two Samurai Heavy fight on rails at sunset, the same fight every lap.</summary>
     public bool Duel;
-    /// <summary>Where the duel is fought (null: the built-in cliff top).</summary>
+    /// <summary>Where the duel is fought (null: the built-in desert dunes).</summary>
     public (float X, float Z)? DuelAt;
     /// <summary>The start to play (null = the default); with <c>--move-to</c> the picture shows a selected squad walking.</summary>
     public string? NewGameName;
@@ -38,7 +38,7 @@ sealed class GameOptions
           --sandbox [n]              animation sandbox: no world, a flat 1000x1000 wireframe floor (lines every 10, bold every 100) with 1 character (n = 2: two facing each other 30 units apart; more: the rest idle in rings round them, up to 1000); Z/X/C walk/run/free, [ ] fixed speed, P patrol, G fight, Y follow; works with --screenshot --ticks
           --sandbox-character <name> the CHARACTER record the sandbox spawns (default: the first member of the default new-game start)
           --sandbox-mode <list>      the sandbox hero's start, comma-separated: walk, run or free, a fixed speed in u/s, patrol (the 400-unit patrol), e.g. run,patrol (with --move-to or --screenshot)
-          --duel [x,z]               trailer scene: two Samurai duel at sunset on a cliff top (or at x,z), on rails: every lap is the same fight, the clock, weather and clouds start again with it,
+          --duel [x,z]               trailer scene: two helmeted Samurai duel at sunset in the desert dunes (or at x,z), on rails: every lap is the same fight, the clock, weather and clouds start again with it,
                                      and it restarts when a cinema flight is played or recorded (Backspace restarts it); --time and --weather override 22:00 and clear
           --move-to <x> <z>          with --new-game: select the squad and order it to walk (for screenshots)
           --ticks <n>                with --screenshot: run n control ticks (and the same real time of the simulation, at speed 1) before the picture
