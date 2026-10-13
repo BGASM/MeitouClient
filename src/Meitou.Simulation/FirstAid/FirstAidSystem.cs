@@ -297,7 +297,7 @@ public sealed class FirstAidSystem(GameConstants constants, BodyOptions options,
             {
                 if (!table.TryResolveNext(id, out int s) || taken.Contains(s) || table.Cold(s) is not { Medical: { Dead: false } med, Race: { } race } other || other.InCombat) continue;
                 float distance = Gap(next[i], next[s]);
-                if (distance > Settings.AutoReach) continue;
+                if (distance > Settings.AutoReach || (s != i && !med.Incapacitated && Speed2(next[s].Velocity) > Settings.StillSpeed * Settings.StillSpeed)) continue;   // a moving patient cannot be treated (targetStandingStill)
                 if (!(organic && med.NeedsAid(race, false)) && !(robotic && med.NeedsAid(race, true))) continue;
                 float capacity = MathF.Max(MedicalState.BloodCapacity(race, other.Stats?.Strength ?? 50), 1);
                 var key = (med.Incapacitated ? 0 : 1, med.Blood / capacity, distance);

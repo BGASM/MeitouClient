@@ -482,14 +482,14 @@ Formulas, constants, units and the engine choices of the body code are in
   the right type is in reach, the patient is gone or the medic goes down. **Kit:** the medic's own best (highest record `quality`, `ItemInfo.Quality`; ordinary kit `item function` 1 for organic
   parts, robot kit 12 for robotic ones), else a squad mate's within 60 units; its `Charges` is the original's `remaining`, a used-up kit is removed. **Treating by themselves**
   (`SlowWorld`, every 15 ticks, serial): an idle, wandering or following character with a kit treats the most hurt squad mate within 250 units (knocked out first, then lowest blood; one medic
-  per patient), unless someone in the squad is fighting; NPCs do (engine stand-in until stage 9), the player's characters only with the medic job (the original's `medic` toggle; whether its
+  per patient; a conscious patient that is moving is not picked, the original's `targetStandingStill`), unless someone in the squad is fighting; NPCs do (engine stand-in until stage 9), the player's characters only with the medic job (the original's `medic` toggle; whether its
   squad "Heal Allies" option is on by default is **Unknown**, so off), and go back to Wander or Follow afterwards.
 - **Rest.** The `Rest` task sits the character down (animation `sitting idle`; a treating medic plays `medic`): `BodySystem` passes `MedicalContext.Resting`, so blood recovers at `resting heal rate mult`
   (x2) and hunger falls at `bed hunger rate` (0.33). **Beds are not done**: buildings have no world state yet, so there is no object to rest on (the bed bonus, degeneration 0 and the part-heal multiplier
   of character-stats.md "Sleep, beds and resting" need one).
 - **XP on the move** (`BodySystem`): `XpService.AthleticsFromRunning` while moving faster than the race walk speed + 1 (whether walking trains is **Unknown**), `StrengthFromCarrying` while moving under
   a load that encumbers (factor below 1). The fighter's `EncumbranceFactor` is set from the inventory weight each tick.
-- **Not done.** Beds, the shallow-water speed cap, the splint, rescue (NUM8) and "sleep when injured" jobs, the first aid context menu, healing a patient that is moving (the original also needs it to stand still),
+- **Not done.** Beds, the shallow-water speed cap, the splint, rescue (NUM8) and "sleep when injured" jobs, the first aid context menu, treating a patient that keeps moving (a treatment ordered on one makes the medic follow it until it stops; the original has a "make target stand still" task),
   limb items for severed parts. Treatment and rest are not saved ([Saves](#saves)).
 - **The time scale question.** See [Measurements](#measurements): at scale 1 nothing but hunger happens over days, at 100 the numbers read like
   play. The default stays 1 until a game session settles it.

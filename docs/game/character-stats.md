@@ -778,6 +778,7 @@ Scorchlander, Shek, Garru, Leviathan and Skeleton rows). Engine choices where th
   Not done: the bed objects (kinds 6 and 0x19: degeneration 0, the part-heal multiplier), the twice-as-fast healing of "state 2", the repair bed's wear repair (`MedicalContext.RepairRate`): buildings have no world state.
 - **XP on the move** (`FUN_1408c6660`, **Observed**): `AthleticsFromRunning` with the encumbrance factor and the speed fraction of the maximum (x1.5 over 80 %), applied while the character moves faster than its race walk speed + 1 (**Unknown** whether walking trains);
   `StrengthFromCarrying` while it moves with a factor below 1. Swimming XP and stealth XP are not built.
+- **Several medics** on one patient (select two, right click the hurt one: the patient treats itself and the other treats it) each apply the full rate, so their bandaging stacks; whether the original allows it is **Unknown**.
 - **Data:** a CHARACTER's kits come from its `inventory` list (first value = count), as for any item. Of the base-game starts the Wanderer, Rock Bottom, Hive Exile and Empire Citizen squads have none; Cannibal Hunters (a Standard kit each), The Holy Sword,
   Son of a Captain and The Freedom Seekers do. Many NPC records list a kit as `{0, 100}` (the first value 0, so no kit by the rule above); the meaning of the second value is **Unknown**.
   the legacy STATS keys (`endurance`, `xp`...), and the situational hunger factors beyond machine use.
