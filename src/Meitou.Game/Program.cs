@@ -10,10 +10,11 @@ static class Program
     {
         RenderJobs.RaiseRenderThread();
         GameOptions game;
+        string[] rest;
         WorldOptions? world;
         try
         {
-            (game, var rest) = GameOptions.Split(args);
+            (game, rest) = GameOptions.Split(args);
             world = WorldOptions.Parse(rest);
         }
         catch (Exception e) when (e is ArgumentException or FormatException or IndexOutOfRangeException)
@@ -50,6 +51,22 @@ static class Program
             world.Yaw ??= 35;
             using var flat = WorldFrame.LoadFlat(world, db);
             return new GameHost(install, flat, new AssetLocator(install), world, game, config, null).Run();
+        }
+        if (game.Duel)
+        {
+            // The trailer duel (docs/simulation.md "Duel"): the world round its spot at sunset, clear, the camera low beside the pair looking into the sun.
+            if (game.NewGame || game.NoPopulation)
+            {
+                Console.Error.WriteLine("--duel makes its own two characters: drop --new-game and --no-population.");
+                return 2;
+            }
+            var spot = game.DuelAt is { } at ? new Vector2(at.X, at.Z) : GameHost.DuelSpot;
+            (world.X, world.Z, world.Town) = (spot.X, spot.Y, null);
+            if (!rest.Contains("--time")) world.Hour = GameHost.DuelHour;
+            world.Weather ??= "Default";
+            world.Distance ??= 90;
+            world.Pitch ??= 8;
+            world.Yaw ??= 90;   // looking west into the sunset, the pair left and right
         }
         if (game.ListStarts || game.NewGame)
         {

@@ -38,6 +38,7 @@ sealed partial class GameHost
             session.Tick();
             session.AdvanceSimulation(session.Ticks.TickSeconds);   // one control tick of real time, at speed 1
             UpdateNav(wait: true);
+            DuelFrame(false);   // the duel's laps run on in a long still too
         }
         SandboxFollowCamera();
         ApplyCamera(session.Camera.Current);

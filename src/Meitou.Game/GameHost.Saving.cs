@@ -42,11 +42,14 @@ sealed partial class GameHost
     Meitou.Simulation.StandardSystemSet BuildSystems(bool interactive) =>
         Meitou.Simulation.StandardSystems.Build(popData!, simWalkability!, new Meitou.Simulation.StandardSystemOptions
         {
-            // The sandbox compares motion with the original on characters standing still: a hostile foe there must not start a fight by itself.
-            Parts = IsSandbox ? Meitou.Simulation.StandardParts.All & ~Meitou.Simulation.StandardParts.Aggro : Meitou.Simulation.StandardParts.All,
+            // The sandbox compares motion with the original on characters standing still: a hostile foe there must not start a fight by itself. The duel scripts its fight.
+            Parts = IsSandbox || IsDuel ? Meitou.Simulation.StandardParts.All & ~Meitou.Simulation.StandardParts.Aggro : Meitou.Simulation.StandardParts.All,
             Aggro = new Meitou.Simulation.AggroSettings { RecordLog = true },
-            Population = new Meitou.Simulation.PopulationSettings { Background = interactive },
-            SynchronousPaths = !interactive,
+            Population = new Meitou.Simulation.PopulationSettings { Background = interactive && !IsDuel },
+            // The duel replays exactly: its paths are answered inside the tick, never on a thread whose timing differs from lap to lap.
+            SynchronousPaths = !interactive || IsDuel,
+            // The duel prints what its measured lap holds (MeasureLap).
+            Combat = new Meitou.Simulation.Combat.CombatOptions { SelfApproach = false, TickMedical = false, RecordLog = IsDuel },
             AnimationLengths = animationLengths,
             AnimationLibrary = animationLibrary,
             AnimationBlendRate = popData!.Bodies.Constants.AnimationBlendRate,

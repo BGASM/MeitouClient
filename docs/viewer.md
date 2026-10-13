@@ -284,5 +284,8 @@ spawns, still runs in real time, so it can lag a little behind in a take). The g
 debug overlays) is left out of recorded frames, and hidden by the clean picture (numpad *) and by **F7** (game only; the cinema's editor
 stays usable with F6, its status line hides). The viewer has no F7: its clean picture (numpad *) hides its panels.
 
+With `--duel` (docs/simulation.md "Duel", added 2026-10-13) starting a flight, played or recorded, also starts the duel's lap again, so every take of
+it begins on the lap's first frame and takes from different angles cut together.
+
 **Starting a flight.** `--play-shots` starts the viewer flying its saved keys on a loop (added 2026-10-10). Screenshot mode prints the
 camera's code (`camera    <hex> (...)`) so a still made with `--at`, `--yaw`, `--pitch` and `--distance` can be turned into a key.

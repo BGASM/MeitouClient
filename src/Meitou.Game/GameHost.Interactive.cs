@@ -49,7 +49,7 @@ sealed partial class GameHost
         var meitou = new MeitouToggle(switches);
         // The viewer's panel: the game clock's time of day, vsync and full screen on top of the graphics sliders.
         var panel = overlay is null ? null : WorldFrame.CreateSettingsPanel(overlay, gpu, render,
-            getHour: () => (float)session.Clock.HourOfDay, setHour: v => session.Clock.SetHourOfDay(v),
+            getHour: () => (float)session.Clock.HourOfDay, setHour: v => { session.Clock.SetHourOfDay(v); if (IsDuel) duelHour = v; },
             getVSync: () => display.VSync, setVSync: v => display.VSync = v, switches: switches,
             getFullScreen: () => BorderlessFullScreen.IsOn(window), setFullScreen: _ => BorderlessFullScreen.Toggle(window));
         if (panel is not null)
@@ -99,6 +99,7 @@ sealed partial class GameHost
                     session.Input.SetKey(key, true);
                     player.Key(key, shiftDown);
                     SandboxKey(key);
+                    if (IsDuel && key == EngineKey.Backspace) duelRestartRequested = true;
                 }
             };
             kb.KeyUp += (_, k, _) =>
@@ -149,6 +150,7 @@ sealed partial class GameHost
         double last = 0, titleTimer = 0, cpuSum = 0;
         int frames = 0, totalFrames = 0;
         bool quit = false;
+        bool cinemaWasPlaying = false, cinemaWasRecording = false;
         session.Ticked += actions =>
         {
             if (actions.Pressed(InputAction.Quit)) quit = true;
@@ -191,6 +193,9 @@ sealed partial class GameHost
             // While the cinema records, every frame is exactly one frame of its rate, for the simulation too (the take plays at game speed
             // however slowly the frames are drawn and saved); otherwise the real time.
             double frameDt = cinema.Recording ? cinema.FrameTime(dt) : dt;
+            // The duel starts a lap when a flight starts (played or recorded), so every take begins with the fight's first frame, and when its lap is over.
+            DuelFrame(cinema.Playing && !cinemaWasPlaying || cinema.Recording && !cinemaWasRecording);
+            (cinemaWasPlaying, cinemaWasRecording) = (cinema.Playing, cinema.Recording);
             long a0 = Stopwatch.GetTimestamp();
             session.Advance(frameDt);
             advanceTotal += Stopwatch.GetElapsedTime(a0).TotalMilliseconds;

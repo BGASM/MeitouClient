@@ -76,6 +76,7 @@ Code layout (engine choices; behaviour is the game loop above):
 | `GameHost.Screenshot.cs`, `GameHost.Interactive.cs` | The unattended `--screenshot` run; the window loop, input wiring, title, `--quit-after` profile. |
 | `GameHost.Characters.cs` | The renderer's draw list from the two snapshots, markers, the camera focus command. |
 | `GameHost.Saving.cs` | Quicksave (F5) and quickload (F9): the requests, `SaveCapture` at a frame boundary and the file write on a worker, the new world from `SaveLoader`, the host re-hooked ([simulation.md](simulation.md#quicksave-and-quickload)). |
+| `GameHost.Duel.cs` | The `--duel` trailer scene: two Samurai fighting on rails, the lap measured headless and replayed exactly ([simulation.md](simulation.md#duel)). |
 | `KeyMap.cs` | Silk key and button to the engine's. |
 | `PlayerInterface*.cs` | Events and commands; picking (`.Picking`); the HUD (`.Hud`). The HUD formats the snapshot's numbers (`SkillSummary`) itself. |
 | `NavAdapter.cs` | The navmesh as the simulation's `IAgentWalkability`. |

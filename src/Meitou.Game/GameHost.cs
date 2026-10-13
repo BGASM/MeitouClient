@@ -83,8 +83,10 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         Meitou.Data.Gameplay.GameConstants? constants = null;   // parsed once: the body factory's, else for the clock alone
         if (!g.NoPopulation && scene.Database is { } gameDb)
         {
-            var levels = IsSandbox ? null : scene.Objects?.Levels ?? Meitou.Data.World.WorldLevelData.Load(install);
-            if (!IsSandbox)
+            // The sandbox and the duel walk on open ground (the heightmap): the sandbox has no world, and the duel's spot may be a navmesh island the build prunes.
+            // Neither has towns: the duel's two characters are the only ones.
+            var levels = IsSandbox || IsDuel ? null : scene.Objects?.Levels ?? Meitou.Data.World.WorldLevelData.Load(install);
+            if (levels is not null)
             {
                 nav = new Meitou.Navigation.NavSystem(install, gameDb, levels!, heights.HeightAt);
                 nav.ZoneReady += _ => navChanged = true;
@@ -106,7 +108,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         }
         session = new WorldSession(scene.Focus, (scene.X0, scene.Z0, scene.X1, scene.Z1), gpu.Terrain.HeightAt, o.Hour, config.TickRate,
             clock: GameClockFor(constants ??= scene.Database is { } clockDb ? Meitou.Data.Gameplay.GameConstants.FromDatabase(clockDb) : null, o.Hour, o.Day ?? GameClock.DefaultStartDay),
-            simulation: new Meitou.Simulation.WorldSettings { Seed = g.Seed, MinPartitionSize = 128, Threads = Math.Max(1, config.SimThreads ?? Math.Clamp(Environment.ProcessorCount / 2, 1, 8)) },
+            simulation: worldSettings = new Meitou.Simulation.WorldSettings { Seed = g.Seed, MinPartitionSize = 128, Threads = Math.Max(1, config.SimThreads ?? Math.Clamp(Environment.ProcessorCount / 2, 1, 8)) },
             systems: systems, walkability: walkability);
         var target = camera.Target;
         foreach (var problem in session.Bindings.Apply(config.Bindings)) Console.Error.WriteLine($"config    binding skipped: {problem}");
@@ -134,6 +136,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             Console.WriteLine($"player    {playerSquad.Members.Count} characters, leader at {lead.X:0}, {lead.Z:0}");
         }
         if (IsSandbox && population is not null) target = SandboxSpawn();
+        if (IsDuel && population is not null) target = DuelStart();
         if (!IsSandbox && crowd > 0 && population is not null) SpawnCrowd(target, crowd);
         if (scene.Database is { } characterDb && !g.NoPopulation && gpu.Characters is null)
             gpu.Characters = new CharacterRenderer(context, install, characterDb, assets) { Source = FillDrawList, Guard = gpu.Guard };

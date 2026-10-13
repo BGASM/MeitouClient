@@ -734,6 +734,39 @@ the pain of the medical state are not in the save's keys and start empty and at 
   the picture is taken after n ticks of it (`--move-to x z` works as in a new game). The start camera is boom 70, pitch 22,
   yaw 35 (`--distance`, `--pitch`, `--yaw`).
 
+## Duel
+
+`meitou --duel [x,z]` (added 2026-10-13, for the trailer; `GameHost.Duel.cs`) is a scene on rails: two Samurai fight on the real map at sunset and every lap is
+the same fight to the tick, so a camera flight recorded from any angle lines up with every other take. Engine choices throughout; nothing of it runs in the game.
+
+- **Place and light.** The built-in spot is a flat cliff top at -38016, -67824 (height about 4230) with pines along the ridge and an open horizon to
+  the sunset (the sun sets towards −X, `SkyClock`); it was picked from a heightmap search for flat ground with a drop and no terrain above 0.6 degrees
+  towards the setting sun, then by sunset screenshots. A hilltop above a bay at -90144, -120240 was the runner-up (the sun on the water). Unless
+  `--time` or `--weather` say otherwise the clock starts at 22:00 (the sun about 5 degrees up) and the weather is held clear (`Default`). The start
+  camera looks west into the sun with the pair left and right (yaw 90).
+- **World.** No towns (so no residents or roaming squads), aggro off, paths answered inside the tick (`SynchronousPaths`), the population system on
+  the tick thread, the camera focus fixed on the spot (`SendFocus` sends nothing). The characters walk on open ground (`OpenGroundWalkability` on
+  the heightmap), not the navmesh: the built-in cliff top is a navmesh island the build prunes (`meitou-tools navmesh --zone 23,17`, **Observed**
+  2026-10-13), so on the navmesh the pair could not reach each other.
+- **The pair.** `PopulationSystem.SpawnSandbox` with a faction override: two NPCs of the CHARACTER record named `Samurai` with the looks of United
+  Cities (variants 1 and 2), 40 units apart across the sun, facing each other; both get an `AttackOrder` on tick 45.
+- **The lap.** At start the duel is run once headless on a world of its own (`MeasureLap`; 5000 ticks in about 0.3 s, Release, this PC). Two of the same
+  record are evenly matched: in the built-in duel the first one is down after 165.2 s (28 hits, 61 blocks, 1 dodge; **Observed**, seed 0). A lap is the
+  last 40 s before the knockout and 4 s after it; the ticks before it run headless at each restart (about a quarter of a second). A duel nobody loses
+  in 5 minutes loops its first 60 s. The pair drifts as it fights (about 140 units here), so the spawn is moved by the measured offset and the lap's
+  fight is centred on the spot (the fight is unchanged by the move: same blows, same knockout tick).
+- **Restart.** A new world from `WorldSession.ReplaceWorld` with the same setup, the fight before the lap run headless, the game clock back at the
+  start hour (`GameClock.SetTime`), the simulation clock's phase dropped (`SimulationClock.ResetPhase`, so the ticks fall on the same frames), the
+  animation clock (clouds, water, foliage sway) at 0 and fresh per-character renderer state (`worldEpoch`). It happens at the lap's end, on
+  Backspace, and whenever a cinema flight starts or a recording starts (also over a flight already playing; docs/viewer.md "Cinematic camera"): the
+  cinema sets its state in the key handler, before the frame, so each take's first frame is the lap's first. The Tab panel's time of day slider sets the
+  hour the next lap starts at (else it would snap back each lap).
+- **Checked.** The measured run keeps the world's state hash at the lap's end; each lap that ends on that tick is compared with it and the log says
+  `lap n ended as measured` or `DIFFERS`. Headless (`--duel --screenshot --ticks n`) three laps ended with the measured hash, and pictures of lap 1
+  and lap 3 at the same moment were pixel-identical (`meitou-tools image-diff`, **Verified** 2026-10-13). A lap shows end − skip − 1 ticks (1319 here).
+- **Not reset.** The particles (the leaves the map's effects blow) and the renderer's temporal history (upscaler, GI probes) carry on across a restart;
+  `--no-particles` takes the leaves out where takes must match to the pixel.
+
 ## The game host
 
 `src/Meitou.Game` (file layout in [engine.md](engine.md#the-game-host-srcmeitougame)). `GameHost.Boot` builds the `PopulationData`, the
