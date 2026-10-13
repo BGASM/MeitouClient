@@ -43,12 +43,22 @@ sealed partial class GameHost
         indexedFor = previous;
     }
 
-    /// <summary>Where a character is drawn: between the last two snapshots, by the simulation's alpha.</summary>
+    /// <summary>Where a character is drawn: between the last two snapshots, by the simulation's alpha (a carried body on its carrier's left shoulder).</summary>
     Vector3 DrawnPosition(CharacterSnapshot c)
     {
         IndexPrevious();
-        return previousById.TryGetValue(c.Id, out var before) ? Vector3.Lerp(before.Position, c.Position, session.SimulationAlpha) : c.Position;
+        var at = previousById.TryGetValue(c.Id, out var before) ? Vector3.Lerp(before.Position, c.Position, session.SimulationAlpha) : c.Position;
+        return at + CarriedOffset(c, c.Yaw);
     }
+
+    /// <summary>
+    /// A carried body has its carrier's position; it is drawn this far from it: up to the shoulder and to the left (engine stand-in: the original hangs it from the carrier's
+    /// <see cref="CharacterSnapshot.AttachBone"/>, which the renderer does not do yet; the numbers are a guess, not checked in the viewer).
+    /// </summary>
+    static Vector3 CarriedOffset(CharacterSnapshot c, float yaw) =>
+        c.CarriedBy.IsNone ? Vector3.Zero : new Vector3(MathF.Cos(yaw) * CarriedSide, CarriedHeight, -MathF.Sin(yaw) * CarriedSide);
+
+    const float CarriedHeight = 14, CarriedSide = 2;
 
     /// <summary>Fills the renderer's list from the last two snapshots, interpolated by the simulation's alpha.</summary>
     void FillDrawList(CharacterDrawList list)
@@ -76,6 +86,7 @@ sealed partial class GameHost
                 position = Vector3.Lerp(found.Position, c.Position, alpha);
                 yaw = Meitou.Engine.Time.Interp.LerpAngle(found.Yaw, c.Yaw, alpha);
             }
+            position += CarriedOffset(c, yaw);
             var poses = new CharacterPose[c.Animations.Count];
             for (int i = 0; i < poses.Length; i++)
             {

@@ -186,6 +186,8 @@ sealed partial class PlayerInterface
             string state = body.Dead ? "dead" : body.Unconscious ? "knocked out" : body.Care == CareKind.Treating ? "treating" : body.Care == CareKind.Resting ? "resting" : "ok";
             if (body.MedicJob) state += "  medic job (H)";
             else if (body.NeedsAid) state += "  needs first aid (right click)";
+            if (body.RescueJob) state += "  rescue job (J)";
+            if (!chosen[0].Carrying.IsNone) state += "  carrying (K puts down)";
             o.Text($"Health: blood {body.Blood * 100:0}%  worst part {body.WorstPart * 100:0}%  {state}", box.X0 + Pad + o.CharWidth, y, body.Dead || body.Unconscious ? red : white);
             y += o.LineHeight;
             o.Text($"Hunger: {body.Hunger:0.00} of 3", box.X0 + Pad + o.CharWidth, y, body.Hunger < 1 ? red : white);

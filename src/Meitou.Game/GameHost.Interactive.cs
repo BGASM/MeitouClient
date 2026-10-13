@@ -122,7 +122,9 @@ sealed partial class GameHost
                 if (cinema.Contains(at)) return;
                 if (KeyMap.Map(b) is { } button)
                 {
-                    if (player.MouseDown(button, at, shiftDown)) return;
+                    // Ctrl and Alt with the right button: pick up / put down and loot (docs/game/ui-input.md, Meitou's carry bindings).
+                    bool Held(SilkKey a, SilkKey b) => silkInput.Keyboards.Any(k => k.IsKeyPressed(a) || k.IsKeyPressed(b));
+                    if (player.MouseDown(button, at, shiftDown, Held(SilkKey.ControlLeft, SilkKey.ControlRight), Held(SilkKey.AltLeft, SilkKey.AltRight))) return;
                     session.Input.SetMouseButton(button, true);
                 }
             };

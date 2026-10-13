@@ -390,6 +390,11 @@ public sealed class CarrySystem(GameConstants constants, BodyOptions options, fl
             if (Relations is { } relations) PlayerRelations.Event(world, relations, victim.Faction, RelationEventKind.Stealing);
         }
         loots.Add(new LootEntry(world.Tick, table.IdOf(i), table.IdOf(t), taken, left, seen));
+        if (cold.IsPlayer)
+        {
+            world.Post(left > 0 ? $"{cold.Name} took {taken} items from {victim.Name}; {left} did not fit" : $"{cold.Name} took {taken} items from {victim.Name}");
+            if (seen) world.Post($"{cold.Name} was seen looting {victim.Name}");
+        }
         End(table, i);
     }
 

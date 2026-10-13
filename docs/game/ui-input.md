@@ -213,7 +213,24 @@ verb 25 "First Aid" (pointer mode 1 `med`, section 7). Neither exists here: the 
 | `L` | the selection rests (sits down; **no binding in the original**); any move order or `R` ends it |
 
 `H` and `L` were unbound (not in the action table above, not used by the camera, the free camera (R / F), the sandbox (Z X C G Y P [ ]) or the cinema); they are ignored in the free camera.
-Rescue (NUM8, carrying a downed ally) and the orders panel are not built. Not rebindable yet (the keys are read in `PlayerInterface.Key` like `R` and the digits).
+The orders panel is not built. Not rebindable yet (the keys are read in `PlayerInterface.Key` like `R` and the digits).
+
+Meitou's carry, rescue and loot bindings (2026-10-13, engine choices; simulation side in [simulation.md](../simulation.md#carrying-rescue-and-looting), the
+original's rules in [carry-loot.md](carry-loot.md#31-the-players-orders)). The original picks up and puts down through the context menu ("Pick Up" 68 / 225,
+"Put Down" 69), the quick right click on a downed friend (first aid first, else `LIFT_PERSON`), loots through "Loot" (26, a window) and runs the
+rescue job from NUM8. Without a context menu, loot window or numpad:
+
+| Input | Effect |
+|---|---|
+| Ctrl + right click on a knocked-out or dead character | the nearest selected character picks it up (`PickUpOrder`); on a body a selected character carries, puts it down (`PutDownOrder`) |
+| right click on one of the player's own downed characters with nothing to bandage | picks it up (as the original's quick right click; with something to bandage it is first aid, as above) |
+| Alt + right click on a knocked-out or dead character | the nearest selected character takes all that fits from its inventory and backpack (`LootOrder`; no window) |
+| `J` | rescue job on / off for the selection (the original's `rescue`, NUM8) |
+| `K` | the selected carriers put their bodies down |
+
+`J` and `K` are bound in the original only to the build-mode gizmo (`gizmo_move / rotate / scale` = H / J / K, like `H` above), which Meitou does not have;
+they are ignored in the free camera. Alt is the original's held `highlight` key and its "Hold down the ALT key to steal items" modifier for ground items
+([carry-loot.md 4.5](carry-loot.md#45-items-on-the-ground)); Meitou has neither, so Alt + right click is free for the loot.
 
 Screenshot (event 0x10) is handled in frameEnded: hides the camera grid widget for two frames and writes
 `_screens/screenshot_<N>`; count and multiplier come from `screens.cfg` (**Observed**).

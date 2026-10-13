@@ -541,8 +541,34 @@ claimed again; this guards against selling the same prisoner twice.
 
 - **Bail** (`CharacterTrading_PrisonerBailout`, `FUN_1406ab890`, window "Pay Bounty"; **Observed**): price = `2 * bounty` (read with `FUN_140854080` from the prisoner's ledger; the call passes a zero faction argument, so which faction's entry is meant was not resolved); if the prisoner is **not** of the player's faction the price is at least 2000 (`max(2000, 2*bounty)`).
 - **Sentence**: CONSTANTS `prison time` (1.0, "multiplier for time you have to spend in prison for your crimes") is read by the
-  loader. The sentence length function `FUN_140851d10` (a `lerp` between 350-600-based and 450/80 values scaled by a health fraction)
-  is **not decoded**; see Unknowns.
+  loader; its only reader is the cage sentence `FUN_140854950` (11.6: `0.02 x bounty x prison time`). The function `FUN_140851d10` (a `lerp`
+  between 350-600-based and 450/80 values scaled by a health fraction), once taken for the sentence length, is **not decoded**; see Unknowns.
+
+### 11.6 Pending crimes, witnesses and the cage sentence
+
+Found while tracing carrying and looting; the full rules and addresses are in [carry-loot.md](carry-loot.md#43-crimes-for-taking-items) (**Observed**
+unless marked).
+
+- **A crime is first pending.** `FUN_140852c80(ledger, code, victim faction, victim handle)` writes a pending record next to the ledger (code,
+  victim faction, victim handle and a freshness timer of at least 3; `FUN_140852e10` sets a given timer). It refuses police-like takers
+  (`NPC class` LAW_ENFORCEMENT, or MILITARY of its own squad's faction), imprisoned takers, victims of the taker's own faction and "lawless"
+  victim factions (`+0x1d0` set or `+0x34 == 8`). An Assault (5) becomes code 9 under a victim test and otherwise does not replace another pending
+  crime. A new code clears the "booked" flag `+0xa4` read by `FUN_140853ec0` (11.2).
+- **Which code**: taking from a conscious owner is Theft (3) and from a downed owner without permission Looting (10) on the right-click transfer
+  path; the drag-and-drop path gives Theft for a downed character's items and Looting for everything else (**Verified** by disassembly of both
+  call sites; which path the usual loot uses is **Unknown**). Picking up a ground item inside a building that belongs to another, non-lawless
+  faction is Theft. Setting down a conscious, non-friendly person flagged as a victim is Kidnapping (0xf, timer 10, **Verified** by disassembly);
+  carrying an "innocent" person past a witness who cares is Kidnapping (timer 20); freeing someone from another faction's cage is code 7 for the
+  carrier and Escaping Prison (0xc) for the freed.
+- **Permission to loot a downed character** (no crime): the victim is a slave, has any bounty, is a bandit (`NPC class` 8) or the taker's own
+  prisoner; the taker is LAW_ENFORCEMENT, MILITARY or DIPLOMAT; or the item belongs to the taker's faction.
+- **Witnesses** (`FUN_140854d10`): a conscious, free witness of another faction that cares about the victim (friendly with it or allied with its
+  faction) answers a pending crime with relation event 7, raises the timer to 20 and reacts in dialogue. **Only a police-like witness whose
+  faction has the `+0x40` flag books it as a bounty** (`FUN_140853ec0`). The steal roll (thievery against the nearest owner) always succeeds
+  against an unconscious, dead, carried or imprisoned owner, so a downed victim never catches the thief itself.
+- **Cage sentence** (`FUN_140854950`, the only reader of `prison time`, **Verified** reader; formula **Observed**): when a prisoner with a bounty
+  for the cage owner's faction is caged, the sentence is `trunc(bounty x 0.02 x prison time)` (presumably game hours; 999999 for bounties over
+  25000) starting now. The bail and the release were not traced.
 
 ## 12. Slaves, prisoners, animals
 
@@ -597,7 +623,10 @@ RACE `buy value` is 100 for most races (27 of 53 records); other values in the d
 - **The stolen predicate** `FUN_14079e550(item, 1)`: it reads two owner handles (`+0x140`, `+0x160`), a flag byte, and a type
   check against the type list `{2, 3, 4, 0x2e, 0x56, 0x66, 0x6b, 0x6f}`. What exactly makes an item "stolen" (the thief, the
   owning faction vs. the holder's, expiry) and the second halving condition in `FUN_140793490` are not decoded. The `0.5`
-  stolen factor in `T` is therefore only roughly defined.
+  stolen factor in `T` is therefore only roughly defined. *Partly resolved 2026-10-13* ([carry-loot.md 4.4](carry-loot.md#44-the-stolen-flag-fun_14079e550item-strict-observed-answers-part-of-the-economymd-unknown)):
+  `+0x140` is the owner the item was taken from, `+0x160` its current holder (a backpack's owner for a backpack); stolen = the from-owner is set,
+  differs from the holder and is of another faction, unless the holder's faction is lawless; the type list is the lootable item kinds. Expiry and
+  the halving condition remain open.
 - **The meaning of `Armour+0x1e8`** (non-null multiplies the armour price by the hard-coded 0.3) and of `Weapon/Armour+0x208`
   (inferred as "crafted by the player" from the editor text of the two player rows; not shown by a writer).
 - **Whether the town being set up is already in the global town list `DAT_142134100` when its own market factors are rolled.**
@@ -622,7 +651,8 @@ RACE `buy value` is 100 for most races (27 of 53 records); other values in the d
 - **Whether CHARACTER `money min` / `money max`** exist in the data and are unused (the editor lists `money`; not found
   being read for NPC purses).
 - **The "Terrorism" label for code 9** (two crime codes share the name; the second may be a different crime in the editor enum).
-- **Sentence length** (`FUN_140851d10`) and `prison time`'s consumer.
+- **What `FUN_140851d10` computes** (`prison time`'s consumer is the cage sentence, 11.6), how a sentence counts down and ends, and how bail
+  ends it.
 - **Research cost** beyond the formula of section 10, crafting costs, building purchase price, bed cost.
 - **The purpose of `FUN_1405d4260`** (the crime-in-progress tooltip function; the decompile timed out and was not analysed).
 

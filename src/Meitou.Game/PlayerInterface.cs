@@ -52,7 +52,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     // ---- events ----
 
     /// <summary>Returns true when the click belonged to the HUD or the interface (the camera input should not see it).</summary>
-    public bool MouseDown(MouseButton button, Vector2 p, bool shift)
+    public bool MouseDown(MouseButton button, Vector2 p, bool shift, bool ctrl = false, bool alt = false)
     {
         mouse = p;
         if (button == MouseButton.Left)
@@ -69,10 +69,21 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         }
         if (button == MouseButton.Right && !OverHud(p))
         {
-            if (PickTarget(p) is { } victim && SelectedIds() is { Count: > 0 } attackers)
+            // Alt + right click on a downed or dead character: the nearest selected loots it (take all). Ctrl + right click: picks it up, or puts it down when a selected
+            // character carries it. A plain right click on one of your own downed characters that needs no first aid picks it up too (the original's quick right click).
+            var downed = alt || ctrl ? PickDowned(p) : null;
+            if (alt && downed is { } loot && SelectedIds() is { Count: > 0 })
+                Say(new Meitou.Simulation.Carrying.LootOrder([], loot) { Tick = session.World.Tick });
+            else if (ctrl && downed is { } body && Selected().Where(c => c.Carrying == body).Select(c => c.Id).ToArray() is { Length: > 0 } carriers)
+                Say(new Meitou.Simulation.Carrying.PutDownOrder(carriers) { Tick = session.World.Tick });
+            else if (ctrl && downed is { } lift && SelectedIds() is { Count: > 0 })
+                Say(new Meitou.Simulation.Carrying.PickUpOrder([], lift) { Tick = session.World.Tick });
+            else if (PickTarget(p) is { } victim && SelectedIds() is { Count: > 0 } attackers)
                 Say(new Meitou.Simulation.Combat.AttackOrder(attackers, victim) { Tick = session.World.Tick });
             else if (PickHurtAlly(p) is { } patient && SelectedIds() is { Count: > 0 } medics)
                 Say(new Meitou.Simulation.FirstAid.TreatOrder(medics, patient) { Tick = session.World.Tick });
+            else if (PickDowned(p, ownOnly: true) is { } ally && SelectedIds() is { Count: > 0 })
+                Say(new Meitou.Simulation.Carrying.PickUpOrder([], ally) { Tick = session.World.Tick });
             else if (Ray(p) is { } ray && GroundHit(ray.Origin, ray.Direction) is { } hit)
             {
                 Move(hit, shift);
@@ -138,5 +149,8 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         else if (key == Meitou.Engine.Input.Key.R && !session.Camera.IsFree) Say(new StopCommand(SelectedIds()) { Tick = session.World.Tick });
         else if (key == Meitou.Engine.Input.Key.H && !session.Camera.IsFree) Say(new Meitou.Simulation.FirstAid.MedicJobCommand(SelectedIds()) { Tick = session.World.Tick });
         else if (key == Meitou.Engine.Input.Key.L && !session.Camera.IsFree) Say(new Meitou.Simulation.FirstAid.RestOrder(SelectedIds()) { Tick = session.World.Tick });
+        // Rescue job (the original's NUM8 rescue toggle; the numpad is the cinema camera's) and put down (the original's context menu verb "Put Down").
+        else if (key == Meitou.Engine.Input.Key.J && !session.Camera.IsFree) Say(new Meitou.Simulation.Carrying.RescueJobCommand(SelectedIds()) { Tick = session.World.Tick });
+        else if (key == Meitou.Engine.Input.Key.K && !session.Camera.IsFree) Say(new Meitou.Simulation.Carrying.PutDownOrder(SelectedIds()) { Tick = session.World.Tick });
     }
 }

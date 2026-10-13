@@ -630,7 +630,9 @@ Animals use `CharStatsAnimal`, fed by CHARACTER / ANIMAL_CHARACTER fields (`anim
 `FUN_1408866b0`, `CharStats` vtable slot 4), `FUN_1405c89d0`, `FUN_1408c60c0`, `FUN_1408837a0`.
 
 - Carried weight `W` = the inventory's total weight (`FUN_1405c89d0`) plus `carry person weight` (30 in the base game)
-  when carrying a person.
+  when carrying a person (**Verified** 2026-10-13: the CONSTANTS loader stores the value in a global whose only readers are this function and
+  a tooltip; the carried body's own weight, race and inventory add nothing). The speed product does not read the carry flag; a carrier walking
+  in speed mode 0 is raised to mode 1. Details in [carry-loot.md](carry-loot.md#15-weight-and-speed).
 - Capacity `C = carry weight mult * strength * strengthInjuryMultiplier + encumbrance base`, with
   `carry weight mult` 1.2, `encumbrance base` 15 (the load at strength 0), `strength` the effective strength stat
   and the multiplier `FUN_1406457e0(strength)`.

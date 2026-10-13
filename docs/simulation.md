@@ -152,12 +152,13 @@ Floats go in by their bits (-0 as 0). The first aid state (`TreatTarget` and `Re
 **Determinism tests** (`tests/Meitou.Tests/Simulation`). A dummy workload (`WanderSystem` in `WanderWorkload.cs`: seeded wandering,
 separation over the grid, a synthetic ground that dips under the water, blows on the nearest neighbour, births and deaths that reuse slots) and
 the real systems on a synthetic town (`SyntheticTown`) and on The Hub of the install run at 1, 4 and 16 threads; the hashes at the checkpoints
-agree, two runs agree, another seed differs. `GoldenHashTests` pins the hashes of eleven scripted scenarios (wander, player, roaming, bodies,
+agree, two runs agree, another seed differs. `GoldenHashTests` pins the hashes of twelve scripted scenarios (wander, player, roaming, bodies,
 fight, duels, two worlds cut into many partitions with `MinPartitionSize` 4, a first aid and rest script on hand-made characters, and `aggro`: five squads of five
 factions round a crossroads with a player character, fights started by hostility, self-defence and an assault that changes the relations, cut into partitions of one slot, and `ranged`: crossbowmen against katana fighters in one-slot partitions), so a refactor meant to change nothing is checked to change
 nothing; a change of behaviour that is meant updates the numbers in the same commit. **Re-pinned 2026-10-13** (`bodies` from its sixth checkpoint, `fight` from its second, `town-parts` from its second): the XP on the move of `BodySystem` (athletics while running, strength under a load) raises stats a little, which feeds the speed chain; the first aid system, the rest flag and the fighter encumbrance moved nothing there (switching only the XP off made all eight old pins match again), and the new `first-aid` scenario agrees at 1, 4 and 16 threads before being pinned. **Pinned 2026-10-13**: `aggro` (agrees at 1, 4 and 16 threads first;
 `AggroTests`); the hostility work moved none of the nine others (they do not run the aggro system, and the deferred list and self-defence change nothing in them).
 **Pinned 2026-10-13**: `ranged` (agrees at 1, 4 and 16 threads first; `RangedTests`); the ranged code moved none of the ten others (their worlds have no crossbows, and the ranged state is hashed only once used, [Ranged](#ranged)).
+**Pinned 2026-10-13**: `carry` (agrees at 1, 4 and 16 threads first; `CarryTests.Scripted`: an ordered lift, carry and put-down, a rescue by the job whose carrier is then knocked out, the dropped body lifted again, an NPC leader rescue, a witnessed loot and a loot of an emptied body); the carry code moved none of the eleven others (they do not build the carry system, and its fields are hashed only while set, [Carrying](#carrying-rescue-and-looting)).
 
 **Asynchronous services** (paths, navmesh building, building a town's characters) run on their own threads with request and result
 queues. In play a result is taken in at the first tick after it is ready, so timing can differ between runs. In the determinism tests they
@@ -219,18 +220,21 @@ result (the golden hashes pin it):
 | 4 | `MovementSystem` | Inputs, Schedule, Think, Move | Orders, paths, tasks, steering |
 | 5 | `FirstAidSystem` | Inputs, Schedule, Act, Apply, SlowWorld | First aid and resting: treat / rest / medic job orders, the walk to the patient, the bandaging, NPCs treating by themselves ([Bodies](#bodies)) |
 | 6 | `BodySystem` | Act, SlowWorld | Medical tick (resting from the `Rest` task), top speed, XP on the move, the fighter's encumbrance, down characters; removes corpses |
-| 7 | `CombatSystem` | Inputs, Schedule, Move, Act, Apply, SlowWorld | Fights, melee and crossbow (`Schedule` resyncs its slots with the table and flies the bolts, [Ranged](#ranged)) |
-| 8 | `AnimationSystem` | Act | Animation layers |
-| 9 | `FeedSystem` | SlowWorld | Eating |
-| 10 | `RetaliationSystem` | SlowWorld | Attacked characters fight back (NPCs always, the player's while idle) |
-| 11 | `AggroSystem` | Schedule, Act, Apply, SlowWorld | NPCs attack enemies of their faction they see or hear (the original's figures); the leash; back to the routine after a fight; hashes the live relation table ([Hostility](#hostility-and-relations)) |
-| 12 | `FleeSystem` | SlowWorld | NPC squads of factions with run-away ratios break and run when beaten, until safe ([Hostility](#hostility-and-relations)) |
+| 7 | `CarrySystem` | Inputs, Schedule, SlowWorld | Pick up, carry, put down, loot, the rescue job and NPC leader rescue ([Carrying](#carrying-rescue-and-looting)) |
+| 8 | `CombatSystem` | Inputs, Schedule, Move, Act, Apply, SlowWorld | Fights, melee and crossbow (`Schedule` resyncs its slots with the table and flies the bolts, [Ranged](#ranged)) |
+| 9 | `AnimationSystem` | Act | Animation layers |
+| 10 | `FeedSystem` | SlowWorld | Eating |
+| 11 | `RetaliationSystem` | SlowWorld | Attacked characters fight back (NPCs always, the player's while idle) |
+| 12 | `AggroSystem` | Schedule, Act, Apply, SlowWorld | NPCs attack enemies of their faction they see or hear (the original's figures); the leash; back to the routine after a fight; hashes the live relation table ([Hostility](#hostility-and-relations)) |
+| 13 | `FleeSystem` | SlowWorld | NPC squads of factions with run-away ratios break and run when beaten, until safe ([Hostility](#hostility-and-relations)) |
 
 The rules: **population first** (it spawns in `SlowWorld`, so later systems see its characters); **player before movement** (a
 `MoveOrder` without ids reads the selection the player system just changed); **pursuit before movement** (pursuit raises `NeedPath` in
 `Schedule` and movement answers the same tick); **first aid after movement, before body** (2026-10-13: a move order is the movement system's and sets the task, so it replaces a treatment or a rest; the treatment is applied in the serial commit, after every `Act` of the tick including the body system's medical tick; first aid reads the patient only in its own `Act` barrier, where nothing writes it); **body before combat** (the body system ticks the medical state, combat runs with
 `TickMedical` off and reads the result); **combat before animation and retaliation** (combat swaps its read and write arrays at the end of
-its `SlowWorld`: a system after it sees the new combat state, one before it the old); **feed after body**; **retaliation, then aggro, last** (both defer
+its `SlowWorld`: a system after it sees the new combat state, one before it the old); **carry after body, before combat** (2026-10-13: its
+`SlowWorld` sees this tick's knock-outs and removed corpses, so a carrier that goes down drops the body in the same tick; its `Inputs` run before
+combat's, so a carrier ordered to attack lets go first; everything it does is serial); **feed after body**; **retaliation, then aggro, last** (both defer
 orders for the next tick after combat swapped; the aggro's leash sweep sees the tasks every other system left this tick, and its look in `Act` reads only the last tick's
 positions and the cold state no other `Act` writes). The game's `CombatOptions` are `SelfApproach = false, TickMedical = false`. The sandbox builds `All` without `Aggro`
 (its hostile foe stands 30 units from the hero and must not start a fight by itself).
@@ -315,6 +319,11 @@ positions and the cold state no other `Act` writes). The game's `CombatOptions` 
 | right click on one of your own hurt characters (blood or a part below full; `BodyStatus.NeedsAid`) | the selection treats it with a first aid kit (`TreatOrder`); a lone selected character on itself treats itself. The original's verb is "First Aid" in the hold-right-button context menu (not built); engine choice |
 | `H` | switches the medic job on or off for the selection (`MedicJobCommand`; the original's `medic` toggle is NUM7, which the cinema camera owns here); the HUD shows `medic job (H)` |
 | `L` | the selection sits down and rests (`RestOrder`; no binding in the original, engine choice); a move or stop order ends it |
+| Ctrl + right click on a knocked-out or dead character | the nearest selected character picks it up (`PickUpOrder`); on a body a selected character carries, puts it down (`PutDownOrder`). The original's verbs "Pick Up" / "Put Down" are in the hold-right-button context menu (not built); engine choice |
+| right click on one of your own downed characters that needs no first aid | picks it up (`PickUpOrder`; the original's quick right click does the same, [carry-loot.md](game/carry-loot.md#31-the-players-orders)) |
+| Alt + right click on a knocked-out or dead character | the nearest selected character takes everything that fits (`LootOrder`, [Carrying](#carrying-rescue-and-looting)); the original opens a loot window instead (not built) |
+| `J` | switches the rescue job on or off for the selection (`RescueJobCommand`; the original's `rescue` key is NUM8, which the cinema camera owns here); the HUD shows `rescue job (J)` |
+| `K` | the selected carriers put their bodies down (`PutDownOrder`); the HUD shows `carrying (K puts down)` |
 
 Right mouse is the command button, so **orbit is the middle button only**; saved configs that bound `Mouse:Right` to orbit lose that entry on
 load. The HUD (top left, `DebugOverlay` text and quads): game clock and day, money, clickable speed buttons (pause, 1x, 2x, 5x, the active one
@@ -458,8 +467,14 @@ The original's rules (decompilation) are in [animation.md](animation.md#run-time
 - **Care** (engine choice, 2026-10-13). A standing character with the `Treat` task holds the whole-body `medic` clip (`is action`, loops), one with the `Rest` task `sitting idle`, through the same held-clip branch as the lying clip
   (`AnimationSystem.HeldClip`); walking, a technique or going down replaces them. There is no walk-to-kneel blend and the clip is not matched to the patient's position.
   `Fraction x 100` of each side's leg parts.
+- **Carrying** (2026-10-13, [Carrying](#carrying-rescue-and-looting)). `AnimationStance.CarryingLeft` / `BeingCarried` select the carry clips; the
+  `carry me` record (category 3) is appended after the ranged block, so no other index moves. A lifting or putting-down character plays
+  `shoulder lift left` at an explicit time (forward from the lift's start, backwards for a put-down); a standing carrier plays a whole-body idle
+  without the carry flag under `AnimationLibrary.CarryIdle` (`stand carrying left`); a walking one gets the `walk/jog carrying left` upper clips
+  through the normal movement blend (lower-body clips ignore the carry flags, `FitsExceptLegs`). A carried body plays `carry me` instead of the
+  lying clip, does not fall and is not pushed by root motion. The arm-only overlay is not used.
 - **Host.** Clip time and weight are interpolated between the two snapshots (a wrapped clip time shows the new value).
-- **Not made:** strafing (`strafe lower` by the sideways speed), overlays (breathing, wound `pain anim`s, carrying), `head turning`, other
+- **Not made:** strafing (`strafe lower` by the sideways speed), overlays (breathing, wound `pain anim`s, `carrying left arm only`), `head turning`, other
   `is action` clips, weather variants, the ragdoll, and the right-arm override clone of blocks.
 
 ## Bodies
@@ -505,7 +520,7 @@ Formulas, constants, units and the engine choices of the body code are in
   of character-stats.md "Sleep, beds and resting" need one).
 - **XP on the move** (`BodySystem`): `XpService.AthleticsFromRunning` while moving faster than the race walk speed + 1 (whether walking trains is **Unknown**), `StrengthFromCarrying` while moving under
   a load that encumbers (factor below 1). The fighter's `EncumbranceFactor` is set from the inventory weight each tick.
-- **Not done.** Beds, the shallow-water speed cap, the splint, rescue (NUM8) and "sleep when injured" jobs, the first aid context menu, treating a patient that keeps moving (a treatment ordered on one makes the medic follow it until it stops; the original has a "make target stand still" task),
+- **Not done.** Beds, the shallow-water speed cap, the splint, the "sleep when injured" job (rescue is done, [Carrying](#carrying-rescue-and-looting)), the first aid context menu, treating a patient that keeps moving (a treatment ordered on one makes the medic follow it until it stops; the original has a "make target stand still" task),
   limb items for severed parts. Treatment and rest are not saved ([Saves](#saves)).
 - **The time scale question.** See [Measurements](#measurements): at scale 1 nothing but hunger happens over days, at 100 the numbers read like
   play. The default stays 1 until a game session settles it.
@@ -739,6 +754,64 @@ An **engine stand-in** for the stage 9 senses and target choice, with the origin
   (slots 7, 8), dialogue relation effects, trust, the drift, animals fighting, NPCs finishing off or looting the downed. The original's enemy test (Character slot 125) does
   not consult `coexistence`; the engine keeps it (above) until the place the flag acts is found.
 
+## Carrying, rescue and looting
+
+The original's rules are in [carry-loot.md](game/carry-loot.md) (crimes also in [economy.md 11.6](game/economy.md#116-pending-crimes-witnesses-and-the-cage-sentence)).
+Code: `src/Meitou.Simulation/Carrying/` (`CarrySystem`, `CarryTypes.cs`), built 2026-10-13 as `StandardParts.Carry` after the body system
+([order](#systems-and-their-order)). Everything it does runs in the serial phases (`Inputs`, `Schedule`, `SlowWorld`), in slot order.
+
+- **The link.** `CharacterCold.Carrying` (carrier) and `CarriedBy` (body), set and cleared together. The body is always on the **left shoulder**
+  (**Verified** in the original), so `CarrySystem.LeftArmUsable` (no collapsed part with the left-arm bit 4 of `collapse part`, limb slot 0 not a
+  stump) decides who can carry. Each tick the body's position and yaw are set to the carrier's. The snapshot publishes `CarriedBy`, `Carrying`
+  and `AttachBone` (`Bip01 L UpperArm`); **the renderer does not attach the body to the bone yet**: the host draws it at a fixed offset beside
+  and above the carrier (`GameHost.CarriedOffset`, 2 units left, 14 up; a guess not checked in the viewer).
+- **Who.** A carrier is awake, has a race, is not in combat, not carrying or carried, with a usable left arm (`CanCarry`). A body is knocked
+  out or dead, of a `carriable` race (every base race but the Leviathan), not carried (`CanBeLifted`). Snatching a carried body is not allowed
+  (engine choice; the original allows it for some AI goals).
+- **Pick up** (`PickUpOrder`, task `PickUp`): the nearest eligible character of the list (the selection when empty) walks to the body like a
+  first-aid medic (reach 14), then plays `shoulder lift left`; at 0.4 of the clip the link is made (if both are still eligible and within 28
+  units), at 0.95 the task ends and the carrier goes back to the task it had (Follow, Wander, Idle). The clip length is read from the
+  skeleton's animations (1 s without them).
+- **Weight and speed.** `BodySystem` adds `carry person weight` (30) to the carrier's load (`Encumbrance.Factor(..., carrying: true)`);
+  `MovementSystem` raises a carrier's walk mode to run (the original's speed mode 0 to 1). Separation does not push carried bodies, and a
+  follower does not follow the leader it carries.
+- **Put down** (`PutDownOrder`, `K`, task `PutDown`): the clip backwards, released below 0.2; the body is placed 3 units to the carrier's side
+  (where walkable, else at the carrier) and, unless the carrier regards it as friendly (same faction, or allied at relation 50 or more when
+  the live table is set: engine reading of the original's test), knocked out again for `MedicalState.PutDownKoMinutes` with the factor
+  `0.1 + 0.3 x assassination / 100` (the KO formula as character-stats.md reads it, without its random roll: engine choice).
+- **Drop.** At once (no clip) when the carrier is knocked out or dies, its left arm collapses or is cut off, or it is ordered to attack (an
+  attack order is the player's way to fight; an NPC carrier picks no fight: the aggro look and retaliation skip carriers, as the original's AI
+  weights do). Dangling links (a body removed) are cleared.
+- **Waking on the shoulder** (engine choice; the original's put-down-if-they-can-walk goal was not decoded): a friendly body that comes
+  round is set down; a non-friendly one is knocked out again on the shoulder, so a captive stays carried.
+- **Rescue job** (`RescueJobCommand`, `J`; `CharacterCold.RescueJob`, published as `BodyStatus.RescueJob`). Every 15 ticks a character with
+  the job, idle, wandering or following, able to carry and with no fight in its squad, picks up the nearest knocked-out (not dead),
+  liftable member of its faction within its sight (`AggroSystem.RangeOf` of 1500, the race's vision multiplier; the original searches its
+  sensed list, whose range is **Unknown**) that nobody else is lifting. **No beds** (buildings have no world state): after the pick-up the
+  rescuer goes back to its task and carries the body until it comes round (then sets it down) or is ordered to put it down. The squad's
+  "Rescue Allies" toggle is not built (own faction only).
+- **NPC leader rescue** (`CarrySettings.RescueNpcLeaders`, on): an NPC squad whose leader is knocked out (not dead) sends its nearest free
+  member to pick it up (the original's `FIND_AND_RESCUE_LEADER` stands in for the AI packages it belongs to). Wounded slaves and kidnapping
+  are not built.
+- **Loot** (`LootOrder`, Alt + right click, task `Loot`): the nearest looter walks to a knocked-out or dead character with an inventory and
+  takes everything of its main inventory and its backpack that fits its own (`CarrySystem.TakeAll` through `Inventory.Add`: stacks join,
+  then the first free cell of the main grid, then of the backpack); what does not fit stays. Worn gear and the backpack itself stay (engine
+  choice: the fighter's gear is fixed at spawn, and the original has no "take all" rule for equipment). The host shows "{name} took n
+  items from {victim}" (and how many did not fit). No loot window.
+- **Witnessed theft** (engine stand-in for the original's pending-crime rules): when a player character loots a non-player, every awake,
+  uncarried member of the victim's faction is checked with the aggro sight test (`AggroSystem.Visibility`: range, view cone, daylight); if
+  one sees it, `PlayerRelations.Event(victim faction, Stealing)` (kind 3, -10, floor -50, [Hostility](#hostility-and-relations)) and the
+  message "{name} was seen looting {victim}". The victim itself never notices (the original's steal roll always succeeds against a downed
+  owner). **Not built:** crimes and bounties (pending crimes, Theft / Looting codes, police booking: out of scope), the permission rules
+  (slaves, bandits, wanted victims), the stolen flag on items, kidnapping and cage crimes, NPC looting (`LOOT_THE_DEAD`).
+- **Not built:** beds, cages, `Put in Bed` / `Put in` / `Kidnap`; the context menu; items on the ground (no world item objects yet: picking
+  up and dropping are not done); the renderer's bone attachment; the `carrying left arm only` overlay; swimming with a body. Carrying and
+  looting are not saved ([Saves](#saves)).
+- **Hash.** `CharacterCold` hashes `Carrying`, `CarriedBy`, the task's `CarryTarget` / `LiftTime` / resume task and `RescueJob` only while set,
+  so worlds without carrying keep their pinned hashes. **Tests** (`CarryTests`, 12): lift timing and weight and speed, who can be lifted and
+  the left arm, the drops, put-down timing and the KO, friend vs captive waking, run mode, the rescue target, NPC leader rescue, take-all grid
+  fit, witness vs unseen loot, and the scripted scenario at 1, 4 and 16 threads (pinned `carry`).
+
 ## Saves
 
 `Meitou.Data.Save` reads and writes the save folder ([save.md](formats/save.md#implementation-as-built-stage-10)); `Meitou.Simulation.Saving`
@@ -774,7 +847,10 @@ real saves (`[Slow]`): each loads (195 to 354 roaming stand-ins), loading and ca
 `quick.save` and nothing in the player's characters, a change made in the world survives writing and reading, and a world loaded from a real
 save runs 150 ticks and captures again with the same platoons and characters.
 
-**Not carried yet** (kept as the save had it, or regenerated): first aid and resting (the `Treat` / `Rest` tasks, the medic job: no key in MEDICAL_STATE or GAMESTATE_CHARACTER holds them; the squad toggles `heal`, `sleep`, `sit` of the CAMERA record have **Unknown** short-key meanings and are not mapped) and a kit's used charges with the rest of the inventory, the NPC platoons' characters (regenerated from the template; their files stay as
+**Not carried yet** (kept as the save had it, or regenerated): first aid and resting (the `Treat` / `Rest` tasks, the medic job: no key in MEDICAL_STATE or GAMESTATE_CHARACTER holds them; the squad toggles `heal`, `sleep`, `sit` of the CAMERA record have **Unknown** short-key meanings and are not mapped); carrying (GAMESTATE_CHARACTER
+has `carrying` and the handle `carrying*`, but the carried body is usually an NPC, whose character is not saved, so a quicksave drops the link and
+the body lies where it was), a pick-up, put-down or loot under way, the rescue job (the CAMERA squad toggle `rescue` is not mapped either) and what
+a loot moved (inventories are not saved); and a kit's used charges with the rest of the inventory, the NPC platoons' characters (regenerated from the template; their files stay as
 they were), towns and their state, war state, weather and season (the weather rolls anew on loading), research, zone buildings and loose items, inventories and equipment (a loaded character's are rebuilt from its record and look), AI jobs,
 the saved look of a loaded character (rolled again from the saved serial through `IAppearanceSource`; the serial of a character Meitou saved is its look's seed), bounties, `5-redirect`. **Unknown**:
 whether the original loads a save written from nothing ([save.md](formats/save.md#implementation-as-built-stage-10)); the orientation convention
