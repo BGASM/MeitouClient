@@ -22,7 +22,9 @@ sealed partial class PlayerInterface
         var o = measure;
         if (o is null) return (0, 0, 0, 0);
         float width = MathF.Max(26 * o.CharWidth, 4 * (ButtonWidth(o) + 4)) + 2 * Pad;
-        float height = Pad + o.LineHeight * 2 + 4 + o.LineHeight + Pad + 6 + o.LineHeight * (1 + Math.Min(8, Selected().Count) + 3 + 6 + 10);
+        var selected = Selected();
+        int bountyLines = selected.Count == 0 ? 0 : Math.Min(3, selected[0].Bounties.Count) + (selected.Count > 1 && selected.Any(c => c.Bounties.Count > 0) ? 1 : 0);
+        float height = Pad + o.LineHeight * 2 + 4 + o.LineHeight + Pad + 6 + o.LineHeight * (1 + Math.Min(8, selected.Count) + 3 + 6 + 10 + bountyLines);
         return (Margin, Margin, Margin + width, Margin + height);
     }
 
@@ -193,6 +195,16 @@ sealed partial class PlayerInterface
             o.Text($"Hunger: {body.Hunger:0.00} of 3", box.X0 + Pad + o.CharWidth, y, body.Hunger < 1 ? red : white);
             y += o.LineHeight;
         }
+        // Bounties (the game's status panel: "Bounty:", "-Wanted For:", "The bounty will expire in n hrs" / "Notorious: The bounty will never expire.").
+        if (chosen.FirstOrDefault() is { } wanted)
+            foreach (var b in wanted.Bounties.Take(3))
+            {
+                string expiry = double.IsPositiveInfinity(b.HoursLeft) ? "never expires" : $"expires in {Math.Max(0, Math.Ceiling(b.HoursLeft)):0} hrs";
+                o.Text($"Bounty: c.{b.Amount} {b.Faction} ({b.Crimes}) {expiry}", box.X0 + Pad + o.CharWidth, y, red);
+                y += o.LineHeight;
+            }
+        int squadBounty = chosen.Sum(c => c.Bounties.Sum(b => b.Amount));
+        if (chosen.Count > 1 && squadBounty > 0) { o.Text($"Bounties of the selection: c.{squadBounty}", box.X0 + Pad + o.CharWidth, y, red); y += o.LineHeight; }
         if (chosen.FirstOrDefault() is { Skills: { } skills }) { o.Text($"Atk {skills.Attack:0.0} Def {skills.Defence:0.0} Dodge {skills.Dodge:0.0} Tough {skills.Toughness:0.0} Str {skills.Strength:0.0} Ath {skills.Athletics:0.0}", box.X0 + Pad + o.CharWidth, y, white); y += o.LineHeight; }
         if (chosen.FirstOrDefault() is { } carrier)
             foreach (var line in carrier.Inventory.Take(9)) { o.Text(line, box.X0 + Pad + o.CharWidth, y, white); y += o.LineHeight; }

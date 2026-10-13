@@ -364,10 +364,16 @@ that pass or has a pending crime whose timer is above 5; **Observed**):
 - When the witness's faction is not hostile to the suspect's (`FUN_1406b2630`) the carrying check (4.6) runs first.
 - With a pending crime: for Theft or Fencing (3 / 0xd) and Looting (10, which also needs the witness not to regard the suspect as friendly) the
   witness must care about the victim (it regards the victim as friendly, or its faction is allied with the victim's, `FUN_1406b2630`); Kidnapping
-  (0xf) needs a victim handle and that care. Then: relation event 7 (witness against suspect), the suspect's crime timer set to 20
+  (0xf) needs a victim handle and that care. Then: a reaction of kind 7 (witness against suspect), the suspect's crime timer set to 20
   (`FUN_140851f40`), a reaction (`FUN_140684990`, dialogue event 0x29 / 0x2a / 0x2b / 0x3a / 0x22 / 0x11 / 0x39 by code), and **only when the
   witness is police-like and its faction's `+0x40` flag is set** the crime is booked as a bounty (`FUN_140853ec0(suspect ledger, witness
-  faction)`, [economy.md 11.2](economy.md#112-how-a-bounty-is-gained)). Ordinary witnesses only change relations and react.
+  faction)`, [economy.md 11.2](economy.md#112-how-a-bounty-is-gained)). Ordinary witnesses only react.
+- More of the same function (re-read 2026-10-13, **Observed**): with a pending crime, the victim's faction must not be the witness's slave owner faction, nor one the witness's
+  faction is hostile to (`FUN_1406b26d0`), nor lawless (`+0x1d0`), nor a BANDIT-type faction when the witness's faction has the `+0x40` flag; and a witness that regards the suspect
+  as friendly reacts only to crimes against its own faction. An **Assault** (5) needs a victim that resolves and that the witness does not regard as an enemy (slot 125; a slaver
+  branch for slave victims not decoded); a **Murder** (4) and the codes without a case need nothing more (no care). The "kind 7" call (`FUN_1406744a0`) goes to the witness's
+  squad object (`FUN_140674300`), not to the faction relation table (the slot 5 table of factions-squads-towns.md 3.4 has no row 7); it reads as a squad-level tag on the suspect.
+  Only when the witness regards both suspect and victim as friendly does the function change the witness faction's relations (a call with -20 and 1, purpose not decoded).
 
 ### 4.4 The stolen flag (`FUN_14079e550(item, strict)`, **Observed**; answers part of the economy.md Unknown)
 
@@ -458,4 +464,4 @@ For a witness that sees a carrier:
 ## As built
 
 Meitou's `CarrySystem` (`src/Meitou.Simulation/Carrying/`) and the choices it makes where this page stops are described in
-[../simulation.md "Carrying, rescue and looting"](../simulation.md#carrying-rescue-and-looting).
+[../simulation.md "Carrying, rescue and looting"](../simulation.md#carrying-rescue-and-looting); the crimes of sections 4.3 and 4.6 (pending crimes, witnesses, kidnapping, booking) in [../simulation.md "Crimes and bounties"](../simulation.md#crimes-and-bounties).

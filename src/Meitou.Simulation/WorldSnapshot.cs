@@ -33,6 +33,8 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     public BodyStatus? Body { get; init; }
     /// <summary>What a selected character carries, one line per item (empty for the others).</summary>
     public IReadOnlyList<string> Inventory { get; init; } = [];
+    /// <summary>A selected character's bounties, one line per faction that wants it (empty for the others and for one nobody wants).</summary>
+    public IReadOnlyList<Crime.BountyLine> Bounties { get; init; } = [];
     /// <summary>A selected character's trained stats (the host formats them); null for the others and for a character without stats.</summary>
     public SkillSummary? Skills { get; init; }
     /// <summary>

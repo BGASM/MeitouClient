@@ -172,6 +172,8 @@ public static class SaveLoader
                     Medical = medical,
                 },
             };
+            // Bounties: the ledger keys of the character's state record (docs/simulation.md "Crimes and bounties").
+            cold.Bounties = BountySave.Read(sc.GameState, data.Relations, loaded.Clock, world.Tick, world.TickSeconds);
             // The body: the saved stats and medical state go to the body systems, the rest of the assembly (inventory, fighter) is made as for a new character.
             if (race is not null && stats is not null && medical is not null) assembly.AttachSaved(cold, race, stats, medical, record);
             else if (race is not null)

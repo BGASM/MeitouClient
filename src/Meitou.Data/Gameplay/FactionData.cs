@@ -39,6 +39,11 @@ public sealed record FactionData
     /// <summary><c>not real</c>: wildlife, ruins, slaves, "No Faction"...</summary>
     public bool NotReal { get; init; }
     public bool OffersBounties { get; init; }
+    /// <summary>
+    /// The faction books crimes as bounties: the faction loader <c>FUN_1407fe270</c> sets the faction's byte <c>+0x40</c> to true for <c>fundamental type</c> LAW_ENFORCEMENT and
+    /// otherwise to <c>offers bounties</c> (<b>Observed</b>, docs/game/economy.md 11.6). In the base data: Police, Mercenary Police, United Cities, The Holy Nation, Shek Kingdom, Republic of Tertius.
+    /// </summary>
+    public bool BooksBounties => FundamentalType == FundamentalType.LawEnforcement || OffersBounties;
     public float RunAwayRatioOfSquadSize { get; init; }
     public float RunAwayRatioRelativeToEnemy { get; init; }
     public int MaxProsperity { get; init; }

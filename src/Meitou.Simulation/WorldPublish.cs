@@ -30,6 +30,7 @@ public sealed partial class World
                 Selected = selected,
                 Skills = selected && cold!.Stats is { } sk ? new SkillSummary(sk[StatsEnumerated.MeleeAttack], sk[StatsEnumerated.MeleeDefence], sk[StatsEnumerated.Dodge], sk.Toughness, sk.Strength, sk.Athletics) : null,
                 Inventory = selected && cold!.Inventory is { } carried ? Items.InventoryText.Lines(carried) : [],
+                Bounties = selected && cold!.Bounties is not null ? Crime.CrimeSystem.Lines(cold, Tick, TickSeconds) : [],
                 Body = cold?.Medical is { } med && cold.Race is { } race ? BodyOf(cold, med, race, state[i].Task) : null,
                 Path = selected && (state[i].Flags & (ushort)MoveFlags.HasPath) != 0 ? cold!.Path.Skip(state[i].PathCursor).ToArray() : [],
                 CarriedBy = cold?.CarriedBy ?? CharacterId.None,

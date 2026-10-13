@@ -647,6 +647,11 @@ public sealed partial class CombatSystem : IProjectileSource
             xp.Combat(vs, dc.Race, XpEvent.HitTaken, vf.Unarmed, StatsEnumerated.None, p.ShooterSkill, StrengthFactor(dc, vf));
         bool shooterAlive = p.Shooter < prev.Length && prev[p.Shooter].Alive && prev[p.Shooter].Generation == p.ShooterGeneration;
         if (shooterAlive && intended) write[p.Shooter].Landed++;
+        if (shooterAlive && Crimes is { } crimes)
+        {
+            crimes.Hit(world, p.Shooter, v);
+            if (death) crimes.Murder(world, p.Shooter, v);
+        }
         if (death && Relations is not null && p.ShooterIsPlayer && !dc.IsPlayer) PlayerRelations.Event(world, Relations, dc.Faction, RelationEventKind.Murder);
         if (Settings.RecordLog)
             log.Add(new CombatLogEntry(now, p.Shooter, v, 0, BlowOutcome.Hit, part, damage.Cut, damage.Blunt, damage.Pierce, damage.ExtraStun, knockout, death) { Ranged = true, Intended = intended });

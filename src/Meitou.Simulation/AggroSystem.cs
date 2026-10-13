@@ -106,6 +106,11 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
 
     public AggroSettings Settings { get; } = settings ?? new AggroSettings();
     public FactionRelations Relations { get; } = relations;
+    /// <summary>
+    /// The crime system: with it a police-like NPC also attacks a character its faction has an unclaimed bounty on (docs/simulation.md "Crimes and bounties"; the original's police go after
+    /// wanted characters they sense). Null: hostility by relations only.
+    /// </summary>
+    public Crime.CrimeSystem? Crimes { get; set; }
 
     /// <summary>The fights started since the last <see cref="TakeLog"/> (with <see cref="AggroSettings.RecordLog"/>).</summary>
     public IReadOnlyList<AggroEntry> Log => log;
@@ -134,13 +139,21 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         }
         size = Math.Max(size, n);
         var next = table.Next;
-        if (present.Length != Relations.Count) { present = new bool[Relations.Count]; hasEnemy = new bool[Relations.Count]; }
+        if (present.Length != Relations.Count) { present = new bool[Relations.Count]; hasEnemy = new bool[Relations.Count]; wanted = new bool[Relations.Count]; }
         Array.Clear(present);
+        Array.Clear(wanted);
         for (int i = 0; i < n; i++)
         {
             int generation = next[i].Alive ? next[i].Generation : -1;
             if (slots[i].Generation != generation) slots[i] = new Slot { Generation = generation, Task = NoTask };
-            if (generation >= 0 && table.Cold(i) is { Medical: not null } c && Relations.Contains(c.Faction)) present[c.Faction] = true;
+            if (generation >= 0 && table.Cold(i) is { Medical: not null } c && Relations.Contains(c.Faction))
+            {
+                present[c.Faction] = true;
+                // Which factions want a character present: their police look even when no enemy faction is about.
+                if (Crimes is not null && c.Bounties is { } ledger)
+                    foreach (var e in ledger.Entries)
+                        if (e.Amount > 0 && !e.Claimed && Relations.Contains(e.Faction)) wanted[e.Faction] = true;
+            }
         }
         // Which factions have an enemy among the factions present: a peaceful crowd skips its looks. Worked out again only when the set changes.
         if (present.AsSpan().SequenceEqual(presentBefore) && Relations.Changes == changesBefore) return;
@@ -156,7 +169,7 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         }
     }
 
-    bool[] present = [], presentBefore = [], hasEnemy = [];
+    bool[] present = [], presentBefore = [], hasEnemy = [], wanted = [];
     long changesBefore = -1;
     readonly List<int> presentList = [];
 
@@ -167,6 +180,8 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         public CharacterTable Table;
         public FactionRelations Relations;
         public int Self, Faction;
+        /// <summary>The looker is police-like and its faction wants someone present: a wanted character counts as an enemy.</summary>
+        public bool Police;
         public Vector3 Eye;
         public float Yaw, Range;
         public ulong Seed, Key, Tick;
@@ -187,12 +202,14 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
             if (!prev[i].Alive || i >= slots.Length || world.Tick < slots[i].CalmUntil) continue;
             byte task = next[i].Task;
             if (task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat or (byte)CharacterTask.Rest) continue;
-            if (table.Cold(i) is not { IsPlayer: false, InCombat: false, Fleeing: false, Fighter: not null, Medical.Incapacitated: false, Carrying.IsNone: true } cold || !Relations.Contains(cold.Faction) || !hasEnemy[cold.Faction]) continue;
+            if (table.Cold(i) is not { IsPlayer: false, InCombat: false, Fleeing: false, Fighter: not null, Medical.Incapacitated: false, Carrying.IsNone: true } cold || !Relations.Contains(cold.Faction)) continue;
+            bool police = wanted[cold.Faction] && Crimes is { } crimes && crimes.IsPoliceLike(world, cold);
+            if (!hasEnemy[cold.Faction] && !police) continue;
             float range = RangeOf(cold, Settings.SightRange);
             if (!(range > 0)) continue;
             var scan = new Scan
             {
-                Table = table, Relations = Relations, Self = i, Faction = cold.Faction,
+                Table = table, Relations = Relations, Self = i, Faction = cold.Faction, Police = police,
                 Eye = prev[i].Position, Yaw = prev[i].Yaw, Range = range, Best = -1, BestD2 = float.MaxValue,
                 Seed = world.Seed, Key = Rng.Key(new CharacterId(i, prev[i].Generation)), Tick = (ulong)world.Tick,
             };
@@ -209,7 +226,8 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         // Strictly nearer only: the grid visits a cell's slots in ascending order, so a tie keeps the lower slot within a cell; across cells the
         // order is the grid's fixed one. Either way it is a function of the state.
         if (d2 >= s.BestD2 || (d2 > s.Range * s.Range && d2 > NoiseFar * NoiseFar)) return;
-        if (s.Table.Cold(slot) is not { Medical.Incapacitated: false } c || !IsEnemy(s.Relations, s.Faction, c.Faction)) return;
+        if (s.Table.Cold(slot) is not { Medical.Incapacitated: false } c) return;
+        if (!IsEnemy(s.Relations, s.Faction, c.Faction) && !(s.Police && Crime.CrimeSystem.IsWantedBy(c, s.Faction))) return;
         if (Visibility(s.Eye, s.Yaw, other.Position, s.Range) <= 0)
         {
             float p = HearChance(MathF.Sqrt(d2), NoiseRange(new Vector2(other.Velocity.X, other.Velocity.Z).Length(), other.MaxSpeed));

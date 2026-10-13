@@ -52,6 +52,8 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
 
     /// <summary>The live relation table the player's assaults and killings change (<c>PopulationData.Relations</c>); null: nothing changes (hand-built test worlds).</summary>
     public FactionRelations? Relations { get; set; }
+    /// <summary>The crime system the player's assaults, killings and hits on the police are reported to (null: no crimes).</summary>
+    public Crime.CrimeSystem? Crimes { get; set; }
     public IReadOnlyList<CombatTechnique> Techniques => techniques;
 
     /// <summary>The resolved blows so far (when <see cref="CombatOptions.RecordLog"/> is on).</summary>
@@ -116,7 +118,12 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
                     bool deed = Relations is not null && !order.Defensive && !PlayerFights(table, order.Target);
                     bool byPlayer = false;
                     foreach (var id in order.Attackers)
-                        if (Engage(world, table, id, order.Target, now) && table.Cold(id.Slot)!.IsPlayer) byPlayer = true;
+                        if (Engage(world, table, id, order.Target, now) && table.Cold(id.Slot)!.IsPlayer)
+                        {
+                            byPlayer = true;
+                            // An attack that is not self-defence is an assault (before the relation event below, which could make the victim's faction hostile).
+                            if (!order.Defensive && Crimes is { } crimes && table.TryResolveNext(order.Target, out int victimSlot)) crimes.Assault(world, id.Slot, victimSlot);
+                        }
                     if (deed && byPlayer && table.Cold(order.Target.Slot) is { IsPlayer: false } victim)
                         PlayerRelations.Event(world, Relations!, victim.Faction, RelationEventKind.Assault);
                     break;

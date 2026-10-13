@@ -29,7 +29,7 @@ Each stage ends with tests and something the owner can run.
 | **8. Combat** | Melee per [combat.md](game/combat.md); ranged later | Melee done and wired ([Combat](#combat)); fights start by faction hostility, the player's idle characters defend themselves, the player's assaults and killings change the relations (2026-10-13, `AggroSystem`, [Hostility](#hostility-and-relations)); ranged, turrets and attack slots not built |
 | **9. AI proper** | Packages, blackboard, scoring and planner ([ai.md](game/ai.md)), off-screen squads | Not started (gate: towns run their daily routines, squads travel off screen). `PursuitSystem`, `RetaliationSystem`, `AggroSystem` (senses and target choice) and the roaming squads are engine stand-ins, not the original's AI |
 | **10. Saves** | Read and write the world state ([save.md](formats/save.md)) | API done ([Saves](#saves)); the game host quicksaves (F5) and quickloads (F9) the player's squad into its own slot ([Quicksave and quickload](#quicksave-and-quickload)); no save menu, no loading of the original game's saves in play |
-| **11+** | Economy and trade, buildings and production, the MyGUI screens, audio | Not started |
+| **11+** | Economy and trade, buildings and production, the MyGUI screens, audio | Not started, except crimes and bounties (2026-10-13, [Crimes and bounties](#crimes-and-bounties)) |
 
 ## Principles
 
@@ -146,7 +146,7 @@ The original's own random sequence is not reproduced (open for the character gen
 **State hash.** `World.StateHash()` is an order-sensitive mixing hash (`StateHasher`, written here, no packages) over the seed, the tick, every
 slot in order (alive, generation, and for live ones every `CharacterHot` field, then faction, spawn tick, squad, role, formation offset, path
 length and request, `IsPlayer`, the order queue, `DrawnWeapon`, stats and medical state through `BodyHash`, the inventory, provision and death
-ticks, `InCombat`, the animation layers and the name's length) and the free list, then the squad and platoon registries, the player state and every system that implements `IStateHashed` (the combat slots; the aggro system's leash slots, fight count and, once a deed has changed it, the whole relation table).
+ticks, `InCombat`, the animation layers and the name's length; the bounty ledger and the pending crime only while set) and the free list, then the squad and platoon registries, the player state and every system that implements `IStateHashed` (the combat slots; the aggro system's leash slots, fight count and, once a deed has changed it, the whole relation table).
 Floats go in by their bits (-0 as 0). The first aid state (`TreatTarget` and `ResumeTask` while the task is `Treat`, `MedicJob` when on) goes in only while it is set, so a world that never uses first aid hashes as it did before it existed. It is a test and debugging tool, not run in play.
 
 **Determinism tests** (`tests/Meitou.Tests/Simulation`). A dummy workload (`WanderSystem` in `WanderWorkload.cs`: seeded wandering,
@@ -162,6 +162,9 @@ nothing; a change of behaviour that is meant updates the numbers in the same com
 were one item of quantity 2 and are now two cells (ITEM `stackable` 1); the world agrees at 1, 4 and 16 threads first (`InventoryTests.A_town_with_items_agrees_at_one_four_and_sixteen_threads`),
 and none of the eleven other pins moved.
 **Pinned 2026-10-13**: `carry` (agrees at 1, 4 and 16 threads first; `CarryTests.Scripted`: an ordered lift, carry and put-down, a rescue by the job whose carrier is then knocked out, the dropped body lifted again, an NPC leader rescue, a witnessed loot and a loot of an emptied body); the carry code moved none of the eleven others (they do not build the carry system, and its fields are hashed only while set, [Carrying](#carrying-rescue-and-looting)).
+**Pinned 2026-10-13**: `crime` (agrees at 1, 4 and 16 threads and with 16-slot partitions first; `CrimeTests.Scripted`: an assault on a townsman in view of two policemen, booked, the police
+going after the wanted player character, and a second player character looting a knocked-out farmer before a policeman); the crime code moved none of the twelve others (no
+other scenario builds the crime system, and the ledgers and pending crimes are hashed only while set, [Crimes and bounties](#crimes-and-bounties)).
 
 **Asynchronous services** (paths, navmesh building, building a town's characters) run on their own threads with request and result
 queues. In play a result is taken in at the first tick after it is ready, so timing can differ between runs. In the determinism tests they
@@ -230,6 +233,7 @@ result (the golden hashes pin it):
 | 11 | `RetaliationSystem` | SlowWorld | Attacked characters fight back (NPCs always, the player's while idle) |
 | 12 | `AggroSystem` | Schedule, Act, Apply, SlowWorld | NPCs attack enemies of their faction they see or hear (the original's figures); the leash; back to the routine after a fight; hashes the live relation table ([Hostility](#hostility-and-relations)) |
 | 13 | `FleeSystem` | SlowWorld | NPC squads of factions with run-away ratios break and run when beaten, until safe ([Hostility](#hostility-and-relations)) |
+| 14 | `CrimeSystem` | SlowWorld | Pending crimes from the player's deeds (reported by combat and carrying), witnesses, booking by the police, bounty expiry ([Crimes and bounties](#crimes-and-bounties)) |
 
 The rules: **population first** (it spawns in `SlowWorld`, so later systems see its characters); **player before movement** (a
 `MoveOrder` without ids reads the selection the player system just changed); **pursuit before movement** (pursuit raises `NeedPath` in
@@ -240,7 +244,7 @@ its `SlowWorld`: a system after it sees the new combat state, one before it the 
 combat's, so a carrier ordered to attack lets go first; everything it does is serial); **feed after body**; **retaliation, then aggro, last** (both defer
 orders for the next tick after combat swapped; the aggro's leash sweep sees the tasks every other system left this tick, and its look in `Act` reads only the last tick's
 positions and the cold state no other `Act` writes). The game's `CombatOptions` are `SelfApproach = false, TickMedical = false`. The sandbox builds `All` without `Aggro`
-(its hostile foe stands 30 units from the hero and must not start a fight by itself).
+(its hostile foe stands 30 units from the hero and must not start a fight by itself). **Crime last** (2026-10-13): its witness sweep sees the positions, carry links and pending crimes every other system left this tick; the deeds come in from combat (`Inputs`, the commit, the bolt flight in `Schedule`) and carrying (`SlowWorld`), all serial.
 
 ## Population
 
@@ -331,7 +335,8 @@ positions and the cold state no other `Act` writes). The game's `CombatOptions` 
 Right mouse is the command button, so **orbit is the middle button only**; saved configs that bound `Mouse:Right` to orbit lose that entry on
 load. The HUD (top left, `DebugOverlay` text and quads): game clock and day, money, clickable speed buttons (pause, 1x, 2x, 5x, the active one
 lit), the selected characters' names; for the first selected character `Health: blood n%  worst part n%  state`, `Hunger: n of 3`, the trained
-stats (attack, defence, dodge, toughness, strength, athletics) and up to 9 inventory lines. Selected characters get a green ring and their
+stats (attack, defence, dodge, toughness, strength, athletics) and up to 9 inventory lines; above the stats, in red, up to three `Bounty: c.n {faction} ({crimes}) expires in n hrs`
+lines (or `never expires` from 10000; the original's status panel words) and, with several selected, the sum of their bounties ([Crimes and bounties](#crimes-and-bounties)). Selected characters get a green ring and their
 remaining path a yellow line. A click on the HUD never selects. Screenshot option: `--move-to <x> <z>` (selects the squad and orders it to walk)
 (with `--new-game --screenshot`); a `pickcheck` line in the log checks that the leader's own pixel picks it and a ray 60 px lower lands near it.
 
@@ -758,7 +763,7 @@ An **engine stand-in** for the stage 9 senses and target choice, with the origin
   - **Until** (the original's end conditions): no enemy standing within its R and nobody attacking it; it then wanders again. A fleeing character (`CharacterCold.Fleeing`,
     hashed only while set) neither looks for fights nor answers attacks (retaliation skips it; engine reading of the task's urgency). The player's characters never flee.
 - **Not done:** night, weather, buildings, stealth, line of sight and the tags of the original's senses ([perception.md](game/perception.md)), its target choice and attack
-  slots, the squad retreat package for raids, guards defending other factions' townsfolk, crimes and bounties ([economy.md](game/economy.md#11-bounties-and-crimes)), wars
+  slots, the squad retreat package for raids, guards defending other factions' townsfolk (crimes and bounties are built: [Crimes and bounties](#crimes-and-bounties)), wars
   (slots 7, 8), dialogue relation effects, trust, the drift, animals fighting, NPCs finishing off or looting the downed. The original's enemy test (Character slot 125) does
   not consult `coexistence`; the engine keeps it (above) until the place the flag acts is found.
 
@@ -810,8 +815,8 @@ Code: `src/Meitou.Simulation/Carrying/` (`CarrySystem`, `CarryTypes.cs`), built 
   uncarried member of the victim's faction is checked with the aggro sight test (`AggroSystem.Visibility`: range, view cone, daylight); if
   one sees it, `PlayerRelations.Event(victim faction, Stealing)` (kind 3, -10, floor -50, [Hostility](#hostility-and-relations)) and the
   message "{name} was seen looting {victim}". The victim itself never notices (the original's steal roll always succeeds against a downed
-  owner). **Not built:** crimes and bounties (pending crimes, Theft / Looting codes, police booking: out of scope), the permission rules
-  (slaves, bandits, wanted victims), the stolen flag on items, kidnapping and cage crimes, NPC looting (`LOOT_THE_DEAD`).
+  owner). This relation change stays as it was; the crime that goes with it (a pending Looting with the original's permission rules, booked only by police) is the crime
+  system's ([Crimes and bounties](#crimes-and-bounties), 2026-10-13). **Not built:** the stolen flag on items, cage crimes, NPC looting (`LOOT_THE_DEAD`).
 - **Not built:** beds, cages, `Put in Bed` / `Put in` / `Kidnap`; the context menu; items on the ground (no world item objects yet: picking
   up and dropping are not done); the renderer's bone attachment; the `carrying left arm only` overlay; swimming with a body. Carrying and
   looting are not saved ([Saves](#saves)).
@@ -819,6 +824,67 @@ Code: `src/Meitou.Simulation/Carrying/` (`CarrySystem`, `CarryTypes.cs`), built 
   so worlds without carrying keep their pinned hashes. **Tests** (`CarryTests`, 12): lift timing and weight and speed, who can be lifted and
   the left arm, the drops, put-down timing and the KO, friend vs captive waking, run mode, the rescue target, NPC leader rescue, take-all grid
   fit, witness vs unseen loot, and the scripted scenario at 1, 4 and 16 threads (pinned `carry`).
+
+## Crimes and bounties
+
+The original's rules are in [economy.md section 11](game/economy.md#11-bounties-and-crimes) (the crime table, the ledger, the lifetime, booking, the `+0x40` faction flag, the
+hit-on-police rule) and [carry-loot.md 4.3 and 4.6](game/carry-loot.md#43-crimes-for-taking-items) (the pending-crime setter, the permission to loot, the witness function by code,
+kidnapping). Code: `src/Meitou.Simulation/Crime/` (`CrimeSystem`, `CrimeTypes.cs`: `CrimeCode`, `CrimeTable`, `BountyLedger`, `BountyEntry`, `PendingCrime`, `CrimeFactions`,
+`CrimeSettings`), `Saving/BountySave.cs`; built 2026-10-13 as `StandardParts.Crime`, last in the [order](#systems-and-their-order). Tests: `CrimeTests` (29) and
+`CrimeInstallTests` (`[Slow]`, the base game's factions and towns).
+
+- **State.** On the character: `CharacterCold.Pending` (one pending crime: code, victim faction, victim, timer in game seconds, booked and witnessed flags) and
+  `CharacterCold.Bounties` (a `BountyLedger`: one `BountyEntry` per faction in faction order with amount, crime mask, claimed and the tick of the last raise). Both are changed only
+  in serial phases and hashed only while set. `CharacterCold.NpcClass` is CHARACTER `NPC class` (**Verified**; `fcs.def` default MILITARY), set by `CharacterAssembly`; `None`
+  for a character without a record (tests).
+- **Factions** (`CrimeFactions`). A faction books bounties when `fundamental type` is LAW_ENFORCEMENT or `offers bounties` is set (`FactionData.BooksBounties`, **Observed** loader, base data:
+  Police, Mercenary Police, United Cities, The Holy Nation, Shek Kingdom, Republic of Tertius, `CrimeInstallTests`); lawless = `not real` or `fundamental type` BANDIT.
+- **Police-like** (`CrimeSystem.IsPoliceLike`, the original's `FUN_140599600`): never of a BANDIT-type faction; `NPC class` LAW_ENFORCEMENT; or MILITARY in a **resident squad of a town**
+  of its own faction (**engine reading** of the original's test of its status object against its squad; roaming military are not police). The player's characters never are. In the
+  base game's towns this makes most residents police: Admag 49, Stack 110, Heng 142, Blister Hill 117, Bad Teeth 105 (`CrimeInstallTests`, Observed), because 151 CHARACTER records
+  are MILITARY.
+- **Culprits.** Only the player's characters (**engine choice**: the simulation's NPCs fight only enemies or in defence, loot nothing and carry only their own; bandit-class NPCs could not
+  be booked anyway).
+- **Deeds** (all reported from serial phases):
+
+| Deed | Where | Crime | Rules |
+|---|---|---|---|
+| An attack order that is not self-defence | `CombatSystem.Inputs` | Assault (500), timer 3 | the original's `FUN_140334070`: not on a victim wanted by the attacker's faction, of class BANDIT or with a pending crime; the undecoded victim test read as "its faction is not hostile to the attacker's" (engine) |
+| A killing blow (melee or bolt) | `CombatSystem` commit, bolt flight | Murder (5000), timer 20 | **engine choice**: the original's setter has no caller with code 4; same terms as an assault |
+| A loot-all from a downed character | `CarrySystem` | Looting (500), timer 3 | the right-click transfer's code (**Verified** call site; which path the usual loot takes is **Unknown**); no crime when the victim is of class SLAVE (stand-in for the slave status) or BANDIT or has any bounty, or the looter is LAW_ENFORCEMENT, MILITARY or DIPLOMAT |
+| Carrying an "innocent" body past a witness who cares | the sweep | Kidnapping (5000), timer 20 | carry-loot.md 4.6; innocent = an NPC of another, real, non-bandit faction, not of class BANDIT, with no bounty (engine reading of the unknown status flag); the witness is not allied with the carrier and is allied with the body's faction. Putting a conscious captive down is not a case here (captives are knocked out again on the shoulder) |
+| A landed hit between a police-like character and a player character | `CombatSystem` commit, bolt flight | Assault, timer 30, **booked at once** with the police's faction | the original's `FUN_140665fa0`, both ways (being hit by the police counts) |
+
+  The setter (`SetPending`, the original's) refuses a police-like culprit, a victim of the culprit's own faction and a lawless victim faction; an Assault does not replace another
+  pending crime (it raises that one's timer to 20); the same code again keeps the booked flag; a new code clears it. A pending crime's timer counts down by game seconds and the crime
+  is forgotten at 0 (**engine choice**: the original's countdown was not found).
+- **Witnesses** (`SlowWorld`, every 15 ticks, serial, slot order). For each player character with a pending crime (or carrying an innocent body), every awake, uncarried NPC of another
+  faction without a pending crime of its own that **sees** it (`AggroSystem.Visibility`: 1500 x the race's vision multiplier, the view cone, daylight; hearing is not used) is tested as the
+  original's witness function does: not when its faction is hostile to the victim's, the victim's is lawless, it books bounties and the victim's is a bandit faction, or it regards the
+  culprit as friendly and the victim is of another faction; Theft and Looting need it to care about the victim (same faction or allied, 50 and up), Looting also that it does not regard the
+  culprit as friendly; Kidnapping a victim and the care; an Assault a victim it does not regard as an enemy; a Murder nothing more. A witness that passes sets the timer to 20, the first one
+  posts "{name} has been caught committing {crime}!" (the original's tooltip words; not for Looting, whose loot already says "was seen looting"), and a **police-like** witness of a faction that
+  books bounties books it.
+- **Booking** (`Book`, the original's `FUN_140853ec0`): once per pending crime; not for a culprit of class BANDIT, DIPLOMAT or LAW_ENFORCEMENT; Enslaving adds nothing. The crime table's
+  amount goes into the entry of the **booking witness's faction** (the original's faction choice; its parent faction is **Unknown** and not used), the crime's bit is set and the raise time
+  reset. Message: "{name} is wanted by {faction} for {crime}: bounty c.{total}".
+- **Relations.** The crime system changes no relation: the deed-time events of [Hostility](#hostility-and-relations) and the carry system's witnessed-loot event stay as they were, so
+  nothing is counted twice. In the original, witnessing gives a squad-level reaction (kind 7, not a relation event) and changes the witness faction's relations only when it is friendly
+  with both sides (**Observed**, carry-loot.md 4.3); whether the original changes relations at the deed at all is **Unknown** (open question below).
+- **Expiry** (the sweep): an entry is removed once more than 0.04 hours per cat have passed since its last raise (500: 20 hours; never from 10000, `CrimeTable.LifetimeHours`); all
+  expired entries at once (the original removes one per tick); message "{name} is no longer wanted by {faction}".
+- **The police** (`AggroSystem.Crimes`): a police-like NPC whose faction has an unclaimed bounty on a character it perceives (the aggro look's sight and hearing) attacks it as it attacks an
+  enemy, with its squad mates (the aggro's join rule). The look's "no enemy here" skip counts the factions that want a character present. Fights already end at the knock-out (nobody
+  finishes off), so the police knock the wanted down rather than kill them, but nothing makes their blows non-lethal: whether the original's police try to subdue is **Unknown**.
+  Hitting back is an Assault booked at once (above), as in the original.
+- **HUD and messages.** `CharacterSnapshot.Bounties` (`BountyLine`: faction, amount, crimes, hours left) for selected characters; the HUD lines are in [Player](#player); the messages go
+  through `World.Post` to the HUD notice and the log.
+- **Saves.** The player's characters' ledgers: `BountySave` writes and reads the GAMESTATE_CHARACTER keys of [save.md](formats/save.md) (`bountyfac<k>` the FACTION string id,
+  `bountyexp<k>` the game hour of the last raise as day x 24 + hour, **Observed**, `amount<k>`, `crimes<k>`, `claim<k>`). Pending crimes are not saved (no key known).
+- **Not built:** claiming bounties (turning a captive in, the 11.4 reward), bail, cages and sentences, escaping prison, the stolen flag on items and fencing, theft from a conscious owner
+  (no pickpocketing), trespassing and burglary (no buildings), spawn bounties (CHARACTER `bounty chance` / `amount` / `fuzz`, so NPCs are never wanted), NPC crimes, the dialogue
+  reactions, the squad-level kind 7 tag, the police chasing an unseen culprit, witnesses hearing.
+- **Cost.** Nothing until a crime is pending; then one pass over the slots per pending culprit every 15 ticks (a sight test per NPC), and the aggro's extra test per look.
 
 ## Saves
 
@@ -860,7 +926,9 @@ has `carrying` and the handle `carrying*`, but the carried body is usually an NP
 the body lies where it was), a pick-up, put-down or loot under way, the rescue job (the CAMERA squad toggle `rescue` is not mapped either) and what
 a loot moved (inventories are not saved); and a kit's used charges with the rest of the inventory, the NPC platoons' characters (regenerated from the template; their files stay as
 they were), towns and their state, war state, weather and season (the weather rolls anew on loading), research, zone buildings and loose items, inventories and equipment (a loaded character's are rebuilt from its record and look), AI jobs,
-the saved look of a loaded character (rolled again from the saved serial through `IAppearanceSource`; the serial of a character Meitou saved is its look's seed), bounties, `5-redirect`. **Unknown**:
+the saved look of a loaded character (rolled again from the saved serial through `IAppearanceSource`; the serial of a character Meitou saved is its look's seed), pending crimes (no key known), `5-redirect`.
+The player's characters' bounty ledgers are carried (2026-10-13, `BountySave`: the GAMESTATE_CHARACTER keys `bountyfac<k>`, `bountyexp<k>`, `amount<k>`, `crimes<k>`, `claim<k>`;
+the raise time converted between world ticks and the save's game hours, day x 24 + hour, [Crimes and bounties](#crimes-and-bounties)). **Unknown**:
 whether the original loads a save written from nothing ([save.md](formats/save.md#implementation-as-built-stage-10)); the orientation convention
 of the saved quaternion (read as a rotation about Y, yaw from +Z towards +X, written back the same way; an unchanged character keeps its
 quaternion bit for bit).
@@ -975,8 +1043,8 @@ buildings). They are not to be unified; `MoveOrder.Target.Y` is ignored (the mov
   so a paused game draws the squad, and takes the first look at the zones), the draw list's per-character renderer state is not reused (the host's world counter is part of the key), the mouse state (drag box, steering right click) is dropped and the HUD says "Loaded".
   The selection is the saved one (CAMERA `selected_character`s), not cleared. The speed (paused or 1x/2x/5x) and the camera settings are the running game's. Loading works in a run that began without `--new-game` (it gives the player a squad).
 - **Saved and loaded:** the clock, the player's money and faction, the factions' relations (the data's table is replaced by the save's on load) and prosperity, the player's squad(s) with each character's position, facing, name, role and leader flag,
-  stats and medical state (blood, bleeding, hunger, parts: flesh, bandage, rig, stun, wear, hit multiplier), the look (as the seed in the handle) and the selection. **Not saved:** the town residents and roaming squads (made again from the towns near the player; they are not
-  where they were), the weather (rolled anew), orders, paths, queued moves, animation and combat state (everyone stands idle and unengaged), inventories (rebuilt from the record and look: eaten food is back, loot is gone), the wound list and pain, bounties, buildings and
+  stats and medical state (blood, bleeding, hunger, parts: flesh, bandage, rig, stun, wear, hit multiplier), the look (as the seed in the handle), the bounties and the selection. **Not saved:** the town residents and roaming squads (made again from the towns near the player; they are not
+  where they were), the weather (rolled anew), orders, paths, queued moves, animation and combat state (everyone stands idle and unengaged), inventories (rebuilt from the record and look: eaten food is back, loot is gone), the wound list and pain, pending crimes, buildings and
   items on the ground, the camera's position (the leader's), the game speed. The state hash of a loaded world is not the original's (the tick, paths and the rest above differ); `QuickSaveTests` compares the carried state field by field and that two loads run the same at 1 and 4 threads.
 
 ## Measurements
@@ -1061,7 +1129,10 @@ rules and `squad formation` (pathfinding.md); the attacker's technique choice, `
 nutrition, the NPCs' food source, auto-eat, the `main` grid size (character-stats.md); how a start-off's relations, research and `force race` are
 applied; the world states' initial values; the corpse removal rule; the animation selection code (animation.md); the saved quaternion's
 convention and whether the original loads a save written from nothing (save.md); the navmesh items in [pathfinding.md](game/pathfinding.md); the senses' unknowns, the leash and the run-away ratios ([perception.md](game/perception.md#unknowns)),
-which game events use which relation event kind, what the coexistence flag does, the Passive toggle's default (ai.md, factions-squads-towns.md, [Hostility](#hostility-and-relations)).
+which game events use which relation event kind, what the coexistence flag does, the Passive toggle's default (ai.md, factions-squads-towns.md, [Hostility](#hostility-and-relations));
+for crimes ([Crimes and bounties](#crimes-and-bounties), economy.md 11): how a killing becomes a Murder, the pending timer's countdown, the "innocent victim" flag, what the witness
+function's squad-level kind 7 does, the faction parent `+0x38` a bounty may go to, the victim test `FUN_140436610` of an assault, whether witnesses also hear, and whether the original's
+relation changes for deeds come only through witnesses (Meitou keeps its deed-time events).
 
 **Engine gaps**: the AI (stage 9), towns and their state, the economy, buildings, the UI screens, the host's use of saves, combat clips and ranged
 combat, doors that open and close in play, physics.

@@ -112,6 +112,12 @@ public sealed partial class CombatSystem
         }
         GainCombatXp(ac, dc, XpEvent.HitDealt, XpEvent.HitTaken);
         // A killing by the player's squad is a murder against the victim's faction (engine choice of the event kind, docs/simulation.md "Combat").
+        if (Crimes is { } crimes)
+        {
+            // Crimes before the relation event, which could make the victim's faction hostile (no crime against an enemy).
+            crimes.Hit(world, a, d);
+            if (death) crimes.Murder(world, a, d);
+        }
         if (death && Relations is not null && ac.IsPlayer && !dc.IsPlayer) PlayerRelations.Event(world, Relations, dc.Faction, RelationEventKind.Murder);
         Record(now, a, d, blow, outcome, part, damage, knockout, death);
     }

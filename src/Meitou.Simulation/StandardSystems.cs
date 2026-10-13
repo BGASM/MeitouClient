@@ -26,8 +26,10 @@ public enum StandardParts
     Flee = 2048,
     /// <summary>Carrying downed characters, the rescue job and looting (<see cref="Meitou.Simulation.Carrying.CarrySystem"/>).</summary>
     Carry = 4096,
+    /// <summary>Crimes and bounties (<see cref="Meitou.Simulation.Crime.CrimeSystem"/>): pending crimes from the player's deeds, witnesses, the police; with <c>Aggro</c> the police attack wanted characters.</summary>
+    Crime = 8192,
     /// <summary>What the game runs.</summary>
-    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee | Carry,
+    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee | Carry | Crime,
 }
 
 /// <summary>What <see cref="StandardSystems.Build"/> builds and with which settings; the defaults are the game's.</summary>
@@ -52,6 +54,7 @@ public sealed class StandardSystemOptions
     public Meitou.Simulation.FirstAid.FirstAidSettings? FirstAid { get; init; }
     public AggroSettings? Aggro { get; init; }
     public Meitou.Simulation.Carrying.CarrySettings? Carry { get; init; }
+    public Meitou.Simulation.Crime.CrimeSettings? Crime { get; init; }
 }
 
 /// <summary>The built systems in tick order, with the ones the host talks to.</summary>
@@ -64,6 +67,7 @@ public sealed class StandardSystemSet
     public CombatSystem? Combat { get; init; }
     public AggroSystem? Aggro { get; init; }
     public Meitou.Simulation.Carrying.CarrySystem? Carry { get; init; }
+    public Meitou.Simulation.Crime.CrimeSystem? Crime { get; init; }
 }
 
 /// <summary>
@@ -86,6 +90,8 @@ public sealed class StandardSystemSet
 /// <item><b>Retaliation, then aggro, last</b>: both defer <c>AttackOrder</c>s for the next tick (<see cref="World.Defer"/>) after combat has swapped its arrays; aggro's
 /// leash sweep sees the tasks every other system left, and its look (<c>Act</c>) runs after combat's, reading only the last tick's positions.
 /// <b>Flee after aggro</b>: a squad that breaks sends its runners off after every fight of the tick was ordered, and its stop orders are deferred like theirs.</item>
+/// <item><b>Crime last</b>: its witness sweep (<c>SlowWorld</c>) sees the positions, carry links and pending crimes every other system left this tick; the deeds are reported to it by
+/// combat (<c>Inputs</c>, commit, the bolt flight in <c>Schedule</c>) and carrying (<c>SlowWorld</c>), all serial. It adds nothing to the hash until a crime is pending.</item>
 /// </list>
 /// An extra system a test wants (a probe, a poke) goes after these.
 /// </summary>
@@ -128,6 +134,15 @@ public static class StandardSystems
         AggroSystem? aggro = null;
         if (Has(StandardParts.Aggro)) systems.Add(aggro = new AggroSystem(data.Relations, o.Aggro));
         if (Has(StandardParts.Flee)) systems.Add(new FleeSystem(data.Relations, combat!, o.Aggro?.SightRange ?? AggroSystem.OutdoorSight));
-        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry };
+        Meitou.Simulation.Crime.CrimeSystem? crime = null;
+        if (Has(StandardParts.Crime))
+        {
+            // Last: its sweep sees every position, task and carry link the tick left; the deeds come in from combat and carrying in their own serial steps.
+            systems.Add(crime = new Meitou.Simulation.Crime.CrimeSystem(data.Relations, o.Crime));
+            if (combat is not null) combat.Crimes = crime;
+            if (carry is not null) carry.Crimes = crime;
+            if (aggro is not null) aggro.Crimes = crime;
+        }
+        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime };
     }
 }

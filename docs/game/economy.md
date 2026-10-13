@@ -481,14 +481,16 @@ Platoons of the player's faction never restock through this path (the same `+0x2
 
 Each `Character` has a bounty ledger (a hash map keyed by faction, at `Character+0xf0`). An entry (read through
 `FUN_1405e7ee0`) has: `+8` amount (int), `+0xc` crime bitmask (bit `1 << crimeCode`), `+0x10` byte "claimed", `+0x18` double game-hour timestamp of the last
-raise. The player's own ledger is saved as `bountyfac<n>` / `bountyexp<n>` / `amount<n>` / `crimes<n>` / `claim<n>` (see
-[save.md](../formats/save.md); the loader that fills the ledger from those keys is `FUN_140625e60` and the writer is `FUN_1406262b0`, **Verified** by which side assigns the record fields and which the ledger fields; the saved `bountyexp<n>` is the entry's timestamp (`+0x18`) truncated to an int, and `bountyfac<n>` is the faction's name; the sample-save details are in save.md). The `+8` / `+0xc` / `+0x18` / `+0x10` layout is **Verified** by the crime add, the claim marker `FUN_140854170` (sets `+0x10`) and these two functions agreeing.
+raise. Every saved character's ledger is in its GAMESTATE_CHARACTER as `bountyfac<n>` / `bountyexp<n>` / `amount<n>` / `crimes<n>` / `claim<n>` (see
+[save.md](../formats/save.md); the loader that fills the ledger from those keys is `FUN_140625e60` and the writer is `FUN_1406262b0`, **Verified** by which side assigns the record fields and which the ledger fields; the saved `bountyexp<n>` is the entry's timestamp (`+0x18`) truncated to an int, and `bountyfac<n>` is the faction's **string id** (`defaultEmpireFactionSID`, `1083-gamedata.base`), all four others ints (**Verified** 2026-10-13 against the three sample saves: 25, 25 and 26 entries, all on NPCs, all with `crimes` 0 as spawn bounties are, so the keys are not player-only). `bountyexp` read as game hours = day x 24 + hour fits the samples (every value is at most that of its save's clock, the largest one hour below it; with days counted from 1 several would lie in the future): **Observed**. The `+8` / `+0xc` / `+0x18` / `+0x10` layout is **Verified** by the crime add, the claim marker `FUN_140854170` (sets `+0x10`) and these two functions agreeing.
 
 ### 11.2 How a bounty is gained
 
-- **Crime**: `FUN_140853ec0(crimeEvent)`: if the crime code is nonzero and has not been processed yet (`+0xa4` flag), the
-  character's state is not 8, 5 or 1, then the crime's amount is **added** to the ledger entry of the wronged faction
-  (`FUN_140852010`), the crime bit is set, the timestamp is reset to now, and the "wanted" UI is refreshed. The very first crime
+- **Crime**: `FUN_140853ec0(crimeEvent, faction)`: if the crime code is nonzero and has not been processed yet (`+0xa4` flag), and the
+  character's **`NPC class`** (`+0x1a0 -> +0xdc`, the same read as the police test, carry-loot.md 4.3; corrected 2026-10-13, this was called a "state") is not 8 (BANDIT),
+  5 (DIPLOMAT) or 1 (LAW_ENFORCEMENT), then the crime's amount is **added** to a ledger entry chosen by `FUN_140852010` from the given faction: a caged character's prison
+  owner's, else the given faction's parent (`+0x38`, which field sets it is **Unknown**) when it has one, else the given faction itself when its `+0x40` flag is set (else none).
+  The given faction is the **booking police witness's** (or the police in the hit rule of 11.6), not the victim's (**Observed**: both callers pass their own faction); the crime bit is set, the timestamp is reset to now, and the "wanted" UI is refreshed. The very first crime
   code (1, Enslaving) sets the flag but adds nothing (**Observed**; the code returns before the add). The same function also sets a float (250.0) in a nearby object of the character at `+0x110` (purpose not traced).
 - **Crime amounts** (`FUN_140851e40`; **Verified**: a switch with no other inputs; names from the game's own name table `FUN_140856530`; the editor's enum is not in `fcs_enums.def`, so a match with it was not checked):
 
@@ -563,12 +565,28 @@ unless marked).
 - **Permission to loot a downed character** (no crime): the victim is a slave, has any bounty, is a bandit (`NPC class` 8) or the taker's own
   prisoner; the taker is LAW_ENFORCEMENT, MILITARY or DIPLOMAT; or the item belongs to the taker's faction.
 - **Witnesses** (`FUN_140854d10`): a conscious, free witness of another faction that cares about the victim (friendly with it or allied with its
-  faction) answers a pending crime with relation event 7, raises the timer to 20 and reacts in dialogue. **Only a police-like witness whose
+  faction) answers a pending crime with a squad-level reaction of kind 7 (not a relation event: see carry-loot.md 4.3), raises the timer to 20 and reacts in dialogue. **Only a police-like witness whose
   faction has the `+0x40` flag books it as a bounty** (`FUN_140853ec0`). The steal roll (thievery against the nearest owner) always succeeds
-  against an unconscious, dead, carried or imprisoned owner, so a downed victim never catches the thief itself.
+  against an unconscious, dead, carried or imprisoned owner, so a downed victim never catches the thief itself. Which crimes need the care is by code (carry-loot.md 4.3).
+- **The `+0x40` flag** (**Observed**, the FACTION loader `FUN_1407fe270`): true when `fundamental type` is 1 (LAW_ENFORCEMENT), else the record's `offers bounties`. In the base
+  data (merged load order): Police and Mercenary Police (type 1), United Cities, The Holy Nation, Shek Kingdom and Republic of Tertius (`offers bounties`); **Verified** list by
+  `CrimeInstallTests`. The same loader stores `fundamental type` at `+0x34` and `not real` at `+0x1d0`, the two "lawless" tests of the setter.
+- **Hitting the police** (`FUN_140665fa0`, the hit outcome, **Observed**): when a blow lands (not blocked, not dodged) between a character and a police-like one, the non-police one
+  gets a pending Assault (timer 30) against the police's faction and its pending crime is booked with that faction at once (`FUN_140853ec0`), whichever of the two struck (as read: the
+  first branch charges the defender when only the attacker is police-like).
+- **Assault on an attack order** (`FUN_140334070`, **Observed**, an attack task's start): a pending Assault against the victim's faction unless the victim has a bounty with the
+  attacker's faction, a flag of its status object (`+0x114`) is set, its `NPC class` is BANDIT, it has a pending crime itself, or `FUN_140436610(victim, 1)` (not decoded) holds.
+- **Murder**: no caller of the setter passes code 4 (25 callers checked 2026-10-13; the killing blow path was not found), so how a killing becomes a Murder is **Unknown**.
 - **Cage sentence** (`FUN_140854950`, the only reader of `prison time`, **Verified** reader; formula **Observed**): when a prisoner with a bounty
   for the cage owner's faction is caged, the sentence is `trunc(bounty x 0.02 x prison time)` (presumably game hours; 999999 for bounties over
   25000) starting now. The bail and the release were not traced.
+
+### 11.7 As built (2026-10-13)
+
+Meitou's `CrimeSystem` (`src/Meitou.Simulation/Crime/`) and its engine choices are described in [../simulation.md "Crimes and bounties"](../simulation.md#crimes-and-bounties).
+In short: the crime table, the lifetime rule, the ledger and its save keys, the `+0x40` faction flag, the police test, the setter's refusals, the witness tests by code, booking
+into the police witness's faction and the hit-on-police rule follow this section; only the player's characters commit crimes; Murder on the killing blow, the pending timer's
+countdown, the "innocent victim" and military-police readings are engine choices; claiming, bail, cages, sentences, spawn bounties and the item "stolen" flag are not built.
 
 ## 12. Slaves, prisoners, animals
 
@@ -646,8 +664,9 @@ RACE `buy value` is 100 for most races (27 of 53 records); other values in the d
   that quantity 0 never spawns, but this was not re-verified for shops.
 - **The slave price override** (the fifth argument of the slave windows) and where it comes from.
 - **The artifact placement** (`ArtifactTown`, which squad carries which artifact) beyond the six field readers.
-- **The crime-witness faction selection** `FUN_140852010` (it chooses which faction's ledger entry a crime goes into; it reads
-  `Character+0x2f8` which is 2 in some state) and `Character+0x2f8`'s meaning.
+- **The crime-witness faction selection** `FUN_140852010`: *mostly resolved 2026-10-13* (11.2: the prison owner's faction when `Character+0x2f8` is 2, which reads as
+  imprisoned; else the given faction's parent `+0x38`, else the faction itself with the `+0x40` flag). Still open: what sets a faction's `+0x38`.
+- **How a pending crime's timer counts down** (`+0x90`; set by `FUN_140851f40` / `FUN_140852e10`, the decrement was not found), and so how long an unseen crime stays pending.
 - **Whether CHARACTER `money min` / `money max`** exist in the data and are unused (the editor lists `money`; not found
   being read for NPC purses).
 - **The "Terrorism" label for code 9** (two crime codes share the name; the second may be a different crime in the editor enum).
@@ -678,6 +697,6 @@ Order of work for the new engine (the data side is already in `Meitou.Data`: `Ga
    (section 9.2), vendor money (derived from the stock for squads; `vendor money` only for building shops), restock timer in game hours (9.3).
 7. **Platoon money.** `Platoon.Money` as `int` with save/load of `money` and `inventory refresh time`; the pickup of money items.
 8. **Bounty ledger.** Per-character map faction -> (amount, crime mask, claimed, timestamp), the crime table, the lifetime rule and the
-   claim (section 11); spawn bounties from `bounty chance` / `amount` / `fuzz`.
+   claim (section 11); spawn bounties from `bounty chance` / `amount` / `fuzz`. *Built 2026-10-13 except the claim and the spawn bounties (11.7).*
 9. **Trade rules.** Funds check with split stacks, the two refusal codes, the fencing prompt and the smuggling messages; bail and
    slave/animal prices (section 12).

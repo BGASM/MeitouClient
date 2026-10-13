@@ -111,6 +111,15 @@ public sealed class CharacterCold
     public float LiftTime { get; set; } = -1;
     /// <summary>The rescue job (the original's <c>rescue</c> toggle, NUM8): an idle character picks up a downed member of its faction by itself.</summary>
     public bool RescueJob { get; set; }
+    /// <summary>
+    /// CHARACTER <c>NPC class</c> (the editor's CharacterTypeEnum; <c>fcs.def</c>'s default is MILITARY), set from the record at spawn; <c>None</c> for a character without a record
+    /// (hand-made in tests). The crime rules read it (who is police, who may loot, who can be booked); not hashed, it follows from the record.
+    /// </summary>
+    public Meitou.Data.Gameplay.FundamentalType NpcClass { get; set; }
+    /// <summary>The character's bounties by faction (null: none ever); <see cref="Crime.CrimeSystem"/>, serial phases only. Hashed only while set.</summary>
+    public Crime.BountyLedger? Bounties { get; set; }
+    /// <summary>A crime nobody has booked yet (null: none); <see cref="Crime.CrimeSystem"/>, serial phases only. Hashed only while set.</summary>
+    public Crime.PendingCrime? Pending { get; set; }
 }
 
 /// <summary>
@@ -291,6 +300,9 @@ public sealed class CharacterTable
             if (!k.CarriedBy.IsNone) { hasher.Add(0x42726E65); hasher.Add(k.CarriedBy); }
             if (c.Task is (byte)CharacterTask.PickUp or (byte)CharacterTask.PutDown or (byte)CharacterTask.Loot) { hasher.Add(k.CarryTarget); hasher.Add(k.LiftTime); hasher.Add((int)k.ResumeTask); }
             if (k.RescueJob) hasher.Add(0x52657363);
+            // Bounties and pending crimes add to the hash only while set, so worlds without crimes hash as before.
+            k.Bounties?.Hash(ref hasher);
+            k.Pending?.Hash(ref hasher);
         }
         hasher.Add(free.Count);
         foreach (int slot in free) hasher.Add(slot);

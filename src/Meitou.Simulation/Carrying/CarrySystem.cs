@@ -35,6 +35,8 @@ public sealed class CarrySystem(GameConstants constants, BodyOptions options, fl
     public float LiftSeconds { get; } = liftSeconds > 0 ? liftSeconds : 1;
     /// <summary>The live relation table: with it, being seen looting changes the victim faction's view of the player and an ally counts as friendly. Null: no relation effects.</summary>
     public FactionRelations? Relations { get; set; }
+    /// <summary>The crime system a player's looting is reported to (a pending Looting; null: no crimes).</summary>
+    public Crime.CrimeSystem? Crimes { get; set; }
     readonly BodyOptions bodyOptions = options;
     readonly List<LootEntry> loots = [];
 
@@ -389,6 +391,7 @@ public sealed class CarrySystem(GameConstants constants, BodyOptions options, fl
             seen = true;
             if (Relations is { } relations) PlayerRelations.Event(world, relations, victim.Faction, RelationEventKind.Stealing);
         }
+        if (taken > 0) Crimes?.Loot(world, i, t);
         loots.Add(new LootEntry(world.Tick, table.IdOf(i), table.IdOf(t), taken, left, seen));
         if (cold.IsPlayer)
         {

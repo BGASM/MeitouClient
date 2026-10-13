@@ -47,7 +47,7 @@ Labels: **Verified** = checked against game data or by two independent places in
 
 Fields **read by the exe** (field loader `FUN_1407fe270`, relation init `FUN_1406b3f80`/`FUN_1406b40d0`, others by
 the functions named): `default relation`, `relations`, `coexistence`, `trustworthy`, `allow slaves weapons`, `anti
-slavery`, `fundamental type`, `road preference`, `not real`, `offers bounties`, `run away ratio of squad size`, `run
+slavery`, `fundamental type`, `road preference`, `not real`, `offers bounties` (with `fundamental type` 1 it makes the faction book bounties, the byte `+0x40`: [economy.md 11.6](economy.md#116-pending-crimes-witnesses-and-the-cage-sentence)), `run away ratio of squad size`, `run
 away ratio relative to enemy`, `races`, `trade culture`, `buildings replacements`, `max prosperity`,
 `special squads` (`FUN_1402ddc90`), `roaming population`, `residents`, `bar squads`, `default resident`, `squads`,
 `squad default`, `campaigns`, `biomes`, `no-go zones`, `heals strangers`, `squad formation`.

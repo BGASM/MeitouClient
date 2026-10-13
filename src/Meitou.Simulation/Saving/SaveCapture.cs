@@ -71,7 +71,7 @@ public static class SaveCapture
         if (data.PlayerFaction >= 0) camera.PlayerFactionName = data.Factions[data.PlayerFaction].Name;
 
         UpdateFactions(game, data, loaded);
-        var written = WritePlayerSquads(builder, world, data, loaded, options);
+        var written = WritePlayerSquads(builder, world, data, loaded, options, clock);
         WriteSelection(game, world, written);
         if (loaded is not null) WriteRoaming(game, world, loaded);
 
@@ -137,7 +137,7 @@ public static class SaveCapture
 
     // ------------------------------------------------------------------ the player's platoons
 
-    static Dictionary<CharacterId, SaveCharacter> WritePlayerSquads(SaveBuilder builder, World world, PopulationData data, LoadedSave? loaded, SaveCaptureOptions options)
+    static Dictionary<CharacterId, SaveCharacter> WritePlayerSquads(SaveBuilder builder, World world, PopulationData data, LoadedSave? loaded, SaveCaptureOptions options, SaveClock clock)
     {
         var game = builder.Game;
         var table = world.Characters;
@@ -203,6 +203,7 @@ public static class SaveCapture
                 {
                     g.Strings["name"] = cold.Name;
                     g.Bools["is leader"] = squad.Leader == id;
+                    BountySave.Write(g, cold.Bounties, data.Relations, clock, world.Tick, world.TickSeconds);
                 }
 
                 // Body: stats and medical state, from the host, else the loaded ones, else (for a new character) defaults.

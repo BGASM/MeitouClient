@@ -79,6 +79,7 @@ sealed class CharacterAssembly(PopulationData data)
     /// </summary>
     public void AttachSaved(CharacterCold cold, RaceData race, CharacterStats stats, MedicalState medical, GameRecord? record)
     {
+        cold.NpcClass = NpcClassOf(record);
         cold.Race = race;
         cold.Stats = stats;
         cold.Medical = medical;
@@ -87,9 +88,17 @@ sealed class CharacterAssembly(PopulationData data)
         cold.WaterFactor = race.WaterAvoidance * (cold.Faction == data.PlayerFaction && data.PlayerFaction >= 0 ? 0.5f : 1);
     }
 
+    /// <summary>
+    /// CHARACTER <c>NPC class</c> (<b>Verified</b>, carry-loot.md 4.3: read by <c>FUN_14062b210</c>, the editor's CharacterTypeEnum, <c>fcs.def</c> default MILITARY); None without a
+    /// CHARACTER record (an animal's ANIMAL_CHARACTER, or nothing).
+    /// </summary>
+    public static FundamentalType NpcClassOf(GameRecord? record) =>
+        record is { Type: Meitou.Data.Fcs.FcsRecordType.CHARACTER } ? (FundamentalType)record.GetInt("NPC class", (int)FundamentalType.Military) : FundamentalType.None;
+
     /// <summary>Gives a character with a race its stats and medical state, its inventory and fighter, and the top speed of the speed chain (stage 7). Animals (no race) are left as they are.</summary>
     public void Attach(CharacterId id, CharacterCold cold, ref CharacterHot hot, GameRecord? record, GameRecord? race, ulong seed)
     {
+        cold.NpcClass = NpcClassOf(record);
         if (race is null) return;
         var (raceData, stats, medical) = data.Bodies.Create(race, record, seed, Rng.Key(id));
         cold.Race = raceData;
