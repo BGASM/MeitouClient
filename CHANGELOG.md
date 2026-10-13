@@ -3,7 +3,7 @@
 What changed in each release, newest first. The release workflow copies the section of the version it builds into the GitHub release
 notes and refuses to release a version without one: add a `## vX.Y.Z` section with one `- ` line per change before running it.
 
-## v0.8.0
+## v0.9.0
 
 - Cinematic camera in the game: numpad shots and the timeline editor, now on F6 (F2..F4 are the game speeds), with keys saved apart from the viewer's; recording steps the whole game at a fixed 60 fps
 - F7 hides the game's interface for clean screenshots and video
@@ -16,6 +16,17 @@ notes and refuses to release a version without one: add a `## vX.Y.Z` section wi
 - Moving the clock back no longer leaves the old weather's fog behind (e.g. a dust storm hanging over the Hub)
 - Red rain is drawn at half its opacity
 - Faster: shadows and water cost less, and water work is skipped when no water is near
+- Fights: factions turn hostile by their relations, with a leash and self-defence for an idle player
+- First aid and resting: treat, rest and medic orders, automatic aid from NPCs, and medic XP while on the move
+- Carrying: carry downed characters, rescue them, and loot everyone with witnessed theft (Ctrl/Alt+right click, J, K)
+- Crimes and bounties: witnesses, police arrests and a bounty ledger
+- Senses and fleeing: sight cone, hearing, squads sharing what they see, and characters running away
+- Crossbows: reload by skill, aim spread, bolt flight, ammo and friendly fire
+- Animals: drawn and animated with their own meshes, fur, size and clips, with natural weapons; wild squads and nests fill each biome
+- Inventories: stack limits and backpack bonuses, with stacks split and topped up
+- F5 quicksave and F9 quickload into Meitou's own slot
+- `--duel` trailer scene: two Samurai fight at sunset on a cliff top
+- New native in-game interface: front-end menus, inventory and map panels
 
 ## v0.7.1
 
