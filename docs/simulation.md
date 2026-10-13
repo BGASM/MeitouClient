@@ -648,7 +648,8 @@ Tests: `RangedTests` (formulas, worlds, the 1 / 4 / 16 thread check) and `Ranged
   standing for ever). Buildings are not tested (no building shapes in the simulation yet). Enemy = the character's target, someone fighting it, or hostile by
   `AggroSystem.IsEnemy`; in a world without a relation table, another faction (engine).
 - **Geometry** (engine stand-ins): the barrel 15 units above the feet and 3 ahead (the record's `barrel pos` is in item space); the aim point 13 above the feet (for `Bip01
-  Spine2`) plus the lead; a body is an upright cylinder of the race's footprint radius, 18 tall (the original tests its physics shape, **Unknown**); a down character does
+  Spine2`) plus the lead; a body is an upright cylinder of the race's footprint radius, 18 tall (the original tests its physics shape, **Unknown**); a down character and a
+  character without a body (an animal: no race or medical state, so nothing to damage) do
   not stop bolts.
 - **The shot** (`ApplyFire`, commit order): the cone D, the damage, range and speed with the height factor, the avoidance (all **Observed** formulas); rolls from
   `RngPurpose.Ranged` keyed by the shooter and its shot number (tilt, spin, damage). The bolt joins `projectiles` in commit order.
