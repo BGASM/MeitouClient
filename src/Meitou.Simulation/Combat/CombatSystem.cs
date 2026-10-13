@@ -49,6 +49,9 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
     }
 
     public CombatOptions Settings { get; }
+
+    /// <summary>The live relation table the player's assaults and killings change (<c>PopulationData.Relations</c>); null: nothing changes (hand-built test worlds).</summary>
+    public FactionRelations? Relations { get; set; }
     public IReadOnlyList<CombatTechnique> Techniques => techniques;
 
     /// <summary>The resolved blows so far (when <see cref="CombatOptions.RecordLog"/> is on).</summary>
@@ -106,8 +109,17 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
             switch (command)
             {
                 case AttackOrder order:
-                    foreach (var id in order.Attackers) Engage(world, table, id, order.Target, now);
+                {
+                    // The player's squad picking a fight with a character of another faction is an assault on that faction (engine choice of the
+                    // event kind, docs/simulation.md "Combat"): once per victim, when no player character is fighting it already.
+                    bool deed = Relations is not null && !order.Defensive && !PlayerFights(table, order.Target);
+                    bool byPlayer = false;
+                    foreach (var id in order.Attackers)
+                        if (Engage(world, table, id, order.Target, now) && table.Cold(id.Slot)!.IsPlayer) byPlayer = true;
+                    if (deed && byPlayer && table.Cold(order.Target.Slot) is { IsPlayer: false } victim)
+                        PlayerRelations.Event(world, Relations!, victim.Faction, RelationEventKind.Assault);
                     break;
+                }
                 case StopCommand stop:
                     foreach (var id in stop.Characters) Disengage(table, id);
                     break;
@@ -115,12 +127,22 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
         }
     }
 
-    void Engage(World world, CharacterTable table, CharacterId attacker, CharacterId target, int now)
+    /// <summary>Whether a player character is fighting <paramref name="target"/> (the combat state as of the inputs).</summary>
+    bool PlayerFights(CharacterTable table, CharacterId target)
     {
-        if (!table.TryResolveNext(attacker, out int a) || !table.TryResolveNext(target, out int t) || a == t) return;
+        if (!table.TryResolveNext(target, out int t)) return false;
+        var next = table.Next;
+        for (int i = 0; i < table.HighWater; i++)
+            if (read[i].TargetSlot == t && read[i].TargetGeneration == target.Generation && next[i].Alive && next[i].Task == (byte)CharacterTask.Attack && table.Cold(i)!.IsPlayer) return true;
+        return false;
+    }
+
+    bool Engage(World world, CharacterTable table, CharacterId attacker, CharacterId target, int now)
+    {
+        if (!table.TryResolveNext(attacker, out int a) || !table.TryResolveNext(target, out int t) || a == t) return false;
         var cold = table.Cold(a)!;
         var tc = table.Cold(t)!;
-        if (cold.Fighter is null || cold.Stats is null || cold.Medical is null || cold.Race is null || tc.Medical is null || cold.Medical.Incapacitated || tc.Medical.Incapacitated) return;
+        if (cold.Fighter is null || cold.Stats is null || cold.Medical is null || cold.Race is null || tc.Medical is null || cold.Medical.Incapacitated || tc.Medical.Incapacitated) return false;
         ref var s = ref read[a];
         s.TargetSlot = t;
         s.TargetGeneration = target.Generation;
@@ -128,6 +150,7 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
         table.Next[a].Task = (byte)CharacterTask.Attack;
         cold.InCombat = true;
         cold.DrawnWeapon = cold.Fighter.Weapon is { } w && !cold.Fighter.Unarmed ? HandHold.OfCategory(w.Data.SkillCategory).Weapon : WeaponKinds.None;
+        return true;
     }
 
     void Disengage(CharacterTable table, CharacterId id)

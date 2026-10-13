@@ -194,6 +194,7 @@ sealed partial class GameHost
             long a0 = Stopwatch.GetTimestamp();
             session.Advance(frameDt);
             advanceTotal += Stopwatch.GetElapsedTime(a0).TotalMilliseconds;
+            WorldNews();
             HandleSaves();   // a quicksave or quickload asked for by a key: between ticks, none in flight
             animSeconds += frameDt;
             animClock = true;
@@ -356,5 +357,22 @@ sealed partial class GameHost
         double remaining = end - clock.Elapsed.TotalSeconds;
         if (remaining > 0.002) Thread.Sleep(TimeSpan.FromSeconds(remaining - 0.0015));
         while (clock.Elapsed.TotalSeconds < end) Thread.SpinWait(64);
+    }
+
+    /// <summary>Between ticks: the world's messages for the player go to the HUD and the log, the fights hostility started to the log.</summary>
+    void WorldNews()
+    {
+        var world = session.World;
+        foreach (string message in world.TakeMessages())
+        {
+            Console.WriteLine($"relations {message}");
+            player.Notice(message);
+        }
+        if (aggro is null || aggro.Log.Count == 0) return;
+        var table = world.Characters;
+        string Who(Meitou.Simulation.CharacterId id, int faction) =>
+            $"{(table.IsAlive(id) ? table.Cold(id.Slot)!.Name : "?")} ({(popData is { } d && faction >= 0 && faction < d.Factions.Count ? d.Factions[faction].Name : "no faction")})";
+        foreach (var e in aggro.TakeLog())
+            Console.WriteLine($"aggro     tick {e.Tick}: {Who(e.Attacker, e.AttackerFaction)} attacks {Who(e.Target, e.TargetFaction)} at {e.Distance:0}{(e.Joined > 0 ? $", {e.Joined} squad mate(s) join" : "")}");
     }
 }

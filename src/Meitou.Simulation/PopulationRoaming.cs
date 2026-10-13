@@ -144,6 +144,8 @@ public sealed partial class PopulationSystem
             p.UnloadAtTick = -1;
             return;
         }
+        // A leader in a fight is left to it: an order now would replace the fight's task (the trip goes on when it is over).
+        if (table.Next[squad.Leader.Slot].Task == (byte)CharacterTask.Attack) return;
 
         if (p.WaitLeft > 0)
         {

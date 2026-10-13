@@ -26,8 +26,8 @@ Each stage ends with tests and something the owner can run.
 | **5. Navmesh** | Collision reader, our own generator with the seed prune, path queries off the tick | Done in three passes plus the game wiring ([Navmesh](#navmesh)); gaps listed there |
 | **6. Player** | New game from NEW_GAME_STARTOFF, selection, move orders, minimal HUD | Done ([Player](#player)); formation and queued orders included |
 | **7. Bodies** | Stats and XP, hunger, blood, body parts, KO and death | Done and wired into `World` ([Bodies](#bodies)); first aid, resting and XP on the move are in play (2026-10-13, `FirstAidSystem`); beds and the time scale are open |
-| **8. Combat** | Melee per [combat.md](game/combat.md); ranged later | Melee done and wired ([Combat](#combat)); ranged, turrets and attack slots not built |
-| **9. AI proper** | Packages, blackboard, scoring and planner ([ai.md](game/ai.md)), off-screen squads | Not started (gate: towns run their daily routines, squads travel off screen). `PursuitSystem`, `RetaliationSystem` and the roaming squads are engine stand-ins, not the original's AI |
+| **8. Combat** | Melee per [combat.md](game/combat.md); ranged later | Melee done and wired ([Combat](#combat)); fights start by faction hostility, the player's idle characters defend themselves, the player's assaults and killings change the relations (2026-10-13, `AggroSystem`, [Hostility](#hostility-and-relations)); ranged, turrets and attack slots not built |
+| **9. AI proper** | Packages, blackboard, scoring and planner ([ai.md](game/ai.md)), off-screen squads | Not started (gate: towns run their daily routines, squads travel off screen). `PursuitSystem`, `RetaliationSystem`, `AggroSystem` (senses and target choice) and the roaming squads are engine stand-ins, not the original's AI |
 | **10. Saves** | Read and write the world state ([save.md](formats/save.md)) | API done ([Saves](#saves)); the game host quicksaves (F5) and quickloads (F9) the player's squad into its own slot ([Quicksave and quickload](#quicksave-and-quickload)); no save menu, no loading of the original game's saves in play |
 | **11+** | Economy and trade, buildings and production, the MyGUI screens, audio | Not started |
 
@@ -68,8 +68,8 @@ round robins. Its results depend on the frame rate, and at 5x every step is five
   `1f/30`) and the clock's `SimulationClock.TickSeconds` (double) are separate values; the session refuses settings where they differ.
   `Dispose` disposes the world and every `IDisposable` system (the movement system joins its path thread, the population system its build thread).
 - **Cadences in game time.** The original's per-frame budgets become rates in game time ([game-loop.md](game/game-loop.md#the-character-update-budget)):
-  every character moves every tick; slower work runs on its own cadence in ticks (zones every 15, retaliation every 15, eating every 30,
-  roaming pools every 60).
+  every character moves every tick; slower work runs on its own cadence in ticks (zones every 15, retaliation every 15, an NPC's look for
+  enemies every 15 staggered by slot, eating every 30, roaming pools every 60).
 - **Clock.** `GameClock` advances with simulation ticks only: **Verified** 1200/11 game seconds per game hour, 24 hours a day, days per year
   from CONSTANTS; it keeps the day, the time of day, total game hours (double), the daylight factor with its 2-hour ramps, the day/night flag
   and the `HH:MM` / `Day n` texts ([game-loop.md](game/game-loop.md#the-clock)). Saves store day, hour and minute.
@@ -99,9 +99,9 @@ moving it to its own thread (running ahead and publishing snapshots) is a host c
 | 2 | `Schedule` (serial) | The `SpatialGrid` is built from `Previous`, the partitions are cut, then each system: path requests and answers, who is due |
 | 3 | `Think` (parallel) | Per partition: AI intents (today the movement system's tasks) |
 | 4 | `Move` (parallel) | Path following, steering, separation, integration on the ground |
-| 5 | `Act` (parallel) | Medical tick, combat timers and blows, animation; effects on others go to the partition's `EffectBuffer` |
+| 5 | `Act` (parallel) | Medical tick, combat timers and blows, animation, the look for enemies; effects on others go to the partition's `EffectBuffer` |
 | 6 | Commit (serial) | The effects of all partitions, sorted, each handed to `Apply` of the system that emitted it |
-| 7 | `SlowWorld` (serial) | Zones, spawns and removals, roaming squads, eating, retaliation; each on its own cadence |
+| 7 | `SlowWorld` (serial) | Zones, spawns and removals, roaming squads, eating, retaliation, the leash; each on its own cadence |
 | 8 | Publish | Squads refreshed, dead characters pruned from the selection, the hot arrays swapped, the tick counted, the snapshot built |
 
 Systems are `ITickSystem`s; every method has an empty default. In every phase systems run in the order they were added; each system's
@@ -129,7 +129,11 @@ so the order must be a function of the state alone.
 
 **Commands.** `SimCommand`s are stamped with the tick they apply at: `FocusCommand`, `MoveOrder`, `RepathCommand`, `SelectCommand`,
 `StopCommand` (`Commands.cs`), `AttackOrder` (`Combat/CombatTypes.cs`) and `TreatOrder`, `RestOrder`, `MedicJobCommand` (`FirstAid/FirstAidTypes.cs`). The host enqueues them between ticks at `World.Tick`.
-`RetaliationSystem` enqueues `AttackOrder`s for the next tick from inside `SlowWorld` (an open item, [below](#open-questions-and-known-gaps)).
+A system that decides on a command inside the tick (retaliation, the aggro's attacks and leash stops) hands it to `World.Defer` (serial phases only, for a later tick):
+a list inside the world, never the host's `CommandQueue`, so a host enqueuing from another thread cannot interleave with it. At its tick the deferred commands come
+first, in the order they were deferred, then the host's (2026-10-13; before, retaliation enqueued into the host's queue, where its commands sorted after any the host had
+queued earlier for the same tick: no pinned scenario had such a command, and none of the nine old golden hashes moved). Deferred commands are not hashed (they apply
+at the next tick and show there). `World.Post` / `TakeMessages` carry messages for the player (the relation thresholds) to the host, not hashed.
 
 **Randomness.** Stateless: `Rng.Hash(world seed, entity key, RngPurpose, counter)` with SplitMix64 mixing; the entity key of a character is
 `Rng.Key(id)` (slot and generation), the counter is usually a tick number. Nothing to store, hash or race on, and the same roll whichever
@@ -142,15 +146,17 @@ The original's own random sequence is not reproduced (open for the character gen
 **State hash.** `World.StateHash()` is an order-sensitive mixing hash (`StateHasher`, written here, no packages) over the seed, the tick, every
 slot in order (alive, generation, and for live ones every `CharacterHot` field, then faction, spawn tick, squad, role, formation offset, path
 length and request, `IsPlayer`, the order queue, `DrawnWeapon`, stats and medical state through `BodyHash`, the inventory, provision and death
-ticks, `InCombat`, the animation layers and the name's length) and the free list, then the squad and platoon registries, the player state and every system that implements `IStateHashed` (the combat slots).
+ticks, `InCombat`, the animation layers and the name's length) and the free list, then the squad and platoon registries, the player state and every system that implements `IStateHashed` (the combat slots; the aggro system's leash slots, fight count and, once a deed has changed it, the whole relation table).
 Floats go in by their bits (-0 as 0). The first aid state (`TreatTarget` and `ResumeTask` while the task is `Treat`, `MedicJob` when on) goes in only while it is set, so a world that never uses first aid hashes as it did before it existed. It is a test and debugging tool, not run in play.
 
 **Determinism tests** (`tests/Meitou.Tests/Simulation`). A dummy workload (`WanderSystem` in `WanderWorkload.cs`: seeded wandering,
 separation over the grid, a synthetic ground that dips under the water, blows on the nearest neighbour, births and deaths that reuse slots) and
 the real systems on a synthetic town (`SyntheticTown`) and on The Hub of the install run at 1, 4 and 16 threads; the hashes at the checkpoints
-agree, two runs agree, another seed differs. `GoldenHashTests` pins the hashes of nine scripted scenarios (wander, player, roaming, bodies,
-fight, duels, two worlds cut into many partitions with `MinPartitionSize` 4, and a first aid and rest script on hand-made characters), so a refactor meant to change nothing is checked to change
-nothing; a change of behaviour that is meant updates the numbers in the same commit. **Re-pinned 2026-10-13** (`bodies` from its sixth checkpoint, `fight` from its second, `town-parts` from its second): the XP on the move of `BodySystem` (athletics while running, strength under a load) raises stats a little, which feeds the speed chain; the first aid system, the rest flag and the fighter encumbrance moved nothing there (switching only the XP off made all eight old pins match again), and the new `first-aid` scenario agrees at 1, 4 and 16 threads before being pinned.
+agree, two runs agree, another seed differs. `GoldenHashTests` pins the hashes of ten scripted scenarios (wander, player, roaming, bodies,
+fight, duels, two worlds cut into many partitions with `MinPartitionSize` 4, a first aid and rest script on hand-made characters, and `aggro`: five squads of five
+factions round a crossroads with a player character, fights started by hostility, self-defence and an assault that changes the relations, cut into partitions of one slot), so a refactor meant to change nothing is checked to change
+nothing; a change of behaviour that is meant updates the numbers in the same commit. **Re-pinned 2026-10-13** (`bodies` from its sixth checkpoint, `fight` from its second, `town-parts` from its second): the XP on the move of `BodySystem` (athletics while running, strength under a load) raises stats a little, which feeds the speed chain; the first aid system, the rest flag and the fighter encumbrance moved nothing there (switching only the XP off made all eight old pins match again), and the new `first-aid` scenario agrees at 1, 4 and 16 threads before being pinned. **Pinned 2026-10-13**: `aggro` (agrees at 1, 4 and 16 threads first;
+`AggroTests`); the hostility work moved none of the nine others (they do not run the aggro system, and the deferred list and self-defence change nothing in them).
 
 **Asynchronous services** (paths, navmesh building, building a town's characters) run on their own threads with request and result
 queues. In play a result is taken in at the first tick after it is ready, so timing can differ between runs. In the determinism tests they
@@ -215,14 +221,17 @@ result (the golden hashes pin it):
 | 7 | `CombatSystem` | Inputs, Schedule, Move, Act, Apply, SlowWorld | Fights (`Schedule` resyncs its slots with the table) |
 | 8 | `AnimationSystem` | Act | Animation layers |
 | 9 | `FeedSystem` | SlowWorld | Eating |
-| 10 | `RetaliationSystem` | SlowWorld | Attacked characters fight back |
+| 10 | `RetaliationSystem` | SlowWorld | Attacked characters fight back (NPCs always, the player's while idle) |
+| 11 | `AggroSystem` | Schedule, Act, Apply, SlowWorld | NPCs attack enemies of their faction in sight; the leash; back to the routine after a fight; hashes the live relation table ([Hostility](#hostility-and-relations)) |
 
 The rules: **population first** (it spawns in `SlowWorld`, so later systems see its characters); **player before movement** (a
 `MoveOrder` without ids reads the selection the player system just changed); **pursuit before movement** (pursuit raises `NeedPath` in
 `Schedule` and movement answers the same tick); **first aid after movement, before body** (2026-10-13: a move order is the movement system's and sets the task, so it replaces a treatment or a rest; the treatment is applied in the serial commit, after every `Act` of the tick including the body system's medical tick; first aid reads the patient only in its own `Act` barrier, where nothing writes it); **body before combat** (the body system ticks the medical state, combat runs with
 `TickMedical` off and reads the result); **combat before animation and retaliation** (combat swaps its read and write arrays at the end of
-its `SlowWorld`: a system after it sees the new combat state, one before it the old); **feed after body**; **retaliation last** (it queues
-orders for the next tick after combat swapped). The game's `CombatOptions` are `SelfApproach = false, TickMedical = false`.
+its `SlowWorld`: a system after it sees the new combat state, one before it the old); **feed after body**; **retaliation, then aggro, last** (both defer
+orders for the next tick after combat swapped; the aggro's leash sweep sees the tasks every other system left this tick, and its look in `Act` reads only the last tick's
+positions and the cold state no other `Act` writes). The game's `CombatOptions` are `SelfApproach = false, TickMedical = false`. The sandbox builds `All` without `Aggro`
+(its hostile foe stands 30 units from the hero and must not start a fight by itself).
 
 ## Population
 
@@ -266,7 +275,7 @@ orders for the next tick after combat swapped). The game's `CombatOptions` are `
   has characters (the leader runs to the target, the others follow; at a town they mill about); when none has been for 10 s its characters
   are removed and **a stand-in moves at 25 units per second (90 beyond 25000), no physics, no paths**, the numbers of the original's
   `UnloadedPlatoon` (units not verified). When a zone near it becomes active the members are made again from the key at the stand-in's
-  place. A squad that loses all its members leaves the pool.
+  place. A squad that loses all its members leaves the pool. While its leader fights, the trip waits (an order would replace the fight's task).
 - **Not made:** roads for long trips (`road preference`), AI package jobs (`GoOutOnPatrol` and others), faction campaigns, fleeing danger,
   nests and the homeless spawns of the area sectors (6.2, 6.3), unique squads, the residents' unloaded half (a town is all or nothing).
 
@@ -288,7 +297,8 @@ orders for the next tick after combat swapped). The game's `CombatOptions` are `
   is popped; a blocked or failed path drops the queue; `Stop` ends the go-to and clears the queue. Several characters get a block of slots
   round the click (`Formation.Place`, [Movement and paths](#movement-and-paths)); queued orders get their own block. A right click on a living
   character that is not the player's orders the selection to attack it (`AttackOrder`; hostility is not checked: **engine choice**, the
-  original attacks enemies and the red cursor says so, [ui-input.md](game/ui-input.md)).
+  original attacks enemies and the red cursor says so, [ui-input.md](game/ui-input.md)). Attacking someone of another faction is an assault on that faction
+  ([Hostility](#hostility-and-relations)).
 - **Interface** (`src/Meitou.Game/PlayerInterface.cs`, `.Picking.cs`, `.Hud.cs`; host side only: it reads the published snapshot and enqueues
   commands at the world's tick):
 
@@ -589,14 +599,61 @@ retaliation systems are in `Fighting.cs`.
   target has moved 12 units from the goal, at most every 0.5 s); the path is dropped once the target is within `CombatTuning.CloseInGap` (3) or a
   swing or reaction is on.
 - **Retaliation** (`RetaliationSystem`, an **engine rule** until the AI): every 15 ticks a character targeted by an attacker, awake, with a
-  `Fighter`, not the player's and not fighting, issues its own `AttackOrder` against that attacker, and so do its squad mates within 250
-  units. Hostile relations do not start fights; nothing starts a fight but an order.
+  `Fighter` and not fighting, fights that attacker, and so do its free squad mates within 250 units (`RetaliationSystem.JoinMates`, shared with the aggro). NPCs always
+  answer; **the player's characters answer only while idle** (task `Idle`: no move order, not treating or resting), so one sent away keeps walking (2026-10-13; the
+  combat.md gap "player characters defending themselves when idle"). The original's orders panel has a Passive toggle (non-combat mode, NUM2,
+  [ui-screens.md](game/ui-screens.md); GAMESTATE_CHARACTER `passive mode` in [save.md](formats/save.md)); it is not modelled, and its default is taken as off (**Unknown**;
+  engine choice). The orders go through `World.Defer` and are `Defensive`: defending is not an assault.
+- **Hostility** (`AggroSystem`): NPCs start fights with enemies of their faction in sight; see [Hostility and relations](#hostility-and-relations).
 - **Host API.** `CombatSystem.StateOf(id)` (target, counters, `Down`), `Playing(id, tick)` (the technique playing and its progress) and, with
   `CombatOptions.RecordLog`, `Log` (every resolved blow: attacker, defender, outcome, part, damage, KO, death).
 - **Gaps.** The clips are played by the animation system ([Animation](#animation)). Also not built: ranged combat and turrets (only the records
   are read), attack slots (`max num attack slots`), target choice, movement round the target beyond the path, fighting while prone, finishing off,
-  prisoners, fist injury to the attacker, a stagger coupled to leg loss, mass-combat XP, auto-aggro by relations, player characters defending
-  themselves when idle.
+  prisoners, fist injury to the attacker, a stagger coupled to leg loss, mass-combat XP. Built 2026-10-13: auto-aggro by relations and the player's idle characters
+  defending themselves (above).
+
+### Hostility and relations
+
+An **engine stand-in** for the stage 9 senses and target choice ([ai.md](game/ai.md#senses)); the relation rules are the original's
+([factions-squads-towns.md section 3](game/factions-squads-towns.md#3-relations)). Code: `AggroSystem.cs`, `Relations.cs` (`PlayerRelations`), `FactionRelations` in
+`Meitou.Data/Gameplay/FactionData.cs`; tests `AggroTests` (synthetic factions) and `TownAggroTests` (`[Slow]`, the install).
+
+- **The table.** `PopulationData.Relations` is the game's one live table (no copy per world): built by the **Verified** rules of 3.2 (explicit entry, else the smaller default,
+  self 100), with the 3.3 predicates (hostile at -30 or below, ally at 50 or above or self, coexistence from the FACTION list). The player's faction (Nameless) has no table:
+  `FactionRelations.PlayerFaction` makes every query of its row ask the other side's entry about the player (3.1, **Observed**; player to player is 100), so the explicit list of
+  the Nameless record is never read. A loaded save puts its values in (`SaveLoader`) and a save writes the changed ones back (`SaveCapture`, as before). Worlds built on one
+  `PopulationData` share it: a test that changes relations builds its own data. The aggro system hashes it once `Changes` is above 0.
+- **Deeds** (3.4 slot 5, `FactionRelations.Event`, **Observed** table: delta x amount only while above the floor or below the ceiling, then clamped; nothing for a `not real`
+  faction; a change asked of the player's row goes to the other side). Which game events use which kind is **Unknown**; the engine's choice, after the `CrimeEnum` numbers the kinds
+  line up with: a player's `AttackOrder` (not a defensive one) on a character of another faction is an **assault** (kind 5: -20, floor -75) on that faction's view of the player,
+  once per victim while no player character fights it already; a killing blow by a player's character is a **murder** (kind 4: -20, floor -100). Amount 1. So two assaults
+  turn a neutral (0) faction hostile. KOs, theft, prisoners and the drift (kind 8) are not wired.
+- **Messages.** When a faction's view of the player crosses -30 or 50 the game's texts (`FUN_1406b28f0`, **Verified** thresholds): "{faction} are now hostile towards you", "...
+  no longer hostile towards you", "... are now your allies" (above 50 only), "... no longer your ally" (the exact wording of the two "no longer" texts is an engine reading of
+  the doc's summary). `World.Post`; the host shows them as a HUD notice and prints `relations ...` to the log.
+- **Who is an enemy** (`AggroSystem.IsEnemy`): A picks a fight with B when A is hostile to B (one way: A's view) and neither lists the other in `coexistence` (**engine
+  choice**: what the coexistence flag does in the original is **Unknown**; either side's is enough here). Same faction never (self is 100) and allies never (50 or above is not
+  hostile). The "default-hostile faction" test of 3.3 is not used: the smaller-default rule already makes such factions hostile to almost everyone.
+- **The look** (`Act`, parallel, own slot): an awake NPC with a `Fighter`, not fighting, not treating or resting, and not calm, looks once every 15 ticks (slot s on the ticks
+  where tick % 15 = s % 15, so the work is spread over the ticks) for the nearest living, awake character with a body whose faction is an enemy, within **300 units** (30 m;
+  **engine choice**, the original's range is **Unknown**; no CONSTANTS field exists, [game-loop.md](game/game-loop.md)) times its race's `vision range mult` (RACE +0x74,
+  "detection range", [character-stats.md](game/character-stats.md#races); 1 for the humans seen). The grid of the last tick's positions; ties keep the grid's order (lower slot
+  within a cell). It emits one effect. A crowd whose factions present have no enemy among each other skips the looks (worked out when the set of factions present or the
+  table changes). Downed characters and animals (no race, no body, no fighter) are never looked for and never look.
+- **The decision** (`Apply`, serial, commit order): the looker if still free, and its free squad mates within 250 units (the retaliation join rule; never the player's), get
+  an `AttackOrder` for the next tick (`World.Defer`). The target answers through retaliation. **The player's characters never look and never join**: they fight when
+  ordered or, idle, when attacked.
+- **Leash and standing down** (`SlowWorld`, every tick, serial): an NPC's position when it starts a fight (by aggro, retaliation or anything) is kept; beyond **750 units**
+  from it the NPC stops (a deferred `StopCommand`) and is calm (no looking) for **20 game seconds**; it still answers an attack. When its fight is over (target down, or
+  stopped) it goes back to the task it had before (wander or follow; a go-to becomes idle, which the roaming squads order again; a knocked-out one is left to wake into
+  wandering). All three numbers are engine choices (`AggroSettings`).
+- **What the data gives** (2026-10-13, `TownAggroTests`, base game, residents and bar squads with their looks, 60 game seconds each): The Hub (37 characters), Squin (66),
+  Stack (145), Admag (82), Mongrel (160), Shark (78) and Sho-Battai (179) start no fight; Waystation (30) has United Cities attacking The Holy Nation (hostile in the data).
+  The sandbox's foe (Bloodraiders) attacks an idle Nameless character 150 units away and is fought back. In the game (`--new-game "The Cannibal Hunters"`) the Cannibals of the
+  start town attack the player's squad at once; the Wanderer's start in The Hub stays quiet.
+- **Not done:** the original's senses (line of sight, stealth, the KO/ENEMY/ALLY tags, `vision range mult` is the only input taken), its target choice and attack slots,
+  fleeing (`run away ratio...`), guards defending other factions' townsfolk, crimes and bounties ([economy.md](game/economy.md#11-bounties-and-crimes)), wars (slots 7, 8),
+  dialogue relation effects, trust, the drift, animals fighting, NPCs finishing off or looting the downed.
 
 ## Saves
 
@@ -609,7 +666,7 @@ retaliation systems are in `Fighting.cs`.
 |---|---|
 | CAMERA `time day / hour / minute` | `LoadedSave.Clock` (a `SaveClock`); the host sets its `GameClock` from it |
 | CAMERA `player money`, `pfaction name` | `World.Player.Money`, `World.Player.Faction` (the faction's position, else `204-gamedata.base`) |
-| GAMESTATE_FACTION relation tables | `PopulationData.Relations` (`FactionRelations.Set`, on by default); prosperity, platoon counters and trust stay in `LoadedSave.Factions` (`FactionState`) |
+| GAMESTATE_FACTION relation tables | `PopulationData.Relations`, the game's live table (`FactionRelations.Set`, on by default; the player's faction has no table and is answered by the others', [Hostility](#hostility-and-relations)); prosperity, platoon counters and trust stay in `LoadedSave.Factions` (`FactionState`) |
 | The player's platoons that have a file | One `Squad` each (`Name` = platoon name, `TemplateId`, leader = the `is leader` character) and their characters: saved position (with height), yaw from the rotation quaternion, name, role (`squad mem type`), `IsPlayer`, speed from the race and the saved stats; `World.Player.Squad` is the first platoon |
 | STATS, MEDICAL_STATE of those characters | `CharacterCold.Save` (`SavedCharacterLink`) with `Stats` and `Medical` (race from the appearance record or the CHARACTER); a dead character is not made and stays in the save |
 | CAMERA `selected_character`, `selected_characters<k>` | `World.Player.Selection` |
@@ -769,6 +826,13 @@ A duel with the install's records (Greenlander, a Katana of a level-50 model, he
 and 16 threads at six checkpoints. These tests set `MinPartitionSize` to 1 (duels) or 4 (the crowd) so the fighters really spread over 2, 8 and
 32 partitions.
 
+**Hostility** (2026-10-13; `TownAggroTests.The_cost_of_the_aggro_is_recorded`, `[Bench]`, flat ground, The Hub with the looks, one thread, 1800 ticks after
+the town loaded, the aggro system's phases timed inside the tick; the machine was busy, so the first (cold) runs read 5 to 20 us and are left out). Squad size 1, 37
+characters: 0.5 to 1.1 us per tick of 22 to 35 us. Squad size 10, 127 characters: 1.3 to 1.4 us of 110 to 120 us (Schedule 0.5, Act 0.1, SlowWorld 0.7: the two passes over the
+slots). The Hub has no hostile pair, so the looks are skipped; before that skip a look cost about 0.9 us (a 300-unit query over a crowd of 127: 7 columns of the grid, which
+`SpatialGrid.Query` now searches once per column instead of once per cell, same order), 8 us per tick at squad size 10. A crowd with enemies in it pays that: about 1 us
+per looking character every 15 ticks.
+
 **Body time scale** (2026-10-08; `BodyFactory` / `MedicalState.Tick` on a base-game Greenlander, `dt` 11/36000 h per tick, CONSTANTS from the
 install, unhurt and with one leg hit for 40 cut + 20 blunt, 72 game hours; at 5x the game runs 2.75 game hours per real minute, so 72 h take 26
 real minutes):
@@ -789,15 +853,14 @@ home building, the length of the three zone unload timers, the roaming cap for t
 rules and `squad formation` (pathfinding.md); the attacker's technique choice, `power`, `max encumbrance`, the Heavy_Hit length (combat.md); item
 nutrition, the NPCs' food source, auto-eat, the `main` grid size (character-stats.md); how a start-off's relations, research and `force race` are
 applied; the world states' initial values; the corpse removal rule; the animation selection code (animation.md); the saved quaternion's
-convention and whether the original loads a save written from nothing (save.md); the navmesh items in [pathfinding.md](game/pathfinding.md).
+convention and whether the original loads a save written from nothing (save.md); the navmesh items in [pathfinding.md](game/pathfinding.md); the senses' range and rules,
+which game events use which relation event kind, what the coexistence flag does, the Passive toggle's default (ai.md, factions-squads-towns.md, [Hostility](#hostility-and-relations)).
 
 **Engine gaps**: the AI (stage 9), towns and their state, the economy, buildings, the UI screens, the host's use of saves, combat clips and ranged
 combat, doors that open and close in play, physics.
 
-**Refactor items skipped because they would change behaviour** (each moves a golden hash or the timing of something):
-- `RetaliationSystem` enqueues `AttackOrder`s into the external `CommandQueue` from inside the tick. Deterministic while the host enqueues on the
-  same thread between ticks; once the simulation runs on its own thread the interleaving depends on timing. A world-internal deferred list
-  would fix it and may reorder same-tick commands.
+**Refactor items skipped because they would change behaviour** (each moves a golden hash or the timing of something). Done 2026-10-13: retaliation no longer
+enqueues into the host's `CommandQueue` from inside the tick; it and the aggro use the world's deferred list (`World.Defer`, [Threading](#threading)), no pin moved.
 - No end-of-tick hook: the combat system swaps its arrays at the end of its `SlowWorld`, so the result depends on the system order
   ([Systems and their order](#systems-and-their-order)). Moving the swap would change what retaliation reads.
 - The two `MedicalContext` builders (`BodySystem` and `CombatSystem.MakeContext`) agree on toughness, strength, encumbrance (the body system now writes it to

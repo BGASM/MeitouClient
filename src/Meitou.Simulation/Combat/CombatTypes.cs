@@ -7,7 +7,11 @@ using Meitou.Simulation.Bodies;
 namespace Meitou.Simulation.Combat;
 
 /// <summary>Orders the characters to fight <see cref="Target"/> (the AI's "attack" task, a player's attack command): they draw their weapon, close in and attack until one of them is down.</summary>
-public sealed record AttackOrder(IReadOnlyList<CharacterId> Attackers, CharacterId Target) : SimCommand;
+public sealed record AttackOrder(IReadOnlyList<CharacterId> Attackers, CharacterId Target) : SimCommand
+{
+    /// <summary>A fight the attackers did not pick: an answer to being attacked (<see cref="RetaliationSystem"/>). The player's defence does not count as an assault on the other faction.</summary>
+    public bool Defensive { get; init; }
+}
 
 /// <summary>What a resolved blow did, for the log (a combat log, damage numbers, tests).</summary>
 public readonly record struct CombatLogEntry(long Tick, int Attacker, int Defender, int Blow, BlowOutcome Outcome, int Part, float Cut, float Blunt, float Pierce, float Stun, bool Knockout, bool Death);

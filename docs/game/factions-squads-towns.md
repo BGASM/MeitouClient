@@ -479,6 +479,22 @@ placement code was not decoded).
 - Patrol routes: the patrol tasks (`Task_Patrol`, `Task_PatrolTown`, `GoOutOnPatrol*`) were not decoded here (class mapping: [ai-tasks.md](ai-tasks.md#tasktype-to-task-class); packages: [ai.md](ai.md#signal-functions-and-the-package-classes)); no fixed route data
   was found in FCS records (squad templates only name `AI packages`; `patrol approaches towns` is a bool).
 
+## As built: relations in the simulation (2026-10-13)
+
+What the engine does with section 3 ([simulation.md "Hostility and relations"](../simulation.md#hostility-and-relations) has the details and the numbers):
+
+- `FactionRelations` (`Meitou.Data/Gameplay/FactionData.cs`) is the table of 3.2 with the predicates of 3.3 and is the game's live table (`PopulationData.Relations`). The player's
+  faction row is answered by the other side's entry about the player (3.1); the relation, trust and war flags of 3.1 beyond the relation value are not modelled (trust lives
+  in the save only).
+- `FactionRelations.Event` is slot 5 of 3.4 with the kind table above (**Observed** values, tested entry by entry in `AggroTests`), including the `not real` no-op and the
+  overshoot of the floor by up to one delta. Slots 3, 4, 6 to 9 are not wired (no dialogue, wars or reputation yet).
+- **Engine choice** (the call sites are **Unknown**): a player's attack order on a character of another faction is kind 5 (assault), a player's killing blow kind 4 (murder),
+  amount 1, on the victim faction's view of the player. The threshold messages of 3.3 are posted to the player.
+- **Engine choice:** an NPC attacks a character in sight whose faction its own is hostile to, unless either faction lists the other in `coexistence` (what the coexistence
+  flag does in the original is **Unknown**). The "default-hostile faction" test is not used.
+- **Observed** with these rules over the base game (2026-10-13, `TownAggroTests`): among the residents and bar squads of The Hub, Squin, Stack, Admag, Mongrel, Shark and
+  Sho-Battai no faction is hostile to another present (no fight in 60 game seconds); at Waystation the United Cities are hostile to The Holy Nation and fight them.
+
 ## Implementation outline
 
 Order that gets a populated, hostile-aware world with the least decoded behaviour:

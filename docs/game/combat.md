@@ -383,6 +383,8 @@ Read through the typed views of `Meitou.Data.Gameplay.Combat` and checked by `Co
 
 Items 1 to 5 of the outline exist: [simulation.md "Combat"](../simulation.md#combat) lists what the engine does and where it chose (attack choice, timing, the reaction's alignment to the blow, the stagger, XP for blocks and dodges, the reach
 test). The attacker-side technique choice is no longer a gap of the code but is still **Unknown** in the original. Ranged combat, turrets and the AI's targeting are not built.
+Since 2026-10-13 fights also start without an order: NPCs attack the nearest enemy of their faction in sight and the player's idle characters defend themselves, an engine
+stand-in for the AI's senses and target choice ([simulation.md "Hostility and relations"](../simulation.md#hostility-and-relations)).
 
 ## Unknowns
 

@@ -20,8 +20,10 @@ public enum StandardParts
     Retaliation = 256,
     /// <summary>First aid and resting (<see cref="Meitou.Simulation.FirstAid.FirstAidSystem"/>).</summary>
     FirstAid = 512,
+    /// <summary>Fights started by faction hostility, the leash and standing down (<see cref="AggroSystem"/>); with it the player's assaults and killings change the relations.</summary>
+    Aggro = 1024,
     /// <summary>What the game runs.</summary>
-    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid,
+    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro,
 }
 
 /// <summary>What <see cref="StandardSystems.Build"/> builds and with which settings; the defaults are the game's.</summary>
@@ -44,6 +46,7 @@ public sealed class StandardSystemOptions
     public float? AnimationBlendRate { get; init; }
     public FeedSettings? Feed { get; init; }
     public Meitou.Simulation.FirstAid.FirstAidSettings? FirstAid { get; init; }
+    public AggroSettings? Aggro { get; init; }
 }
 
 /// <summary>The built systems in tick order, with the ones the host talks to.</summary>
@@ -54,6 +57,7 @@ public sealed class StandardSystemSet
     public MovementSystem? Movement { get; init; }
     /// <summary>Built when combat, pursuit or retaliation is asked for.</summary>
     public CombatSystem? Combat { get; init; }
+    public AggroSystem? Aggro { get; init; }
 }
 
 /// <summary>
@@ -71,7 +75,8 @@ public sealed class StandardSystemSet
 /// so a system placed after it sees the new tick's combat state and one placed before it the old one. Retaliation reads the combat state of the tick that just ended
 /// (animation is placed after combat in the game's order, and the golden hashes pin it). Moving the swap to a separate end-of-tick hook would change what retaliation reads.</item>
 /// <item><b>Feed after body</b>: the game's order; eating reads hunger the body system advanced in the same tick.</item>
-/// <item><b>Retaliation last</b>: it queues <c>AttackOrder</c>s for the next tick from <c>SlowWorld</c>, after combat has swapped its arrays.</item>
+/// <item><b>Retaliation, then aggro, last</b>: both defer <c>AttackOrder</c>s for the next tick (<see cref="World.Defer"/>) after combat has swapped its arrays; aggro's
+/// leash sweep sees the tasks every other system left, and its look (<c>Act</c>) runs after combat's, reading only the last tick's positions.</item>
 /// </list>
 /// An extra system a test wants (a probe, a poke) goes after these.
 /// </summary>
@@ -89,6 +94,7 @@ public static class StandardSystems
         if (Has(StandardParts.Player)) systems.Add(new PlayerSystem());
         if (Has(StandardParts.Pursuit | StandardParts.Combat | StandardParts.Retaliation))
             combat = new CombatSystem(data.Combat.Techniques, data.Combat.Constants, data.Bodies.Constants, data.BodyOptions, o.AnimationLengths ?? new AnimationLengths(), o.Combat);
+        if (combat is not null && Has(StandardParts.Aggro)) combat.Relations = data.Relations;
         if (Has(StandardParts.Pursuit)) systems.Add(new PursuitSystem(combat!));
         if (Has(StandardParts.Movement)) systems.Add(movement = new MovementSystem(new PathService(walkability, o.SynchronousPaths)));
         if (Has(StandardParts.FirstAid)) systems.Add(new FirstAid.FirstAidSystem(data.Bodies.Constants, data.BodyOptions, data.Items, o.FirstAid));
@@ -102,6 +108,8 @@ public static class StandardSystems
         }
         if (Has(StandardParts.Feed)) systems.Add(new FeedSystem(data.Items, o.Feed));
         if (Has(StandardParts.Retaliation)) systems.Add(new RetaliationSystem(combat!));
-        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat };
+        AggroSystem? aggro = null;
+        if (Has(StandardParts.Aggro)) systems.Add(aggro = new AggroSystem(data.Relations, o.Aggro));
+        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro };
     }
 }

@@ -46,7 +46,11 @@ public sealed class PopulationData
     public IWorldStates States { get; init; } = IWorldStates.None;
     /// <summary>The player's faction (the FACTION named Nameless, 204-gamedata.base), a position in <see cref="Factions"/>; -1 when there is none.</summary>
     public int PlayerFaction { get; init; } = -1;
-    /// <summary>The relations the factions start with (who is hostile to whom: roaming squads avoid hostile towns).</summary>
+    /// <summary>
+    /// The live relation table of the game (who is hostile to whom: roaming squads avoid hostile towns, <see cref="AggroSystem"/> starts fights by it);
+    /// it starts as the data's (section 3.2), a loaded save replaces its values, and the player's deeds change it (<see cref="Combat.CombatSystem"/>).
+    /// Worlds built on the same data share it.
+    /// </summary>
     public FactionRelations Relations { get; init; } = FactionRelations.Build([]);
     /// <summary>The faction of every placed town, a position in <see cref="Factions"/> (-1: none).</summary>
     public IReadOnlyList<int> SiteFactions { get; init; } = [];
@@ -88,10 +92,13 @@ public sealed class PopulationData
         }
         var factions = FactionData.LoadAll(db);
         var byId = BuildFactionIndex(factions);
+        int player = factions.FindIndex(f => f.Name == "Nameless");
+        var relations = FactionRelations.Build(factions);
+        relations.PlayerFaction = player;
         return new PopulationData
         {
-            Db = db, Sites = sites, Factions = factions, Appearances = appearances, BodyOptions = bodyOptions ?? BodyOptions.Default, PlayerFaction = factions.FindIndex(f => f.Name == "Nameless"),
-            Relations = FactionRelations.Build(factions),
+            Db = db, Sites = sites, Factions = factions, Appearances = appearances, BodyOptions = bodyOptions ?? BodyOptions.Default, PlayerFaction = player,
+            Relations = relations,
             SiteFactions = [.. sites.Select(s => s.Town.Faction is { } fid ? byId.GetValueOrDefault(fid, -1) : -1)],
         };
     }

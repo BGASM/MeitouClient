@@ -42,6 +42,9 @@ sealed partial class GameHost
     Meitou.Simulation.StandardSystemSet BuildSystems(bool interactive) =>
         Meitou.Simulation.StandardSystems.Build(popData!, simWalkability!, new Meitou.Simulation.StandardSystemOptions
         {
+            // The sandbox compares motion with the original on characters standing still: a hostile foe there must not start a fight by itself.
+            Parts = IsSandbox ? Meitou.Simulation.StandardParts.All & ~Meitou.Simulation.StandardParts.Aggro : Meitou.Simulation.StandardParts.All,
+            Aggro = new Meitou.Simulation.AggroSettings { RecordLog = true },
             Population = new Meitou.Simulation.PopulationSettings { Background = interactive },
             SynchronousPaths = !interactive,
             AnimationLengths = animationLengths,
@@ -149,6 +152,7 @@ sealed partial class GameHost
             return;
         }
         population = built.Population;
+        aggro = built.Aggro;
         if (nav is not null) population!.ZoneGate = zone => nav.Walkability.World.Contains(zone);
         loadedSave = loaded;
         preparedBase = null;

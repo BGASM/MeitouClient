@@ -68,6 +68,8 @@ public sealed partial class World : IDisposable
     Partition[] partitions = [];
     // Per system, built once when it is added: which parallel phases it implements and the delegates that run them (no closure per tick).
     readonly List<SystemPhases> phases = [];
+    readonly List<SimCommand> deferred = [];
+    readonly List<string> messages = [];
     IAnimationSource? animations;
 
     public World(WorldSettings settings, IWalkability walkability, IEnumerable<ITickSystem>? systems = null, CharacterTable? characters = null)
@@ -125,7 +127,7 @@ public sealed partial class World : IDisposable
 
         // 1. Inputs (serial).
         table.Phase = TablePhase.Inputs;
-        var due = Commands.TakeDue(Tick);
+        var due = TakeDue();
         foreach (var s in systems) s.Inputs(this, due);
 
         // 2. Schedule (serial): the grid of the last tick's positions, then the systems.
@@ -166,6 +168,56 @@ public sealed partial class World : IDisposable
         table.EndTick();
         Tick++;
         if (Settings.PublishSnapshots) Publish();
+    }
+
+    /// <summary>
+    /// Queues a command a system decided on inside the tick (retaliation, auto-aggro) for the tick it is stamped with (at least the next one).
+    /// Serial phases only. These are world state, not the host's: they never go through <see cref="Commands"/>, so a host enqueuing from
+    /// another thread cannot interleave with them. At a tick they come before the host's commands of that tick, in the order they were deferred.
+    /// </summary>
+    public void Defer(SimCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (Characters.Phase == TablePhase.Parallel) throw new InvalidOperationException("commands are deferred in serial phases only");
+        if (command.Tick <= Tick) throw new ArgumentException("a deferred command is for a later tick", nameof(command));
+        deferred.Add(command);
+    }
+
+    /// <summary>The commands deferred for later ticks (for tests).</summary>
+    public int DeferredCount => deferred.Count;
+
+    IReadOnlyList<SimCommand> TakeDue()
+    {
+        var external = Commands.TakeDue(Tick);
+        if (deferred.Count == 0) return external;
+        var due = new List<SimCommand>(deferred.Count + external.Count);
+        int kept = 0;
+        for (int k = 0; k < deferred.Count; k++)
+        {
+            if (deferred[k].Tick <= Tick) due.Add(deferred[k]);
+            else deferred[kept++] = deferred[k];
+        }
+        deferred.RemoveRange(kept, deferred.Count - kept);
+        due.AddRange(external);
+        return due;
+    }
+
+    /// <summary>Posts a message for the player (a relation crossing a threshold...); serial phases only. The host shows them.</summary>
+    public void Post(string message)
+    {
+        lock (messages) messages.Add(message);
+    }
+
+    /// <summary>Takes the messages posted since the last call (the host, between ticks).</summary>
+    public IReadOnlyList<string> TakeMessages()
+    {
+        lock (messages)
+        {
+            if (messages.Count == 0) return [];
+            string[] all = [.. messages];
+            messages.Clear();
+            return all;
+        }
     }
 
     /// <summary>Runs <paramref name="ticks"/> ticks.</summary>
