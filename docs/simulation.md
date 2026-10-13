@@ -739,11 +739,13 @@ the pain of the medical state are not in the save's keys and start empty and at 
 `meitou --duel [x,z]` (added 2026-10-13, for the trailer; `GameHost.Duel.cs`) is a scene on rails: two Samurai fight on the real map at sunset and every lap is
 the same fight to the tick, so a camera flight recorded from any angle lines up with every other take. Engine choices throughout; nothing of it runs in the game.
 
-- **Place and light.** The built-in spot is the owner's pick (2026-10-13): desert dunes at 41062, -110207, with ridges of dead trees and a rock spire
-  before the setting sun (the sun sets towards −X, `SkyClock`). Before it, a flat cliff top at -38016, -67824 with pines along the ridge was used,
+- **Place and light.** The built-in spot is the owner's pick (2026-10-13): in the desert dunes at 42360, -110400, 33 units back from the edge of a dune
+  crest that runs north-south and drops about 280 units to the east within 500 (the pair fight along the crest), with dunes beyond and the setting sun
+  to the west (the sun sets towards −X, `SkyClock`). Before it, the owner's first dune spot at 41062, -110207 and a flat cliff top at -38016, -67824 with pines along the ridge was used,
   picked from a heightmap search for flat ground with a drop and no terrain above 0.6 degrees towards the setting sun, then by sunset screenshots; a
-  hilltop above a bay at -90144, -120240 was the runner-up there (the sun on the water). Unless `--time` or `--weather` say otherwise the clock starts at
-  22:00 (the sun about 5 degrees up) and the weather is held clear (`Default`). The start camera looks west into the sun with the pair left and right (yaw 90).
+  hilltop above a bay at -90144, -120240 was the runner-up there (the sun on the water). Unless `--time` or `--weather` say otherwise the time of day is
+  22:00 (the sun about 5 degrees up) and the weather is held clear (`Default`). The time of day is held still (`GameClock.HoldHourOfDay` after each
+  frame's ticks; game time runs on for what animates by it, the heat haze), so the light is the same through a lap and across laps. The start camera looks west into the sun with the pair left and right (yaw 90).
 - **World.** No towns (so no residents or roaming squads), aggro off, paths answered inside the tick (`SynchronousPaths`), the population system on
   the tick thread, the camera focus fixed on the spot (`SendFocus` sends nothing). The characters walk on open ground (`OpenGroundWalkability` on
   the heightmap), not the navmesh: the first spot, the cliff top, is a navmesh island the build prunes (`meitou-tools navmesh --zone 23,17`, **Observed**
@@ -762,7 +764,7 @@ the same fight to the tick, so a camera flight recorded from any angle lines up 
   animation clock (clouds, water, foliage sway) at 0 and fresh per-character renderer state (`worldEpoch`). It happens at the lap's end, on
   Backspace, and whenever a cinema flight starts or a recording starts (also over a flight already playing; docs/viewer.md "Cinematic camera"): the
   cinema sets its state in the key handler, before the frame, so each take's first frame is the lap's first. The Tab panel's time of day slider sets the
-  hour the next lap starts at (else it would snap back each lap).
+  held hour.
 - **Checked.** The measured run keeps the world's state hash at the lap's end; each lap that ends on that tick is compared with it and the log says
   `lap n ended as measured` or `DIFFERS`. Headless (`--duel --screenshot --ticks n`) three laps ended with the measured hash (again at the desert spot), and pictures of lap 1
   and lap 3 at the same moment were pixel-identical (`meitou-tools image-diff`, **Verified** 2026-10-13). A lap shows end − skip − 1 ticks (1319 here).

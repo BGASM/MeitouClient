@@ -79,7 +79,8 @@ internal sealed unsafe partial class CharacterRenderer
                 Matrix4x4 model = world;
                 if (!part.Shared) model = attach[l.AttachBase + part.AttachIndex] * world;
                 var mesh = part.Mesh;
-                float value = MeshLod.Value(eye, Vector3.Transform(part.BoundsCentre, model), part.BoundsRadius * model.ScaleLength(), depthPass ? LodBias * ShadowLodBias : LodBias);
+                // The model is relative to the view's eye (above), so the LOD eye is too: with the world eye every part far from the origin took its last level.
+                float value = MeshLod.Value(eye - origin, Vector3.Transform(part.BoundsCentre, model), part.BoundsRadius * model.ScaleLength(), depthPass ? LodBias * ShadowLodBias : LodBias);
                 // In a shadow map hair is a silhouette, so it takes the rule's own distances there (its levels start CharacterContent.HairLodScale times farther for the picture).
                 if (depthPass) value = Math.Max(part.Material.Shading == CharacterShaders.ShadeHair ? value * CharacterContent.HairLodScale : value, shadowLodFloor);
                 int level = MeshLod.Select(mesh.Distances, value);

@@ -110,6 +110,9 @@ public sealed class GameClock
         GameSeconds = 0;
     }
 
+    /// <summary>Keeps the time of day at <paramref name="hour"/> while game time runs on (<see cref="HoursSinceStart"/> and what animates by it): the trailer duel's still sun.</summary>
+    public void HoldHourOfDay(double hour) => StartHour = ((hour % 24) + 24) % 24 - HoursSinceStart;
+
     /// <summary>Sets the time of day, keeping the day count.</summary>
     public void SetHourOfDay(double hour)
     {

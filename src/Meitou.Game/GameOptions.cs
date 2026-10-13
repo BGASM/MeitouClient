@@ -19,7 +19,7 @@ sealed class GameOptions
     public string? SandboxMode;
     /// <summary>The looping duel for trailers (<c>--duel [x,z]</c>, docs/simulation.md "Duel"): two Samurai Heavy fight on rails at sunset, the same fight every lap.</summary>
     public bool Duel;
-    /// <summary>Where the duel is fought (null: the built-in desert dunes).</summary>
+    /// <summary>Where the duel is fought (null: the built-in dune crest).</summary>
     public (float X, float Z)? DuelAt;
     /// <summary>The start to play (null = the default); with <c>--move-to</c> the picture shows a selected squad walking.</summary>
     public string? NewGameName;
@@ -39,7 +39,7 @@ sealed class GameOptions
           --sandbox-character <name> the CHARACTER record the sandbox spawns (default: the first member of the default new-game start)
           --sandbox-mode <list>      the sandbox hero's start, comma-separated: walk, run or free, a fixed speed in u/s, patrol (the 400-unit patrol), e.g. run,patrol (with --move-to or --screenshot)
           --duel [x,z]               trailer scene: two helmeted Samurai duel at sunset in the desert dunes (or at x,z), on rails: every lap is the same fight, the clock, weather and clouds start again with it,
-                                     and it restarts when a cinema flight is played or recorded (Backspace restarts it); --time and --weather override 22:00 and clear
+                                     and it restarts when a cinema flight is played or recorded (Backspace restarts it); the time of day is held (22:00, or --time) and the weather clear (or --weather)
           --move-to <x> <z>          with --new-game: select the squad and order it to walk (for screenshots)
           --ticks <n>                with --screenshot: run n control ticks (and the same real time of the simulation, at speed 1) before the picture
           --quit-after <s>           close after s seconds and print the frame rate (smoke test)

@@ -198,6 +198,7 @@ sealed partial class GameHost
             (cinemaWasPlaying, cinemaWasRecording) = (cinema.Playing, cinema.Recording);
             long a0 = Stopwatch.GetTimestamp();
             session.Advance(frameDt);
+            DuelHoldClock();
             advanceTotal += Stopwatch.GetElapsedTime(a0).TotalMilliseconds;
             WorldNews();
             HandleSaves();   // a quicksave or quickload asked for by a key: between ticks, none in flight

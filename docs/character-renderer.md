@@ -32,7 +32,9 @@ On exit a `characters ...` line gives counts per LOD level and timings (means of
   The instance matrices (this frame's and last frame's) are relative to the view's eye, and the view's matrices take the eye back out
   (in double on the CPU); the vertex program adds the eye back for the shading position. Skinned in world floats, characters tens of
   thousands of units from the origin (the Hub) jiggled: every animated vertex rounds to a new float step each frame (~0.004 units at
-  30000, pixels in a close-up). Static meshes round the same way every frame, so the world does not show it.
+  30000, pixels in a close-up). Static meshes round the same way every frame, so the world does not show it. The LOD distance is taken in the same
+  eye-relative space (`eye - origin`); from 6e42731 until the fix (2026-10-13) it used the world eye against eye-relative centres, so a character's distance
+  was about the eye's distance from the world origin and far out every part took its last level (**Observed**: blocky Samurai at 42000, -110000).
 - **Shading**: one shader with three modes (item, body, hair) that layers vests, head at uv+(0,1), skin tone, hair/beard overlays and
   dye, then the shared mesh lighting tail (`kenshiLight`, atmosphere), so characters are lit like the world.
 - **Shadows**: the same instances are drawn into the existing cascades with a depth program that only does the cut-out test.

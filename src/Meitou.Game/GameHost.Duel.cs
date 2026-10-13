@@ -14,9 +14,9 @@ namespace Meitou.Game;
 /// </summary>
 sealed partial class GameHost
 {
-    /// <summary>The built-in spot (the owner's pick, 2026-10-13): dunes in the desert, ridges with dead trees and a rock spire before the setting sun (−X).</summary>
-    public static readonly Vector2 DuelSpot = new(41062, -110207);
-    /// <summary>Game hour of the duel's start: the sun about 5 degrees above the horizon (SkyClock: sunrise 5, sunset 23, latitude 54); a 44 s lap ends near 22:24 (109 s of game time an hour).</summary>
+    /// <summary>The built-in spot (the owner's pick, 2026-10-13): the top of a dune crest that runs north-south and drops about 280 units to the east (+X), 33 units back from its edge; the sun sets to the west (−X).</summary>
+    public static readonly Vector2 DuelSpot = new(42360, -110400);
+    /// <summary>The duel's hour, held still: the sun about 5 degrees above the horizon (SkyClock: sunrise 5, sunset 23, latitude 54).</summary>
     public const float DuelHour = 22;
     /// <summary>The CHARACTER record both fighters are made from (the base game's Samurai Heavy: Samurai Armour and Helmet, legplates, boots, a nodachi), and the faction whose looks they get.</summary>
     const string DuelRecord = "Samurai Heavy", DuelFaction = "United Cities";
@@ -161,6 +161,12 @@ sealed partial class GameHost
         previousById.Clear();
         player.Reset();
         duelLaps++;
+    }
+
+    /// <summary>After the frame's ticks: the duel's sun stands still (the hour of the lap's start, or the Tab slider's), so every lap and every moment of one has the same light.</summary>
+    void DuelHoldClock()
+    {
+        if (IsDuel) session.Clock.HoldHourOfDay(duelHour);
     }
 
     /// <summary>Once per frame, between ticks: a restart asked for (Backspace, a cinema flight starting) or the end of the lap starts the next one.</summary>
