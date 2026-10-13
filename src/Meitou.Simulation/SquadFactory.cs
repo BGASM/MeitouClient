@@ -143,6 +143,24 @@ public static class SquadFactory
         return new SquadPlan(template, members, slaves, problems);
     }
 
+    /// <summary>
+    /// The expected size of a squad (section 6.1, <c>FUN_1408fe0f0</c>, Observed), what the pool budgets count: 1 for a leader, plus for every <c>squad</c>,
+    /// <c>squad2</c>, <c>animals</c>, <c>animals2</c> entry v0 when v1 is 0 or the sentinel 100 (not scaled), else (v0 + v1) / 2 (integer) times the squad
+    /// size multiplier when that is below 1, at least 1; entries with v0 and v1 both &lt;= 0 are skipped.
+    /// </summary>
+    public static int ExpectedSize(SquadTemplate template, float multiplier)
+    {
+        int n = template.Leader is not null ? 1 : 0;
+        foreach (var list in (IReadOnlyList<RecordLink>[])[template.Squad, template.Squad2, template.Animals, template.Animals2])
+            foreach (var e in list)
+            {
+                if (e.V0 <= 0 && e.V1 <= 0) continue;
+                if (e.V1 is 0 or 100) n += e.V0;
+                else n += Math.Max(1, (int)((e.V0 + e.V1) / 2 * (multiplier < 1 ? multiplier : 1)));
+            }
+        return n;
+    }
+
     /// <summary>The generic weighted pick (section 6.1): weight v0 with 0 meaning 100, gated entries and non-positive weights skipped; a single candidate needs no roll.</summary>
     public static string? WeightedPick(IReadOnlyList<RecordLink> list, Func<string, bool> gated, Func<ulong> nextRoll)
     {

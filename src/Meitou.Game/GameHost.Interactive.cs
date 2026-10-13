@@ -378,6 +378,9 @@ sealed partial class GameHost
             Console.WriteLine($"relations {message}");
             player.Notice(message);
         }
+        if (population is not null)
+            foreach (var w in population.TakeWildLog())
+                Console.WriteLine($"wild      tick {w.Tick}: {w.Squad} ({w.Members}) from the {(w.Kind == Meitou.Simulation.WildKind.Nest ? "nest" : "sector of")} {w.Place}");
         if (aggro is null || aggro.Log.Count == 0) return;
         var table = world.Characters;
         string Who(Meitou.Simulation.CharacterId id, int faction) =>

@@ -495,6 +495,23 @@ What the engine does with section 3 ([simulation.md "Hostility and relations"](.
 - **Observed** with these rules over the base game (2026-10-13, `TownAggroTests`): among the residents and bar squads of The Hub, Squin, Stack, Admag, Mongrel, Shark and
   Sho-Battai no faction is hostile to another present (no fight in 60 game seconds); at Waystation the United Cities are hostile to The Holy Nation and fight them.
 
+## As built: the wild (2026-10-13)
+
+What the engine does with 6.2 and 6.3 ([simulation.md "Population"](../simulation.md#population) has the details):
+
+- `BiomeGroupData` / `BiomeMap` (`Meitou.Data/Gameplay/BiomeGroupData.cs`) read the population half of BIOME_GROUP and paint the 64 x 64 sectors from
+  `areasmap.tga` (unmatched colours: the group `NONE`, `18003-gamedata.base`). The sector grid is the zone grid (`floor(x / 4608) + 32`), not the game's
+  `trunc((x + 147465) / 4608)`: 9 units apart (engine choice).
+- **Engine choice:** a sector loaded makes ceil(P x `homeless spawn amount`) homeless squads at once (what 6.2's tick reaches for a sector loaded alone), by
+  the homeless weights of 6.2 with the sector's own counts; the island-wide budget, the counters a/b and the halving near towns are not modelled.
+- **Engine choice:** the nests of every group are laid out from the world seed at the first look rather than one per area tick; the count is
+  round(`num nests` x the nests multiplier, 1 here); a loaded nest fills its roaming pool to floor(0.7 N) at once and does not replace its dead until it reloads.
+- **Observed** (base game, probe 2026-10-13): no TOWN of type 0 (NEST) is placed in `leveldata`; the 43 placed type-8 NEST_MARKERs are 19 `MARKER-Nest-Cower`
+  and 24 `spider camp marker`. 74 BIOME_GROUPs with the load order; the sum of `homeless spawn amount` is 84.14 (most groups 1; Black Desert 0.33,
+  Skimsands 2.2, Howler Maze 2); two groups use `nests at fixed markers only` (Fog Islands, Watcher's Rim). The rebirth.mod group `NONE` (`56123-rebirth.mod`,
+  colour 0x329999) has amount 1 and the homeless entry "Crab". Of the `nests` targets, Raider Camp and Gurgler Nest carry a `world state` gate.
+- With all world states false and seed 1 the layout has 324 nests (of 531 asked for: groups without a `nests` list or whose picks are gated make fewer).
+
 ## Implementation outline
 
 Order that gets a populated, hostile-aware world with the least decoded behaviour:

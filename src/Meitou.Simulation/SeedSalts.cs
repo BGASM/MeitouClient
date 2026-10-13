@@ -17,6 +17,20 @@ internal static class SeedSalts
     /// <summary>Added to the count of slave squads in the key of the next slave squad.</summary>
     public const ulong SlaveSquad = 0x5A1AUL;
 
+    /// <summary>XORed into the key of a homeless squad of an area sector (6.2).</summary>
+    public const ulong HomelessSquad = 0x5EC7UL;
+    /// <summary>XORed into the key of a squad a nest makes (6.3).</summary>
+    public const ulong NestSquad = 0x4E57UL;
+    /// <summary>XORed into the key of the layout of the nests of a biome group (which nest, which cell, which spots).</summary>
+    public const ulong NestLayout = 0x1A70UL;
+
+    /// <summary>Counter of the roll that picks the template of a homeless squad.</summary>
+    public const ulong HomelessPick = 6;
+    /// <summary>Counter of the roll that picks the template of a nest's squad.</summary>
+    public const ulong NestPick = 7;
+    /// <summary>Counter base of the placement tries of a wild squad (the try is added).</summary>
+    public const ulong WildPlace = 2000;
+
     /// <summary>Counter (under <see cref="RngPurpose.Spawn"/>) of the roll that decides whether a bar squad is present.</summary>
     public const ulong BarChance = 77;
     /// <summary>Counter of the roll that picks which squad template a town's roaming pool draws.</summary>

@@ -54,6 +54,8 @@ public sealed class PopulationData
     public FactionRelations Relations { get; init; } = FactionRelations.Build([]);
     /// <summary>The faction of every placed town, a position in <see cref="Factions"/> (-1: none).</summary>
     public IReadOnlyList<int> SiteFactions { get; init; } = [];
+    /// <summary>The area sectors and their BIOME_GROUPs (6.2, 6.3): when set, zones get their homeless squads and the biome groups their nests; null: no wild population (the worlds of the pinned tests).</summary>
+    public BiomeMap? Biomes { get; init; }
     /// <summary>The new-game options that change the body mechanics (hunger time, chance of death...).</summary>
     public BodyOptions BodyOptions { get; init; } = BodyOptions.Default;
     Dictionary<string, int>? factionIndex;
@@ -82,7 +84,7 @@ public sealed class PopulationData
     /// <summary>Makes item instances and the starting inventories (loadout and the CHARACTER's <c>inventory</c> list).</summary>
     public ItemFactory Items => LazyInitializer.EnsureInitialized(ref items, () => new ItemFactory(Db, Bodies.Constants));
 
-    public static PopulationData Create(GameDatabase db, IEnumerable<TownPlacement> placements, IAppearanceSource? appearances = null, BodyOptions? bodyOptions = null)
+    public static PopulationData Create(GameDatabase db, IEnumerable<TownPlacement> placements, IAppearanceSource? appearances = null, BodyOptions? bodyOptions = null, BiomeMap? biomes = null)
     {
         var sites = new List<TownSite>();
         foreach (var p in placements)
@@ -97,7 +99,7 @@ public sealed class PopulationData
         relations.PlayerFaction = player;
         return new PopulationData
         {
-            Db = db, Sites = sites, Factions = factions, Appearances = appearances, BodyOptions = bodyOptions ?? BodyOptions.Default, PlayerFaction = player,
+            Db = db, Sites = sites, Factions = factions, Appearances = appearances, Biomes = biomes, BodyOptions = bodyOptions ?? BodyOptions.Default, PlayerFaction = player,
             Relations = relations,
             SiteFactions = [.. sites.Select(s => s.Town.Faction is { } fid ? byId.GetValueOrDefault(fid, -1) : -1)],
         };
@@ -140,6 +142,18 @@ public sealed class PopulationSettings
     public float StandInSpeed { get; init; } = 25;
     public float StandInFarSpeed { get; init; } = 90;
     public float StandInFarDistance { get; init; } = 25000;
+
+    // ---- the wild: homeless squads and nests (6.2, 6.3) ----
+    /// <summary>The new game's <i>Number of nests multiplier</i> (slider 0.5 to 4; its default is <b>Unknown</b>, 1 here).</summary>
+    public float NestsMultiplier { get; init; } = 1;
+    /// <summary>Radius a homeless squad wanders in round the spot it was made (engine choice: the original's AI packages are not decoded).</summary>
+    public float HomelessHomeRadius { get; init; } = 300;
+    /// <summary>Least distance of a homeless squad's spot from a player character (6.2, Observed: 1382.4 from the view position).</summary>
+    public float HomelessPlayerDistance { get; init; } = 1382.4f;
+    /// <summary>Least distance of a nest squad's spot from a player character (6.3: sqrt(1250) = 35.4 from the view point; 36 as the roaming pools use).</summary>
+    public float NestPlayerDistance { get; init; } = 36;
+    /// <summary>Share of a nest's <c>nest resident population</c> its roaming pool fills (6.3, Observed: floor(0.7 N)).</summary>
+    public float NestShare { get; init; } = 0.7f;
 }
 
 /// <summary>Where a town's residents are in their life.</summary>

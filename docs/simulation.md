@@ -20,7 +20,7 @@ Each stage ends with tests and something the owner can run.
 |---|---|---|
 | **0. Time facts** | `GameClock` at 1200/11 s per hour; speeds {0, 1, 2, 5}; the control tick in real time, the simulation tick in game time | Done ([Time model](#time-model)) |
 | **1. Skeleton** | `Meitou.Simulation`, `World`, tick phases, worker pool, seeded randomness, state hash; typed views over CONSTANTS, FACTION, SQUAD_TEMPLATE, TOWN | Done ([Threading](#threading), [World model](#world-model)) |
-| **2. Populate** | Squad factory, town residents, zone activation and unloading | Done ([Population](#population)); bar and roaming squads added after stage 6 |
+| **2. Populate** | Squad factory, town residents, zone activation and unloading | Done ([Population](#population)); bar and roaming squads added after stage 6; the wild (homeless squads of the area sectors and nests) 2026-10-13 |
 | **3. Move** | Movement, wander, go-to, follow | Done ([Movement and paths](#movement-and-paths)) |
 | **4. Characters drawn** | Native character renderer | Done ([character-renderer.md](character-renderer.md)); animation layers from [Animation](#animation) |
 | **5. Navmesh** | Collision reader, our own generator with the seed prune, path queries off the tick | Done in three passes plus the game wiring ([Navmesh](#navmesh)); gaps listed there |
@@ -165,6 +165,8 @@ and none of the eleven other pins moved.
 **Pinned 2026-10-13**: `crime` (agrees at 1, 4 and 16 threads and with 16-slot partitions first; `CrimeTests.Scripted`: an assault on a townsman in view of two policemen, booked, the police
 going after the wanted player character, and a second player character looting a knocked-out farmer before a policeman); the crime code moved none of the twelve others (no
 other scenario builds the crime system, and the ledgers and pending crimes are hashed only while set, [Crimes and bounties](#crimes-and-bounties)).
+The wild (2026-10-13, [Population](#population)) moved none of the thirteen: it runs only when `PopulationData.Biomes` is set, which no pinned scenario does; its own
+world (`WildTests`: a synthetic biome with homeless squads and two nests) agrees at 1, 4 and 16 threads and in partitions of 4 slots.
 
 **Asynchronous services** (paths, navmesh building, building a town's characters) run on their own threads with request and result
 queues. In play a result is taken in at the first tick after it is ready, so timing can differ between runs. In the determinism tests they
@@ -220,7 +222,7 @@ result (the golden hashes pin it):
 
 | # | System | Phases it implements | Job |
 |---|---|---|---|
-| 1 | `PopulationSystem` | Inputs, SlowWorld | Zones, residents, bar and roaming squads, the player's squad |
+| 1 | `PopulationSystem` | Inputs, SlowWorld | Zones, residents, bar and roaming squads, the wild (homeless squads and nests), the player's squad |
 | 2 | `PlayerSystem` | Inputs, SlowWorld | Selection and stop; prunes the selection |
 | 3 | `PursuitSystem` | Schedule | Paths for attackers towards their targets |
 | 4 | `MovementSystem` | Inputs, Schedule, Think, Move | Orders, paths, tasks, steering |
@@ -289,8 +291,27 @@ positions and the cold state no other `Act` writes). The game's `CombatOptions` 
   are removed and **a stand-in moves at 25 units per second (90 beyond 25000), no physics, no paths**, the numbers of the original's
   `UnloadedPlatoon` (units not verified). When a zone near it becomes active the members are made again from the key at the stand-in's
   place. A squad that loses all its members leaves the pool. While its leader fights, the trip waits (an order would replace the fight's task).
-- **Not made:** roads for long trips (`road preference`), AI package jobs (`GoOutOnPatrol` and others), faction campaigns, fleeing danger,
-  nests and the homeless spawns of the area sectors (6.2, 6.3), unique squads, the residents' unloaded half (a town is all or nothing).
+- **The wild** (`PopulationWild.cs`, 2026-10-13; 6.2, 6.3). Only when `PopulationData.Biomes` is set (the game host builds it from `areasmap.tga` and the
+  BIOME_GROUPs; worlds without it, every pinned scenario among them, make none). Every in-map zone cell is an **area sector** of its group; a sector whose
+  group has `homeless spawns` and an amount gets, when its zone activates, ceil(P x `homeless spawn amount`) squads: what the original's area tick reaches
+  for a sector loaded alone (it spawns while the island is below P x its amounts and the sector below its own share). Engine choices: the island-wide sum over
+  several loaded sectors, the counters a and b and the halving near towns are not modelled; the squads are made at once, not one per 2 s. Templates by 6.2's
+  homeless weights `max(0, v0 - k x count)` with k = (sum of v0) / (P x amount) over the sector's own picks, world-state gated templates skipped; the spot by
+  `FUN_1408f50d0`'s rules (out of the nearest town to 2x its radius, other factions' towns to 1x, 1382.4 from every player character, walkable, 40 tries; else
+  that squad is not made); none when the nearest town is the player's. They wander within 300 of their spot (`HomelessHomeRadius`, engine choice).
+  **Nests** are laid out at the first look from the world seed (the original adds one per area tick up to `num nests` x the *Number of nests multiplier*,
+  default **Unknown**, 1 here; the end count is the same): per group, a weighted pick of the `nests` TOWN (v0, 0 as 100, its `world state` gate, so with all
+  world states false the Raider Camp and Gurgler Nest never appear), a seeded cell of the group with up to 8 candidate spots outside 2x the radius of every
+  placed town (the first walkable one is the nest when it loads; none: dormant), or for `nests at fixed markers only` one of the area's placed NEST_MARKERs.
+  With the base game and seed 1: 324 nests (62 Nest of Beak Things, 59 Wolf Den, 46 Swamp Raptor Nest, 34 Crab Nest, ...) and 2674 sectors with homeless
+  spawns. A loaded nest fills its roaming pool to floor(0.7 x `nest resident population`) members from the TOWN's `roaming squads` (weight max(0, v0 -
+  count); an entry whose expected size (6.1, `SquadFactory.ExpectedSize`) passes the free room is skipped), spots within 0.6 of the nest radius, not
+  within 36 of a player character; they wander in the nest radius. A nest does not replace its dead while loaded (the respawn delay is **Unknown**).
+  Wild sites load and unload like towns (zone gate, 60 s grace, built on the population thread, taken in at a tick boundary); every roll is keyed by the
+  world seed and the zone or nest and the squad's number, never the tick, so a reload makes the same squads (the spots of homeless squads move when the
+  player stands elsewhere). Wild squads are plain `Squad`s (`Town` -1), not platoons: they do not travel between towns and are not saved.
+- **Not made:** roads for long trips (`road preference`), AI package jobs (`GoOutOnPatrol` and others), faction campaigns,
+  the island-wide homeless budget and nest respawns (6.2, 6.3), the nests' debris and loot (section 8), unique squads, the residents' unloaded half (a town is all or nothing).
 
 ## Player
 
@@ -1158,13 +1179,19 @@ At scale 1 blood and healing rates look far too slow for game hours (**Observed*
 days (3 -> 0 at about 0.0164 per hour, extrapolated). At 100 the numbers read like play (a bleed clots and blood is back in hours, an untreated
 wound rots in about a day). A scale between 1 and 100 is probably right (the original's `dt` is likely not hours).
 
+**The wild** (2026-10-13; `WildTests.A_populated_wilderness_costs_little_per_tick`, `[Slow]`, not a pass/fail timing): the zone of a Wolf Den with every
+fighting system on, 4 threads, flat ground: 11 characters, all wild (a wolf pack of 5 and the sector's homeless squad), 0.085 ms per tick. The wild's own
+look is a lookup of the active zones in a table of the sites (2674 sectors and 324 nests with the base game) every 15 ticks; the squads are built on the
+population thread. The caps keep it small: a sector makes at most ceil(P x amount) squads (3 with the base data at P = 1), a nest floor(0.7 N) members (5 to 21
+for the nests the base data lays out).
+
 ## Open questions and known gaps
 
 **About the original** (each with its doc): the unit of the medical `dt` and so `BodyTimeScale` (character-stats.md); how resident squads pick a
 home building, the length of the three zone unload timers, the roaming cap for towns (factions-squads-towns.md, game-loop.md); the formation slot
 rules and `squad formation` (pathfinding.md); the attacker's technique choice, `power`, `max encumbrance`, the Heavy_Hit length (combat.md); item
 nutrition, the NPCs' food source, auto-eat, the `main` grid size (character-stats.md); how a start-off's relations, research and `force race` are
-applied; the world states' initial values; the corpse removal rule; the animation selection code (animation.md); the saved quaternion's
+applied; the world states' initial values; for the wild (factions-squads-towns.md 6.2, 6.3) the islands of the area tick, the sector counters a and b, the nest respawn delay, the default of the nests multiplier and whether the 1250 of the nest spawner is squared; the corpse removal rule; the animation selection code (animation.md); the saved quaternion's
 convention and whether the original loads a save written from nothing (save.md); the navmesh items in [pathfinding.md](game/pathfinding.md); the senses' unknowns, the leash and the run-away ratios ([perception.md](game/perception.md#unknowns)),
 which game events use which relation event kind, what the coexistence flag does, the Passive toggle's default (ai.md, factions-squads-towns.md, [Hostility](#hostility-and-relations));
 for crimes ([Crimes and bounties](#crimes-and-bounties), economy.md 11): how a killing becomes a Murder, the pending timer's countdown, the "innocent victim" flag, what the witness

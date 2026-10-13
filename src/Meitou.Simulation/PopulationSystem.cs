@@ -84,6 +84,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
             state.UnloadAtTick = -1;
         }
         DrainRoamers(world);
+        DrainWild(world);
     }
 
     public void SlowWorld(World world)
@@ -125,6 +126,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
                     break;
             }
         }
+        StepWild(world, grace);
         StepRoaming(world);
     }
 

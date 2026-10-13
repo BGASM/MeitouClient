@@ -93,7 +93,14 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
                 walkability = new NavAdapter(nav.Walkability);
             }
             var towns = levels is null ? [] : levels.Towns().ToList();
-            var data = Meitou.Simulation.PopulationData.Create(gameDb, towns, new Meitou.Simulation.GeneratedAppearances(gameDb, install.Root));
+            // The wild (homeless squads and nests) needs the world's area sectors; the sandbox and the duel have none.
+            Meitou.Data.Gameplay.BiomeMap? biomes = null;
+            if (levels is not null)
+            {
+                try { biomes = Meitou.Data.Gameplay.BiomeMap.Create(gameDb, gpu.WeatherAreas ?? Meitou.Data.World.WeatherAreas.Load(install)); }
+                catch (Exception e) when (e is IOException or FormatException) { Console.Error.WriteLine($"population no areas map ({e.Message}): no wild squads"); }
+            }
+            var data = Meitou.Simulation.PopulationData.Create(gameDb, towns, new Meitou.Simulation.GeneratedAppearances(gameDb, install.Root), biomes: biomes);
             animationLengths = Meitou.Data.Gameplay.AnimationLengths.Load(install.Root);
             animationLibrary = Meitou.Data.Gameplay.AnimationLibrary.FromDatabase(gameDb);
             popData = data;
