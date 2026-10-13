@@ -121,6 +121,9 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     /// <summary>The whole-body clips held while a character bandages a patient (<c>medic</c>) or rests (<c>sitting idle</c>); -1 when the data has none. A held clip like the lying one (engine choice).</summary>
     int TreatingClip { get; } = library.IndexOf("medic");
     int RestingClip { get; } = library.IndexOf("sitting idle");
+    /// <summary>The carrier's lift clip (<c>shoulder lift left</c>, played backwards to put down) and a carried body's held pose (<c>carry me</c>, a category 3 record the library appends); -1 when the data has none.</summary>
+    int LiftClip { get; } = library.IndexOf(Carrying.CarrySystem.LiftClip);
+    int CarriedClip { get; } = library.IndexOf(Carrying.CarrySystem.CarriedClip);
 
     int HeldClip(CharacterTask task) => task switch { CharacterTask.Treat => TreatingClip, CharacterTask.Rest => RestingClip, _ => -1 };
     // The fall (a stand-in for the ragdoll) and getting up.
@@ -203,7 +206,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         world.Grid.Query(block.From.X, block.From.Y, block.Radius + MaxFootprint + step.Length(), ref block, static (int other, ref BodyBlock b) =>
         {
             var all = b.Table.Previous;
-            if (other == b.Self || !all[other].Alive) return;
+            if (other == b.Self || !all[other].Alive || b.Table.Cold(other) is { CarriedBy.IsNone: false }) return;   // a carried body is on its carrier, not in the way
             var away = b.From - new Vector2(all[other].Position.X, all[other].Position.Z);
             float reach = b.Radius + CombatTuning.Footprint(b.Table.Cold(other));
             if ((away + b.Step).LengthSquared() >= reach * reach) return;
@@ -244,7 +247,9 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         lower.Clear();
         upper.Clear();
         if (a.Rate == 0) a.Rate = cold.Appearance is { } look ? 2 - CharacterShape.MovementScaleOf(look) : 1;
-        var stance = new AnimationStance { Right = new HandHold(cold.DrawnWeapon), Combat = cold.InCombat };
+        // Carrying picks the "carrying left" clips and a carried body the "being carried" ones (the ANIMATION booleans, docs/animation.md).
+        bool carried = !cold.CarriedBy.IsNone;
+        var stance = new AnimationStance { Right = new HandHold(cold.DrawnWeapon), Combat = cold.InCombat, CarryingLeft = !cold.Carrying.IsNone, BeingCarried = carried };
         bool down = false;
         if (cold.Medical is { } body)
         {
@@ -260,7 +265,8 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             down = body.Incapacitated;
         }
 
-        if (down && !a.WasDown) StartAction(a, fall, false);
+        if (down && !a.WasDown && !carried) StartAction(a, fall, false);
+        if (carried) a.Action = -1;   // held on the shoulder: no falling or getting up
         else if (!down && a.WasDown) StartAction(a, getUp, false);
         a.WasDown = down;
         if (!down && fight.HitTick > a.SeenHit)
@@ -286,7 +292,8 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         if (a.Action >= 0) wanted.Add((a.Action, 1));
         else if (down)
         {
-            if (LyingClip >= 0) wanted.Add((LyingClip, 1));
+            if (carried && CarriedClip >= 0) wanted.Add((CarriedClip, 1));
+            else if (LyingClip >= 0) wanted.Add((LyingClip, 1));
             a.Idle = -1;
         }
         else if (!fullTechnique)
@@ -299,13 +306,31 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             legs = lower.Count;
             if (moving) wanted.AddRange(upper);
             else if (technique < 0 && HeldClip(task) is >= 0 and var held) { wanted.Add((held, 1)); a.Idle = -1; }
-            else if (technique < 0) StandingIdle(a, stance, lower.Count > 0, dt, seed, key, tick, wanted);
+            else if (technique < 0)
+            {
+                // A carrier standing: a whole-body idle as if it carried nothing, with the carrying arm pose (stand carrying left) over it (engine choice: the data has no whole-body carrying idle).
+                bool carrying = stance.CarryingLeft || stance.CarryingRight;
+                StandingIdle(a, carrying ? stance with { CarryingLeft = false, CarryingRight = false } : stance, lower.Count > 0, dt, seed, key, tick, wanted);
+                if (carrying && Library.CarryIdle(stance) is >= 0 and var arms) wanted.Add((arms, 1));
+            }
         }
         if (technique >= 0)
         {
             // An attack or a dodge is the whole body; a block the upper body over the legs' clips.
             if (fullTechnique) wanted.Clear();
             wanted.Add((technique, 1));
+        }
+        // Lifting or putting down (the carry system's timing): the whole-body lift clip, forwards for a pick-up, backwards from its end for a put-down.
+        int lift = -1;
+        float liftTime = 0;
+        if (!down && LiftClip >= 0 && cold.LiftTime >= 0 && task is CharacterTask.PickUp or CharacterTask.PutDown)
+        {
+            float length = Lengths.Of(Library.Definitions[LiftClip].Clip);
+            lift = LiftClip;
+            liftTime = task == CharacterTask.PickUp ? MathF.Min(cold.LiftTime, length) : MathF.Max(length - cold.LiftTime, 0);
+            wanted.Clear();
+            wanted.Add((lift, 1));
+            a.Idle = -1;
         }
 
         // Targets: what is wanted fades in, everything else out. The first clips a character ever plays start at full weight (no fade from the binding pose).
@@ -345,7 +370,8 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             float before = layer.Time;
             float length = Lengths.Of(d.Clip);
             bool synched = d.Synchs && d.MoveSpeed != 0;
-            if (layer.Definition == technique) layer.Time = fight.Progress * length;   // the combat system's timing: the blow lands at its frame
+            if (layer.Definition == lift) layer.Time = liftTime;
+            else if (layer.Definition == technique) layer.Time = fight.Progress * length;   // the combat system's timing: the blow lands at its frame
             else if (layer.Definition == a.Action) layer.Time = a.ActionTime;
             else if (synched) layer.Time = (a.Phase + d.SynchOffset - MathF.Floor(a.Phase + d.SynchOffset)) * length;
             else if (d.MoveSpeed != 0) layer.Time += dt * a.Rate * d.PlaySpeed * speed;

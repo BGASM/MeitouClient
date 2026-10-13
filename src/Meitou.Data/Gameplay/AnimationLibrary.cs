@@ -239,7 +239,8 @@ public sealed record AnimationDefinition
         return Hand(WeaponLeft, s.Left, Kinds) && Hand(WeaponRight, s.Right, Kinds)
             && Mode(CombatMode, s.Combat) && Mode(StealthMode, s.Stealth)
             && Crouched == s.Crouched && Prone == s.Prone
-            && CarryingLeft == s.CarryingLeft && CarryingRight == s.CarryingRight && BeingCarried == s.BeingCarried;
+            // The carrying booleans are tested on upper and overlay picks only (docs/animation.md): a carrier's legs walk with the ordinary lower clips.
+            && (Area == AnimationArea.Lower || CarryingLeft == s.CarryingLeft && CarryingRight == s.CarryingRight && BeingCarried == s.BeingCarried);
     }
 }
 
@@ -321,10 +322,17 @@ public sealed class AnimationLibrary
         .Concat(db.OfType(FcsRecordType.ANIMATION)
             .Where(r => !r.GetBool("disabled") && r.GetInt("category") == RangedCategory && r.GetInt("weather type") == 0)
             .OrderBy(r => r.StringId, StringComparer.Ordinal)
+            .Select(AnimationDefinition.From))
+        // Category 3 after those (so no earlier index moves): the carried body's held pose "carry me". Played by name only; every selector takes category 0.
+        .Concat(db.OfType(FcsRecordType.ANIMATION)
+            .Where(r => !r.GetBool("disabled") && r.GetInt("category") == CarriedCategory && r.GetInt("weather type") == 0)
+            .OrderBy(r => r.StringId, StringComparer.Ordinal)
             .Select(AnimationDefinition.From)));
 
     /// <summary>CharacterAnimCategory 8, RANGED.</summary>
     public const int RangedCategory = 8;
+    /// <summary>The ANIMATION category of <c>carry me</c> (3 in the data; the enum name is not known here).</summary>
+    public const int CarriedCategory = 3;
 
     readonly System.Collections.Concurrent.ConcurrentDictionary<(AnimationArea, AnimationStance), int[]> candidates = new();
     readonly System.Collections.Concurrent.ConcurrentDictionary<AnimationStance, (int Index, float Weight)[]> idles = new();
@@ -426,6 +434,22 @@ public sealed class AnimationLibrary
             if (d.Category == 0 && d.Idle && !d.IsAction && d.Area == AnimationArea.All && d.Fits(s)) list.Add((i, Math.Max(d.IdleChance, 0)));
         }
         return list.ToArray();
+    }, this);
+
+    readonly System.Collections.Concurrent.ConcurrentDictionary<AnimationStance, int> carryIdles = new();
+
+    /// <summary>
+    /// The held arm pose of a carrier standing (or of a carried body): the first idle overlay or upper clip, in record order, whose carrying booleans are set and fit the stance
+    /// (<c>stand carrying left</c> in the base game); -1 when none. Played over a whole-body idle of the same stance without the carrying (engine choice).
+    /// </summary>
+    public int CarryIdle(in AnimationStance stance) => carryIdles.GetOrAdd(Canonical(stance), static (s, self) =>
+    {
+        for (int i = 0; i < self.all.Count; i++)
+        {
+            var d = self.all[i];
+            if (d.Category == 0 && d.Idle && !d.IsAction && d.Area is AnimationArea.Overlay or AnimationArea.Upper && (d.CarryingLeft || d.CarryingRight || d.BeingCarried) && d.Fits(s)) return i;
+        }
+        return -1;
     }, this);
 }
 

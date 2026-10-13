@@ -32,6 +32,9 @@ public sealed partial class World
                 Inventory = selected && cold!.Inventory is { } carried ? Items.InventoryText.Lines(carried) : [],
                 Body = cold?.Medical is { } med && cold.Race is { } race ? BodyOf(cold, med, race, state[i].Task) : null,
                 Path = selected && (state[i].Flags & (ushort)MoveFlags.HasPath) != 0 ? cold!.Path.Skip(state[i].PathCursor).ToArray() : [],
+                CarriedBy = cold?.CarriedBy ?? CharacterId.None,
+                AttachBone = cold is { CarriedBy.IsNone: false } ? Carrying.CarrySystem.AttachBone : null,
+                Carrying = cold?.Carrying ?? CharacterId.None,
             });
         }
         PreviousSnapshot = Snapshot;
@@ -41,7 +44,7 @@ public sealed partial class World
     static BodyStatus BodyOf(CharacterCold cold, Bodies.MedicalState med, RaceData race, byte task) => new(
         med.Blood / MathF.Max(Bodies.MedicalState.BloodCapacity(race, cold.Stats?.Strength ?? 50), 1), WorstPart(med), med.Hunger, med.Unconscious, med.Dead,
         cold.IsPlayer && (med.NeedsAid(race, false) || med.NeedsAid(race, true)),
-        task == (byte)CharacterTask.Treat ? CareKind.Treating : task == (byte)CharacterTask.Rest ? CareKind.Resting : CareKind.None, cold.MedicJob);
+        task == (byte)CharacterTask.Treat ? CareKind.Treating : task == (byte)CharacterTask.Rest ? CareKind.Resting : CareKind.None, cold.MedicJob, cold.RescueJob);
 
     /// <summary>The lowest part fraction (1 for a body without parts), the way <c>Enumerable.Min</c> reads floats: a NaN wins.</summary>
     static float WorstPart(Bodies.MedicalState med)

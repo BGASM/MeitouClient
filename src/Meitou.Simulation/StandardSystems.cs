@@ -24,8 +24,10 @@ public enum StandardParts
     Aggro = 1024,
     /// <summary>NPC squads running away from a lost fight (<see cref="FleeSystem"/>), by the relations of the data.</summary>
     Flee = 2048,
+    /// <summary>Carrying downed characters, the rescue job and looting (<see cref="Meitou.Simulation.Carrying.CarrySystem"/>).</summary>
+    Carry = 4096,
     /// <summary>What the game runs.</summary>
-    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee,
+    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee | Carry,
 }
 
 /// <summary>What <see cref="StandardSystems.Build"/> builds and with which settings; the defaults are the game's.</summary>
@@ -49,6 +51,7 @@ public sealed class StandardSystemOptions
     public FeedSettings? Feed { get; init; }
     public Meitou.Simulation.FirstAid.FirstAidSettings? FirstAid { get; init; }
     public AggroSettings? Aggro { get; init; }
+    public Meitou.Simulation.Carrying.CarrySettings? Carry { get; init; }
 }
 
 /// <summary>The built systems in tick order, with the ones the host talks to.</summary>
@@ -60,6 +63,7 @@ public sealed class StandardSystemSet
     /// <summary>Built when combat, pursuit or retaliation is asked for.</summary>
     public CombatSystem? Combat { get; init; }
     public AggroSystem? Aggro { get; init; }
+    public Meitou.Simulation.Carrying.CarrySystem? Carry { get; init; }
 }
 
 /// <summary>
@@ -76,6 +80,8 @@ public sealed class StandardSystemSet
 /// <item><b>Combat before animation and retaliation</b>: the combat system swaps its read and write arrays at the end of its <c>SlowWorld</c>,
 /// so a system placed after it sees the new tick's combat state and one placed before it the old one. Retaliation reads the combat state of the tick that just ended
 /// (animation is placed after combat in the game's order, and the golden hashes pin it). Moving the swap to a separate end-of-tick hook would change what retaliation reads.</item>
+/// <item><b>Carry after body, before combat</b>: its <c>SlowWorld</c> sees the knock-outs of this tick's medical step and the corpses the body system removed, so a carrier that went down
+/// drops its load in the same tick; its <c>Inputs</c> come before combat's, so a carrier ordered to attack lets go of the body first. Everything it does is serial.</item>
 /// <item><b>Feed after body</b>: the game's order; eating reads hunger the body system advanced in the same tick.</item>
 /// <item><b>Retaliation, then aggro, last</b>: both defer <c>AttackOrder</c>s for the next tick (<see cref="World.Defer"/>) after combat has swapped its arrays; aggro's
 /// leash sweep sees the tasks every other system left, and its look (<c>Act</c>) runs after combat's, reading only the last tick's positions.
@@ -102,6 +108,14 @@ public static class StandardSystems
         if (Has(StandardParts.Movement)) systems.Add(movement = new MovementSystem(new PathService(walkability, o.SynchronousPaths)));
         if (Has(StandardParts.FirstAid)) systems.Add(new FirstAid.FirstAidSystem(data.Bodies.Constants, data.BodyOptions, data.Items, o.FirstAid));
         if (Has(StandardParts.Body)) systems.Add(new BodySystem(data.Bodies.Constants, data.BodyOptions, o.BodyTimeScale));
+        Meitou.Simulation.Carrying.CarrySystem? carry = null;
+        if (Has(StandardParts.Carry))
+        {
+            // The lift takes the length of the shoulder lift left clip (1 s when the lengths are not known).
+            carry = new Meitou.Simulation.Carrying.CarrySystem(data.Bodies.Constants, data.BodyOptions, o.AnimationLengths?.Of(Meitou.Simulation.Carrying.CarrySystem.LiftClip) ?? 1, o.Carry);
+            if (Has(StandardParts.Aggro)) carry.Relations = data.Relations;
+            systems.Add(carry);
+        }
         if (Has(StandardParts.Combat)) systems.Add(combat!);
         if (Has(StandardParts.Animation))
         {
@@ -114,6 +128,6 @@ public static class StandardSystems
         AggroSystem? aggro = null;
         if (Has(StandardParts.Aggro)) systems.Add(aggro = new AggroSystem(data.Relations, o.Aggro));
         if (Has(StandardParts.Flee)) systems.Add(new FleeSystem(data.Relations, combat!, o.Aggro?.SightRange ?? AggroSystem.OutdoorSight));
-        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro };
+        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry };
     }
 }

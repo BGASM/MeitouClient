@@ -13,7 +13,7 @@ public enum CareKind { None, Treating, Resting }
 /// The health the interface shows: blood (0..1 of capacity), the worst body part (fraction of its maximum HP), hunger (3 fed .. 0 starving) and whether it is out cold or dead; for the player's
 /// characters also whether first aid has anything to bandage (<see cref="NeedsAid"/>), what the character is doing (<see cref="Care"/>) and its medic job switch.
 /// </summary>
-public readonly record struct BodyStatus(float Blood, float WorstPart, float Hunger, bool Unconscious, bool Dead, bool NeedsAid = false, CareKind Care = CareKind.None, bool MedicJob = false);
+public readonly record struct BodyStatus(float Blood, float WorstPart, float Hunger, bool Unconscious, bool Dead, bool NeedsAid = false, CareKind Care = CareKind.None, bool MedicJob = false, bool RescueJob = false);
 
 /// <summary>A character as the renderer needs it after one tick; <c>Appearance</c> is null for one that is simulated but has nothing to draw (an animal, a failed build): the host shows a marker (docs/simulation.md, "Threading", step 8).</summary>
 public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appearance, Vector3 Position, float Yaw, IReadOnlyList<AnimationLayer> Animations)
@@ -35,6 +35,15 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     public IReadOnlyList<string> Inventory { get; init; } = [];
     /// <summary>A selected character's trained stats (the host formats them); null for the others and for a character without stats.</summary>
     public SkillSummary? Skills { get; init; }
+    /// <summary>
+    /// The character carrying this one (none when not carried). A carried body has its carrier's position and facing; the renderer should hang it from the carrier's
+    /// <see cref="AttachBone"/> (the original attaches it there) with the <c>carry me</c> pose.
+    /// </summary>
+    public CharacterId CarriedBy { get; init; } = CharacterId.None;
+    /// <summary>The carrier's bone a carried body hangs from (<c>Bip01 L UpperArm</c>), null when not carried.</summary>
+    public string? AttachBone { get; init; }
+    /// <summary>The character this one carries (none when not carrying).</summary>
+    public CharacterId Carrying { get; init; } = CharacterId.None;
 }
 
 /// <summary>The trained stats the HUD shows for the selection.</summary>

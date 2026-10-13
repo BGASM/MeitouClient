@@ -1,0 +1,504 @@
+using System.Numerics;
+using Meitou.Data.Gameplay;
+using Meitou.Data.Gameplay.Bodies;
+using Meitou.Simulation.Bodies;
+using Meitou.Simulation.Items;
+
+namespace Meitou.Simulation.Carrying;
+
+/// <summary>
+/// Carrying downed characters, rescue and looting (docs/game/carry-loot.md for the original's rules, docs/simulation.md "Carrying, rescue and looting" for what is built).
+/// <list type="bullet">
+/// <item><b>The link</b>: <see cref="CharacterCold.Carrying"/> on the carrier and <see cref="CharacterCold.CarriedBy"/> on the body, set and cleared together, in serial phases only. The
+/// body is always on the left shoulder (the original's side setter, <b>Verified</b>), so a carrier needs a usable left arm. The body keeps the carrier's position (the renderer is told the
+/// bone, <see cref="AttachBone"/>), weighs <c>carry person weight</c> in the carrier's load (<see cref="BodySystem"/>) and lifts a carrier's speed mode from walk to run (<see cref="MovementSystem"/>).</item>
+/// <item><b>Pick up</b> (<see cref="CharacterTask.PickUp"/>): the walk to the body (the first aid pattern), then the <c>shoulder lift left</c> clip: attached at 0.4 of it, done at 0.95.
+/// <b>Put down</b> (<see cref="CharacterTask.PutDown"/>): the clip backwards, let go below 0.2; a body the carrier does not regard as friendly is knocked out again.</item>
+/// <item><b>Dropped</b> at once when the carrier is knocked out or dies or its left arm fails or is cut off. A friendly body that comes round is set down; a non-friendly one is knocked out again on the
+/// shoulder (engine choices).</item>
+/// <item><b>Rescue</b>: the rescue job, and NPC squads' knocked-out leaders (<see cref="CarrySettings.RescueNpcLeaders"/>).</item>
+/// <item><b>Loot</b> (<see cref="CharacterTask.Loot"/>): the walk, then everything of the main inventory and the backpack that fits moves to the looter; a member of the victim's faction who sees it makes it a theft.</item>
+/// </list>
+/// Everything runs in the serial phases (<c>Inputs</c>, <c>Schedule</c>, <c>SlowWorld</c>), in slot order, so the result does not depend on threads or partitions. Placed after the body system (its
+/// <c>SlowWorld</c> sees this tick's knock-outs and the corpses already removed) and before combat.
+/// </summary>
+public sealed class CarrySystem(GameConstants constants, BodyOptions options, float liftSeconds = 1, CarrySettings? settings = null) : ITickSystem
+{
+    /// <summary>The bone of the carrier the body hangs from (the original's <c>Bip01 L UpperArm</c> for the left side, <b>Verified</b>).</summary>
+    public const string AttachBone = "Bip01 L UpperArm";
+    /// <summary>The clip of the carrier lifting (played forwards) and putting down (backwards), and the held pose of a carried body (<b>Observed</b> names).</summary>
+    public const string LiftClip = "shoulder lift left", CarriedClip = "carry me";
+
+    public CarrySettings Settings { get; } = settings ?? new CarrySettings();
+    public GameConstants Constants { get; } = constants;
+    /// <summary>The length of the <c>shoulder lift left</c> clip in seconds (1 when the clip lengths are not known).</summary>
+    public float LiftSeconds { get; } = liftSeconds > 0 ? liftSeconds : 1;
+    /// <summary>The live relation table: with it, being seen looting changes the victim faction's view of the player and an ally counts as friendly. Null: no relation effects.</summary>
+    public FactionRelations? Relations { get; set; }
+    readonly BodyOptions bodyOptions = options;
+    readonly List<LootEntry> loots = [];
+
+    /// <summary>The loots done since the last <see cref="TakeLoots"/> (tests read it, the host shows them).</summary>
+    public IReadOnlyList<LootEntry> Loots => loots;
+
+    public LootEntry[] TakeLoots()
+    {
+        LootEntry[] all = [.. loots];
+        loots.Clear();
+        return all;
+    }
+
+    // ------------------------------------------------------------------ rules
+
+    /// <summary>
+    /// Whether the left arm can carry (the original's <c>isCarryingArmOK</c>, the medical object's left-arm byte): no part whose <c>collapse part</c> has the left arm bit (4) is collapsed,
+    /// and the left arm is not a stump (<b>Verified</b>: the bit and the three writers, docs/game/carry-loot.md). The right arm does not matter.
+    /// </summary>
+    public static bool LeftArmUsable(MedicalState medical)
+    {
+        foreach (var p in medical.Parts)
+        {
+            if ((p.Template.CollapsePart & 4) == 0) continue;
+            if (p.Template.Collapses && p.IsDown) return false;
+            if (p.Template.LimbSlot == 0 && p.Limb == LimbState.Stump) return false;
+        }
+        return true;
+    }
+
+    /// <summary>A character that can be given a pick-up: awake, with a body, not fighting, not carrying or carried, with a usable left arm.</summary>
+    public static bool CanCarry(CharacterCold cold) =>
+        cold is { Medical: { Incapacitated: false } m, Race: not null, InCombat: false } && cold.Carrying.IsNone && cold.CarriedBy.IsNone && LeftArmUsable(m);
+
+    /// <summary>A character that may be lifted: knocked out or dead, of a <c>carriable</c> race (every base race but the Leviathan, <b>Verified</b>), not carried already.</summary>
+    public static bool CanBeLifted(CharacterCold cold) => cold is { Medical.Incapacitated: true, Race.Carriable: true } && cold.CarriedBy.IsNone;
+
+    /// <summary>A character that may be looted: knocked out or dead (the original's <c>isItemLootable</c> also takes the bedded and imprisoned, which do not exist here), with an inventory.</summary>
+    public static bool CanBeLooted(CharacterCold cold) => cold is { Medical.Incapacitated: true, Inventory: not null };
+
+    /// <summary>
+    /// Whether <paramref name="a"/> regards <paramref name="b"/> as friendly for the put-down KO: the same faction, or allied factions (relation 50 or more) when a table is known
+    /// (engine reading of <c>CharacterAnimal::vfunc_126</c>, whose last faction test is <b>Unknown</b>).
+    /// </summary>
+    public bool Friendly(CharacterCold a, CharacterCold b) =>
+        a.Faction == b.Faction || Relations is { } r && r.Contains(a.Faction) && r.Contains(b.Faction) && r.IsAlly(a.Faction, b.Faction);
+
+    static float Gap(in CharacterHot a, in CharacterHot b)
+    {
+        float dx = a.Position.X - b.Position.X, dz = a.Position.Z - b.Position.Z;
+        return MathF.Sqrt(dx * dx + dz * dz);
+    }
+
+    static IReadOnlyList<CharacterId> Who(World world, IReadOnlyList<CharacterId> ids) => ids.Count > 0 ? ids : world.Player.Selection.ToArray();
+
+    // ------------------------------------------------------------------ orders
+
+    public void Inputs(World world, IReadOnlyList<SimCommand> commands)
+    {
+        var table = world.Characters;
+        foreach (var command in commands)
+        {
+            switch (command)
+            {
+                case PickUpOrder order:
+                    if (!table.TryResolveNext(order.Target, out int body) || !CanBeLifted(table.Cold(body)!)) break;
+                    if (Nearest(table, Who(world, order.Carriers), body, s => s != body && CanCarry(table.Cold(s)!)) is int carrier)
+                        Begin(table, carrier, order.Target, CharacterTask.PickUp, CharacterTask.Idle);
+                    break;
+                case LootOrder loot:
+                    if (!table.TryResolveNext(loot.Target, out int victim) || !CanBeLooted(table.Cold(victim)!)) break;
+                    if (Nearest(table, Who(world, loot.Looters), victim, s => s != victim && table.Cold(s) is { Medical.Incapacitated: false, Inventory: not null, InCombat: false } c && c.CarriedBy.IsNone) is int looter)
+                        Begin(table, looter, loot.Target, CharacterTask.Loot, CharacterTask.Idle);
+                    break;
+                case PutDownOrder put:
+                    foreach (var id in Who(world, put.Carriers))
+                    {
+                        if (!table.TryResolveNext(id, out int slot) || table.Cold(slot) is not { Carrying.IsNone: false, Medical.Incapacitated: false } cold) continue;
+                        if (table.Next[slot].Task == (byte)CharacterTask.PutDown) continue;
+                        MovementSystem.Stop(table, slot);
+                        table.Next[slot].Task = (byte)CharacterTask.PutDown;
+                        table.Next[slot].TaskTime = 0;
+                        cold.CarryTarget = cold.Carrying;
+                        cold.LiftTime = 0;
+                        cold.ResumeTask = CharacterTask.Idle;
+                    }
+                    break;
+                case RescueJobCommand job:
+                    foreach (var id in Who(world, job.Characters))
+                        if (table.TryResolveNext(id, out int slot) && table.Cold(slot) is { } cold)
+                            cold.RescueJob = job.On ?? !cold.RescueJob;
+                    break;
+                case Combat.AttackOrder attack when !attack.Defensive:
+                    // An ordered attack: the carrier lets the body fall and fights (engine choice; the original forbids no attack while carrying, but has no carrying fighter either).
+                    foreach (var id in attack.Attackers)
+                        if (table.TryResolveNext(id, out int slot) && table.Cold(slot) is { Carrying.IsNone: false } c && table.TryResolveNext(c.Carrying, out int b))
+                            Unlink(world, slot, b, drop: true);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>The slot among <paramref name="ids"/> that <paramref name="accept"/> takes and is nearest the target (ties: the first listed).</summary>
+    static int? Nearest(CharacterTable table, IReadOnlyList<CharacterId> ids, int target, Func<int, bool> accept)
+    {
+        int? best = null;
+        float bestD = float.MaxValue;
+        foreach (var id in ids)
+        {
+            if (!table.TryResolveNext(id, out int s) || !accept(s)) continue;
+            float d = Gap(table.Next[s], table.Next[target]);
+            if (d < bestD) { best = s; bestD = d; }
+        }
+        return best;
+    }
+
+    /// <summary>Starts a pick-up or a loot (serial phases): the character stands, then walks to the target.</summary>
+    static void Begin(CharacterTable table, int slot, CharacterId target, CharacterTask task, CharacterTask resume)
+    {
+        var cold = table.Cold(slot)!;
+        ref var n = ref table.Next[slot];
+        MovementSystem.Stop(table, slot);
+        n.Task = (byte)task;
+        n.Mode = SpeedMode.Free;
+        n.TaskTime = 0;
+        cold.CarryTarget = target;
+        cold.LiftTime = -1;
+        cold.ResumeTask = resume;
+    }
+
+    /// <summary>Ends a pick-up, put-down or loot (serial phases): back to the task before it.</summary>
+    static void End(CharacterTable table, int slot)
+    {
+        var cold = table.Cold(slot)!;
+        ref var n = ref table.Next[slot];
+        if (n.Task is (byte)CharacterTask.PickUp or (byte)CharacterTask.PutDown or (byte)CharacterTask.Loot)
+        {
+            MovementSystem.Stop(table, slot);
+            n.Task = (byte)cold.ResumeTask;
+            n.TaskTime = 0;
+        }
+        cold.CarryTarget = CharacterId.None;
+        cold.LiftTime = -1;
+        cold.ResumeTask = CharacterTask.Idle;
+    }
+
+    // ------------------------------------------------------------------ the walk
+
+    public void Schedule(World world)
+    {
+        var table = world.Characters;
+        var next = table.Next;
+        float dt = world.TickSeconds;
+        for (int i = 0; i < table.HighWater; i++)
+        {
+            ref var n = ref next[i];
+            if (!n.Alive || n.Task is not ((byte)CharacterTask.PickUp or (byte)CharacterTask.Loot)) continue;
+            var cold = table.Cold(i)!;
+            bool lifting = n.Task == (byte)CharacterTask.PickUp;
+            if (cold.Medical is not { Incapacitated: false } || cold.InCombat || !table.TryResolveNext(cold.CarryTarget, out int t)
+                || (lifting ? cold.LiftTime < 0 && !(CanCarry(cold) && CanBeLifted(table.Cold(t)!)) : !CanBeLooted(table.Cold(t)!)))
+            {
+                if (!(lifting && cold.LiftTime >= 0)) End(table, i);   // a lift under way is finished or broken off in SlowWorld
+                continue;
+            }
+            const ushort Path = (ushort)MoveFlags.AnyPath;
+            if (Gap(next[i], next[t]) <= Settings.Reach)
+            {
+                if ((n.Flags & Path) != 0)
+                {
+                    n.Flags = (ushort)(n.Flags & ~Path);
+                    n.PathCursor = 0;
+                    cold.PathRequest = 0;
+                }
+                n.TaskTime = 0;
+                if (lifting && cold.LiftTime < 0) cold.LiftTime = 0;   // in reach: the lift clip starts
+                continue;
+            }
+            if (lifting && cold.LiftTime >= 0) continue;   // lifting: it does not walk after the body
+            n.TaskTime -= dt;
+            var goal = new Vector2(next[t].Position.X, next[t].Position.Z);
+            bool asking = (n.Flags & (ushort)(MoveFlags.NeedPath | MoveFlags.Pending)) != 0;
+            bool stale = (n.Flags & (ushort)MoveFlags.HasPath) == 0 || Vector2.DistanceSquared(goal, n.Goal) > PursuitSystem.RepathDistance * PursuitSystem.RepathDistance;
+            if (asking || !stale || n.TaskTime > 0) continue;
+            n.Goal = goal;
+            n.Mode = SpeedMode.Free;
+            n.Flags |= (ushort)MoveFlags.NeedPath;
+            n.TaskTime = PursuitSystem.RepathSeconds;
+        }
+    }
+
+    // ------------------------------------------------------------------ lifting, putting down, the links, rescue
+
+    public void SlowWorld(World world)
+    {
+        var table = world.Characters;
+        var next = table.Next;
+        float dt = world.TickSeconds;
+        for (int i = 0; i < table.HighWater; i++)
+        {
+            if (!next[i].Alive) continue;
+            switch ((CharacterTask)next[i].Task)
+            {
+                case CharacterTask.PickUp: Lift(world, table, i, dt); break;
+                case CharacterTask.PutDown: PutDown(world, i, dt); break;
+                case CharacterTask.Loot: Loot(world, table, i); break;
+            }
+        }
+        KeepLinks(world);
+        if (Settings.AutoEveryTicks > 0 && world.Tick % Settings.AutoEveryTicks == 0) Rescue(world, table);
+    }
+
+    void Lift(World world, CharacterTable table, int i, float dt)
+    {
+        var cold = table.Cold(i)!;
+        if (cold.LiftTime < 0) return;   // still walking
+        float before = cold.LiftTime;
+        cold.LiftTime += dt;
+        bool attached = !cold.Carrying.IsNone && cold.Carrying == cold.CarryTarget;
+        if (!attached && cold.LiftTime > CarrySettings.AttachAt * LiftSeconds)
+        {
+            // The body is attached once, at 0.4 of the clip, if it can still be lifted and is still near (the reach was tested when the clip started).
+            if (!table.TryResolveNext(cold.CarryTarget, out int b) || !CanCarry(cold) || !CanBeLifted(table.Cold(b)!)
+                || Gap(table.Next[i], table.Next[b]) > 2 * Settings.Reach)   // pushed about while lifting: some slack, not a pick-up from afar
+            {
+                End(table, i);
+                return;
+            }
+            Link(table, i, b);
+        }
+        else if (!attached && before > CarrySettings.AttachAt * LiftSeconds) { End(table, i); return; }   // dropped again mid-lift
+        if (cold.LiftTime >= CarrySettings.DoneAt * LiftSeconds) End(table, i);
+    }
+
+    void PutDown(World world, int i, float dt)
+    {
+        var table = world.Characters;
+        var cold = table.Cold(i)!;
+        if (cold.Carrying.IsNone || !table.TryResolveNext(cold.Carrying, out int b))
+        {
+            End(table, i);
+            return;
+        }
+        cold.LiftTime += dt;
+        // The clip runs backwards from its end; the body is let go when it is below 0.2 of the way.
+        if (LiftSeconds - cold.LiftTime >= CarrySettings.ReleaseBelow * LiftSeconds) return;
+        Unlink(world, i, b, drop: false);
+        End(table, i);
+    }
+
+    /// <summary>Links a carrier and a body (serial). The body stops whatever it did and takes the carrier's place.</summary>
+    static void Link(CharacterTable table, int carrier, int body)
+    {
+        var c = table.Cold(carrier)!;
+        var b = table.Cold(body)!;
+        c.Carrying = table.IdOf(body);
+        b.CarriedBy = table.IdOf(carrier);
+        MovementSystem.Stop(table, body);
+        ref var n = ref table.Next[body];
+        n.Velocity = Vector3.Zero;
+        n.Position = table.Next[carrier].Position;
+        n.Yaw = table.Next[carrier].Yaw;
+        if (b.Animation is { } anim) anim.Action = -1;   // no falling or getting up while held
+    }
+
+    /// <summary>
+    /// Ends a link (serial). <paramref name="drop"/>: the body falls where the carrier stands (the carrier went down, lost its arm or turned to fight); else it is set down beside the
+    /// carrier and, when the carrier does not regard it as friendly, knocked out again (<see cref="MedicalState.PutDownKoMinutes"/>).
+    /// </summary>
+    void Unlink(World world, int carrier, int body, bool drop)
+    {
+        var table = world.Characters;
+        var c = table.Cold(carrier)!;
+        var b = table.Cold(body)!;
+        c.Carrying = CharacterId.None;
+        b.CarriedBy = CharacterId.None;
+        ref var bn = ref table.Next[body];
+        ref readonly var cn = ref table.Next[carrier];
+        bn.Velocity = Vector3.Zero;
+        bn.Position = cn.Position;
+        if (!drop)
+        {
+            // Beside the carrier, on its left (engine choice), when that ground is walkable.
+            var side = new Vector2(MathF.Cos(cn.Yaw), -MathF.Sin(cn.Yaw)) * Settings.PutDownSide;
+            float x = cn.Position.X + side.X, z = cn.Position.Z + side.Y;
+            if (world.Walkability.IsWalkable(x, z)) bn.Position = new Vector3(x, world.Walkability.GroundHeight(x, z), z);
+            if (!Friendly(c, b)) KnockOutHeld(c, b);
+        }
+    }
+
+    /// <summary>The put-down KO of a body its carrier does not regard as friendly (nothing for the dead).</summary>
+    void KnockOutHeld(CharacterCold carrier, CharacterCold body)
+    {
+        if (body.Medical is not { Dead: false } medical || body.Race is not { } race) return;
+        var ctx = new MedicalContext(Constants, bodyOptions, race) { Toughness = body.Stats?.Toughness ?? 0, Strength = body.Stats?.Strength ?? 50, HasStats = body.Stats is not null };
+        medical.KnockOut(medical.PutDownKoMinutes(ctx, MedicalState.PutDownKoFactor(carrier.Stats?[StatsEnumerated.Assassination] ?? 0)));
+    }
+
+    /// <summary>The links every tick (serial, after the body tick): drops, wake-ups, broken links, and the body kept at its carrier.</summary>
+    void KeepLinks(World world)
+    {
+        var table = world.Characters;
+        var next = table.Next;
+        for (int i = 0; i < table.HighWater; i++)
+        {
+            if (!next[i].Alive) continue;
+            var cold = table.Cold(i)!;
+            if (!cold.CarriedBy.IsNone && (!table.TryResolveNext(cold.CarriedBy, out int k) || table.Cold(k)!.Carrying != table.IdOf(i)))
+                cold.CarriedBy = CharacterId.None;   // the carrier is gone: the body stays where it was
+            if (cold.Carrying.IsNone) continue;
+            if (!table.TryResolveNext(cold.Carrying, out int b) || table.Cold(b)!.CarriedBy != table.IdOf(i))
+            {
+                cold.Carrying = CharacterId.None;   // the body is gone (a corpse removed, a zone unloaded)
+                continue;
+            }
+            var body = table.Cold(b)!;
+            // A carrier that is knocked out or dies, or whose left arm goes limp or is cut off, drops the body (the original's ragdoll switch and limb removal).
+            if (cold.Medical is not { Incapacitated: false } medical || !LeftArmUsable(medical))
+            {
+                Unlink(world, i, b, drop: true);
+                continue;
+            }
+            if (body.Medical is { Incapacitated: false })
+            {
+                // The body came round. A friendly one is set down (the AI's PUT_DOWN_CARRIED_DUDE_IF_THEY_CAN_WALK); a captive is knocked out again on the shoulder (engine stand-ins).
+                if (Friendly(cold, body)) { Unlink(world, i, b, drop: false); continue; }
+                KnockOutHeld(cold, body);
+            }
+            ref var bn = ref next[b];
+            bn.Position = next[i].Position;
+            bn.Yaw = next[i].Yaw;
+            bn.Velocity = Vector3.Zero;
+        }
+    }
+
+    // ------------------------------------------------------------------ looting
+
+    void Loot(World world, CharacterTable table, int i)
+    {
+        var cold = table.Cold(i)!;
+        if (!table.TryResolveNext(cold.CarryTarget, out int t) || Gap(table.Next[i], table.Next[t]) > Settings.Reach) return;   // still walking (Schedule ends a loot whose target went)
+        var victim = table.Cold(t)!;
+        if (cold.Inventory is not { } bag || !CanBeLooted(victim))
+        {
+            End(table, i);
+            return;
+        }
+        var (taken, left) = TakeAll(bag, victim.Inventory!);
+        bool seen = false;
+        if (taken > 0 && cold.IsPlayer && !victim.IsPlayer && cold.Faction != victim.Faction && Witnessed(table, i, t))
+        {
+            seen = true;
+            if (Relations is { } relations) PlayerRelations.Event(world, relations, victim.Faction, RelationEventKind.Stealing);
+        }
+        loots.Add(new LootEntry(world.Tick, table.IdOf(i), table.IdOf(t), taken, left, seen));
+        End(table, i);
+    }
+
+    /// <summary>
+    /// "Take all": every item of <paramref name="from"/>'s main inventory and of its worn backpack, in order, goes into <paramref name="into"/> where it fits (a stack joins a stack,
+    /// else the first free cell of the main grid, then of the backpack: <see cref="Inventory.Add"/>); what does not fit stays. Worn clothing, armour, weapons and the backpack itself stay
+    /// (engine choice: the fighter's gear is fixed at spawn). Returns the items moved and the ones left.
+    /// </summary>
+    public static (int Taken, int Left) TakeAll(Inventory into, Inventory from)
+    {
+        var items = new List<ItemInstance>();
+        foreach (var item in from.Items)
+        {
+            if (item.Section == "main") items.Add(item);
+            else if (item.Contents is { } pack) items.AddRange(pack.Items);
+        }
+        int taken = 0, left = 0;
+        foreach (var item in items)
+        {
+            if (into.Add(item))
+            {
+                from.Remove(item);
+                taken++;
+            }
+            else left++;
+        }
+        return (taken, left);
+    }
+
+    /// <summary>
+    /// Whether a member of the victim's faction sees the looter: awake, not carried, and the looter within its sight by the original's daylight test (<see cref="AggroSystem.Visibility"/>,
+    /// range <see cref="CarrySettings.Sight"/> x its race's <c>vision range mult</c>, the view cone). The original's witness rules are richer (docs/game/carry-loot.md "Witnesses"); this is the
+    /// part the engine has.
+    /// </summary>
+    bool Witnessed(CharacterTable table, int looter, int victim)
+    {
+        var next = table.Next;
+        int faction = table.Cold(victim)!.Faction;
+        var at = next[looter].Position;
+        for (int w = 0; w < table.HighWater; w++)
+        {
+            if (w == looter || w == victim || !next[w].Alive) continue;
+            if (table.Cold(w) is not { Medical.Incapacitated: false } c || c.Faction != faction || !c.CarriedBy.IsNone) continue;
+            if (AggroSystem.Visibility(next[w].Position, next[w].Yaw, at, AggroSystem.RangeOf(c, Settings.Sight)) > 0) return true;
+        }
+        return false;
+    }
+
+    // ------------------------------------------------------------------ rescue
+
+    /// <summary>
+    /// Every <see cref="CarrySettings.AutoEveryTicks"/> ticks (serial, slot order): characters with the rescue job, idle, wandering or following, able to carry and with no fight in their
+    /// squad, pick up the nearest knocked-out (not dead) member of their faction within their sight that no one else is lifting (the original's rescue finder: nearest, same faction, not
+    /// carried, not dead, not targeted by a squad mate). Then NPC squads whose leader is knocked out send their nearest free member to pick it up.
+    /// </summary>
+    void Rescue(World world, CharacterTable table)
+    {
+        var next = table.Next;
+        var taken = new HashSet<int>();
+        for (int i = 0; i < table.HighWater; i++)
+            if (next[i].Alive && next[i].Task == (byte)CharacterTask.PickUp && table.TryResolveNext(table.Cold(i)!.CarryTarget, out int busy)) taken.Add(busy);
+        for (int i = 0; i < table.HighWater; i++)
+        {
+            if (!Free(table, i) || !table.Cold(i)!.RescueJob) continue;
+            var cold = table.Cold(i)!;
+            if (cold.SquadId >= 0 && world.Squads.Find(cold.SquadId) is { } squad && Fighting(table, squad)) continue;
+            float range = AggroSystem.RangeOf(cold, Settings.Sight), best2 = range * range;
+            int best = -1;
+            for (int s = 0; s < table.HighWater; s++)
+            {
+                if (s == i || !next[s].Alive || taken.Contains(s)) continue;
+                if (table.Cold(s) is not { Medical: { Unconscious: true, Dead: false } } other || other.Faction != cold.Faction || !CanBeLifted(other)) continue;
+                float d2 = Vector2.DistanceSquared(new Vector2(next[i].Position.X, next[i].Position.Z), new Vector2(next[s].Position.X, next[s].Position.Z));
+                if (d2 <= best2 && (best < 0 || d2 < best2)) { best = s; best2 = d2; }
+            }
+            if (best < 0) continue;
+            taken.Add(best);
+            Begin(table, i, table.IdOf(best), CharacterTask.PickUp, (CharacterTask)next[i].Task);
+        }
+        if (!Settings.RescueNpcLeaders) return;
+        foreach (var squad in world.Squads.All)
+        {
+            if (!table.TryResolveNext(squad.Leader, out int l) || taken.Contains(l)) continue;
+            if (table.Cold(l) is not { IsPlayer: false, Medical: { Unconscious: true, Dead: false } } leader || !CanBeLifted(leader) || Fighting(table, squad)) continue;
+            int best = -1;
+            float best2 = float.MaxValue;
+            foreach (var m in squad.Members)
+            {
+                if (!table.TryResolveNext(m, out int s) || s == l || !Free(table, s) || table.Cold(s)!.IsPlayer) continue;
+                float range = AggroSystem.RangeOf(table.Cold(s)!, Settings.Sight);
+                float d2 = Vector2.DistanceSquared(new Vector2(next[s].Position.X, next[s].Position.Z), new Vector2(next[l].Position.X, next[l].Position.Z));
+                if (d2 <= range * range && d2 < best2) { best = s; best2 = d2; }
+            }
+            if (best < 0) continue;
+            taken.Add(l);
+            Begin(table, best, squad.Leader, CharacterTask.PickUp, (CharacterTask)next[best].Task);
+        }
+    }
+
+    /// <summary>A character free to start a rescue: alive, idle, wandering or following, not fleeing, able to carry.</summary>
+    static bool Free(CharacterTable table, int slot) =>
+        table.Next[slot].Alive && table.Next[slot].Task is (byte)CharacterTask.Idle or (byte)CharacterTask.Wander or (byte)CharacterTask.Follow
+        && table.Cold(slot) is { Fleeing: false } cold && CanCarry(cold);
+
+    /// <summary>A fight is on in the squad: a member in combat or with an attack order.</summary>
+    static bool Fighting(CharacterTable table, Squad squad)
+    {
+        foreach (var m in squad.Members)
+            if (table.TryResolveNext(m, out int s) && (table.Cold(s)!.InCombat || table.Next[s].Task == (byte)CharacterTask.Attack)) return true;
+        return false;
+    }
+}

@@ -101,6 +101,16 @@ public sealed class CharacterCold
     public CharacterTask ResumeTask { get; set; }
     /// <summary>The medic job (the original's <c>medic</c> toggle): an idle character with a kit treats hurt squad mates by itself. NPCs with a kit do so without it (an engine rule until the AI).</summary>
     public bool MedicJob { get; set; }
+    /// <summary>The character this one carries on its left shoulder (none: not carrying); the original's <c>isCarrying</c> with the partner handle. Set and cleared by <see cref="Carrying.CarrySystem"/> in serial phases only, together with <see cref="CarriedBy"/> of the other.</summary>
+    public CharacterId Carrying { get; set; } = CharacterId.None;
+    /// <summary>The character carrying this one (none: not carried); the original's <c>isBeingCarried</c> with the partner handle.</summary>
+    public CharacterId CarriedBy { get; set; } = CharacterId.None;
+    /// <summary>Whom the <see cref="CharacterTask.PickUp"/> or <see cref="CharacterTask.Loot"/> task is for; meaningful only while one of those tasks is set.</summary>
+    public CharacterId CarryTarget { get; set; } = CharacterId.None;
+    /// <summary>Seconds into the <c>shoulder lift left</c> clip of a pick-up or put-down in progress (-1: not lifting; the animation system plays the clip at this time).</summary>
+    public float LiftTime { get; set; } = -1;
+    /// <summary>The rescue job (the original's <c>rescue</c> toggle, NUM8): an idle character picks up a downed member of its faction by itself.</summary>
+    public bool RescueJob { get; set; }
 }
 
 /// <summary>
@@ -276,6 +286,11 @@ public sealed class CharacterTable
             if (c.Task == (byte)CharacterTask.Treat) { hasher.Add(k.TreatTarget); hasher.Add((int)k.ResumeTask); }
             if (k.MedicJob) hasher.Add(true);
             if (k.Fleeing) hasher.Add(0x466C6565);   // only while set, so worlds without fleeing hash as before
+            // Carrying, looting and the rescue job add to the hash only while set, so worlds without them hash as before.
+            if (!k.Carrying.IsNone) { hasher.Add(0x43617272); hasher.Add(k.Carrying); }
+            if (!k.CarriedBy.IsNone) { hasher.Add(0x42726E65); hasher.Add(k.CarriedBy); }
+            if (c.Task is (byte)CharacterTask.PickUp or (byte)CharacterTask.PutDown or (byte)CharacterTask.Loot) { hasher.Add(k.CarryTarget); hasher.Add(k.LiftTime); hasher.Add((int)k.ResumeTask); }
+            if (k.RescueJob) hasher.Add(0x52657363);
         }
         hasher.Add(free.Count);
         foreach (int slot in free) hasher.Add(slot);

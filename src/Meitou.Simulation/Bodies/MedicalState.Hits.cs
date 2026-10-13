@@ -129,6 +129,19 @@ public sealed partial class MedicalState
 
     void StartKo(in MedicalContext ctx, List<MedicalEvent>? events) => ApplyKo(KoTime(ctx), events);
 
+    /// <summary>
+    /// The factor of the KO given to a non-friendly character that is put down (docs/game/carry-loot.md "Putting down"): lerp(0.1, 0.4, the carrier's assassination / 100)
+    /// (<b>Observed</b>, <c>Task_PutDownObject</c>; the help text says assassination decides how long they stay out).
+    /// </summary>
+    public static float PutDownKoFactor(float assassination) => 0.1f + 0.3f * Math.Clamp(assassination / 100, 0, 1);
+
+    /// <summary>
+    /// The KO time of a character put down by a non-friendly carrier, in game minutes: max(3, (2 x <c>knockout time base</c> + <see cref="KoTerms"/>) x <paramref name="factor"/> x 4),
+    /// the shape of the leg-loss KO (<c>FUN_140644980</c>) with the put-down factor in place of (1 - toughness) and no random roll (the notes give that function only the blood term and
+    /// no roll; which reading is right is <b>Unknown</b>, the doc's leg-loss reading is used).
+    /// </summary>
+    public float PutDownKoMinutes(in MedicalContext ctx, float factor) => MathF.Max(3, (2 * ctx.Constants.KnockoutTimeBase + KoTerms(ctx)) * factor * 4);
+
     /// <summary>Knocks the character out for <paramref name="minutes"/> game minutes from outside the medical rules (a drug, a scripted event); a longer running KO is kept.</summary>
     public void KnockOut(float minutes, List<MedicalEvent>? events = null) => ApplyKo(minutes, events);
 

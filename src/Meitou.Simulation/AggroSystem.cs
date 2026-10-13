@@ -187,7 +187,7 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
             if (!prev[i].Alive || i >= slots.Length || world.Tick < slots[i].CalmUntil) continue;
             byte task = next[i].Task;
             if (task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat or (byte)CharacterTask.Rest) continue;
-            if (table.Cold(i) is not { IsPlayer: false, InCombat: false, Fleeing: false, Fighter: not null, Medical.Incapacitated: false } cold || !Relations.Contains(cold.Faction) || !hasEnemy[cold.Faction]) continue;
+            if (table.Cold(i) is not { IsPlayer: false, InCombat: false, Fleeing: false, Fighter: not null, Medical.Incapacitated: false, Carrying.IsNone: true } cold || !Relations.Contains(cold.Faction) || !hasEnemy[cold.Faction]) continue;
             float range = RangeOf(cold, Settings.SightRange);
             if (!(range > 0)) continue;
             var scan = new Scan
@@ -270,7 +270,7 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         if (taken.Contains(slot) || !table.Next[slot].Alive) return false;
         byte task = table.Next[slot].Task;
         if (task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat or (byte)CharacterTask.Rest) return false;
-        return table.Cold(slot) is { IsPlayer: false, InCombat: false, Fleeing: false, Fighter: not null, Medical.Incapacitated: false };
+        return table.Cold(slot) is { IsPlayer: false, InCombat: false, Fleeing: false, Fighter: not null, Medical.Incapacitated: false, Carrying.IsNone: true };   // a carrier picks no fight (the original's engagement weight is 0 while carrying)
     }
 
     // ------------------------------------------------------------------ leash and stand down

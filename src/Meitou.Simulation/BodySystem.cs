@@ -49,9 +49,10 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
                 n.Velocity = Vector3.Zero;
             }
             if (medical.Dead) continue;
-            // The load: the inventory weight against the strength the injuries leave (character-stats.md "Encumbrance and carrying").
+            // The load: the inventory weight, plus carry person weight while carrying someone, against the strength the injuries leave (character-stats.md "Encumbrance and carrying").
             float load = cold.Inventory?.ContentWeight() ?? 0;
-            float encumbrance = load <= 0 ? 1 : Encumbrance.Factor(Constants, load, false, stats.Strength, medical.StatMultiplier(Meitou.Data.Gameplay.Bodies.StatsEnumerated.Strength));
+            bool carrying = !cold.Carrying.IsNone;
+            float encumbrance = load <= 0 && !carrying ? 1 : Encumbrance.Factor(Constants, load, carrying, stats.Strength, medical.StatMultiplier(Meitou.Data.Gameplay.Bodies.StatsEnumerated.Strength));
             var ctx = new MedicalContext(Constants, Options, race)
             {
                 EncumbranceFactor = encumbrance,

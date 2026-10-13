@@ -18,6 +18,12 @@ public enum CharacterTask : byte
     Treat = 5,
     /// <summary>Sits on the ground resting: blood recovers at <c>resting heal rate mult</c> and hunger falls at <c>bed hunger rate</c> (<see cref="FirstAid.FirstAidSystem"/>); any other order replaces it.</summary>
     Rest = 6,
+    /// <summary>Walks to <see cref="CharacterCold.CarryTarget"/> and lifts it onto the left shoulder (<see cref="Carrying.CarrySystem"/> owns it; the original's <c>LIFT_PERSON</c>).</summary>
+    PickUp = 7,
+    /// <summary>Sets the carried character down (<see cref="Carrying.CarrySystem"/>; the original's <c>PUT_DOWN_OBJECT</c>).</summary>
+    PutDown = 8,
+    /// <summary>Walks to <see cref="CharacterCold.CarryTarget"/> (a downed or dead character) and takes everything from its inventory that fits (<see cref="Carrying.CarrySystem"/>).</summary>
+    Loot = 9,
 }
 
 /// <summary>Bits of <see cref="CharacterHot.Flags"/> the movement system uses.</summary>

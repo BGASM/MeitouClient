@@ -210,6 +210,7 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                     n.Task = (byte)CharacterTask.Wander;
                     continue;
                 }
+                if (table.Cold(leader.Slot)?.CarriedBy == table.IdOf(i)) continue;   // it carries its leader: the squad follows it, it does not follow itself
                 var lead = prev[leader.Slot];
                 var slotPos = new Vector2(lead.Position.X, lead.Position.Z) + cold.FormationOffset * FormationScale;
                 var here = new Vector2(n.Position.X, n.Position.Z);
@@ -279,7 +280,10 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                 else
                 {
                     dir = to / dist;
-                    desired = cold.SpeedOverride > 0 ? cold.SpeedOverride : MathF.Min(n.MaxSpeed, SpeedMode.Cap(cold.ModeOverride ?? n.Mode, n.WalkSpeed));
+                    byte mode = cold.ModeOverride ?? n.Mode;
+                    // A carrier in walk mode is raised to run mode (the original's speed selector, Observed; docs/game/carry-loot.md "Speed and weight").
+                    if (mode == SpeedMode.Walk && !cold.Carrying.IsNone) mode = SpeedMode.Run;
+                    desired = cold.SpeedOverride > 0 ? cold.SpeedOverride : MathF.Min(n.MaxSpeed, SpeedMode.Cap(mode, n.WalkSpeed));
                 }
             }
             else if (((MoveFlags)n.Flags & MoveFlags.HasPath) != 0)
@@ -327,6 +331,7 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
             world.Grid.Query(p.Position.X, p.Position.Z, SeparationRadius, ref push, static (int other, ref SeparationState s) =>
                 {
                     if (other == s.Self || s.Count >= MaxSeparationContributions) return;
+                    if (s.Table.Cold(other) is { CarriedBy.IsNone: false }) return;   // a carried body is on its carrier's shoulder, not in anyone's way
                     var all = s.Table.Previous;
                     var d = new Vector2(all[s.Self].Position.X - all[other].Position.X, all[s.Self].Position.Z - all[other].Position.Z);
                     float len = d.Length();

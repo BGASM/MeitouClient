@@ -106,6 +106,15 @@ public sealed class Inventory(int width, int height)
         return false;
     }
 
+    /// <summary>Removes an item whole (every unit of its stack), wherever it is (this inventory or the backpack).</summary>
+    public bool Remove(ItemInstance item)
+    {
+        if (Items.Remove(item)) return true;
+        foreach (var i in Items)
+            if (i.Contents is { } bag && bag.Remove(item)) return true;
+        return false;
+    }
+
     internal void Hash(ref StateHasher h)
     {
         h.Add(Items.Count);
