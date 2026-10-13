@@ -118,7 +118,9 @@ public class AnimalTests(ITestOutputHelper output)
         return world.Characters.Cold(id.Slot)!;
     }
 
-    const StandardParts Fighting = StandardParts.Movement | StandardParts.Pursuit | StandardParts.Body | StandardParts.Combat | StandardParts.Retaliation | StandardParts.Aggro;
+    // With the animation system: animals have no appearance and their creature techniques are not in the library; they must still run through it.
+    const StandardParts Fighting = StandardParts.Movement | StandardParts.Pursuit | StandardParts.Body | StandardParts.Combat | StandardParts.Retaliation | StandardParts.Aggro
+        | StandardParts.Animation;
 
     static (SimWorld World, StandardSystemSet Systems, PopulationSystem Population) Make(PopulationData data, int threads = 1, ulong seed = 1)
     {

@@ -731,7 +731,9 @@ Built 2026-10-13 from [animals.md](game/animals.md). Code: `AnimalData` (`Meitou
   against people, one-slot partitions) at 1, 4 and 16 threads and gets the same hashes. It is not pinned among the golden scenarios: those run without the install.
 - **Cost.** Nothing per tick beyond what any fighter costs; the scale is one multiply per stat read.
 - **Not done.** Animal animations: animals have no appearance and are drawn as markers, and their technique clips (`attack1`...) live in their own skeletons, which the
-  animation library does not load (creature techniques are left out of it, as the original's preprocess does); attack timing uses the 1 s default clip length. Nests
+  animation library does not load (creature techniques are left out of it, as the original's preprocess does): the animation system runs over animals like anyone
+  (`AnimalTests` include it), finds no clip for their techniques and plays nothing for them, and their other layers are the human clips, which nothing draws; attack timing
+  uses the 1 s default clip length. Nests
   and the area spawns (wild packs), smell, `VO_Creature_Alert`, `animal strength`, lifespan and ageing, `turn rate`, pack animals' backpacks, death items and
   butchering, animal AI goals, taming and buying animals, saving the animal factors.
 
@@ -959,7 +961,8 @@ save runs 150 ticks and captures again with the same platoons and characters.
 has `carrying` and the handle `carrying*`, but the carried body is usually an NPC, whose character is not saved, so a quicksave drops the link and
 the body lies where it was), a pick-up, put-down or loot under way, the rescue job (the CAMERA squad toggle `rescue` is not mapped either) and what
 a loot moved (inventories are not saved); and a kit's used charges with the rest of the inventory, the NPC platoons' characters (regenerated from the template; their files stay as
-they were), towns and their state, war state, weather and season (the weather rolls anew on loading), research, zone buildings and loose items, inventories and equipment (a loaded character's are rebuilt from its record and look), AI jobs,
+they were), towns and their state, war state, weather and season (the weather rolls anew on loading), research, zone buildings and loose items, inventories and equipment (a loaded character's are rebuilt from its record and look; a loaded animal gets its natural weapon back, but its age, size and HP mult factors
+(`CharacterStats.Scale`, `MedicalState.ScaleK` / `ScaleZ` / `HasStatsObject`) come back as a person's 1s, [Animals](#animals)), AI jobs,
 the saved look of a loaded character (rolled again from the saved serial through `IAppearanceSource`; the serial of a character Meitou saved is its look's seed), pending crimes (no key known), `5-redirect`.
 The player's characters' bounty ledgers are carried (2026-10-13, `BountySave`: the GAMESTATE_CHARACTER keys `bountyfac<k>`, `bountyexp<k>`, `amount<k>`, `crimes<k>`, `claim<k>`;
 the raise time converted between world ticks and the save's game hours, day x 24 + hour, [Crimes and bounties](#crimes-and-bounties)). **Unknown**:
