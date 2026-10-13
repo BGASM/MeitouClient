@@ -327,12 +327,12 @@ refused when the sector's nearest town belongs to the player's faction.
 
 A nest is a TOWN record with `type` 0 (TownType 0 NEST); **Verified** against data: all 75 `nests` refs of the 36
 BIOME_GROUPs that have any target a TOWN of type 0 (23 distinct nests of the 40 type-0 records; the others are
-placed on the map or spawned by squad templates through `SQUAD_TEMPLATE.nest`, 47 templates).
+not placed on the map: **Observed**, probe 2026-10-13, no type-0 TOWN is in `leveldata`, only 43 type-8 NEST_MARKERs; the rest come through `SQUAD_TEMPLATE.nest`, 47 templates, or are unused).
 
 Nest spawner (`FUN_1408f7310`, run first in every area tick, **Observed**): for each biome group whose current nest
 count is below `num nests` x `DAT_142133588` (the new-game option *Number of nests multiplier*, slider 0.5 to 4: **Observed**, [character-stats.md](character-stats.md#new-game-advanced-options-that-change-these-mechanics) and [combat.md](combat.md#global-tuning-the-constants-record) bind this address to that slider), pick a nest TOWN from the group's
 `nests` list (weighted pick, weight v0, default 100, `world state` gate), pick a free position in the group's area
-(position helper; groups with `nests at fixed markers only` use the pre-placed `TOWN_NEST_MARKER` towns, TownType 8),
+(position helper; groups with `nests at fixed markers only` use the pre-placed `TOWN_NEST_MARKER` towns, TownType 8; two groups do, Fog Islands and Watcher's Rim, and which marker records (`MARKER-Nest-Cower`, `spider camp marker`) lie in which group's area was not checked, **Unknown**),
 create the `Nest` and stop; one nest per
 tick. The base data asks for 531 nests in total (sum of `num nests`).
 

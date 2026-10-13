@@ -23,7 +23,7 @@ namespace Meitou.Simulation;
 /// <para>Resident lists (6.4, Observed): the town's own <c>residents</c>, plus the faction's unless the town has <c>residents override</c>
 /// with a list of its own; an entry makes v0 squads (v0 = 0 is dropped). Squads are placed at random spots within
 /// <see cref="PopulationSettings.PlacementRadiusShare"/> of the town radius round its placed position, on dry ground: how resident
-/// squads pick a home building is Unknown, so this is an engine choice. Bar squads and the roaming squads (<c>PopulationRoaming.cs</c>) are made here too; default residents come later.</para>
+/// squads pick a home building is Unknown, so this is an engine choice. Bar squads, the roaming squads (<c>PopulationRoaming.cs</c>) and the wild, homeless squads and nests (<c>PopulationWild.cs</c>), are made here too; default residents come later.</para>
 /// </summary>
 public sealed partial class PopulationSystem : ITickSystem, IDisposable
 {
