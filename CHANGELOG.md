@@ -3,6 +3,20 @@
 What changed in each release, newest first. The release workflow copies the section of the version it builds into the GitHub release
 notes and refuses to release a version without one: add a `## vX.Y.Z` section with one `- ` line per change before running it.
 
+## v0.8.0
+
+- Cinematic camera in the game: numpad shots and the timeline editor, now on F6 (F2..F4 are the game speeds), with keys saved apart from the viewer's; recording steps the whole game at a fixed 60 fps
+- F7 hides the game's interface for clean screenshots and video
+- Game: the viewer's Tab panel rows (time of day, VSync, full screen), Alt+Enter, and F9/F10/F11 placed below the HUD
+- Characters: drawn weapons, feet grounded to their body shape, no more jitter far from the camera, cheaper level of detail and shadows
+- Movement: faster turning, holding right click steers, and a path is kept when you re-order
+- Sharper shadows: a 4096 shadow map by default, with a Tab slider for 1024/2048/4096
+- Tab panel: a weather list replaces "Reroll weather", so you can pick any of the region's weathers for the season
+- Ctrl+F1 flips each Faithful / Meitou switch in turn, one a second, so you can compare them
+- Moving the clock back no longer leaves the old weather's fog behind (e.g. a dust storm hanging over the Hub)
+- Red rain is drawn at half its opacity
+- Faster: shadows and water cost less, and water work is skipped when no water is near
+
 ## v0.7.1
 
 - Plant layouts stay cached across updates: an update no longer makes plants fill in slowly on the first start unless the layout itself changed
