@@ -4,15 +4,18 @@ using Meitou.Simulation.Combat;
 
 namespace Meitou.Simulation;
 
-/// <summary>Settings of the <see cref="AggroSystem"/>; every number is an engine choice (docs/simulation.md "Combat").</summary>
+/// <summary>Settings of the <see cref="AggroSystem"/> (docs/simulation.md "Hostility and relations"; the original's figures in docs/game/perception.md).</summary>
 public sealed record AggroSettings
 {
-    /// <summary>A character looks round once every this many ticks (staggered by slot: slot s on the ticks where tick % n == s % n).</summary>
+    /// <summary>A character looks round once every this many ticks (staggered by slot: slot s on the ticks where tick % n == s % n). Engine choice: the original
+    /// updates the senses of 8 characters per frame in turn (docs/game/perception.md "Update rate").</summary>
     public int ScanEveryTicks { get; init; } = 15;
-    /// <summary>How far an NPC sees an enemy, in world units (dm), before the race's <c>vision range mult</c>. The original's range is <b>Unknown</b>.</summary>
-    public float SightRange { get; init; } = 300;
-    /// <summary>An NPC fighting farther than this from where its fight began gives up.</summary>
-    public float LeashRange { get; init; } = 750;
+    /// <summary>How far an NPC sees, in world units (dm), before the race's <c>vision range mult</c>: the original's outdoor range (1500, <c>FUN_140851bc0</c>, Verified),
+    /// in full daylight; straight ahead only, the view cone shortens it to the side (<see cref="AggroSystem.Visibility"/>).</summary>
+    public float SightRange { get; init; } = AggroSystem.OutdoorSight;
+    /// <summary>An NPC fighting farther than this from where its fight began gives up. Engine choice (the original's rule is <b>Unknown</b>): twice the daylight sight,
+    /// so a fight begun at the edge of sight reaches its target.</summary>
+    public float LeashRange { get; init; } = 3000;
     /// <summary>Game seconds an NPC that gave up does not pick a new fight by itself (it still answers an attack).</summary>
     public float CalmSeconds { get; init; } = 20;
     /// <summary>Keep a <see cref="AggroSystem.Log"/> of every fight started (the host prints it; tests read it).</summary>
@@ -26,11 +29,12 @@ public readonly record struct AggroEntry(long Tick, CharacterId Attacker, Charac
 /// Hostility by faction relations (an <b>engine stand-in</b> for the stage 9 AI's senses and target choice, docs/simulation.md "Combat"):
 /// <list type="bullet">
 /// <item><b>Look</b> (<c>Act</c>, parallel, own slot, reading the last tick's positions through the <see cref="SpatialGrid"/>): an awake NPC with a fighter, not fighting,
-/// not treating or resting, whose turn it is (one in <see cref="AggroSettings.ScanEveryTicks"/>, by slot) finds the nearest living, awake character with a body
-/// within its sight (<see cref="AggroSettings.SightRange"/> x its race's <c>vision range mult</c>) whose faction its own is hostile to (relation -30 or lower) and
-/// that neither faction coexists with; ties go to the lower slot. It emits one effect at that target.</item>
-/// <item><b>Decide</b> (<c>Apply</c>, serial commit order): the looker, if still free, and its free squad mates within <see cref="RetaliationSystem.JoinRange"/> (the
-/// retaliation join rule) get an <see cref="AttackOrder"/> for the next tick through <see cref="World.Defer"/>. The player's characters never look and never join.</item>
+/// not fleeing, not treating or resting, whose turn it is (one in <see cref="AggroSettings.ScanEveryTicks"/>, by slot) finds the nearest living, awake character with a body
+/// that it sees (the original's daylight test: within its range R = <see cref="AggroSettings.SightRange"/> x its race's <c>vision range mult</c> times the view-cone factor
+/// of <see cref="Visibility"/>) whose faction its own is hostile to (relation -30 or lower) and that neither faction coexists with; ties go to the lower slot. It emits one
+/// effect at that target.</item>
+/// <item><b>Decide</b> (<c>Apply</c>, serial commit order): the looker, if still free, and its free squad mates within twice their own range R of the target (the original's
+/// squad-shared sightings, <c>GroupSense</c>) get an <see cref="AttackOrder"/> for the next tick through <see cref="World.Defer"/>. The player's characters never look and never join.</item>
 /// <item><b>Leash and stand down</b> (<c>SlowWorld</c>, serial, every tick): an NPC that starts fighting (by this system, retaliation or anything else) has its position
 /// kept; beyond <see cref="AggroSettings.LeashRange"/> from it the NPC stops and stays calm (no looking) for <see cref="AggroSettings.CalmSeconds"/>. When its fight is
 /// over (target down, or stopped) it goes back to what it did before (wander or follow; a go-to becomes idle, which the roaming squads order again).</item>
@@ -42,6 +46,48 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
     /// <summary>The <see cref="Effect.Kind"/> of a sighting: <c>Target</c> is the enemy, <c>Amount</c> the distance.</summary>
     public const int SightEffect = 1;
     const byte NoTask = 0xFF;
+
+    /// <summary>The original's vision range outdoors before the race multiplier (<c>FUN_140851bc0</c>: race <c>vision range mult</c> x 1500; 500 flat inside a building).</summary>
+    public const float OutdoorSight = 1500;
+    /// <summary>The edge of the original's view cone: the cosine of the angle off the facing at which the view factor reaches 0 (about 78.5 degrees; <c>FUN_140852f70</c>).</summary>
+    public const float ConeEdge = 0.2f;
+    /// <summary>The smallest view factor that counts as seen (<c>FUN_140857b10</c>: above 0.01).</summary>
+    public const float MinVisibility = 0.01f;
+
+    /// <summary>
+    /// The original's sight test for an NPC looking at a character who is not sneaking or crawling, in full daylight with both lit alike (<c>FUN_140852f70</c>): the
+    /// view factor v = (cos a - 0.2) / 0.8, a the angle between the looker's facing and the direction to the target (3D), and the target is seen when v is above 0.01
+    /// and the distance is at most R x v. Returns v when seen, else 0. A target at the looker's own position counts as seen straight ahead (an engine choice).
+    /// </summary>
+    public static float Visibility(Vector3 eye, float yaw, Vector3 target, float range)
+    {
+        var d = target - eye;
+        float dist = d.Length();
+        if (dist < 1e-3f) return 1;
+        if (dist > range) return 0;
+        float cos = (MathF.Sin(yaw) * d.X + MathF.Cos(yaw) * d.Z) / dist;
+        float v = (cos - ConeEdge) / (1 - ConeEdge);
+        return v > MinVisibility && dist <= range * v ? v : 0;
+    }
+
+    /// <summary>The noise a moving character makes reaches lerp(speed / max speed, 350, 600) units (<c>FUN_140851d10</c>, Verified constants; clear weather, not sneaking).</summary>
+    public const float NoiseNear = 350, NoiseFar = 600;
+    /// <summary>The chance per check that a character within the noise range is heard when it is not sneaking (<c>FUN_140857500</c>, Verified constant).</summary>
+    public const float HearOdds = 0.75f;
+
+    /// <summary>How far a character moving at <paramref name="speed"/> (its top speed <paramref name="maxSpeed"/>) is heard; 0 when it stands still (the original hears only movers, Observed).</summary>
+    public static float NoiseRange(float speed, float maxSpeed)
+    {
+        if (!(speed > 0.01f)) return 0;
+        float t = maxSpeed > 0 ? Math.Clamp(speed / maxSpeed, 0, 1) : 1;
+        return NoiseNear + (NoiseFar - NoiseNear) * t;
+    }
+
+    /// <summary>The original's chance to hear a character at <paramref name="distance"/> with noise range <paramref name="noise"/>: 0.75 x (1 - d^2 / N^2), rolled each check.</summary>
+    public static float HearChance(float distance, float noise) => noise > 0 && distance < noise ? HearOdds * (1 - distance * distance / (noise * noise)) : 0;
+
+    /// <summary>A character's daylight sight range R: <paramref name="sight"/> x its race's <c>vision range mult</c>.</summary>
+    public static float RangeOf(CharacterCold cold, float sight) => sight * (cold.Race?.VisionRangeMult ?? 1);
 
     struct Slot
     {
@@ -121,7 +167,9 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         public CharacterTable Table;
         public FactionRelations Relations;
         public int Self, Faction;
-        public float X, Z, Range2;
+        public Vector3 Eye;
+        public float Yaw, Range;
+        public ulong Seed, Key, Tick;
         public int Best;
         public float BestD2;
     }
@@ -139,15 +187,16 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
             if (!prev[i].Alive || i >= slots.Length || world.Tick < slots[i].CalmUntil) continue;
             byte task = next[i].Task;
             if (task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat or (byte)CharacterTask.Rest) continue;
-            if (table.Cold(i) is not { IsPlayer: false, InCombat: false, Fighter: not null, Medical.Incapacitated: false } cold || !Relations.Contains(cold.Faction) || !hasEnemy[cold.Faction]) continue;
-            float range = Settings.SightRange * (cold.Race?.VisionRangeMult ?? 1);
+            if (table.Cold(i) is not { IsPlayer: false, InCombat: false, Fleeing: false, Fighter: not null, Medical.Incapacitated: false } cold || !Relations.Contains(cold.Faction) || !hasEnemy[cold.Faction]) continue;
+            float range = RangeOf(cold, Settings.SightRange);
             if (!(range > 0)) continue;
             var scan = new Scan
             {
                 Table = table, Relations = Relations, Self = i, Faction = cold.Faction,
-                X = prev[i].Position.X, Z = prev[i].Position.Z, Range2 = range * range, Best = -1, BestD2 = float.MaxValue,
+                Eye = prev[i].Position, Yaw = prev[i].Yaw, Range = range, Best = -1, BestD2 = float.MaxValue,
+                Seed = world.Seed, Key = Rng.Key(new CharacterId(i, prev[i].Generation)), Tick = (ulong)world.Tick,
             };
-            world.Grid.Query(scan.X, scan.Z, range, ref scan, Visit);
+            world.Grid.Query(scan.Eye.X, scan.Eye.Z, MathF.Max(range, NoiseFar), ref scan, Visit);
             if (scan.Best >= 0) effects.Emit(i, scan.Best, SightEffect, MathF.Sqrt(scan.BestD2));
         }
     }
@@ -156,11 +205,16 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
     {
         if (slot == s.Self) return;
         ref readonly var other = ref s.Table.Previous[slot];
-        float dx = other.Position.X - s.X, dz = other.Position.Z - s.Z, d2 = dx * dx + dz * dz;
+        float d2 = Vector3.DistanceSquared(other.Position, s.Eye);
         // Strictly nearer only: the grid visits a cell's slots in ascending order, so a tie keeps the lower slot within a cell; across cells the
         // order is the grid's fixed one. Either way it is a function of the state.
-        if (d2 > s.Range2 || d2 >= s.BestD2) return;
+        if (d2 >= s.BestD2 || (d2 > s.Range * s.Range && d2 > NoiseFar * NoiseFar)) return;
         if (s.Table.Cold(slot) is not { Medical.Incapacitated: false } c || !IsEnemy(s.Relations, s.Faction, c.Faction)) return;
+        if (Visibility(s.Eye, s.Yaw, other.Position, s.Range) <= 0)
+        {
+            float p = HearChance(MathF.Sqrt(d2), NoiseRange(new Vector2(other.Velocity.X, other.Velocity.Z).Length(), other.MaxSpeed));
+            if (!(p > 0) || Rng.Float(Rng.Hash(s.Seed, s.Key, RngPurpose.Sense, (s.Tick << 20) ^ (ulong)(uint)slot)) >= p) return;
+        }
         s.Best = slot;
         s.BestD2 = d2;
     }
@@ -185,11 +239,30 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         if (!Free(table, i, taken) || !next[t].Alive || table.Cold(t) is not { Medical.Incapacitated: false } target) return;
         var fighters = new List<CharacterId> { table.IdOf(i) };
         taken.Add(i);
-        RetaliationSystem.JoinMates(world, table, i, fighters, taken, Free);
+        JoinMates(world, table, i, t, fighters);
         var targetId = table.IdOf(t);
         world.Defer(new AttackOrder(fighters, targetId) { Tick = world.Tick + 1 });
         Started++;
         if (Settings.RecordLog) log.Add(new AggroEntry(world.Tick, fighters[0], targetId, table.Cold(i)!.Faction, target.Faction, e.Amount, fighters.Count - 1));
+    }
+
+    /// <summary>
+    /// The looker's free squad mates join when the target is within twice their own range R (in the squad's member order). The original shares a squad's sightings
+    /// (<c>GroupSense</c>): a member counts a character a mate saw or heard as seen within 2 R, with no view cone or light test (<c>FUN_140857b10</c>, Observed).
+    /// </summary>
+    void JoinMates(World world, CharacterTable table, int slot, int target, List<CharacterId> fighters)
+    {
+        var squad = table.Cold(slot)!.SquadId >= 0 ? world.Squads.Find(table.Cold(slot)!.SquadId) : null;
+        if (squad is null) return;
+        var at = table.Next[target].Position;
+        foreach (var m in squad.Members)
+        {
+            if (!table.TryResolveNext(m, out int s) || s == slot || !Free(table, s, taken)) continue;
+            float r = 2 * RangeOf(table.Cold(s)!, Settings.SightRange);
+            if (Vector3.DistanceSquared(table.Next[s].Position, at) > r * r) continue;
+            fighters.Add(m);
+            taken.Add(s);
+        }
     }
 
     static bool Free(CharacterTable table, int slot, HashSet<int> taken)
@@ -197,7 +270,7 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         if (taken.Contains(slot) || !table.Next[slot].Alive) return false;
         byte task = table.Next[slot].Task;
         if (task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat or (byte)CharacterTask.Rest) return false;
-        return table.Cold(slot) is { IsPlayer: false, InCombat: false, Fighter: not null, Medical.Incapacitated: false };
+        return table.Cold(slot) is { IsPlayer: false, InCombat: false, Fleeing: false, Fighter: not null, Medical.Incapacitated: false };
     }
 
     // ------------------------------------------------------------------ leash and stand down

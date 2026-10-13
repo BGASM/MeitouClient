@@ -222,7 +222,8 @@ result (the golden hashes pin it):
 | 8 | `AnimationSystem` | Act | Animation layers |
 | 9 | `FeedSystem` | SlowWorld | Eating |
 | 10 | `RetaliationSystem` | SlowWorld | Attacked characters fight back (NPCs always, the player's while idle) |
-| 11 | `AggroSystem` | Schedule, Act, Apply, SlowWorld | NPCs attack enemies of their faction in sight; the leash; back to the routine after a fight; hashes the live relation table ([Hostility](#hostility-and-relations)) |
+| 11 | `AggroSystem` | Schedule, Act, Apply, SlowWorld | NPCs attack enemies of their faction they see or hear (the original's figures); the leash; back to the routine after a fight; hashes the live relation table ([Hostility](#hostility-and-relations)) |
+| 12 | `FleeSystem` | SlowWorld | NPC squads of factions with run-away ratios break and run when beaten, until safe ([Hostility](#hostility-and-relations)) |
 
 The rules: **population first** (it spawns in `SlowWorld`, so later systems see its characters); **player before movement** (a
 `MoveOrder` without ids reads the selection the player system just changed); **pursuit before movement** (pursuit raises `NeedPath` in
@@ -614,7 +615,7 @@ retaliation systems are in `Fighting.cs`.
 
 ### Hostility and relations
 
-An **engine stand-in** for the stage 9 senses and target choice ([ai.md](game/ai.md#senses)); the relation rules are the original's
+An **engine stand-in** for the stage 9 senses and target choice, with the original's sight and hearing figures ([perception.md](game/perception.md)); the relation rules are the original's
 ([factions-squads-towns.md section 3](game/factions-squads-towns.md#3-relations)). Code: `AggroSystem.cs`, `Relations.cs` (`PlayerRelations`), `FactionRelations` in
 `Meitou.Data/Gameplay/FactionData.cs`; tests `AggroTests` (synthetic factions) and `TownAggroTests` (`[Slow]`, the install).
 
@@ -634,26 +635,48 @@ An **engine stand-in** for the stage 9 senses and target choice ([ai.md](game/ai
 - **Who is an enemy** (`AggroSystem.IsEnemy`): A picks a fight with B when A is hostile to B (one way: A's view) and neither lists the other in `coexistence` (**engine
   choice**: what the coexistence flag does in the original is **Unknown**; either side's is enough here). Same faction never (self is 100) and allies never (50 or above is not
   hostile). The "default-hostile faction" test of 3.3 is not used: the smaller-default rule already makes such factions hostile to almost everyone.
-- **The look** (`Act`, parallel, own slot): an awake NPC with a `Fighter`, not fighting, not treating or resting, and not calm, looks once every 15 ticks (slot s on the ticks
-  where tick % 15 = s % 15, so the work is spread over the ticks) for the nearest living, awake character with a body whose faction is an enemy, within **300 units** (30 m;
-  **engine choice**, the original's range is **Unknown**; no CONSTANTS field exists, [game-loop.md](game/game-loop.md)) times its race's `vision range mult` (RACE +0x74,
-  "detection range", [character-stats.md](game/character-stats.md#races); 1 for the humans seen). The grid of the last tick's positions; ties keep the grid's order (lower slot
-  within a cell). It emits one effect. A crowd whose factions present have no enemy among each other skips the looks (worked out when the set of factions present or the
-  table changes). Downed characters and animals (no race, no body, no fighter) are never looked for and never look.
-- **The decision** (`Apply`, serial, commit order): the looker if still free, and its free squad mates within 250 units (the retaliation join rule; never the player's), get
-  an `AttackOrder` for the next tick (`World.Defer`). The target answers through retaliation. **The player's characters never look and never join**: they fight when
-  ordered or, idle, when attacked.
-- **Leash and standing down** (`SlowWorld`, every tick, serial): an NPC's position when it starts a fight (by aggro, retaliation or anything) is kept; beyond **750 units**
+- **The look** (`Act`, parallel, own slot): an awake NPC with a `Fighter`, not fighting, not fleeing, not treating or resting, and not calm, looks once every 15 ticks (slot s
+  on the ticks where tick % 15 = s % 15, so the work is spread over the ticks; **engine choice**: the original refreshes the senses of 8 characters per frame in turn,
+  [perception.md](game/perception.md#1-the-sense-object-and-when-it-updates)) for the nearest living, awake character with a body whose faction is an enemy and that it
+  perceives (2026-10-13, the original's figures, [perception.md](game/perception.md)):
+  - **Sight** (`AggroSystem.Visibility`): R = **1500** units x its race's `vision range mult` (RACE +0x74; 0.5 to 2 in the data), the original's outdoor daylight range
+    (`FUN_140851bc0`); the view cone factor v = (cos a - 0.2) / 0.8 from its facing (`Yaw`), so nothing is seen beyond 78.5 degrees off; seen when v > 0.01 and d <= R x v
+    (`FUN_140852f70`, both characters lit alike, the target not sneaking). Not built: night (x0.5 range and the light terms; the world has no clock yet), weather,
+    buildings (500 inside), stealth (no sneaking in the simulation), line of sight.
+  - **Hearing** (`AggroSystem.NoiseRange`, `HearChance`): a moving target is heard within N = lerp(speed / top speed, 350, 600) with chance 0.75 x (1 - d^2/N^2) per look,
+    rolled from `RngPurpose.Sense` (`FUN_140851d10`, `FUN_140857500`). A standing one makes no noise, so a still enemy behind an NPC goes unnoticed, as in the original.
+  The grid of the last tick's positions; ties keep the grid's order (lower slot within a cell). It emits one effect. A crowd whose factions present have no enemy among
+  each other skips the looks (worked out when the set of factions present or the table changes). Downed characters and animals (no race, no body, no fighter) are never
+  looked for and never look.
+- **The decision** (`Apply`, serial, commit order): the looker if still free, and its free squad mates within **twice their own R** of the target (the original's
+  squad-shared sightings: a target a mate saw or heard counts as seen within 2 R, `GroupSense`, [perception.md](game/perception.md#6-tags-memory-and-the-squads-shared-senses);
+  was 250 units of the looker until 2026-10-13; never the player's), get an `AttackOrder` for the next tick (`World.Defer`). The target answers through retaliation.
+  **The player's characters never look and never join**: they fight when ordered or, idle, when attacked.
+- **Leash and standing down** (`SlowWorld`, every tick, serial): an NPC's position when it starts a fight (by aggro, retaliation or anything) is kept; beyond **3000 units**
   from it the NPC stops (a deferred `StopCommand`) and is calm (no looking) for **20 game seconds**; it still answers an attack. When its fight is over (target down, or
   stopped) it goes back to the task it had before (wander or follow; a go-to becomes idle, which the roaming squads order again; a knocked-out one is left to wake into
-  wandering). All three numbers are engine choices (`AggroSettings`).
+  wandering). Both numbers are engine choices (`AggroSettings`): the original's give-up rule was not found (**Unknown**); the leash is twice the daylight sight (750 until
+  2026-10-13, when the sight was 300) so a fight begun at the edge of sight reaches its target.
 - **What the data gives** (2026-10-13, `TownAggroTests`, base game, residents and bar squads with their looks, 60 game seconds each): The Hub (37 characters), Squin (66),
   Stack (145), Admag (82), Mongrel (160), Shark (78) and Sho-Battai (179) start no fight; Waystation (30) has United Cities attacking The Holy Nation (hostile in the data).
-  The sandbox's foe (Bloodraiders) attacks an idle Nameless character 150 units away and is fought back. In the game (`--new-game "The Cannibal Hunters"`) the Cannibals of the
-  start town attack the player's squad at once; the Wanderer's start in The Hub stays quiet.
-- **Not done:** the original's senses (line of sight, stealth, the KO/ENEMY/ALLY tags, `vision range mult` is the only input taken), its target choice and attack slots,
-  fleeing (`run away ratio...`), guards defending other factions' townsfolk, crimes and bounties ([economy.md](game/economy.md#11-bounties-and-crimes)), wars (slots 7, 8),
-  dialogue relation effects, trust, the drift, animals fighting, NPCs finishing off or looting the downed.
+  The sandbox's foe (Bloodraiders, facing the hero as the game's sandbox places it) attacks an idle Nameless character 150 units away and is fought back. The same holds
+  with the original's sight and hearing (re-run 2026-10-13). In the game (`--new-game "The Cannibal Hunters"`) the Cannibals of the start town attack the player's squad
+  at once; the Wanderer's start in The Hub stays quiet.
+- **Fleeing** (`FleeSystem.cs`, `StandardParts.Flee`, after aggro; serial `SlowWorld`, slot and squad-id order; tests in `AggroTests`). The original's facts are in
+  [perception.md section 7](game/perception.md#7-fleeing): `Task_Runaway`'s movement and end are known, but what makes an ordinary squad run is not (its retreat package is
+  only given to raids, and no reader of the FACTION run-away ratios was found). So:
+  - **When** (**engine reading** of the FACTION fields' names): every 15 ticks, an NPC squad in a fight whose faction has `run away ratio of squad size` r1 or `run away ratio
+    relative to enemy` r2 above 0 breaks when its members standing are fewer than its living members x r1, or fewer than the enemies standing within their sight x r2. 92 of
+    103 factions have both at 0 and fight on; bandit-type factions have 0.2 to 0.5.
+  - **How** (the original's, `Task_Runaway`): every member standing stops fighting (a deferred `StopCommand`) and runs (`GoTo`, speed mode Free, the task's 999 limit) to
+    2000 + 400 r units from the centre of the enemies it sees, on its far side; at its goal (or within 200 of it, or when the path fails) it runs 1000 + 400 r units in a random
+    direction (`RngPurpose.Flee`).
+  - **Until** (the original's end conditions): no enemy standing within its R and nobody attacking it; it then wanders again. A fleeing character (`CharacterCold.Fleeing`,
+    hashed only while set) neither looks for fights nor answers attacks (retaliation skips it; engine reading of the task's urgency). The player's characters never flee.
+- **Not done:** night, weather, buildings, stealth, line of sight and the tags of the original's senses ([perception.md](game/perception.md)), its target choice and attack
+  slots, the squad retreat package for raids, guards defending other factions' townsfolk, crimes and bounties ([economy.md](game/economy.md#11-bounties-and-crimes)), wars
+  (slots 7, 8), dialogue relation effects, trust, the drift, animals fighting, NPCs finishing off or looting the downed. The original's enemy test (Character slot 125) does
+  not consult `coexistence`; the engine keeps it (above) until the place the flag acts is found.
 
 ## Saves
 
@@ -892,7 +915,7 @@ home building, the length of the three zone unload timers, the roaming cap for t
 rules and `squad formation` (pathfinding.md); the attacker's technique choice, `power`, `max encumbrance`, the Heavy_Hit length (combat.md); item
 nutrition, the NPCs' food source, auto-eat, the `main` grid size (character-stats.md); how a start-off's relations, research and `force race` are
 applied; the world states' initial values; the corpse removal rule; the animation selection code (animation.md); the saved quaternion's
-convention and whether the original loads a save written from nothing (save.md); the navmesh items in [pathfinding.md](game/pathfinding.md); the senses' range and rules,
+convention and whether the original loads a save written from nothing (save.md); the navmesh items in [pathfinding.md](game/pathfinding.md); the senses' unknowns, the leash and the run-away ratios ([perception.md](game/perception.md#unknowns)),
 which game events use which relation event kind, what the coexistence flag does, the Passive toggle's default (ai.md, factions-squads-towns.md, [Hostility](#hostility-and-relations)).
 
 **Engine gaps**: the AI (stage 9), towns and their state, the economy, buildings, the UI screens, the host's use of saves, combat clips and ranged

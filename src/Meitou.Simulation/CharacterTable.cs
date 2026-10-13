@@ -91,6 +91,8 @@ public sealed class CharacterCold
     public float FootprintRadius { get; set; }
     /// <summary>The character is in a fight (set by the combat system): the animation stance takes the combat clips.</summary>
     public bool InCombat { get; set; }
+    /// <summary>The character is running away (set and cleared by the <see cref="FleeSystem"/>, serial phases only): it neither looks for fights nor answers attacks.</summary>
+    public bool Fleeing { get; set; }
     /// <summary>Weapon and worn armour (track F, docs/simulation.md "Combat").</summary>
     public Meitou.Simulation.Combat.Fighter? Fighter { get; set; }
     /// <summary>The patient of the <see cref="CharacterTask.Treat"/> task (itself for self-treatment); meaningful only while the task is set (<see cref="FirstAid.FirstAidSystem"/>).</summary>
@@ -273,6 +275,7 @@ public sealed class CharacterTable
             // First aid state adds to the hash only while it is set, so worlds that never use it hash as before.
             if (c.Task == (byte)CharacterTask.Treat) { hasher.Add(k.TreatTarget); hasher.Add((int)k.ResumeTask); }
             if (k.MedicJob) hasher.Add(true);
+            if (k.Fleeing) hasher.Add(0x466C6565);   // only while set, so worlds without fleeing hash as before
         }
         hasher.Add(free.Count);
         foreach (int slot in free) hasher.Add(slot);

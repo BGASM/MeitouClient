@@ -22,8 +22,10 @@ public enum StandardParts
     FirstAid = 512,
     /// <summary>Fights started by faction hostility, the leash and standing down (<see cref="AggroSystem"/>); with it the player's assaults and killings change the relations.</summary>
     Aggro = 1024,
+    /// <summary>NPC squads running away from a lost fight (<see cref="FleeSystem"/>), by the relations of the data.</summary>
+    Flee = 2048,
     /// <summary>What the game runs.</summary>
-    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro,
+    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee,
 }
 
 /// <summary>What <see cref="StandardSystems.Build"/> builds and with which settings; the defaults are the game's.</summary>
@@ -76,7 +78,8 @@ public sealed class StandardSystemSet
 /// (animation is placed after combat in the game's order, and the golden hashes pin it). Moving the swap to a separate end-of-tick hook would change what retaliation reads.</item>
 /// <item><b>Feed after body</b>: the game's order; eating reads hunger the body system advanced in the same tick.</item>
 /// <item><b>Retaliation, then aggro, last</b>: both defer <c>AttackOrder</c>s for the next tick (<see cref="World.Defer"/>) after combat has swapped its arrays; aggro's
-/// leash sweep sees the tasks every other system left, and its look (<c>Act</c>) runs after combat's, reading only the last tick's positions.</item>
+/// leash sweep sees the tasks every other system left, and its look (<c>Act</c>) runs after combat's, reading only the last tick's positions.
+/// <b>Flee after aggro</b>: a squad that breaks sends its runners off after every fight of the tick was ordered, and its stop orders are deferred like theirs.</item>
 /// </list>
 /// An extra system a test wants (a probe, a poke) goes after these.
 /// </summary>
@@ -92,7 +95,7 @@ public static class StandardSystems
         CombatSystem? combat = null;
         if (Has(StandardParts.Population)) systems.Add(population = new PopulationSystem(data, o.Population));
         if (Has(StandardParts.Player)) systems.Add(new PlayerSystem());
-        if (Has(StandardParts.Pursuit | StandardParts.Combat | StandardParts.Retaliation))
+        if (Has(StandardParts.Pursuit | StandardParts.Combat | StandardParts.Retaliation | StandardParts.Flee))
             combat = new CombatSystem(data.Combat.Techniques, data.Combat.Constants, data.Bodies.Constants, data.BodyOptions, o.AnimationLengths ?? new AnimationLengths(), o.Combat);
         if (combat is not null && Has(StandardParts.Aggro)) combat.Relations = data.Relations;
         if (Has(StandardParts.Pursuit)) systems.Add(new PursuitSystem(combat!));
@@ -110,6 +113,7 @@ public static class StandardSystems
         if (Has(StandardParts.Retaliation)) systems.Add(new RetaliationSystem(combat!));
         AggroSystem? aggro = null;
         if (Has(StandardParts.Aggro)) systems.Add(aggro = new AggroSystem(data.Relations, o.Aggro));
+        if (Has(StandardParts.Flee)) systems.Add(new FleeSystem(data.Relations, combat!, o.Aggro?.SightRange ?? AggroSystem.OutdoorSight));
         return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro };
     }
 }

@@ -111,11 +111,18 @@ public class AggroTests
         public FactionRelations Relations { get; } = relations;
         public void Dispose() => World.Dispose();
 
-        public Squad Squad(int faction, Vector2 home, params Vector2[] at)
+        public Squad Squad(int faction, Vector2 home, params Vector2[] at) => FacingSquad(faction, home, null, at);
+
+        /// <summary>A squad whose members face <paramref name="face"/> (null: yaw 0, along +Z); the original's NPCs see only ahead (the view cone) and hear only movers.</summary>
+        public Squad FacingSquad(int faction, Vector2 home, Vector2? face, params Vector2[] at) =>
+            SquadOf(faction, home, false, [.. at.Select(p => (p, face is { } f ? MathF.Atan2(f.X - p.X, f.Y - p.Y) : 0f))]);
+
+        /// <summary>A squad with each member's position and yaw; <paramref name="idle"/> makes them stand (no wandering, so they make no noise).</summary>
+        public Squad SquadOf(int faction, Vector2 home, bool idle, params (Vector2 At, float Yaw)[] members)
         {
             var squad = new Squad { Id = World.Squads.NextId(), TemplateId = "t", Faction = faction, HomeCentre = home, HomeRadius = 30 };
             World.Squads.Add(squad);
-            foreach (var p in at)
+            foreach (var (p, yaw) in members)
             {
                 var cold = new Combatant { Name = $"f{faction}-{squad.Members.Count}" }.MakeCold();
                 cold.Faction = faction;
@@ -123,8 +130,8 @@ public class AggroTests
                 bool leader = squad.Members.Count == 0;
                 var id = World.Characters.Spawn(new CharacterHot
                 {
-                    Position = new Vector3(p.X, 150, p.Y), Health = 100, MaxSpeed = 60, WalkSpeed = 15,
-                    Task = (byte)(leader ? CharacterTask.Wander : CharacterTask.Follow), TaskTime = 1,
+                    Position = new Vector3(p.X, 150, p.Y), Health = 100, MaxSpeed = 60, WalkSpeed = 15, Yaw = yaw,
+                    Task = (byte)(idle ? CharacterTask.Idle : leader ? CharacterTask.Wander : CharacterTask.Follow), TaskTime = 1,
                 }, cold, 0);
                 squad.Members.Add(id);
                 if (leader) squad.Leader = id;
@@ -144,7 +151,7 @@ public class AggroTests
         public CharacterId TargetOf(CharacterId id) { var s = Combat.StateOf(id); return new CharacterId(s.TargetSlot, s.TargetGeneration); }
     }
 
-    static Arena Make(ulong seed, int threads, FactionRelations? relations = null, AggroSettings? settings = null, int minPartition = 1)
+    static Arena Make(ulong seed, int threads, FactionRelations? relations = null, AggroSettings? settings = null, int minPartition = 1, bool flee = false)
     {
         relations ??= Relations();
         var combat = new CombatSystem(KatanaTechniques(), Constants, BaseGame, BodyOptions.Default, DuelFixture.Lengths, new CombatOptions { SelfApproach = false, TickMedical = false, RecordLog = true })
@@ -154,7 +161,8 @@ public class AggroTests
         var aggro = new AggroSystem(relations, settings ?? new AggroSettings { RecordLog = true });
         var walk = new OpenGroundWalkability((_, _) => 150);
         var world = new SimWorld(new WorldSettings { Seed = seed, Threads = threads, PublishSnapshots = false, MinPartitionSize = minPartition }, walk,
-            [new PursuitSystem(combat), new MovementSystem(new PathService(walk, true)), new BodySystem(BaseGame), combat, new RetaliationSystem(combat), aggro]);
+            flee ? [new PursuitSystem(combat), new MovementSystem(new PathService(walk, true)), new BodySystem(BaseGame), combat, new RetaliationSystem(combat), aggro, new FleeSystem(relations, combat)]
+                 : [new PursuitSystem(combat), new MovementSystem(new PathService(walk, true)), new BodySystem(BaseGame), combat, new RetaliationSystem(combat), aggro]);
         return new Arena(world, combat, aggro, relations);
     }
 
@@ -201,7 +209,7 @@ public class AggroTests
         using var a = Make(4, 1);
         var o = new Vector2(2000, 2000);
         var raiders = a.Squad(Raiders, o, o);
-        var villagers = a.Squad(Villagers, o + new Vector2(400, 0), o + new Vector2(400, 0));
+        var villagers = a.Squad(Villagers, o + new Vector2(2000, 0), o + new Vector2(2000, 0));   // beyond sight (1500) and hearing (600)
         var down = a.Squad(Villagers, o + new Vector2(0, 100), o + new Vector2(0, 100));
         a.World.Characters.Cold(down.Members[0].Slot)!.Medical!.KnockOut(3600);
         a.World.RunTicks(90);
@@ -215,7 +223,7 @@ public class AggroTests
     {
         using var a = Make(5, 1, settings: new AggroSettings { RecordLog = true, LeashRange = 200, CalmSeconds = 30 });
         var o = new Vector2(2000, 2000);
-        var raiders = a.Squad(Raiders, o, o);
+        var raiders = a.FacingSquad(Raiders, o, o + new Vector2(200, 0), o);
         var raider = raiders.Members[0];
         var me = a.PlayerCharacter(o + new Vector2(200, 0));
         a.World.RunTicks(20);
@@ -240,7 +248,7 @@ public class AggroTests
     {
         using var a = Make(6, 1);
         var o = new Vector2(2000, 2000);
-        a.Squad(Raiders, o, o);
+        a.FacingSquad(Raiders, o, o + new Vector2(120, 0), o);
         var idle = a.PlayerCharacter(o + new Vector2(120, 0));
         a.World.RunTicks(60);
         Assert.True(a.Fighting(idle), "the idle player character fights back");
@@ -249,7 +257,7 @@ public class AggroTests
         Assert.Equal(-60, a.Relations.Get(Raiders, Player));
 
         using var b = Make(6, 1);
-        b.Squad(Raiders, o, o);
+        b.FacingSquad(Raiders, o, o + new Vector2(120, 0), o);
         var busy = b.PlayerCharacter(o + new Vector2(120, 0));
         b.World.Commands.Enqueue(new MoveOrder([busy], new Vector3(2120, 150, 6000)) { Tick = 0 });
         b.World.RunTicks(60);
@@ -282,6 +290,210 @@ public class AggroTests
         // Now another squad of theirs, which nobody attacked (the victims' mates join them anyway), picks the fight with the player by itself.
         a.World.RunTicks(30);
         Assert.Contains(a.Aggro.Log, e => e.Attacker == watch.Members[0] && e.Target == me);
+    }
+
+    // ------------------------------------------------------------------ the original's senses (docs/game/perception.md)
+
+    [Fact]
+    public void Sight_follows_the_originals_daylight_cone_and_range()
+    {
+        var eye = Vector3.Zero;
+        const float R = AggroSystem.OutdoorSight;
+        Assert.Equal(1500, R);
+        // Straight ahead (yaw 0 looks along +Z): seen out to R, not beyond.
+        Assert.Equal(1, AggroSystem.Visibility(eye, 0, new Vector3(0, 0, 1499), R), 4);
+        Assert.Equal(0, AggroSystem.Visibility(eye, 0, new Vector3(0, 0, 1501), R));
+        // 45 degrees off: v = (cos 45 - 0.2) / 0.8 = 0.6339, so seen to 0.6339 R only.
+        float v45 = (MathF.Sqrt(0.5f) - 0.2f) / 0.8f;
+        var dir45 = Vector3.Normalize(new Vector3(1, 0, 1));
+        Assert.Equal(v45, AggroSystem.Visibility(eye, 0, dir45 * (R * v45 - 1), R), 4);
+        Assert.Equal(0, AggroSystem.Visibility(eye, 0, dir45 * (R * v45 + 1), R));
+        // The cone's edge is where cos a = 0.2 (78.5 degrees): to the side and behind nothing is seen, however near.
+        Assert.Equal(0, AggroSystem.Visibility(eye, 0, new Vector3(50, 0, 0), R));
+        Assert.Equal(0, AggroSystem.Visibility(eye, 0, new Vector3(0, 0, -50), R));
+        float edge = MathF.Acos(0.2f);
+        Assert.True(AggroSystem.Visibility(eye, 0, new Vector3(MathF.Sin(edge - 0.05f), 0, MathF.Cos(edge - 0.05f)) * 10, R) > 0);
+        Assert.Equal(0, AggroSystem.Visibility(eye, 0, new Vector3(MathF.Sin(edge + 0.01f), 0, MathF.Cos(edge + 0.01f)) * 10, R));
+        // The yaw turns the cone: facing +X (yaw pi/2) the character east is ahead.
+        Assert.Equal(1, AggroSystem.Visibility(eye, MathF.PI / 2, new Vector3(1000, 0, 0), R), 4);
+        // Without a race the multiplier is 1.
+        Assert.Equal(1500, AggroSystem.RangeOf(new CharacterCold(), R));
+    }
+
+    [Fact]
+    public void Hearing_follows_the_originals_noise_range_and_odds()
+    {
+        Assert.Equal(0, AggroSystem.NoiseRange(0, 60));                   // standing still makes no noise
+        Assert.Equal(350, AggroSystem.NoiseRange(0.02f, 1e6f), 1);        // creeping: the near end
+        Assert.Equal(475, AggroSystem.NoiseRange(30, 60), 3);             // half speed: halfway
+        Assert.Equal(600, AggroSystem.NoiseRange(60, 60), 3);             // top speed
+        Assert.Equal(0.75f, AggroSystem.HearChance(0, 600), 5);
+        Assert.Equal(0.75f * 0.75f, AggroSystem.HearChance(300, 600), 5); // 1 - (1/2)^2
+        Assert.Equal(0, AggroSystem.HearChance(600, 600));
+        Assert.Equal(0, AggroSystem.HearChance(10, 0));
+    }
+
+    [Fact]
+    public void An_npc_sees_far_ahead_but_not_a_still_enemy_behind_it_and_hears_a_moving_one()
+    {
+        var o = new Vector2(2000, 2000);
+        // Yaw 0 looks along +Z. Ahead at 1400 (inside 1500): seen.
+        using (var a = Make(21, 1))
+        {
+            a.SquadOf(Raiders, o, true, (o, 0f));
+            var villager = a.SquadOf(Villagers, o, true, (o + new Vector2(0, 1400), 0f)).Members[0];
+            a.World.RunTicks(30);
+            Assert.Contains(a.Aggro.Log, e => e.Target == villager && e.Distance > 1300);
+        }
+        // Behind at 300, standing still: neither seen nor heard.
+        using (var a = Make(22, 1))
+        {
+            a.SquadOf(Raiders, o, true, (o, 0f));
+            a.SquadOf(Villagers, o, true, (o - new Vector2(0, 300), 0f));
+            a.World.RunTicks(150);
+            Assert.Empty(a.Aggro.Log);
+        }
+        // Behind, walking past within the noise range: heard sooner or later (0.75 x (1 - d^2/N^2) a look).
+        using (var a = Make(23, 1))
+        {
+            a.SquadOf(Raiders, o, true, (o, 0f));
+            var walker = a.PlayerCharacter(o - new Vector2(200, 300));
+            a.World.Commands.Enqueue(new MoveOrder([walker], new Vector3(2200, 150, 1700)) { Tick = 0 });
+            a.World.RunTicks(150);
+            Assert.Contains(a.Aggro.Log, e => e.Target == walker);
+        }
+    }
+
+    [Fact]
+    public void Squad_mates_join_within_twice_their_sight_of_the_target()
+    {
+        using var a = Make(24, 1);
+        var o = new Vector2(2000, 2000);
+        // The leader sees a villager 1000 ahead; one mate is 2900 from it (inside 2 x 1500), one 3200 (outside). The mates face away.
+        var raiders = a.SquadOf(Raiders, o, true, (o, 0f), (o - new Vector2(0, 1900), MathF.PI), (o - new Vector2(0, 2200), MathF.PI));
+        a.SquadOf(Villagers, o, true, (o + new Vector2(0, 1000), 0f));
+        a.World.RunTicks(16);
+        var first = Assert.Single(a.Aggro.Log);
+        Assert.Equal(raiders.Members[0], first.Attacker);
+        Assert.Equal(1, first.Joined);
+        Assert.True(a.Fighting(raiders.Members[1]));
+        Assert.False(a.Fighting(raiders.Members[2]));
+    }
+
+    // ------------------------------------------------------------------ fleeing
+
+    const int Bandits = 8;
+
+    /// <summary><see cref="Relations"/> plus bandits (8): hostile to the villagers, with the given run-away ratios.</summary>
+    static FactionRelations FleeRelations(float bySize = 0.5f, float byEnemy = 0)
+    {
+        var list = Relations().Factions.ToList();
+        list.Add(new FactionData
+        {
+            Id = "bandits", Name = "bandits", Relations = new Dictionary<string, int> { ["villagers"] = -80 },
+            RunAwayRatioOfSquadSize = bySize, RunAwayRatioRelativeToEnemy = byEnemy,
+        });
+        var table = FactionRelations.Build(list);
+        table.PlayerFaction = Player;
+        return table;
+    }
+
+    /// <summary>Four bandits face three villagers 100 units north; the villagers give up a chase 400 units from where it began.</summary>
+    static (Arena Arena, Squad Bandits, Squad Villagers) Ambush(ulong seed, int threads, FactionRelations relations)
+    {
+        var a = Make(seed, threads, relations, new AggroSettings { RecordLog = true, LeashRange = 400 }, flee: true);
+        var o = new Vector2(2000, 2000);
+        var bandits = a.FacingSquad(Bandits, o, o + new Vector2(0, 100), o, o + new Vector2(20, 0), o + new Vector2(-20, 0), o + new Vector2(40, 0));
+        var villagers = a.FacingSquad(Villagers, o + new Vector2(0, 100), o, o + new Vector2(0, 100), o + new Vector2(20, 100), o + new Vector2(-20, 100));
+        return (a, bandits, villagers);
+    }
+
+    [Fact]
+    public void A_beaten_squad_of_a_faction_that_runs_flees_away_from_its_enemies_and_stops_once_safe()
+    {
+        var (a, bandits, villagers) = Ambush(31, 1, FleeRelations());
+        using var _ = a;
+        a.World.RunTicks(20);
+        Assert.All(bandits.Members, m => Assert.True(a.Fighting(m)));
+        // Three of the four go down: one standing is fewer than half of four, so the squad breaks at the next check.
+        foreach (var m in bandits.Members.Take(3)) a.World.Characters.Cold(m.Slot)!.Medical!.KnockOut(3600);
+        var runner = bandits.Members[3];
+        int t = 0;
+        while (t < 30 && !a.World.Characters.Cold(runner.Slot)!.Fleeing) { a.World.RunTick(); t++; }
+        Assert.True(a.World.Characters.Cold(runner.Slot)!.Fleeing, "the last bandit standing runs");
+        var goal = a.World.Characters.Previous[runner.Slot].Goal;
+        Assert.Equal((byte)CharacterTask.GoTo, a.World.Characters.Previous[runner.Slot].Task);
+        // Task_Runaway: 2000 to 2400 from the centre of the enemies it sees, on its far side (the villagers are north, +Z).
+        var centre = Vector2.Zero;
+        foreach (var v in villagers.Members) centre += new Vector2(a.World.Characters.Previous[v.Slot].Position.X, a.World.Characters.Previous[v.Slot].Position.Z);
+        centre /= villagers.Members.Count;
+        Assert.InRange(Vector2.Distance(goal, centre), 1999, 2401);
+        Assert.True(goal.Y < 2000, $"it runs away from the villagers, not past them: {goal}");
+        a.World.RunTick();
+        Assert.False(a.Fighting(runner));
+        // It neither answers the villagers' blows nor looks for a fight while it runs; once nobody is near and nobody attacks it, it stops running.
+        int ended = -1;
+        for (int i = 0; i < 3000 && ended < 0; i++)
+        {
+            a.World.RunTick();
+            if (a.World.Characters.Cold(runner.Slot)!.Fleeing) Assert.NotEqual((byte)CharacterTask.Attack, a.World.Characters.Previous[runner.Slot].Task);
+            else ended = i;
+        }
+        Assert.True(ended >= 0, "the flight ends");
+        Assert.Equal((byte)CharacterTask.Wander, a.World.Characters.Previous[runner.Slot].Task);
+        foreach (var v in villagers.Members)
+            Assert.True(Vector3.Distance(a.World.Characters.Previous[v.Slot].Position, a.World.Characters.Previous[runner.Slot].Position) > 1450);
+    }
+
+    [Fact]
+    public void A_faction_whose_ratios_are_zero_fights_on()
+    {
+        var (a, bandits, _) = Ambush(32, 1, FleeRelations(bySize: 0, byEnemy: 0));
+        using var _a = a;
+        a.World.RunTicks(20);
+        foreach (var m in bandits.Members.Take(3)) a.World.Characters.Cold(m.Slot)!.Medical!.KnockOut(3600);
+        a.World.RunTicks(60);
+        Assert.False(a.World.Characters.Cold(bandits.Members[3].Slot)!.Fleeing);
+        Assert.Equal(0, a.World.Systems.OfType<FleeSystem>().Single().Fled);
+    }
+
+    [Fact]
+    public void Outnumbered_by_the_ratio_relative_to_enemy_a_squad_runs()
+    {
+        // Two bandits standing of four (not below half of four x 0, the size rule is off) against three villagers in sight, ratio 0.5: 2 >= 1.5, no flight;
+        // a third bandit down leaves 1 < 1.5, and the squad runs.
+        var (a, bandits, _) = Ambush(33, 1, FleeRelations(bySize: 0, byEnemy: 0.5f));
+        using var _a = a;
+        a.World.RunTicks(20);
+        foreach (var m in bandits.Members.Take(2)) a.World.Characters.Cold(m.Slot)!.Medical!.KnockOut(3600);
+        a.World.RunTicks(30);
+        Assert.False(a.World.Characters.Cold(bandits.Members[3].Slot)!.Fleeing);
+        a.World.Characters.Cold(bandits.Members[2].Slot)!.Medical!.KnockOut(3600);
+        a.World.RunTicks(30);
+        Assert.True(a.World.Characters.Cold(bandits.Members[3].Slot)!.Fleeing);
+    }
+
+    static List<ulong> FleeHashes(int threads)
+    {
+        var (a, bandits, _) = Ambush(34, threads, FleeRelations());
+        using var _a = a;
+        var hashes = new List<ulong>();
+        foreach (int target in new[] { 20, 45, 200, 600 })
+        {
+            a.World.RunTicks(target - (int)a.World.Tick);
+            if (target == 20) foreach (var m in bandits.Members.Take(3)) a.World.Characters.Cold(m.Slot)!.Medical!.KnockOut(3600);
+            hashes.Add(a.World.StateHash());
+        }
+        Assert.True(a.World.Systems.OfType<FleeSystem>().Single().Fled > 0);
+        return hashes;
+    }
+
+    [Fact]
+    public void Fleeing_hashes_the_same_at_1_4_and_16_threads()
+    {
+        var one = FleeHashes(1);
+        Assert.Equal(one, FleeHashes(4));
+        Assert.Equal(one, FleeHashes(16));
     }
 
     internal static List<ulong> Hashes(int threads, int minPartition = 1) => Hashes(threads, out _, minPartition);

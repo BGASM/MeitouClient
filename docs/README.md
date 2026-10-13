@@ -43,6 +43,7 @@ game content (dialogue text, large dumps) here; identifiers, counts and byte lay
 | [game/combat.md](game/combat.md) | Combat: the CONSTANTS tuning, weapons, technique choice, block and dodge, armour, the hit pipeline, KO, bleeding and death, ranged weapons and turrets, combat XP |
 | [game/ai.md](game/ai.md) | AI: AI_PACKAGE / AI_TASK records, the squad Blackboard, the per-character decision loop, the GOAP planner, jobs and player orders, unloaded squads, senses, dialogue triggers |
 | [game/ai-tasks.md](game/ai-tasks.md) | AI tables: `taskType` to task class, the TaskData registry, state type ids |
+| [game/perception.md](game/perception.md) | Senses and fleeing: vision range, view cone, light, weather and stealth, hearing, squad-shared sightings, the update rate, running away, squad retreat, the run-away ratios |
 | [game/factions-squads-towns.md](game/factions-squads-towns.md) | Factions and relations, squad templates and how squads are created and spawned, towns, debris, loot and building contents |
 | [game/pathfinding.md](game/pathfinding.md) | Pathfinding: the Havok navmesh manager, `navtiles` tiles, runtime generation, path queries, movement speeds, off-screen movement |
 | [game/economy.md](game/economy.md) | Economy: money, item value and unit price, trader and town market factors, buying, selling and fencing, shop stock and restock, blueprints and research cost, bounties, slaves and prisoners, loot |

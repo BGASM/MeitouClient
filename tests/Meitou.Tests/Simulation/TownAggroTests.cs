@@ -104,7 +104,7 @@ public class TownAggroTests(ITestOutputHelper output)
         var population = new PopulationSystem(data, new PopulationSettings());
         using var world = new SimWorld(new WorldSettings { Seed = 3, PublishSnapshots = false }, walk, systems.Systems);
         var me = population.SpawnSandbox(world, record, new Vector2(5000, 5000), player: true);
-        var foe = population.SpawnSandbox(world, record, new Vector2(5150, 5000), player: false);
+        var foe = population.SpawnSandbox(world, record, new Vector2(5150, 5000), player: false, yaw: -MathF.PI / 2);   // facing the player, as in the game's sandbox
         var table = world.Characters;
         int mine = table.Cold(me.Slot)!.Faction, theirs = table.Cold(foe.Slot)!.Faction;
         Assert.True(AggroSystem.IsEnemy(data.Relations, theirs, mine), "the sandbox's foe is of a faction hostile to the player's");

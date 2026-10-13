@@ -109,7 +109,7 @@ public sealed class RetaliationSystem(CombatSystem combat) : ITickSystem
         if (taken.Contains(slot)) return false;
         byte task = table.Next[slot].Task;
         if (task == (byte)CharacterTask.Attack) return false;
-        if (table.Cold(slot) is not { Fighter: not null, Medical.Incapacitated: false } cold) return false;
+        if (table.Cold(slot) is not { Fighter: not null, Fleeing: false, Medical.Incapacitated: false } cold) return false;
         return !cold.IsPlayer || task == (byte)CharacterTask.Idle;
     }
 }

@@ -319,6 +319,11 @@ Debug panel `FUN_1407981b0` lists (**Observed**): SENSE_CANT_SEE, KO, ENEMY, ALL
 ST_INTRUDER, ST_PRISONER, ST_CRIMINAL; long-term perception LT_MY_INTRUDER, LT_MY_LIFESAVER, LT_FREED_ME, LT_STOLE_FROM_ME,
 LT_DEFEATED_MY_SQUAD_ONCE, LT_SQUAD_LOST_TO_ME_ONCE, LT_KILLED_MY_FRIEND, LT_I_SCREWED_THIS_GUY, LT_MY_CAPTOR, LT_FRIENDLY_AQUAINTANCE.
 
+How the senses work (vision range 1500 x race `vision range mult`, the view cone, light, weather, stealth, hearing, the squad's
+`GroupSense`, the update rate) and how characters run away (`Task_Runaway`, going home, the "Retreat and refresh" package, the FACTION
+run-away ratios) are in [perception.md](perception.md). The sense update runs inside `AI::vfunc_4` before the task system thinks, and
+state 6 `isNoEnemiesInVicinity` is the sense object's enemy count being 0.
+
 ## Dialogue and AI
 
 - A TaskData can require a dialogue event (+0x130); characters lacking it skip the task (**Observed**).
