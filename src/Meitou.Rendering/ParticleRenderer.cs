@@ -250,6 +250,9 @@ public sealed unsafe class ParticleRenderer : IDisposable
             }
     }
 
+    /// <summary>Engine choice (2026-10-12, the user's taste): weather effects drawn fainter than the game's data says. Vain's red rain (`Kenshi_red_Rain`) at half its opacity.</summary>
+    static float EffectOpacity(string effect) => effect.Equals("Kenshi_red_Rain", StringComparison.OrdinalIgnoreCase) ? 0.5f : 1;
+
     public void Update(double seconds, WorldCamera camera)
     {
         long start = Stopwatch.GetTimestamp();
@@ -433,7 +436,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
                 // Built in ordinary memory and copied over in one go: the frame constants are write-combined upload memory, where per-field
                 // writes and the partition's reads are slow (this was 5 ms for 18000 particles).
                 if (scratch.Length < n) scratch = new ParticleInstance[Math.Max(n, scratch.Length * 2)];
-                int written = sim.Collect(t, scratch.AsSpan(0, n), u.Tint, u.Alpha, offset);
+                int written = sim.Collect(t, scratch.AsSpan(0, n), u.Tint, u.Alpha * EffectOpacity(u.Effect.Name), offset);
                 if (written == 0) continue;
                 int close = PartitionByDepth(scratch.AsSpan(0, written), forward, nearPlane);
                 var instances = constants.Allocate((ulong)(written * InstanceBytes), 16);

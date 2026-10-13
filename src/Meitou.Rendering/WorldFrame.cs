@@ -249,7 +249,7 @@ sealed class WorldOptions
         Keys: left drag orbit, right drag look around, wheel zoom, W/A/S/D free fly along the view, Q/E down/up (Shift faster, Ctrl slower),
           T textures, N normal maps, O objects, F foliage, X wireframe, V debug view,
           G water, R water reflections, , / . time of day -/+ 1 hour (the day follows midnight), [ / ] game day -/+ 1 (the weather catches up), \ cycle the forced weather (auto, then each WEATHER record), H print camera, Ctrl+C copy camera code, Ctrl+V go to camera code, P save screenshot, Tab settings sliders, Alt+Enter borderless full screen, Esc quit.
-          F1 Meitou on / off (every switch Faithful, then back as they were; the Tab panel sets them one by one); - / = exposure; F9 fps counter, F10 key list, F11 frame statistics, F12 profiler (gpu, cpu, off).
+          F1 Meitou on / off (every switch Faithful, then back as they were; the Tab panel sets them one by one), Ctrl+F1 flips each switch in turn, 1 s apart (again stops); - / = exposure; F9 fps counter, F10 key list, F11 frame statistics, F12 profiler (gpu, cpu, off).
           Num1-9 cut to a camera key, Ctrl+Num1-9 save the camera as key 1-9, NumEnter fly through the keys (Shift: record PNG frames), Num0 loop, Num+ / Num- slower / faster, Num* clean picture (letterbox), Num/ time of day follows the keys, Num. list keys (Ctrl: delete all), PageUp / PageDown zoom lens, Home lens back to 50 deg, F2 camera timeline editor (Space play, Del delete key).
         """;
 
@@ -1026,8 +1026,6 @@ static class WorldFrame
         if (fifthCascade is not null) (toggles ??= []).Add(fifthCascade);
         // The billboard (impostor atlas) disk cache: deleted files are baked again when next needed; the resident atlases stay until evicted.
         var actions = new List<PanelAction>();
-        if (g.Weather is { } weather)
-            actions.Add(new PanelAction("Reroll weather", weather.RerollQuestion, weather.Reroll));
         if (g.Foliage?.ImpostorDiskCache is { } cache)
             actions.Add(new PanelAction("Delete billboard cache", () =>
             {
@@ -1049,7 +1047,10 @@ static class WorldFrame
                 Text: v => (int)MathF.Round(v) is var level && level != terrainLevel
                     ? $"{Meitou.Data.Textures.TextureQuality.Labels[level]} (terrain at start)" : Meitou.Data.Textures.TextureQuality.Labels[level]),
         };
-        return new SettingsPanel(ui, "Settings   (Tab hides this)", sliders, toggles, "Meitou improvements (unticked: as the game)", actions, side);
+        // The camera region's weathers of its season (the current one marked): a click starts one now.
+        var choices = new List<PanelChoice>();
+        if (g.Weather is { } weather) choices.Add(new PanelChoice(weather.ChoiceLabel, weather.Choices, weather.Current, weather.Choose));
+        return new SettingsPanel(ui, "Settings   (Tab hides this)", sliders, toggles, "Meitou improvements (unticked: as the game)", actions, side, choices);
     }
 
     /// <summary>An hour as <c>HH:MM</c>.</summary>

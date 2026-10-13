@@ -52,6 +52,19 @@ public sealed class CameraRig
         states.Snap(Strategy.State);
     }
 
+    /// <summary>
+    /// Cuts to the free camera at <paramref name="from"/>'s eye looking the same way (a host's camera handed back, e.g. after the
+    /// cinematic camera flew it: only the free camera can stand at any eye); with <paramref name="strategy"/> it then leaves free flight
+    /// as <c>;</c> does (the pivot where the view meets the ground).
+    /// </summary>
+    public void TakeOver(CameraState from, bool strategy)
+    {
+        Free.Enter(from);
+        IsFree = true;
+        if (strategy) Toggle();
+        states.Snap(IsFree ? Free.State : Strategy.State);
+    }
+
     /// <summary>Moves the strategy pivot without a cut: the view keeps its own yaw, pitch and boom, and the next tick blends from where it was (a camera that follows).</summary>
     public void MovePivot(Vector2 pivotXZ) => Strategy.Place(pivotXZ, Strategy.Yaw, Strategy.Pitch, Strategy.Distance);
 

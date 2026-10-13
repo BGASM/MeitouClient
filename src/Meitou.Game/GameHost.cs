@@ -39,6 +39,9 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
     readonly Stopwatch realTime = Stopwatch.StartNew();
     Meitou.Rendering.Upscalers.Streamline? streamline;
     bool screenshotRequested;
+    // The interactive run's animation clock (foliage sway, clouds, water): the frame steps, which are exact while the cinema records; off, the real time.
+    double animSeconds;
+    bool animClock;
     // Draw-list state (GameHost.Characters.cs): the previous snapshot indexed by id, and the last camera focus sent to the world.
     WorldSnapshot? indexedFor;
     readonly Dictionary<CharacterId, CharacterSnapshot> previousById = [];
@@ -186,7 +189,8 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
 
     void DrawWorld(int width, int height)
     {
-        if (gpu.Foliage is { } foliage && o.Screenshot is null) foliage.SwaySeconds = realTime.Elapsed.TotalSeconds;
+        double seconds = animClock ? animSeconds : realTime.Elapsed.TotalSeconds;
+        if (gpu.Foliage is { } foliage && o.Screenshot is null) foliage.SwaySeconds = seconds;
         // The heat haze's gameTime: game hours since the start (it stops while paused, as in the game).
         gpu.GameHours = session.Clock.HoursSinceStart;
         // The weather's three time bases: the game day and time of day (the hour below), the game speed (the last non-zero one while paused) and the paused flag.
@@ -198,7 +202,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             weather.Paused = sim.IsPaused;
             weather.GameSpeed = (float)(sim.Speed > 0 ? sim.Speed : sim.LastNonZeroSpeed);
         }
-        WorldFrame.Draw(gpu, scene, camera, render, width, height, (float)session.Clock.HourOfDay, (float)realTime.Elapsed.TotalSeconds / 600f, o.FogDistance);
+        WorldFrame.Draw(gpu, scene, camera, render, width, height, (float)session.Clock.HourOfDay, (float)seconds / 600f, o.FogDistance);
     }
 
 }

@@ -255,7 +255,7 @@ static partial class WorldApp
         int day = o.Day ?? 0;
         // The animation clock (clouds, particles, water): real seconds, or exact frame steps while the cinema records.
         double animSeconds = 0;
-        var cinema = new Cinema(() => camera, () => hour, v => hour = v, () => BorderlessFullScreen.IsOn(window), () => BorderlessFullScreen.Toggle(window));
+        var cinema = new Cinema(() => camera, () => hour, v => hour = v, () => BorderlessFullScreen.IsOn(window), () => BorderlessFullScreen.Toggle(window), Cinema.ViewerFile);
         cinema.Load();
         if (o.PlayShots) cinema.PlayLoop();
         Vector2? lastMouse = null;
@@ -364,10 +364,11 @@ static partial class WorldApp
             bool ctrl = keyboard is not null && (keyboard.IsKeyPressed(Key.ControlLeft) || keyboard.IsKeyPressed(Key.ControlRight));
             bool shift = keyboard is not null && (keyboard.IsKeyPressed(Key.ShiftLeft) || keyboard.IsKeyPressed(Key.ShiftRight));
             if (key == Key.Enter && keyboard is not null && (keyboard.IsKeyPressed(Key.AltLeft) || keyboard.IsKeyPressed(Key.AltRight))) { BorderlessFullScreen.Toggle(window); return; }
-            if (cinema.OnKey(key, ctrl, shift)) return;
+            if (Enum.TryParse(key.ToString(), out CinemaKey cinemaKey) && cinema.OnKey(cinemaKey, ctrl, shift)) return;
             switch (key)
             {
                 case Key.Escape: window.Close(); break;
+                case Key.F1 when ctrl: Console.WriteLine(meitou.Sweep()); break;
                 case Key.F1: Console.WriteLine(meitou.Toggle()); break;
                 case Key.Minus: o.Post.Exposure = MathF.Max(o.Post.Exposure / 1.1f, 0.05f); PostStatus(); break;
                 case Key.Equal: o.Post.Exposure = MathF.Min(o.Post.Exposure * 1.1f, 20f); PostStatus(); break;
@@ -505,6 +506,7 @@ static partial class WorldApp
             }
             frameWatch.Restart();
             profiler?.BeginFrame();
+            if (meitou.TickSweep() is { } sweepLine) Console.WriteLine(sweepLine);   // Ctrl+F1: the switches flip one a second
             double frameDt = cinema.FrameTime(renderDt);
             animSeconds += frameDt;
             if (o.TimeSpeed > 0)
@@ -543,7 +545,7 @@ static partial class WorldApp
             frameClock.Restart();
             // The picture is read after the present (framebuffer 0 stays intact until the next frame); the frame that is saved is drawn
             // without the overlay and the panel, so saved pictures never show them.
-            // A recorded frame is drawn like a screenshot; the cinema's clean picture hides the panels too (its letterbox stays in saved frames, the F2 editor stays open).
+            // A recorded frame is drawn like a screenshot; the cinema's clean picture hides the panels too (its letterbox stays in saved frames, the F6 editor stays open).
             bool shot = screenshotRequested || takeFile is not null;
             screenshotRequested = false;
             bool panels = !shot && !cinema.Clean;
@@ -569,7 +571,7 @@ static partial class WorldApp
             if (panels && overlay is not null) profiler?.Draw(overlay, size.X, size.Y);
             // Last, over the statistics and the profiler: the settings sit at the top left.
             if (panels) panel?.Draw(size.X, size.Y);
-            // Over everything: the letterbox, and the timeline editor (F2) or the cinema status line.
+            // Over everything: the letterbox, and the timeline editor (F6) or the cinema status line.
             if (overlay is not null) cinema.Draw(overlay, size.X, size.Y, shot);
             StageClock.Phase("overlays");
             display.Present();

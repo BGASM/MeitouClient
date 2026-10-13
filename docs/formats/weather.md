@@ -190,6 +190,9 @@ fading.
   desert storm 15000, Kenshi_Ash-Flakes 35000.
 - **Weather change**: when a region's weather changes, its fog values fade from the previous weather's over the first **2.5 %**
   of the new weather's duration (e.g. 3 minutes of a 120-minute weather).
+  Engine choice (2026-10-12): a time before the weather began, which only a clock moved back makes (the viewer's time slider and its camera keys set
+  the hour, not the day), shows the new weather's fog, and a move back snaps the sky and fog. Before, the fade held at its start there, so the
+  previous weather's fog (a dust storm's over the Hub) stayed as long as the clock was before the change.
 
 ### Sky and clouds (Verified (decompiled), FUN_1409dc4e0, FUN_14066cc80, FUN_14066f190)
 
@@ -289,7 +292,7 @@ list, with the entry's count and respawn times and the weather's effect strength
 the camera's region are changed on the side, not at the moment the weather changes: the new groups are warmed on a worker and swapped in when
 ready (the old weather's particles are drawn meanwhile), and a change of *region* (the camera crossing a border, which at a coast with small
 regions of alternating colours flipped Vain and Dreg back and forth several times in a flight) waits 2 s before anything is made and is dropped if
-the weather returns to the shown one in that time; a change inside the region (the scheduler's next weather, a forced or rerolled one) waits for
+the weather returns to the shown one in that time; a change inside the region (the scheduler's next weather, a forced or chosen one) waits for
 nothing. Details and measurements: [particle-universe.md](particle-universe.md#weather-changes-weathergroups-observed-a-viewer-choice).
 
 | `type` | Group | Behaviour (fcs.def, **Observed**) |
@@ -302,7 +305,7 @@ nothing. Details and measurements: [particle-universe.md](particle-universe.md#w
 | NONE (0) | none | not a weather effect (torches, blood, fire on objects) |
 
 Spawn filters: `min/max altitude` and `min/max slope` of the ground, `min/max time to live`. Base-game EFFECT records: 74; the
-weather ones by type: rain CAMERA_RAIN (`Kenshi_Heavy_Rain`, `Kenshi_red_Rain`, `Kenshi_black_rain`, `rain_light` →
+weather ones by type: rain CAMERA_RAIN (`Kenshi_Heavy_Rain`, `Kenshi_red_Rain` (drawn at half its opacity, engine choice 2026-10-12, `ParticleRenderer.EffectOpacity`), `Kenshi_black_rain`, `rain_light` →
 `kenshi_rain1`), ash CAMERA (`Kenshi_Ash-Flakes_*`), streams and mist GLOBAL (`Sand-Stream*`, `Kenshi_Mist_Cloud`, `fog
 islands`, `purple desert`), storms and twisters WANDERING (`DesertCloudStorm`, `DesertBlast-BillowCloud`, `Twister-Chuff*`,
 `Twister-LARGE`, `great desert streamers`, `ground sand*`), gas and beams WANDERING_GAS (`poison gas*`, `SkyBeam`, `venge beam`,

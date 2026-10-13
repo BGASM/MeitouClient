@@ -66,17 +66,31 @@ sealed partial class GameHost
         string fpsText = "";
         double fpsWindow = 0;
         int fpsWindowFrames = 0;
+        // The cinematic camera (docs/viewer.md "Cinematic camera", F6 its editor): while it flies, previews or cuts to a key it holds the drawn
+        // camera and the rig's state is not applied; the first camera input after that hands the camera back to the rig (CameraRig.TakeOver).
+        // The hour is the game clock's (time does not follow the keys); PageUp/PageDown/Home set the lens only while the editor is open.
+        var cinema = new Cinema(() => camera, () => (float)session.Clock.HourOfDay, null, () => BorderlessFullScreen.IsOn(window), () => BorderlessFullScreen.Toggle(window),
+            Cinema.GameFile, lensKeysAlways: false);
+        bool cinemaHolds = false, interfaceHidden = false;
+        cinema.Moved = () => cinemaHolds = true;
+        cinema.Load();
 
         var silkInput = Silk.NET.Input.InputWindowExtensions.CreateInput(window);
         Vector2? lastMouse = null;
         bool panelDrag = false, shiftDown = false;
         Vector2 Pixels(Vector2 p) => p * new Vector2(window.FramebufferSize.X / (float)Math.Max(window.Size.X, 1), window.FramebufferSize.Y / (float)Math.Max(window.Size.Y, 1));
+        // The settings panel takes the mouse only while it is drawn (F7 and the cinema's clean picture hide it).
+        bool PanelLive() => !interfaceHidden && !cinema.Clean;
         foreach (var kb in silkInput.Keyboards)
         {
             kb.KeyDown += (keyboard, k, _) =>
             {
                 if (k is SilkKey.ShiftLeft or SilkKey.ShiftRight) shiftDown = true;
                 if (k == SilkKey.Enter && (keyboard.IsKeyPressed(SilkKey.AltLeft) || keyboard.IsKeyPressed(SilkKey.AltRight))) { BorderlessFullScreen.Toggle(window); return; }
+                // F7 hides the game's interface; F6 and the numpad are the cinema's (Space, Delete and the lens keys too while its editor is open).
+                if (k == SilkKey.F7) { interfaceHidden = !interfaceHidden; Console.WriteLine(interfaceHidden ? "interface hidden (F7 shows it)" : "interface shown"); return; }
+                bool ctrl = keyboard.IsKeyPressed(SilkKey.ControlLeft) || keyboard.IsKeyPressed(SilkKey.ControlRight);
+                if (Enum.TryParse(k.ToString(), out CinemaKey cinemaKey) && cinema.OnKey(cinemaKey, ctrl, shiftDown)) return;
                 if (KeyMap.Map(k) is { } key)
                 {
                     if (shiftDown && key == EngineKey.F1) { Console.WriteLine(meitou.Toggle()); return; }
@@ -95,17 +109,22 @@ sealed partial class GameHost
         {
             mouse.MouseDown += (m, b) =>
             {
-                if (b == SilkButton.Left && panel?.MouseDown(Pixels(m.Position)) == true) { panelDrag = true; return; }
-                if (panel?.Contains(Pixels(m.Position)) == true) return;
+                var at = Pixels(m.Position);
+                if (b == SilkButton.Left && PanelLive() && panel?.MouseDown(at) == true) { panelDrag = true; return; }
+                if (PanelLive() && panel?.Contains(at) == true) return;
+                // The cinema's editor: its clicks never select or move characters.
+                if (b == SilkButton.Left && cinema.MouseDown(at)) return;
+                if (cinema.Contains(at)) return;
                 if (KeyMap.Map(b) is { } button)
                 {
-                    if (player.MouseDown(button, Pixels(m.Position), shiftDown)) return;
+                    if (player.MouseDown(button, at, shiftDown)) return;
                     session.Input.SetMouseButton(button, true);
                 }
             };
             mouse.MouseUp += (m, b) =>
             {
-                if (KeyMap.Map(b) is { } released) player.MouseUp(released, Pixels(m.Position), shiftDown);
+                bool cinemaDrag = cinema.MouseUp();
+                if (!cinemaDrag && KeyMap.Map(b) is { } released) player.MouseUp(released, Pixels(m.Position), shiftDown);
                 panel?.MouseUp();
                 panelDrag = false;
                 if (KeyMap.Map(b) is { } button) session.Input.SetMouseButton(button, false);
@@ -113,12 +132,13 @@ sealed partial class GameHost
             mouse.MouseMove += (_, p) =>
             {
                 session.Input.SetMousePosition(p.X, p.Y);
+                if (cinema.MouseMove(Pixels(p))) { lastMouse = p; return; }
                 player.MouseMove(Pixels(p));
-                if (panel?.MouseMove(Pixels(p)) == true || panelDrag) { lastMouse = p; return; }
+                if (PanelLive() && panel?.MouseMove(Pixels(p)) == true || panelDrag) { lastMouse = p; return; }
                 if (lastMouse is { } last) session.Input.AddMouseDelta(p.X - last.X, p.Y - last.Y);
                 lastMouse = p;
             };
-            mouse.Scroll += (m, wheel) => { if (panel?.Contains(Pixels(m.Position)) != true) session.Input.AddWheel(wheel.Y); };
+            mouse.Scroll += (m, wheel) => { if (!(PanelLive() && panel?.Contains(Pixels(m.Position)) == true) && !cinema.Contains(Pixels(m.Position))) session.Input.AddWheel(wheel.Y); };
         }
         Console.WriteLine(GameOptions.Usage[GameOptions.Usage.IndexOf("Keys:", StringComparison.Ordinal)..]);
         Console.WriteLine($"display   vsync {(vsync ? "on" : "off")}, frame limit {(vsync || fpsLimit <= 0 ? "none" : fpsLimit + " fps")}, control tick {session.Ticks.TickRate:0} Hz, world tick {SimulationClock.TickRate:0} per game second; settings in {config.Path}");
@@ -136,6 +156,14 @@ sealed partial class GameHost
             if (actions.Pressed(InputAction.ToggleStats)) statsVisible = !statsVisible;
             if (actions.Pressed(InputAction.ToggleFps)) fpsVisible = !fpsVisible;
             if (actions.Pressed(InputAction.CycleProfiler) && profiler is not null) profiler.Showing = (FrameProfiler.Mode)(((int)profiler.Showing + 1) % 3);
+            // The camera the cinema left (a cut, a scrub, the end of a flight) goes back to the rig at the first camera input: the free camera at
+            // that eye (only it can stand anywhere), or with ; the strategy camera where the view meets the ground. A flight in progress keeps it.
+            if (cinemaHolds && !cinema.Playing && CameraInput(actions))
+            {
+                cinemaHolds = false;
+                session.Camera.TakeOver(new CameraState(camera.Eye, camera.Forward, Vector3.UnitY, camera.Target, camera.Yaw, camera.Pitch, camera.Distance, true),
+                    strategy: actions.Pressed(InputAction.ToggleFreeCamera));
+            }
         };
         long windowRan = 0, windowDropped = 0;
         double drawTotal = 0, gpuSum = 0, statsTimer = 0;
@@ -156,13 +184,20 @@ sealed partial class GameHost
                 fpsWindow = 0;
                 fpsWindowFrames = 0;
             }
+            // While the cinema records, every frame is exactly one frame of its rate, for the simulation too (the take plays at game speed
+            // however slowly the frames are drawn and saved); otherwise the real time.
+            double frameDt = cinema.Recording ? cinema.FrameTime(dt) : dt;
             long a0 = Stopwatch.GetTimestamp();
-            session.Advance(dt);
+            session.Advance(frameDt);
             advanceTotal += Stopwatch.GetElapsedTime(a0).TotalMilliseconds;
+            animSeconds += frameDt;
+            animClock = true;
             UpdateNav();
-            SendFocus();
-            ApplyCamera(session.CameraAt());
-            SandboxFollowCamera();
+            if (!cinemaHolds) ApplyCamera(session.CameraAt());
+            cinema.Advance(cinema.FrameTime(dt));   // a flight through the keys moves the camera (and takes it from the rig)
+            string? takeFile = cinema.TakeFrame();
+            SendFocus(cinemaHolds ? camera.Target : null);
+            if (!cinemaHolds) SandboxFollowCamera();
             var size = window.FramebufferSize;
             UpdateView(size.X, size.Y);
             if (display.BeginFrame(size.X, size.Y))
@@ -176,14 +211,16 @@ sealed partial class GameHost
                 DrawWorld(size.X, size.Y);
                 cpuSum += Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
                 drawTotal += Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
-                bool shot = screenshotRequested;
+                bool shot = screenshotRequested, take = takeFile is not null;
+                // The game's interface (markers, HUD, panels, debug overlays): hidden by F7, the cinema's clean picture and in recorded frames.
+                bool ui = !interfaceHidden && !cinema.Clean && !take;
                 screenshotRequested = false;
-                if (overlay is not null && !g.NoPopulation) DrawMarkers(overlay, size.X, size.Y);
-                if (overlay is not null && IsSandbox) DrawSandbox(overlay, size.X, size.Y);
+                if (ui && overlay is not null && !g.NoPopulation) DrawMarkers(overlay, size.X, size.Y);
+                if (ui && overlay is not null && IsSandbox) DrawSandbox(overlay, size.X, size.Y);
                 if (!g.NoPopulation) player.Steer();
-                if (overlay is not null && !g.NoPopulation) player.Draw(overlay, size.X, size.Y);
+                if (ui && overlay is not null && !g.NoPopulation) player.Draw(overlay, size.X, size.Y);
                 // The debug overlays are left out of saved pictures: the statistics at the top left, the key list below them, the profiler.
-                if (overlay is not null && !shot)
+                if (ui && overlay is not null && !shot)
                 {
                     // Below the HUD, which holds the top left corner in the game (the viewer's overlays start at the top).
                     float panelsBottom = g.NoPopulation ? 0 : player.HudBottom;
@@ -204,12 +241,15 @@ sealed partial class GameHost
                     }
                     profiler?.Draw(overlay, size.X, size.Y);
                 }
-                panel?.Draw(size.X, size.Y);
+                if (ui) panel?.Draw(size.X, size.Y);
+                // Over everything: the letterbox, and the cinema's editor (F6, also with F7) or its status line (not with F7).
+                if (overlay is not null) cinema.Draw(overlay, size.X, size.Y, shot || take || (interfaceHidden && !cinema.EditorVisible));
                 display.Present();
                 profiler?.EndFrame();
                 if (display.Context.GpuFrameMs > 0) { gpuSum += display.Context.GpuFrameMs; gpuSamples++; }
                 statsFrames++;
-                if (shot) SaveScreenshot(display.Context, backbuffer, size.X, size.Y);
+                if (takeFile is not null) { FramebufferCapture.SavePng(display.Context, backbuffer, takeFile, size.X, size.Y); cinema.FrameDone(); }
+                else if (shot) SaveScreenshot(display.Context, backbuffer, size.X, size.Y);
                 frames++;
             }
             titleTimer += dt;
@@ -280,6 +320,8 @@ sealed partial class GameHost
                 "Alt+Enter" => FullScreenState(),
                 "F9" => OnOff(fpsVisible),
                 "F11" => OnOff(statsVisible),
+                "F6" => OnOff(cinema.EditorVisible),
+                "F7" => OnOff(interfaceHidden),
                 _ => null,
             };
         }
@@ -287,6 +329,13 @@ sealed partial class GameHost
 
     /// <summary>Panel rows that are the session's state, not graphics settings: kept out of <c>graphics</c> in meitou.user.json (vsync and full screen have their own keys).</summary>
     static readonly HashSet<string> SessionSliders = ["Time of day", "VSync", "Full screen"];
+
+    /// <summary>The player moved, turned, zoomed or switched the camera this tick (what hands a camera the cinema left back to the rig).</summary>
+    static bool CameraInput(ActionState a) =>
+        a.Held(InputAction.MoveForward) || a.Held(InputAction.MoveBack) || a.Held(InputAction.MoveLeft) || a.Held(InputAction.MoveRight) ||
+        a.Held(InputAction.MoveUp) || a.Held(InputAction.MoveDown) || a.Held(InputAction.RotateLeft) || a.Held(InputAction.RotateRight) ||
+        a.Held(InputAction.PitchUp) || a.Held(InputAction.PitchDown) || a.Held(InputAction.ZoomIn) || a.Held(InputAction.ZoomOut) ||
+        a.Held(InputAction.Orbit) && a.MouseDelta != Vector2.Zero || a.Wheel != 0 || a.Pressed(InputAction.ToggleFreeCamera);
 
     static void SaveScreenshot(GpuContext context, Texture backbuffer, int width, int height)
     {

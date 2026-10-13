@@ -24,9 +24,9 @@ namespace Meitou.Game;
 sealed partial class GameHost
 {
     /// <summary>Tells the world where the camera looks, when it has moved enough to matter (the zones follow it).</summary>
-    void SendFocus()
+    void SendFocus(Vector3? at = null)
     {
-        var target = session.Camera.Current.Target;
+        var target = at ?? session.Camera.Current.Target;   // the cinema's camera while it holds the view
         if (sentFocus && Vector3.DistanceSquared(target, lastFocus) < 50 * 50) return;
         session.World.Commands.Enqueue(new Meitou.Simulation.FocusCommand(target) { Tick = session.World.Tick });
         lastFocus = target;

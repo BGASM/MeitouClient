@@ -19,7 +19,7 @@ public readonly record struct CameraShot(Vector3 Eye, float Yaw, float Pitch, fl
 public readonly record struct CameraKey(CameraShot Shot, float Time, bool Ease = false);
 
 /// <summary>
-/// A camera flight through timed shots (the viewer's numpad and F2 editor, docs/viewer.md "Cinematic camera"): a cubic Hermite spline in time
+/// A camera flight through timed shots (the viewer's numpad and F6 editor, docs/viewer.md "Cinematic camera"): a cubic Hermite spline in time
 /// through every key, each value's slope at a key the difference of its neighbours over their time apart (a Catmull-Rom spline in time), so the
 /// speed changes smoothly however unevenly the keys are spaced. The slope is zero at an easing key and at both ends of an open flight (it
 /// starts and ends at rest). The yaw and the hour take the short way round.
