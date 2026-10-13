@@ -67,6 +67,20 @@ sealed class CharacterAssembly(PopulationData data)
         return new Fighter(weapon, armour);
     }
 
+    /// <summary>
+    /// <see cref="Attach"/> for a character loaded from a save: the race, stats and medical state are the saved ones (not rolled), the inventory and the fighter are
+    /// built from the character's record and look like a new character's (the save's inventory is not read yet). The top speed is the loader's.
+    /// </summary>
+    public void AttachSaved(CharacterCold cold, RaceData race, CharacterStats stats, MedicalState medical, GameRecord? record)
+    {
+        cold.Race = race;
+        cold.Stats = stats;
+        cold.Medical = medical;
+        cold.Inventory = data.Items.Build(record, cold.Appearance?.Loadout);
+        cold.Fighter = MakeFighter(cold.Inventory);
+        cold.WaterFactor = race.WaterAvoidance * (cold.Faction == data.PlayerFaction && data.PlayerFaction >= 0 ? 0.5f : 1);
+    }
+
     /// <summary>Gives a character with a race its stats and medical state, its inventory and fighter, and the top speed of the speed chain (stage 7). Animals (no race) are left as they are.</summary>
     public void Attach(CharacterId id, CharacterCold cold, ref CharacterHot hot, GameRecord? record, GameRecord? race, ulong seed)
     {

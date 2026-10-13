@@ -55,11 +55,12 @@ public static class SaveLoader
         var races = new Dictionary<string, RaceData?>(StringComparer.Ordinal);
         var parts = new Dictionary<string, BodyPartTemplate?>(StringComparer.Ordinal);
         var bySource = new Dictionary<SaveCharacter, CharacterId>();
+        var assembly = new CharacterAssembly(data);
         foreach (var platoon in save.Platoons)
         {
             bool mine = playerFaction is not null && platoon.FactionId == playerFaction.Id;
             if (mine && platoon.IsLoaded)
-                LoadPlayerPlatoon(world, platoon, data, options, loaded, playerIndex, races, parts, bySource);
+                LoadPlayerPlatoon(world, platoon, data, options, loaded, playerIndex, races, parts, bySource, assembly);
             else if (!mine && options.NpcPlatoons)
                 LoadRoamingPlatoon(world, platoon, data, loaded);
         }
@@ -101,7 +102,7 @@ public static class SaveLoader
     }
 
     static void LoadPlayerPlatoon(World world, SavePlatoon platoon, PopulationData data, SaveLoadOptions options, LoadedSave loaded,
-        int playerIndex, Dictionary<string, RaceData?> races, Dictionary<string, BodyPartTemplate?> parts, Dictionary<SaveCharacter, CharacterId> bySource)
+        int playerIndex, Dictionary<string, RaceData?> races, Dictionary<string, BodyPartTemplate?> parts, Dictionary<SaveCharacter, CharacterId> bySource, CharacterAssembly assembly)
     {
         var squad = new Squad
         {
@@ -171,6 +172,10 @@ public static class SaveLoader
                     Medical = medical,
                 },
             };
+            // The body: the saved stats and medical state go to the body systems, the rest of the assembly (inventory, fighter) is made as for a new character.
+            if (race is not null && stats is not null && medical is not null) assembly.AttachSaved(cold, race, stats, medical, record);
+            else if (race is not null)
+                loaded.Notes.Add($"{platoon.Name}: {cold.Name} has no stats or medical state that could be read; it has no body in the world.");
             var id = table.Spawn(hot, cold, world.Tick);
             squad.Members.Add(id);
             bySource[sc] = id;

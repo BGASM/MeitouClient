@@ -29,6 +29,40 @@ sealed partial class PlayerInterface
     /// <summary>The bottom of the HUD panel as last drawn (0 before the first frame), where the debug overlays start.</summary>
     public float HudBottom => HudBox().Y1;
 
+    // ---- notices ----
+
+    string? notice;
+    bool noticeIsError;
+    long noticeUntil;
+
+    /// <summary>Shows a short message at the top of the screen for a few seconds ("Saved", "Loaded", or an error text in red).</summary>
+    public void Notice(string text, bool error = false)
+    {
+        notice = text.ReplaceLineEndings(" ");
+        noticeIsError = error;
+        noticeUntil = System.Diagnostics.Stopwatch.GetTimestamp() + (long)((error ? 6 : 2.5) * System.Diagnostics.Stopwatch.Frequency);
+    }
+
+    /// <summary>Drops the transient state of the mouse (a drag box, a steering right click): the world it belonged to is gone.</summary>
+    public void Reset()
+    {
+        dragFrom = null;
+        dragging = false;
+        steering = false;
+        selectedFor = null;
+        selected = [];
+    }
+
+    void DrawNotice(DebugOverlay o, int width)
+    {
+        if (notice is null) return;
+        if (System.Diagnostics.Stopwatch.GetTimestamp() > noticeUntil) { notice = null; return; }
+        string text = notice.Length > 160 ? notice[..157] + "..." : notice;
+        float w = text.Length * o.CharWidth + 4 * Pad, x0 = MathF.Max(Margin, (width - w) / 2), y0 = Margin;
+        o.Rect(x0, y0, x0 + w, y0 + o.LineHeight + 2 * Pad, DebugOverlay.PanelColour);
+        o.Text(text, x0 + 2 * Pad, y0 + Pad, noticeIsError ? new Vector4(1f, 0.4f, 0.35f, 1f) : new Vector4(0.35f, 1f, 0.45f, 1f));
+    }
+
     bool OverHud(Vector2 p)
     {
         var b = HudBox();
@@ -166,6 +200,7 @@ sealed partial class PlayerInterface
                 o.Text(text, box.X0 + Pad + o.CharWidth, y, white);
                 y += o.LineHeight;
             }
+        DrawNotice(o, width);
         o.Flush(width, height);
     }
 }

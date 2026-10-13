@@ -198,6 +198,10 @@ member of the active squad), 0x23 next non-empty squad of the player faction (wr
 active squad (Shift adds; the same key twice within 0.5 s is a double tap that centres on the character),
 900 reload biomes, 0x386 fix interior furniture then rebuild navmesh ([pathfinding.md](pathfinding.md#generator-runtime-and-tool-time-navmesh-building)), 0x398..0x39a gizmo.
 
+Meitou's host binds the same two keys (engine choice: `InputAction.QuickSave` / `QuickLoad`, default F5 / F9) to its own quicksave slot, `%LOCALAPPDATA%\Meitou\save\quicksave`
+([simulation.md](../simulation.md#quicksave-and-quickload)), not to the original's `kenshi\save\quicksave`. The host's own debug fps counter was on F9 and moved to Ctrl+F9
+(F10 to F12 are unchanged). **Observed** only that the action table above lists F5 / F9 for the two events.
+
 Screenshot (event 0x10) is handled in frameEnded: hides the camera grid widget for two frames and writes
 `_screens/screenshot_<N>`; count and multiplier come from `screens.cfg` (**Observed**).
 

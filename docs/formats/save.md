@@ -169,6 +169,9 @@ Whether every key the readers look for is present in the sample's records was ch
   triggers the save: it reads `autosaveindex` from `settings.cfg` (0 when absent), uses `(index + 1) mod 3` as the new index, stores it back, resets the timer and queues a save request named `autosave<index>` (`FUN_14047b920` with flag 1; presumably kind 1 with `+0xA4` = 1, **Observed** only by its arguments). There are three rotating autosave folders; the quicksave hotkey saves as `quicksave`.
   Every queued request (also an autosave) writes `continue=<name>` to `settings.cfg` after a successful save (`FUN_14047c310`), so after an autosave the "Continue" button points at it; a request resets the autosave timer.
 - Autosave never ran in the sample (no `autosaveindex` key). **Unknown**: the meaning of the flag byte (+0x11c) that also holds the timer back (copied from a global each frame).
+- **Meitou's quicksave** (engine choice, [simulation.md](../simulation.md#quicksave-and-quickload)): F5 / F9 as in the original, but the slot is `%LOCALAPPDATA%\Meitou\save\quicksave`, not the original's
+  `%LOCALAPPDATA%\kenshi\save\quicksave` above. The original's folder is the user's own save of the original game, and a Meitou save is not guaranteed to load there (**Unknown** whether the original loads a save written from nothing),
+  so Meitou never touches it; it also does not write `continue=` or `autosaveindex` to `settings.cfg`. There is no autosave in the host.
 
 ## File format
 
@@ -487,11 +490,16 @@ writes back **byte for byte** (`SaveReadTests.Every_file_of_a_save_reads_and_wri
 `UpdateDerived` recomputes what follows from the rest: the CAMERA `zones` list from the zone files, every platoon's `char count`, slot lists 0 and 1 of `quick.save` (2 and 3 are kept, or start as 1..4096), the slot list of a zone file that has none (the slots of its buildings), each file's `nextId` and the child-count `byteSize`s; on a real save it reproduced the game's values
 (**Observed**: a test checked this, and that a loaded save writes back the same files, against the user's saves until 2026-10-12; both were removed then). `Write` follows the game's temp-folder discipline: everything goes to `_current<N>` next to the destination, then the old folder is renamed away and the new one renamed in, so a failed write leaves the old save and no working folder.
 
-Saves go to a folder of our own while testing (`%LOCALAPPDATA%\Meitou\save-test\` by convention); nothing writes to the original game's `save` folders. The version string written is "1.0.68".
+Saves go to a folder of our own while testing (`%LOCALAPPDATA%\Meitou\save-test\` by convention) and, in play, the quicksave to `%LOCALAPPDATA%\Meitou\save\quicksave`; nothing writes to the original game's `save` folders. The version string written is "1.0.68".
 
 **Not done / Unknown** (the writer is untested against the original game, which was not run):
 - Whether the original minds that a roaming platoon's PLATOON `position`, which `SaveCapture` updates, then disagrees with the character positions in its `.platoon` file (**Unknown**).
 - Whether the original loads a save made from nothing: its BIOMES, RESEARCH and TERRAIN_DECALS are empty records, towns have no `trade goods`, population pools or artifacts, war states start at defaults (`updatetime` 40), and slot lists 2 and 3 are the zone registry only. A save made from a loaded one carries all of that through unchanged, which is the safe path.
 - The saved look (CHARACTER_APPEARANCE sliders) is written for a new character from its generated `Loadout` record when it has one, but not read back into a drawable `CharacterAppearance`.
+- **The look's seed as the handle serial** (engine choice, 2026-10-13): the save documents the serial of a character's handle (`handleS`) only as its own random number, and the loader
+  rolls the look of a character from it. A character Meitou writes that has a rolled look (`Loadout.Seed`) gets that seed as its serial (`SaveCapture`), so loading rolls the same face, body, hair and
+  clothes and rebuilds the same inventory (`QuickSaveTests`, with the install's data: the seed, body mesh, part meshes and inventory records equal). The saved CHARACTER_APPEARANCE is still not read.
+  **Unknown**: whether the original minds that a serial is not random (it is only compared as an id as far as the sample shows, **Unknown**).
+- `MEDICAL_STATE` has no wound list or pain (the keys above), so a loaded character starts with no wounds and pain 1 (the medical tick works pain out again); the dead are not loaded.
 - Inventory contents, AI jobs and orders, the `5-redirect` table, bounties and the rest of the platoon data (missions, owned buildings) are kept as raw records in a loaded save and not interpreted; items a character gains in play are not written.
 - Building placement and state of zones the world changes (there is no building simulation): zone files are carried through unchanged.

@@ -28,6 +28,25 @@ public class GameClockTests
     }
 
     [Theory]
+    [InlineData(1, 0, 0)]
+    [InlineData(3, 7, 45)]
+    [InlineData(2, 13, 7)]
+    [InlineData(9, 23, 59)]
+    public void Setting_the_time_of_a_loaded_save_reads_back_as_the_same_day_hour_and_minute(long day, int hour, int minute)
+    {
+        var game = new GameClock(13, 1);
+        game.Advance(5 * Hour);
+        game.SetTime(day, hour + minute / 60.0);
+        Assert.Equal((day, hour, minute), (game.Day, game.Hour, game.Minute));
+        game.Advance(30);   // 30 game seconds is 16 game minutes (a game hour is 109 s)
+        Assert.True(game.Day * 24 * 60 + game.Hour * 60 + game.Minute > day * 24 * 60 + hour * 60 + minute);
+        // A clock whose own start is another day and hour lands on the same time.
+        var other = new GameClock(2, 5);
+        other.SetTime(day, hour + minute / 60.0);
+        Assert.Equal((day, hour, minute), (other.Day, other.Hour, other.Minute));
+    }
+
+    [Theory]
     [InlineData(4, 0)]
     [InlineData(5, 0)]
     [InlineData(5.5, 0.25)]

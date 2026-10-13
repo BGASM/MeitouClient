@@ -28,6 +28,10 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
 {
     WorldSession session = null!;   // disposed with the host (Run)
     Meitou.Simulation.PopulationSystem? population;
+    // The game data the world was built from, kept to build the next world of a quickload (GameHost.Saving.cs).
+    Meitou.Simulation.PopulationData? popData;
+    IReadOnlyList<Meitou.Data.World.TownPlacement> townPlacements = [];
+    Meitou.Simulation.IWalkability? simWalkability;
     Meitou.Navigation.NavSystem? nav;
     volatile bool navChanged;
     readonly Dictionary<Meitou.Data.World.ZoneCoordinate, long> navZones = [];
@@ -84,17 +88,14 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
                 nav.ZoneReady += _ => navChanged = true;
                 walkability = new NavAdapter(nav.Walkability);
             }
-            var data = Meitou.Simulation.PopulationData.Create(gameDb, levels is null ? [] : levels.Towns(), new Meitou.Simulation.GeneratedAppearances(gameDb, install.Root));
-            // The system list and its order are StandardSystems'. Combat: the path service walks attackers to their targets (SelfApproach off),
-            // the body system ticks the medical state (TickMedical off), the defaults of StandardSystemOptions.
-            var built = Meitou.Simulation.StandardSystems.Build(data, walkability, new Meitou.Simulation.StandardSystemOptions
-            {
-                Population = new Meitou.Simulation.PopulationSettings { Background = interactive },
-                SynchronousPaths = !interactive,
-                AnimationLengths = animationLengths = Meitou.Data.Gameplay.AnimationLengths.Load(install.Root),
-                AnimationLibrary = animationLibrary = Meitou.Data.Gameplay.AnimationLibrary.FromDatabase(gameDb),
-                AnimationBlendRate = data.Bodies.Constants.AnimationBlendRate,
-            });
+            var towns = levels is null ? [] : levels.Towns().ToList();
+            var data = Meitou.Simulation.PopulationData.Create(gameDb, towns, new Meitou.Simulation.GeneratedAppearances(gameDb, install.Root));
+            animationLengths = Meitou.Data.Gameplay.AnimationLengths.Load(install.Root);
+            animationLibrary = Meitou.Data.Gameplay.AnimationLibrary.FromDatabase(gameDb);
+            popData = data;
+            townPlacements = towns;
+            simWalkability = walkability;
+            var built = BuildSystems(interactive);
             population = built.Population;
             if (nav is not null) population!.ZoneGate = zone => nav.Walkability.World.Contains(zone);
             systems = built.Systems;
@@ -110,6 +111,8 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         session.Bindings.Set(InputAction.Orbit, [.. session.Bindings.Get(InputAction.Orbit).Where(b => !(b.IsMouse && b.Button == EngineButton.Right))]);
         // F12 is the profiler now (as in the viewer); older saved configs took it for the screenshot.
         if (session.Bindings.Get(InputAction.Screenshot).SequenceEqual([Binding.Of(EngineKey.F12)])) session.Bindings.Set(InputAction.Screenshot, EngineKey.F8, EngineKey.PrintScreen);
+        // F9 is the game's quickload now (F5 quicksave); older saved configs took F9 for the fps counter, which is on Ctrl+F9 and unbound here.
+        if (session.Bindings.Get(InputAction.ToggleFps).SequenceEqual([Binding.Of(EngineKey.F9)])) session.Bindings.Set(InputAction.ToggleFps);
         player = new PlayerInterface(session, heights.HeightAt, DrawnPosition);
         if (nav is not null && (start is not null || !interactive))
         {

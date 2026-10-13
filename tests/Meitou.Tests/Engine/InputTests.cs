@@ -21,4 +21,16 @@ public class InputTests
         Assert.False(t3.Pressed(InputAction.MoveForward));
         Assert.True(t1.Held(InputAction.MoveForward) && t2.Held(InputAction.MoveForward) && t3.Held(InputAction.MoveForward));
     }
+
+    [Fact]
+    public void F5_quicksaves_and_F9_quickloads_and_the_fps_counter_has_no_plain_key()
+    {
+        Assert.Equal([Binding.Of(Key.F5)], bindings.Get(InputAction.QuickSave));
+        Assert.Equal([Binding.Of(Key.F9)], bindings.Get(InputAction.QuickLoad));
+        Assert.Empty(bindings.Get(InputAction.ToggleFps));
+        input.SetKey(Key.F9, true);
+        var t = Tick();
+        Assert.True(t.Pressed(InputAction.QuickLoad));
+        Assert.False(t.Pressed(InputAction.QuickSave) || t.Pressed(InputAction.ToggleFps));
+    }
 }

@@ -21,6 +21,8 @@ public enum InputAction
     ToggleKeys, ToggleStats, CycleProfiler,
     /// <summary>The small frame-rate counter at the top left.</summary>
     ToggleFps,
+    /// <summary>The game's quicksave and quickload (F5 and F9, docs/game/ui-input.md): the host saves to and loads from its own "quicksave" slot.</summary>
+    QuickSave, QuickLoad,
     Quit,
 }
 
@@ -95,7 +97,9 @@ public sealed class InputBindings
         Set(InputAction.Speed3, Key.F4);
         Set(InputAction.Screenshot, Key.F8, Key.PrintScreen);   // the game's own screenshot keys (docs/game/ui-input.md)
         Set(InputAction.ToggleSettings, Key.Tab);
-        Set(InputAction.ToggleFps, Key.F9);
+        Set(InputAction.ToggleFps);   // Ctrl+F9 in the game (plain F9 is the game's quickload), so unbound here
+        Set(InputAction.QuickSave, Key.F5);
+        Set(InputAction.QuickLoad, Key.F9);
         Set(InputAction.ToggleKeys, Key.F10);
         Set(InputAction.ToggleStats, Key.F11);
         Set(InputAction.CycleProfiler, Key.F12);

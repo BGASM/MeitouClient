@@ -68,7 +68,7 @@ Status as of 2026-10-05. Details and open questions live in the linked docs.
    model, 1 skeleton (world, tick phases, worker pool, seeded randomness, state hash), 2 population (squad factory,
    residents, bar and roaming squads, zones), 3 movement, 4 characters drawn, 5 navmesh (own builder, interiors, doors,
    cache), 6 player (new game, selection, orders, HUD), 7 bodies, 8 melee combat: done and wired into the game.
-   10 saves: the world mapping to and from save folders is done, the game does not load or save yet. 9 AI proper
+   10 saves: the world mapping to and from save folders is done and the game quicksaves (F5) and quickloads (F9) the player's squad. 9 AI proper
    (packages, tasks, off-screen squads), ranged combat, dialogue (`Dialogue.mod`), economy and towns: not started. Research (2026-10-05, from
    the full decompile): [game-loop.md](docs/game/game-loop.md), [character-stats.md](docs/game/character-stats.md),
    [combat.md](docs/game/combat.md), [ai.md](docs/game/ai.md), [factions-squads-towns.md](docs/game/factions-squads-towns.md),
@@ -77,7 +77,7 @@ Status as of 2026-10-05. Details and open questions live in the linked docs.
 6. **Saves** — *started.* Read and write original save games. Format researched and checked
    against real saves: [save.md](docs/formats/save.md) (FCS type-15 files, handles, what is saved). The save folder
    reader and writer and the world mapping exist (stage 10 of [simulation.md](docs/simulation.md#saves)); the game
-   does not use them yet.
+   quicksaves and quickloads with them (F5 / F9, Meitou's own slot); there is no save menu or loading of the original game's saves yet.
 7. **Presentation** — *partly.* `meitou` boots into the world with the Kenshi camera on a fixed 30 Hz tick with interpolated
    drawing (`src/Meitou.Engine`, `src/Meitou.Game`, [docs/engine.md](docs/engine.md)); the world renderers are a library
    (`src/Meitou.Rendering`, on Vulkan), shared with the viewer. To do: game renderer

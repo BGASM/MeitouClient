@@ -28,7 +28,7 @@ Each stage ends with tests and something the owner can run.
 | **7. Bodies** | Stats and XP, hunger, blood, body parts, KO and death | Done and wired into `World` ([Bodies](#bodies)); the time scale is open |
 | **8. Combat** | Melee per [combat.md](game/combat.md); ranged later | Melee done and wired ([Combat](#combat)); ranged, turrets and attack slots not built |
 | **9. AI proper** | Packages, blackboard, scoring and planner ([ai.md](game/ai.md)), off-screen squads | Not started (gate: towns run their daily routines, squads travel off screen). `PursuitSystem`, `RetaliationSystem` and the roaming squads are engine stand-ins, not the original's AI |
-| **10. Saves** | Read and write the world state ([save.md](formats/save.md)) | API done ([Saves](#saves)); the game host does not use it yet (no `--load`, no quicksave) |
+| **10. Saves** | Read and write the world state ([save.md](formats/save.md)) | API done ([Saves](#saves)); the game host quicksaves (F5) and quickloads (F9) the player's squad into its own slot ([Quicksave and quickload](#quicksave-and-quickload)); no save menu, no loading of the original game's saves in play |
 | **11+** | Economy and trade, buildings and production, the MyGUI screens, audio | Not started |
 
 ## Principles
@@ -575,7 +575,7 @@ retaliation systems are in `Fighting.cs`.
 ## Saves
 
 `Meitou.Data.Save` reads and writes the save folder ([save.md](formats/save.md#implementation-as-built-stage-10)); `Meitou.Simulation.Saving`
-(`SaveLoader`, `SaveCapture`, `SaveModel.cs`) maps it to and from a `World`. It is an API; the game host does not call it yet.
+(`SaveLoader`, `SaveCapture`, `SaveModel.cs`) maps it to and from a `World`. The game host calls it for the quicksave and quickload keys ([below](#quicksave-and-quickload)).
 
 **Loading** (`SaveLoader.Load(world, save, data, options)`, `world` not started and empty, `data` the `PopulationData` of the running game):
 
@@ -608,15 +608,20 @@ real saves (`[Slow]`): each loads (195 to 354 roaming stand-ins), loading and ca
 save runs 150 ticks and captures again with the same platoons and characters.
 
 **Not carried yet** (kept as the save had it, or regenerated): the NPC platoons' characters (regenerated from the template; their files stay as
-they were), towns and their state, war state, weather and season, research, zone buildings and loose items, inventories and equipment, AI jobs,
-the saved look of a loaded character (rolled anew from the saved serial through `IAppearanceSource`), bounties, `5-redirect`. **Unknown**:
+they were), towns and their state, war state, weather and season (the weather rolls anew on loading), research, zone buildings and loose items, inventories and equipment (a loaded character's are rebuilt from its record and look), AI jobs,
+the saved look of a loaded character (rolled again from the saved serial through `IAppearanceSource`; the serial of a character Meitou saved is its look's seed), bounties, `5-redirect`. **Unknown**:
 whether the original loads a save written from nothing ([save.md](formats/save.md#implementation-as-built-stage-10)); the orientation convention
 of the saved quaternion (read as a rotation about Y, yaw from +Z towards +X, written back the same way; an unchanged character keeps its
 quaternion bit for bit).
 
-**Wiring still to do** (host): call `SaveLoader.Load` before the first tick on a world built with the same `PopulationData`, keep the
-`LoadedSave` for `SaveCapture.Capture` with the host's clock; hand the loaded `CharacterCold.Save.Stats/Medical` to the body systems and back
-through `SaveCaptureOptions.Bodies`; keep the population system from making residents for a town whose platoons were loaded as stand-ins.
+**Wired by the host** (2026-10-13, [Quicksave and quickload](#quicksave-and-quickload)): `SaveLoader.Load` runs on a new `World` built with the same
+`PopulationData` before its first tick, the `LoadedSave` is kept for the next `SaveCapture.Capture` with the host's clock, and a loaded
+character gets its race, its saved stats and medical state, an inventory and a fighter (`CharacterAssembly.AttachSaved`, the loader does it, so the body, combat and
+movement systems treat it like a new game's character); `SaveCapture` reads the live `CharacterCold.Stats` / `Medical` (`SaveCaptureOptions.Bodies` stays as an override). A character with a rolled
+look is saved with the look's seed as the serial of its handle (save.md documents the serial only as the handle's own random number), so loading rolls the same face, body, hair and clothes
+again; the inventory is rebuilt from the same look. Still to do: keep the population system from making residents for a town whose platoons were loaded as
+stand-ins (a quicksave made by Meitou holds none, so this only matters when loading a save of the original game, which the host cannot do yet); the wound list and
+the pain of the medical state are not in the save's keys and start empty and at 1 (the medical tick works the pain out again).
 
 ## Sandbox
 
@@ -659,6 +664,30 @@ keeps the navmesh on the active zones, and fills the renderer's `CharacterDrawLi
 Three ground functions, on purpose: the camera follows the drawn terrain (`gpu.Terrain.HeightAt`), picking and the open-ground stand-in use the
 CPU heightmap, and characters stand on `NavmeshWalkability.GroundHeight` (up to about 0.5 off the heightmap on flat ground, on floors in
 buildings). They are not to be unified; `MoveOrder.Target.Y` is ignored (the movement system re-samples the goal's height).
+
+### Quicksave and quickload
+
+`F5` quicksaves and `F9` quickloads, the original's keys ([ui-input.md](game/ui-input.md#4-action-table); the fps counter that was on `F9` is on `Ctrl+F9`, and a saved
+`ToggleFps` binding of `F9` is dropped at start like the old screenshot `F12`). `GameHost.Saving.cs`; the rules are engine choices.
+
+- **Where.** `%LOCALAPPDATA%\Meitou\save\quicksave` (`QuickSave.Folder()`), Meitou's own slot next to its other caches. The original's quicksave is `%LOCALAPPDATA%\kenshi\save\quicksave`
+  ([save.md](formats/save.md#autosave-and-quicksave)); the host never reads, writes or deletes anything under `kenshi\save`, so the user's saves of the original game are safe, and
+  the original never meets a save with Meitou's differences. Nothing is written to `settings.cfg` (no `continue=`). A run without the town population (`--no-population`, the sandbox) says so on the HUD and does nothing.
+- **Saving.** The key only sets a request (the control tick runs inside `WorldSession.Advance`); the frame loop takes it right after `Advance` returns, when no world tick is in flight.
+  `SaveCapture.Capture` runs there (the clock is `GameClock.Day/Hour/Minute`, the placed towns and the install's load order go in): it only reads the squad (0.8 to 10 ms in a run with the full load order; the first F5 of a run took 50 ms, mostly the JIT, the host runs without tiered compilation. **Observed**, Release, this PC). The save it starts from, which costs 40 to 50 ms (the clone of the quicksave the world was loaded from, or the new save with every faction and town), holds nothing of the world and is made ahead on a worker (`SaveCapture.PrepareBase`, started whenever none is ready and discarded after a load); `SaveGame.Write` also runs on a worker
+  (it writes into `_current<N>` beside the slot and swaps the folder in with two renames, so a crash or a full disk leaves the old quicksave). The worker only queues the result; the HUD message
+  ("Saved", or "Save failed: ..." in red) is shown by the next frame. A save or load asked for while one is still running is refused with a message. There must be a player squad (`--new-game`,
+  or a loaded quicksave); the first capture is from nothing (`SaveCapture` without a `LoadedSave`: all factions with the data's relations, a default state for every placed town, the squad as platoon `Nameless_<n>`), later ones carry the records of the quicksave the world was loaded from.
+- **Loading.** The slot is read on a worker; when it is read the frame loop makes the new world at the same point: `StandardSystems.Build` again (a new population system with its thread, a new path
+  service), `WorldSession.ReplaceWorld` builds the `World` with the same settings and walkability and runs `SaveLoader.Load` on it before its first tick. A load that fails (no folder, a record that does not read) leaves the running world
+  untouched and shows "Load failed: ...". After the swap the old world and its systems are disposed; the game clock is set from the save (`GameClock.SetTime`: day, hour and minute, so up to a game minute is lost; it restarts the clock, whose game seconds and `HoursSinceStart` count the session), `population.ZoneGate`
+  is set again, the camera is cut to the player's leader keeping the heading, pitch and boom (the free camera is left), the navmesh of the zones round the leader is awaited like a new game's start (at most 15 s), one tick runs (it publishes the snapshot,
+  so a paused game draws the squad, and takes the first look at the zones), the draw list's per-character renderer state is not reused (the host's world counter is part of the key), the mouse state (drag box, steering right click) is dropped and the HUD says "Loaded".
+  The selection is the saved one (CAMERA `selected_character`s), not cleared. The speed (paused or 1x/2x/5x) and the camera settings are the running game's. Loading works in a run that began without `--new-game` (it gives the player a squad).
+- **Saved and loaded:** the clock, the player's money and faction, the factions' relations (the data's table is replaced by the save's on load) and prosperity, the player's squad(s) with each character's position, facing, name, role and leader flag,
+  stats and medical state (blood, bleeding, hunger, parts: flesh, bandage, rig, stun, wear, hit multiplier), the look (as the seed in the handle) and the selection. **Not saved:** the town residents and roaming squads (made again from the towns near the player; they are not
+  where they were), the weather (rolled anew), orders, paths, queued moves, animation and combat state (everyone stands idle and unengaged), inventories (rebuilt from the record and look: eaten food is back, loot is gone), the wound list and pain, bounties, buildings and
+  items on the ground, the camera's position (the leader's), the game speed. The state hash of a loaded world is not the original's (the tick, paths and the rest above differ); `QuickSaveTests` compares the carried state field by field and that two loads run the same at 1 and 4 threads.
 
 ## Measurements
 

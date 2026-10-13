@@ -34,24 +34,31 @@ public sealed class SaveCaptureOptions
 /// </summary>
 public static class SaveCapture
 {
-    public static SaveGame Capture(World world, PopulationData data, SaveClock clock, LoadedSave? loaded = null, SaveCaptureOptions? options = null)
+    /// <summary>
+    /// The save a capture starts from: a copy of the loaded save, or a new one made from the data (all factions with the data's relations, a default state per placed town). It holds
+    /// nothing of the world, and costs tens of milliseconds, so a host makes it ahead on a worker and hands it to <see cref="Capture"/> (which changes it: one use). Reads
+    /// <paramref name="data"/>'s relations and the loaded save, neither of which a running world changes.
+    /// </summary>
+    public static SaveBuilder PrepareBase(PopulationData data, LoadedSave? loaded = null, SaveCaptureOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        options ??= new SaveCaptureOptions();
+        if (loaded is not null) return new SaveBuilder(loaded.Source.Clone(), options.Seed);
+        var builder = new SaveBuilder(options.Seed);
+        AddFreshFactions(builder, data);
+        AddFreshTowns(builder, data, options);
+        builder.AddEmptyWorldState();
+        return builder;
+    }
+
+    /// <summary><paramref name="prepared"/> is a <see cref="PrepareBase"/> made with the same <paramref name="loaded"/> (null: made here, which is the slow part).</summary>
+    public static SaveGame Capture(World world, PopulationData data, SaveClock clock, LoadedSave? loaded = null, SaveCaptureOptions? options = null, SaveBuilder? prepared = null)
     {
         ArgumentNullException.ThrowIfNull(world);
         ArgumentNullException.ThrowIfNull(data);
         options ??= new SaveCaptureOptions();
 
-        SaveBuilder builder;
-        if (loaded is not null)
-        {
-            builder = new SaveBuilder(loaded.Source.Clone(), options.Seed);
-        }
-        else
-        {
-            builder = new SaveBuilder(options.Seed);
-            AddFreshFactions(builder, data);
-            AddFreshTowns(builder, data, options);
-            builder.AddEmptyWorldState();
-        }
+        var builder = prepared ?? PrepareBase(data, loaded, options);
         var game = builder.Game;
         var camera = game.Camera;
 
@@ -184,6 +191,9 @@ public static class SaveCapture
                 bool isNew = sc is null;
                 sc ??= builder.AddCharacter(platoon, cold.RecordId, cold.Name, playerFactionId, hot.Position, SaveRotation.OfYaw(hot.Yaw),
                     isLeader: squad.Leader == id, squadMemberType: cold.Role);
+                // The handle's own serial is "random" in the original, and the loader rolls a character's look from it: a character with a rolled look gets the look's seed
+                // as its serial, so loading rolls the same face, hair and clothes again (the saved CHARACTER_APPEARANCE is not read back into a look yet).
+                if (isNew && cold.Appearance?.Loadout is { } loadout) sc.Handle = sc.Handle with { S = loadout.Seed };
 
                 // Where and which way.
                 sc.Position = hot.Position;
@@ -197,8 +207,8 @@ public static class SaveCapture
 
                 // Body: stats and medical state, from the host, else the loaded ones, else (for a new character) defaults.
                 var (stats, medical) = options.Bodies?.Invoke(id) ?? (null, null);
-                stats ??= link2?.Stats;
-                medical ??= link2?.Medical;
+                stats ??= cold.Stats ?? link2?.Stats;
+                medical ??= cold.Medical ?? link2?.Medical;
                 if (stats is null && isNew) stats = new CharacterStats();
                 if (stats is not null && sc.Stats is { } sr)
                 {

@@ -91,7 +91,7 @@ sealed partial class GameHost
                         }
                 poses[i] = new CharacterPose(layer.Name, time, weight);
             }
-            list.Add(new CharacterInstance(((long)c.Id.Slot << 32 | (uint)c.Id.Generation) + 1, c.Appearance, position, yaw, poses) { WeaponDrawn = c.WeaponDrawn });
+            list.Add(new CharacterInstance((((long)c.Id.Slot << 32 | (uint)c.Id.Generation) + 1) | (long)worldEpoch << 56, c.Appearance, position, yaw, poses) { WeaponDrawn = c.WeaponDrawn });
         }
     }
 

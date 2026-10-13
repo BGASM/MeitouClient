@@ -91,6 +91,8 @@ sealed partial class GameHost
                 if (k == SilkKey.F7) { interfaceHidden = !interfaceHidden; Console.WriteLine(interfaceHidden ? "interface hidden (F7 shows it)" : "interface shown"); return; }
                 bool ctrl = keyboard.IsKeyPressed(SilkKey.ControlLeft) || keyboard.IsKeyPressed(SilkKey.ControlRight);
                 if (Enum.TryParse(k.ToString(), out CinemaKey cinemaKey) && cinema.OnKey(cinemaKey, ctrl, shiftDown)) return;
+                // F9 is the game's quickload; the fps counter is on Ctrl+F9 (a modifier, so the key never reaches the input bindings).
+                if (k == SilkKey.F9 && ctrl) { fpsVisible = !fpsVisible; return; }
                 if (KeyMap.Map(k) is { } key)
                 {
                     if (shiftDown && key == EngineKey.F1) { Console.WriteLine(meitou.Toggle()); return; }
@@ -155,6 +157,8 @@ sealed partial class GameHost
             if (actions.Pressed(InputAction.ToggleKeys) && overlay is not null) overlay.Visible = !overlay.Visible;
             if (actions.Pressed(InputAction.ToggleStats)) statsVisible = !statsVisible;
             if (actions.Pressed(InputAction.ToggleFps)) fpsVisible = !fpsVisible;
+            if (actions.Pressed(InputAction.QuickSave)) quickSaveRequested = true;
+            if (actions.Pressed(InputAction.QuickLoad)) quickLoadRequested = true;
             if (actions.Pressed(InputAction.CycleProfiler) && profiler is not null) profiler.Showing = (FrameProfiler.Mode)(((int)profiler.Showing + 1) % 3);
             // The camera the cinema left (a cut, a scrub, the end of a flight) goes back to the rig at the first camera input: the free camera at
             // that eye (only it can stand anywhere), or with ; the strategy camera where the view meets the ground. A flight in progress keeps it.
@@ -190,6 +194,7 @@ sealed partial class GameHost
             long a0 = Stopwatch.GetTimestamp();
             session.Advance(frameDt);
             advanceTotal += Stopwatch.GetElapsedTime(a0).TotalMilliseconds;
+            HandleSaves();   // a quicksave or quickload asked for by a key: between ticks, none in flight
             animSeconds += frameDt;
             animClock = true;
             UpdateNav();
@@ -318,7 +323,7 @@ sealed partial class GameHost
                 "F12" => profiler?.Showing.ToString().ToLowerInvariant(),
                 "Shift+F1" => meitou.On ? "Meitou" : "Faithful",
                 "Alt+Enter" => FullScreenState(),
-                "F9" => OnOff(fpsVisible),
+                "Ctrl+F9" => OnOff(fpsVisible),
                 "F11" => OnOff(statsVisible),
                 "F6" => OnOff(cinema.EditorVisible),
                 "F7" => OnOff(interfaceHidden),

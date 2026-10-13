@@ -75,6 +75,7 @@ Code layout (engine choices; behaviour is the game loop above):
 | `GameHost.cs` | Fields, `Boot` (GPU, camera, the simulation through `StandardSystems`, the session, the player interface), the nav zone upkeep. |
 | `GameHost.Screenshot.cs`, `GameHost.Interactive.cs` | The unattended `--screenshot` run; the window loop, input wiring, title, `--quit-after` profile. |
 | `GameHost.Characters.cs` | The renderer's draw list from the two snapshots, markers, the camera focus command. |
+| `GameHost.Saving.cs` | Quicksave (F5) and quickload (F9): the requests, `SaveCapture` at a frame boundary and the file write on a worker, the new world from `SaveLoader`, the host re-hooked ([simulation.md](simulation.md#quicksave-and-quickload)). |
 | `KeyMap.cs` | Silk key and button to the engine's. |
 | `PlayerInterface*.cs` | Events and commands; picking (`.Picking`); the HUD (`.Hud`). The HUD formats the snapshot's numbers (`SkillSummary`) itself. |
 | `NavAdapter.cs` | The navmesh as the simulation's `IAgentWalkability`. |
@@ -101,7 +102,7 @@ view meets the ground.
 
 Default keys: `W A S D` move, `Q`/`E` or `Left`/`Right` rotate, `Up`/`Down` pitch, wheel or `PageUp`/`PageDown` zoom,
 middle drag orbit (right click is the move command, see [simulation.md](simulation.md#player)), left click or drag selects, `1`..`9`, `` ` ``, `R`; `;` free camera (`R`/`F` up/down in it), `Space` pause, `F2`/`F3`/`F4` speed 1x/2x/5x (`.`/`,` step through them), `Tab` settings panel, `F8` or
-`PrintScreen` screenshot (C:\Temp; Kenshi's own keys), `F9` fps counter, `F10` key list, `F11` frame statistics, `F12` profiler chart (gpu, cpu, off),
+`PrintScreen` screenshot (C:\Temp; Kenshi's own keys), `F5` quicksave and `F9` quickload (the game's own keys, [simulation.md](simulation.md#quicksave-and-quickload)), `Ctrl+F9` fps counter (it was `F9`; a saved `ToggleFps` binding of `F9` is dropped at start), `F10` key list, `F11` frame statistics, `F12` profiler chart (gpu, cpu, off),
 `Alt+Enter` full screen, `F6` cinematic camera editor and `F7` hide the interface ([viewer.md](viewer.md#cinematic-camera), "In the game"), `Esc` quit. The debug overlays are the viewer's, and as there they are left out of screenshots; in the game they start
 below the HUD, which holds the top left corner. The `Tab` panel is the viewer's (`WorldFrame.CreateSettingsPanel`) with its time of day (it sets
 the game clock's hour, `GameClock.SetHourOfDay`), VSync and full screen rows; only the viewer's time speed is left out (the game has its speeds).
