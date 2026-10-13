@@ -15,6 +15,8 @@ public readonly record struct CharacterInstance(long Key, CharacterAppearance Ap
 {
     /// <summary>Show the weapon in hand (the parts tagged <see cref="WeaponShown.Drawn"/>) instead of sheathed.</summary>
     public bool WeaponDrawn { get; init; }
+    /// <summary>Uniform size the body is drawn at (an animal's age-dependent size; 1 for people).</summary>
+    public float Scale { get; init; } = 1;
 }
 
 /// <summary>

@@ -30,9 +30,9 @@ public sealed partial class PopulationSystem
                 if (f != data.PlayerFaction && data.Relations.Get(f, data.PlayerFaction) <= FactionRelations.HostileThreshold) { chosen = f; break; }
             if (chosen == data.PlayerFaction) chosen = data.Factions.Select((f, i) => (f, i)).FirstOrDefault(p => p.i != data.PlayerFaction).i;
         }
-        // An animal (ANIMAL_CHARACTER) has no generated look; it is an adult (age 1).
+        // An animal (ANIMAL_CHARACTER) has its species' shared look (nothing rolled); it is an adult (age 1).
         bool animal = data.Db.Find(recordId) is { Type: Meitou.Data.Fcs.FcsRecordType.ANIMAL_CHARACTER };
-        CharacterAppearance? look = animal ? null : SandboxLook(world.Seed, recordId, player, variant, chosen);
+        CharacterAppearance? look = SandboxLook(world.Seed, recordId, player, variant, chosen);
         var member = new MemberPlan(recordId, SquadRole.Leader, 0, default, animal, 1);
         var template = new SquadTemplate { Id = "sandbox " + recordId, Name = data.Db.Find(recordId)?.Name ?? recordId };
         var plan = new SquadPlan(template, [member], [], []);

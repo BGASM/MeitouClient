@@ -15,7 +15,7 @@ public enum CareKind { None, Treating, Resting }
 /// </summary>
 public readonly record struct BodyStatus(float Blood, float WorstPart, float Hunger, bool Unconscious, bool Dead, bool NeedsAid = false, CareKind Care = CareKind.None, bool MedicJob = false, bool RescueJob = false);
 
-/// <summary>A character as the renderer needs it after one tick; <c>Appearance</c> is null for one that is simulated but has nothing to draw (an animal, a failed build): the host shows a marker (docs/simulation.md, "Threading", step 8).</summary>
+/// <summary>A character as the renderer needs it after one tick; <c>Appearance</c> is null for one that is simulated but has nothing to draw (a failed build, a world without looks): the host shows a marker (docs/simulation.md, "Threading", step 8).</summary>
 public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appearance, Vector3 Position, float Yaw, IReadOnlyList<AnimationLayer> Animations)
 {
     /// <summary>The owner faction (a position in the world's faction list; -1 none), for debug markers.</summary>
@@ -44,6 +44,8 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     public CharacterId CarriedBy { get; init; } = CharacterId.None;
     /// <summary>The carrier's bone a carried body hangs from (<c>Bip01 L UpperArm</c>), null when not carried.</summary>
     public string? AttachBone { get; init; }
+    /// <summary>The size the body is drawn at: an animal's lerp(age, <c>scale min</c>, <c>scale max</c>) (its <c>MedicalState.ScaleK</c>), 1 for people.</summary>
+    public float Scale { get; init; } = 1;
     /// <summary>The character this one carries (none when not carrying).</summary>
     public CharacterId Carrying { get; init; } = CharacterId.None;
 }

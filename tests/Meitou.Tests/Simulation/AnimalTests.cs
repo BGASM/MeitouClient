@@ -118,7 +118,7 @@ public class AnimalTests(ITestOutputHelper output)
         return world.Characters.Cold(id.Slot)!;
     }
 
-    // With the animation system: animals have no appearance and their creature techniques are not in the library; they must still run through it.
+    // With the animation system: animals play their own clip sets (no clip lengths here, so the 1 s default; AnimalAnimationTests has the real ones).
     const StandardParts Fighting = StandardParts.Movement | StandardParts.Pursuit | StandardParts.Body | StandardParts.Combat | StandardParts.Retaliation | StandardParts.Aggro
         | StandardParts.Animation;
 

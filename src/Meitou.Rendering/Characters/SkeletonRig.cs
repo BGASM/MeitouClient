@@ -147,10 +147,21 @@ internal sealed class SkeletonRig
     /// The layer for an ANIMATION record name or an Ogre animation name, with that record's deleted tracks and override bones
     /// (<see cref="AnimationMask.Find"/>), cached; null when the skeleton has no such animation.
     /// </summary>
-    public LayerDef? Layer(GameDatabase? db, string name)
+    /// <param name="animal">The rig of an animal: <paramref name="name"/> is a creature technique's record name or a clip of its own skeleton, never a humanoid ANIMATION
+    /// (whose masks, <c>delete tail</c> above all, would hit the animal's like-named bones); ANIMAL_ANIMATION records are not preprocessed, so a clip plays whole.</param>
+    public LayerDef? Layer(GameDatabase? db, string name, bool animal = false)
     {
-        if (layers.TryGetValue(name, out var cached)) return cached;
-        var mask = AnimationMask.Find(db, name);
+        if (layers.TryGetValue(animal ? "\u0001" + name : name, out var cached)) return cached;
+        var def = Build(db, name, animal);
+        layers[animal ? "\u0001" + name : name] = def;
+        return def;
+    }
+
+    LayerDef? Build(GameDatabase? db, string name, bool animal)
+    {
+        var mask = !animal ? AnimationMask.Find(db, name)
+            : db?.OfType(Meitou.Data.Fcs.FcsRecordType.COMBAT_TECHNIQUE).FirstOrDefault(r => r.Name == name) is { } technique ? AnimationMask.FromTechnique(technique)
+            : AnimationMask.Plain(name);
         var clip = Clip(mask.AnimationName) ?? Clip(name);
         LayerDef? def = null;
         if (clip is not null)
@@ -162,7 +173,7 @@ internal sealed class SkeletonRig
             def = new LayerDef(clip, excluded, overrides, mask.RecordName is { } r && r != clip.Name ? $"{r} ({clip.Name})" : clip.Name,
                 mask.Relocates && Handle("Bip01") is { } root ? root : -1);
         }
-        return layers[name] = def;
+        return def;
     }
 
     /// <summary>The body-shape vectors by handle for the sliders' result (<see cref="CharacterShape.Compute"/>); bones not named stay 1.</summary>

@@ -36,6 +36,7 @@ public sealed partial class World
                 CarriedBy = cold?.CarriedBy ?? CharacterId.None,
                 AttachBone = cold is { CarriedBy.IsNone: false } ? Carrying.CarrySystem.AttachBone : null,
                 Carrying = cold?.Carrying ?? CharacterId.None,
+                Scale = cold is { Fighter.IsAnimal: true, Medical: { } size } ? size.ScaleK : 1,
             });
         }
         PreviousSnapshot = Snapshot;
@@ -43,7 +44,7 @@ public sealed partial class World
     }
 
     static BodyStatus BodyOf(CharacterCold cold, Bodies.MedicalState med, RaceData race, byte task) => new(
-        med.Blood / MathF.Max(Bodies.MedicalState.BloodCapacity(race, cold.Stats?.Strength ?? 50), 1), WorstPart(med), med.Hunger, med.Unconscious, med.Dead,
+        med.Blood / MathF.Max(Bodies.MedicalState.BloodCapacity(race, cold.Stats?.Strength ?? 50, med.HasStatsObject, med.ScaleK, med.ScaleZ), 1), WorstPart(med), med.Hunger, med.Unconscious, med.Dead,
         cold.IsPlayer && (med.NeedsAid(race, false) || med.NeedsAid(race, true)),
         task == (byte)CharacterTask.Treat ? CareKind.Treating : task == (byte)CharacterTask.Rest ? CareKind.Resting : CareKind.None, cold.MedicJob, cold.RescueJob);
 

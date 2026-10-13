@@ -19,10 +19,13 @@ public sealed partial class CombatSystem
         return Math.Max(1, (int)MathF.Ceiling((CombatTuning.PauseMin + u * (CombatTuning.PauseMax - CombatTuning.PauseMin)) / world.TickSeconds));
     }
 
-    /// <summary>The ticks a technique's clip takes at <c>anim speed mult</c> x <paramref name="rate"/> clip seconds per second.</summary>
-    int Ticks(CombatTechnique t, float rate, float dt)
+    /// <summary>
+    /// The ticks a technique's clip takes at <c>anim speed mult</c> x <paramref name="rate"/> clip seconds per second; the clip's length is from the fighter's skeleton (an
+    /// animal's own, <see cref="AnimationLengths.For"/>: <c>attack1</c> is 0.77 s on a bonedog and 5 s on a beak thing).
+    /// </summary>
+    int Ticks(CombatTechnique t, float rate, float dt, CharacterCold cold)
     {
-        float clip = lengths.Of(t.AnimName);
+        float clip = lengths.For(cold.Fighter is { IsAnimal: true } ? cold.Race?.StringId : null).Of(t.AnimName);
         if (clip <= 0) clip = CombatTuning.DefaultClipSeconds;
         return Math.Max(2, (int)MathF.Ceiling(clip / (MathF.Max(t.AnimSpeedMult, 0.1f) * MathF.Max(rate, 0.05f)) / dt));
     }
@@ -157,7 +160,7 @@ public sealed partial class CombatSystem
         s.AttackSeq++;
         s.AttackTech = pick;
         s.AttackStart = now;
-        s.AttackTicks = Ticks(tech, PlayRate(cold, tech, attack: true), dt);
+        s.AttackTicks = Ticks(tech, PlayRate(cold, tech, attack: true), dt, cold);
         s.AttackEnd = now + Math.Max(1, (int)MathF.Ceiling(tech.EndProgress * s.AttackTicks));
         s.NextBlow = 1;
         s.AttackReach = TechniqueChooser.ReachOf(tech, moving, weaponReach);
@@ -218,7 +221,7 @@ public sealed partial class CombatSystem
         int pick = TechniqueChooser.ChooseReaction(techniques, fighter.Kind, fighter.TechniqueCategory, false, fighter.CanBlock, direction, block, dodge, chanceRoll, pickRoll);
         if (pick < 0) return;
         var reaction = techniques[pick];
-        int ticks = Ticks(reaction, PlayRate(cold, reaction, attack: false), dt);
+        int ticks = Ticks(reaction, PlayRate(cold, reaction, attack: false), dt, cold);
         // The reaction is timed so that it is at its "blocked frame" when the blow arrives; with less lead time it starts at once and is less far along.
         int strike = scan.Strike;
         int start = Math.Max(now, strike - (int)MathF.Round(reaction.StrikeProgress(1) * ticks));

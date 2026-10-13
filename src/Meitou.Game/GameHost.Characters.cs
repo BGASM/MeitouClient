@@ -103,11 +103,11 @@ sealed partial class GameHost
                         }
                 poses[i] = new CharacterPose(layer.Name, time, weight);
             }
-            list.Add(new CharacterInstance((((long)c.Id.Slot << 32 | (uint)c.Id.Generation) + 1) | (long)worldEpoch << 56, c.Appearance, position, yaw, poses) { WeaponDrawn = c.WeaponDrawn });
+            list.Add(new CharacterInstance((((long)c.Id.Slot << 32 | (uint)c.Id.Generation) + 1) | (long)worldEpoch << 56, c.Appearance, position, yaw, poses) { WeaponDrawn = c.WeaponDrawn, Scale = c.Scale });
         }
     }
 
-    /// <summary>Squares over the characters that have no drawing (animals, failed builds), coloured by faction.</summary>
+    /// <summary>Squares over the characters that have no drawing (a failed build, a world without looks), coloured by faction.</summary>
     void DrawMarkers(DebugOverlay overlay, int width, int height)
     {
         var view = camera.View * camera.Projection(width / (float)Math.Max(height, 1), camera.Near, camera.ViewDistance);

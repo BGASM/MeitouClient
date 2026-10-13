@@ -60,7 +60,7 @@ On exit a `characters ...` line gives counts per LOD level and timings (means of
   **Observed** (`meitou --sandbox 500`, 1600x900, `--distance 400 --pitch 40`, RTX 4070, stills): every part at full detail 4.6M triangles, GPU colour 3.4 ms; the rule 1.74M,
   1.8 ms (1.38M and 1.1 ms with hair at the rule's distance). The colour pass is geometry-bound: the same 3.3-3.8 ms from 800x450 to 3200x1800, ~0.7 ms per million triangles.
   The per-call GPU timer of the character shadow pass is too noisy in stills to compare (0.5 to 1.4 ms per call for the same build); count triangles instead.
-- **Pose rate by distance**: characters beyond 120, 300 and 600 units are posed every 2nd, 4th and 8th frame (staggered by key); the last palette is reused.
+- **Pose rate by distance**: characters beyond 120, 300 and 600 units (animals: x their radius over 16, [Animals](#animals)) are posed every 2nd, 4th and 8th frame (staggered by key); the last palette is reused.
   State per `Key` (`CharState`) holds the palette, the one before it, bone-attach matrices and last frame's model matrix.
 - **Texture memory**: character textures are loaded on demand (deferred) with the world's mip streaming (`MipStreaming` through `WorldTextureCache.Mips`): a texture
   loads without the top levels its nearest user cannot show, and finer when something comes near. A governor scales every need up by 1.6x (up to 512x) while the cache
@@ -71,6 +71,32 @@ On exit a `characters ...` line gives counts per LOD level and timings (means of
   summed at their weights as Kenshi bakes them (`CharacterShape.BakeWeight`), live in one growing storage buffer (`MorphArena`, binding 8), identical sets stored once
   (squads share faces). The vertex program adds the offset before skinning; normals are not changed (the poses carry none, **Verified** in ogre-mesh.md).- **Motion vectors**: `PostProcess.ObjectMotion` (shared with the grass through one hook): the near slice's characters drawn again with last frame's palette (binding 9) and
   model matrices (instance locations 12 to 15) into the motion target (red, green), where the near depth matches.  A character not posed this frame has no bone motion.
+
+## Animals
+
+Animals go through the same skinned path as people ([game/animals.md](game/animals.md#6-appearance) for the data).
+
+- **One asset per species**: `CharacterAppearance.BuildAnimal` reads the race's mesh, textures and fur (no head, no shape, no clothes), and the population's
+  `GeneratedAppearances` hands every animal of a record the same appearance instance, so the content builds one asset per record and every bonedog shares it.
+  `CharacterAsset.Animal` marks it.
+- **Size**: `CharacterSnapshot.Scale` / `CharacterInstance.Scale` (the medical `ScaleK`, lerp(age, scale min, scale max)) scales the world matrix uniformly and the
+  culling sphere with it. An animal's sphere is the body's bounds (height 2 x the bounds centre, radius plus the centre's horizontal offset), not the human one.
+- **Layers** resolve by name on the animal's own skeleton (`SkeletonRig.Layer(db, name, animal: true)`, cached apart from the humanoid masks): a creature technique's
+  name gives its mask through `FromTechnique`, anything else a plain whole-body mask of the clip of that name. The humanoid ANIMATION masks are never used for an animal
+  (`delete tail` and the like would hit animal bones of the same name).
+- **Textures repeat**: animal body textures are sampled with repeat addressing, a person's with the transparent border, since the goat, bull and beak thing put the
+  mirrored half at u 1..2 (**Observed**: with the border the goat drew black).
+- **Fur LOD**: the race's `hairs` fur is an ATTACHMENT but a whole-body shell, so it takes the LOD rule's own distances (x1, not `HairLodScale`) in the picture and
+  in shadows; at x4 a bonedog's fur stayed at full detail to about 1000 units.
+- **Pose rate**: the 120/300/600 distances are stretched by the instance radius over a person's (16, never below 1): a leviathan keeps its rate that many times farther, a dog keeps the human distances.
+- **Markers** now only stand for a character without a look (a failed build, a world without looks).
+- **Observed** cost (`meitou --sandbox 100 --sandbox-character <name>`, 1600x900, `--distance 300 --pitch 40`, RTX 4070, stills): 100 bonedogs 706k triangles, GPU colour
+  0.82 ms, CPU update 0.13 ms, shadow 0.12 ms per cascade call, one appearance with 2 meshes (3.5 MB) and 3 textures (3 MB); 100 beak things 629k triangles, 0.71 ms,
+  0.19 ms, 0.13 ms, 1 mesh (1.7 MB) and 2 textures (7 MB); 100 people 487k triangles, 0.72 ms, 0.21 ms, 0.04 ms, 100 appearances with 74 meshes (30.7 MB) and 45 textures
+  (68 MB). Animals cost about what people do on the GPU (more triangles per body, no clothes) and far less memory; the clip table adds 150-350 ms at startup
+  (`AnimationLengths.Load` reads every animal skeleton).
+- Not done: crossbow bolts in flight (an unskinned mesh per projectile) and bodies carried on the carrier's `Bip01 L UpperArm` (a second attach pass after posing);
+  turning and strafe clips, ragdolls.
 
 ## Findings
 

@@ -439,12 +439,16 @@ public class RangedInstallTests(ITestOutputHelper output)
         Assert.Equal(AnimationLibrary.RangedCategory, library.Definitions[aim].Category);
         Assert.Equal("aimshoot", library.Definitions[aim].Clip);
         Assert.True(library.IndexOf(AnimationLibrary.RangedReloadRecord) >= 0);
-        // The ranged records come after every other (no index of the normal set moves), followed only by the carried body's (category 3), and neither is chosen as an idle.
-        int firstRanged = library.Definitions.ToList().FindIndex(d => d.Category != 0);
-        int firstCarried = library.Definitions.ToList().FindIndex(d => d.Category == AnimationLibrary.CarriedCategory);
+        // The ranged records come after every other humanoid one (no index of the normal set moves), followed by the carried body's (category 3), then the animals' (-1); none is chosen as an idle.
+        var defs = library.Definitions.ToList();
+        int firstAnimal = defs.FindIndex(d => d.Category == AnimationLibrary.AnimalCategory);
+        int end = firstAnimal < 0 ? defs.Count : firstAnimal;
+        int firstRanged = defs.FindIndex(d => d.Category != 0);
+        int firstCarried = defs.FindIndex(d => d.Category == AnimationLibrary.CarriedCategory);
         Assert.True(firstCarried < 0 || firstCarried > firstRanged);
-        Assert.All(library.Definitions.Skip(firstRanged).Take((firstCarried < 0 ? library.Definitions.Count : firstCarried) - firstRanged), d => Assert.Equal(AnimationLibrary.RangedCategory, d.Category));
-        if (firstCarried >= 0) Assert.All(library.Definitions.Skip(firstCarried), d => Assert.Equal(AnimationLibrary.CarriedCategory, d.Category));
+        Assert.All(defs.Skip(firstRanged).Take((firstCarried < 0 ? end : firstCarried) - firstRanged), d => Assert.Equal(AnimationLibrary.RangedCategory, d.Category));
+        if (firstCarried >= 0) Assert.All(defs.Skip(firstCarried).Take(end - firstCarried), d => Assert.Equal(AnimationLibrary.CarriedCategory, d.Category));
+        if (firstAnimal >= 0) Assert.All(defs.Skip(firstAnimal), d => Assert.Equal(AnimationLibrary.AnimalCategory, d.Category));
         foreach (var stance in new[] { new AnimationStance(), new AnimationStance { Combat = true, Right = HandHold.OfCategory((int)WeaponCategory.Bow) } })
         {
             Assert.DoesNotContain(library.Idles(stance), x => x.Index >= firstRanged);

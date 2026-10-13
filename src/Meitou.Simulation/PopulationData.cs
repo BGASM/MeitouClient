@@ -19,10 +19,19 @@ public interface IAppearanceSource
 /// <summary><see cref="IAppearanceSource"/> over the game data and the install.</summary>
 public sealed class GeneratedAppearances(GameDatabase db, string installRoot) : IAppearanceSource
 {
+    // One look per ANIMAL_CHARACTER (nothing of an animal's is rolled): every animal of a record shares it, so the renderer builds one asset per species.
+    readonly ConcurrentDictionary<string, CharacterAppearance?> animals = new(StringComparer.Ordinal);
+
     public CharacterAppearance? Create(string recordId, string? factionId, int seed)
     {
         try
         {
+            if (db.Find(recordId) is { Type: FcsRecordType.ANIMAL_CHARACTER } animal)
+                return animals.GetOrAdd(recordId, static (_, s) =>
+                {
+                    try { return CharacterAppearance.BuildAnimal(s.db, s.installRoot, s.animal); }
+                    catch (KeyNotFoundException) { return null; }
+                }, (db, installRoot, animal));
             return CharacterAppearance.Build(db, installRoot, recordId, new CharacterOptions { Seed = seed, Faction = factionId });
         }
         catch (Exception e) when (e is IOException or FcsFormatException or KeyNotFoundException or InvalidDataException or UnauthorizedAccessException)

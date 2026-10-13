@@ -88,6 +88,8 @@ internal sealed class CharacterAsset
     public string Idle = "idle_stand_relax";
     /// <summary>A sphere round the standing character in its own space (centre height, radius) for culling.</summary>
     public float Height = 20, Radius = 16;
+    /// <summary>An animal (<see cref="CharacterAppearance.Animal"/>): its layers are its own skeleton's clips (<see cref="SkeletonRig.Layer"/>), its sphere from the body mesh's bounds.</summary>
+    public bool Animal;
     /// <summary>How far the body shape lifts the feet in the bind pose (negative: sinks them); the renderer lowers the character by it.</summary>
     public float GroundOffset;
 }
@@ -280,8 +282,14 @@ internal sealed class CharacterContent : IDisposable
         parsed = null;
         if (body is null) return null;
 
-        var asset = new CharacterAsset { Appearance = c, Rig = rig };
-        asset.Shape = Shape(c, rig);
+        var asset = new CharacterAsset { Appearance = c, Rig = rig, Animal = c.Animal is not null };
+        if (asset.Animal)
+        {
+            // An animal's sphere from its body's bounds (a leviathan is 190 units tall): centred above the feet, grown by the bounds' offset across the ground so any heading fits.
+            asset.Height = Math.Max(2 * body.Centre.Y, 1);
+            asset.Radius = body.Radius + new Vector2(body.Centre.X, body.Centre.Z).Length();
+        }
+        asset.Shape = asset.Animal ? null : Shape(c, rig);
         asset.GroundOffset = GroundOffset(rig, asset.Shape);
         if (body.Morphs is { } bodyMorphs && bodyMorphs.Deltas(c.PoseWeights, c.Character?.GetBool("shaved") == true && bodyMorphs.HasCuttableHorns) is { } deltas)
         {
@@ -299,7 +307,8 @@ internal sealed class CharacterContent : IDisposable
             var path = FindMesh(part.Mesh);
             if (path is null) continue;
             bool shared = part.Mode == AttachMode.SharedSkeleton;
-            var loaded = Mesh(path, shared ? rig.BoneCount : null, part.Record.Type == FcsRecordType.ATTACHMENT ? HairLodScale : 1);
+            // An animal's fur is a shell over the whole body (5.5k triangles on the bonedog, more than its body), not a few hair cards: it takes the rule's own distances.
+            var loaded = Mesh(path, shared ? rig.BoneCount : null, part.Record.Type == FcsRecordType.ATTACHMENT && c.Animal is null ? HairLodScale : 1);
             if (loaded is null || loaded.Gpu.Parts.Count == 0) continue;
             var ap = new AssetPart
             {
@@ -383,8 +392,10 @@ internal sealed class CharacterContent : IDisposable
             BeardAlpha = Channel(c.Beard?.GetInt("head alpha channel" + f, 1) ?? 1),
             ShirtColour = colour is null ? Vector3.One : CharacterAppearance.Rgb(colour.GetInt("color 1")), HasShirtColour = colour is not null,
         };
-        m.Tex[CharacterShaders.SlotDiffuse] = Texture(c.BodyTexture, true);
-        m.Tex[CharacterShaders.SlotNormal] = Texture(c.BodyNormal, true);
+        // Animal meshes put the mirrored half of the body at u 1..2 (goat, bull, beak thing: Observed, the meshes' texture coordinates), so their textures repeat; a
+        // person's body texture has the transparent border (the head sits beside it at v -1..0). That Kenshi repeats them is an engine reading (the animal material was not read).
+        m.Tex[CharacterShaders.SlotDiffuse] = Texture(c.BodyTexture, c.Animal is null);
+        m.Tex[CharacterShaders.SlotNormal] = Texture(c.BodyNormal, c.Animal is null);
         m.Tex[CharacterShaders.SlotBodyMask] = Texture(c.BodyMask, true);
         m.Tex[CharacterShaders.SlotHeadDiffuse] = Texture(Tex(c.Head, "texture map"), true);
         m.Tex[CharacterShaders.SlotHeadNormal] = Texture(Tex(c.Head, "normal map"), true);

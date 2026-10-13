@@ -33,8 +33,9 @@ sealed partial class GameHost
     {
         if (g.SandboxCharacter is { } want)
             return db.Find(want)?.StringId
-                ?? db.OfType(FcsRecordType.CHARACTER).FirstOrDefault(r => string.Equals(r.Name, want, StringComparison.OrdinalIgnoreCase))?.StringId
-                ?? throw new ArgumentException($"--sandbox-character: no CHARACTER named '{want}'");
+                ?? db.Records.Values.Where(r => r.Type is FcsRecordType.CHARACTER or FcsRecordType.ANIMAL_CHARACTER).OrderBy(r => r.Type == FcsRecordType.ANIMAL_CHARACTER)
+                    .FirstOrDefault(r => string.Equals(r.Name, want, StringComparison.OrdinalIgnoreCase))?.StringId
+                ?? throw new ArgumentException($"--sandbox-character: no CHARACTER or ANIMAL_CHARACTER named '{want}'");
         var start = NewGameStart.Find(NewGameStart.LoadAll(db), NewGameStart.DefaultName);
         foreach (var link in start?.Squad ?? [])
         {
@@ -64,8 +65,8 @@ sealed partial class GameHost
         }
         playerSquad = world.Squads.Find(world.Player.Squad);
         world.Commands.Enqueue(new SelectCommand([sandboxHero]) { Tick = world.Tick });
-        bool patrol = false;
-        // --sandbox-mode: comma-separated walk, run or free, a fixed speed in units/s, and patrol.
+        bool patrol = false, fight = false;
+        // --sandbox-mode: comma-separated walk, run or free, a fixed speed in units/s, patrol and fight.
         foreach (string token in (g.SandboxMode ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             if (float.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out float speed)) sandboxSpeed = speed;
@@ -76,11 +77,13 @@ sealed partial class GameHost
                     case "run": sandboxMode = SpeedMode.Run; break;
                     case "free": sandboxMode = SpeedMode.Free; break;
                     case "patrol": patrol = true; break;
-                    default: throw new ArgumentException("--sandbox-mode: walk, run, free, a speed in units/s, or patrol (comma-separated)");
+                    case "fight": fight = true; break;   // the G key at the start (pictures of a fight)
+                    default: throw new ArgumentException("--sandbox-mode: walk, run, free, a speed in units/s, patrol or fight (comma-separated)");
                 }
         }
         SandboxSendMovement();
         if (patrol) SandboxTogglePatrol();
+        if (fight) SandboxKey(EngineKey.G);
         session.Ticked += _ => SandboxTick();
         Console.WriteLine($"sandbox   {record}{(g.Sandbox >= 2 ? ", two facing each other 30 units apart (G fights)" : "")}{(g.Sandbox > 2 ? $", {g.Sandbox - 2} more round them" : "")}; flat floor {2 * SandboxHalf:0} x {2 * SandboxHalf:0}, grid {SandboxMinor:0} / {SandboxMajor:0}");
         return new Vector3(0, scene.FlatHeight, 0);
@@ -235,8 +238,10 @@ sealed partial class GameHost
         foreach (var layer in snapshot.Animations)
         {
             // Published by record name; the length is the clip's (a technique's record name differs from its clip).
-            string clip = animationLibrary is { } lib && lib.IndexOfAny(layer.Name) is var at and >= 0 ? lib.Definitions[at].Clip : layer.Name;
-            float length = animationLengths?.Of(clip) ?? 1;
+            // An animal publishes its clips by clip name (its techniques by record name) and has its own skeleton's lengths.
+            bool animal = cold.Fighter is { IsAnimal: true };
+            string clip = animationLibrary is { } lib && lib.IndexOfAny(layer.Name) is var at and >= 0 && (!animal || lib.Definitions[at].Technique) ? lib.Definitions[at].Clip : layer.Name;
+            float length = animationLengths?.For(animal ? cold.Race?.StringId : null).Of(clip) ?? 1;
             add($"  {layer.Name,-28} t {layer.Time,5:0.00}/{length,5:0.00}  w {layer.Weight:0.00}", null);
         }
     }

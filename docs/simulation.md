@@ -26,7 +26,7 @@ Each stage ends with tests and something the owner can run.
 | **5. Navmesh** | Collision reader, our own generator with the seed prune, path queries off the tick | Done in three passes plus the game wiring ([Navmesh](#navmesh)); gaps listed there |
 | **6. Player** | New game from NEW_GAME_STARTOFF, selection, move orders, minimal HUD | Done ([Player](#player)); formation and queued orders included |
 | **7. Bodies** | Stats and XP, hunger, blood, body parts, KO and death | Done and wired into `World` ([Bodies](#bodies)); first aid, resting and XP on the move are in play (2026-10-13, `FirstAidSystem`); beds and the time scale are open |
-| **8. Combat** | Melee per [combat.md](game/combat.md); ranged later | Melee done and wired ([Combat](#combat)); fights start by faction hostility, the player's idle characters defend themselves, the player's assaults and killings change the relations (2026-10-13, `AggroSystem`, [Hostility](#hostility-and-relations)); crossbows done ([Ranged](#ranged)); animals fight with their natural weapons and bodies (2026-10-13, [Animals](#animals)); turrets and attack slots not built |
+| **8. Combat** | Melee per [combat.md](game/combat.md); ranged later | Melee done and wired ([Combat](#combat)); fights start by faction hostility, the player's idle characters defend themselves, the player's assaults and killings change the relations (2026-10-13, `AggroSystem`, [Hostility](#hostility-and-relations)); crossbows done ([Ranged](#ranged)); animals fight with their natural weapons and bodies, drawn and animated with their own clips (2026-10-13, [Animals](#animals)); turrets and attack slots not built |
 | **9. AI proper** | Packages, blackboard, scoring and planner ([ai.md](game/ai.md)), off-screen squads | Not started (gate: towns run their daily routines, squads travel off screen). `PursuitSystem`, `RetaliationSystem`, `AggroSystem` (senses and target choice) and the roaming squads are engine stand-ins, not the original's AI |
 | **10. Saves** | Read and write the world state ([save.md](formats/save.md)) | API done ([Saves](#saves)); the game host quicksaves (F5) and quickloads (F9) the player's squad into its own slot ([Quicksave and quickload](#quicksave-and-quickload)); no save menu, no loading of the original game's saves in play |
 | **11+** | Economy and trade, buildings and production, the MyGUI screens, audio | Not started, except crimes and bounties (2026-10-13, [Crimes and bounties](#crimes-and-bounties)) |
@@ -278,7 +278,8 @@ positions and the cold state no other `Act` writes). The game's `CombatOptions` 
   seed, the town, the squad and the member). Building runs on one background thread in the game (`PopulationSettings.Background`) and inside
   the tick in tests; results are taken in at the first tick after they are ready. Every member with a race gets a body, a fighter and an
   inventory (`CharacterAssembly`, [Bodies](#bodies), [Items and eating](#items-and-eating)) and its top speed from `Speed.Run`. Animals (ANIMAL_CHARACTER) get
-  their record's race and an animal's body and natural weapon ([Animals](#animals)), an empty inventory and no appearance: they are drawn as markers.
+  their record's race and an animal's body and natural weapon ([Animals](#animals)), an empty inventory and their species' look (`CharacterAppearance.BuildAnimal`, one
+  shared instance per ANIMAL_CHARACTER from `GeneratedAppearances`; since 2026-10-13, before that they were drawn as markers).
   A member without a race runs at the stand-in 45 (`CharacterAssembly.StandInMaxSpeed`) and walks at 15. Resident squads are `Squad` objects (leader, members, home) in `World.Squads`, hashed.
 - **Roaming squads** (`PopulationRoaming.cs`; 6.2, 6.4, [game-loop.md](game/game-loop.md#factions-and-squads), [ai.md](game/ai.md)). A loaded town
   with `roaming squads` draws one squad per look (every 60 ticks, 2 game seconds) while its pool is below the cap: 0.7 of the faction's
@@ -502,6 +503,17 @@ The original's rules (decompilation) are in [animation.md](animation.md#run-time
   without the carry flag under `AnimationLibrary.CarryIdle` (`stand carrying left`); a walking one gets the `walk/jog carrying left` upper clips
   through the normal movement blend (lower-body clips ignore the carry flags, `FitsExceptLegs`). A carried body plays `carry me` instead of the
   lying clip, does not fall and is not pushed by root motion. The arm-only overlay is not used.
+- **Animals** (2026-10-13; data in [animals.md "Animations"](game/animals.md#7-animations)). The library appends every ANIMAL_ANIMATION record and the creature
+  techniques (`animal` 9 and up) after all the humanoid definitions (no hashed index of a person moves), in `AnimationLibrary.AnimalCategory` (-1) so no humanoid selector
+  takes them; an animal's definitions are whole-body and published under their clip name (the records share names: two `sleeponfloor`s play `sleep` and `gotosleep`). Each
+  ANIMAL_CHARACTER gets an `AnimalClips` from its own `animations` list: movement clips (non-zero `move speed`), idles (`idle`, by `idle chance`), and fall / lying candidates
+  (its own `sleeponfloor` records, then every other one). `AnimationSystem` runs animals through `UpdateAnimal` with the clips its race's skeleton has
+  (`AnimationLengths.For(race)`; a record whose clip the skeleton lacks, like the skimmer's `idle1`, is dropped): moving, the movement clips by their speed weights
+  (unsynched, F x `play speed` x v clip seconds per second); standing, in a fight too, an idle (a non-looping one, `idle noloop`, only for its own length); a creature technique
+  from the combat system over everything, timed by its own skeleton's length; down, `gotosleep` once, then `sleep` (or the fall's last frame held; a species with neither, the
+  crab, robot spiders, gorillos, crimper, land bat, stays in its idle). No hit reactions (no animal record has `stumbles`) and no getting up (no clip; it fades back).
+  **Engine readings**: F = 1 / the animal's size (the humanoid F = (2 - H) / g with H = 1 and g the race scale read as the size), and an attack's root motion is scaled by
+  the size. The pinned scenarios have no animals (they run without the install), so no golden hash moved; `AnimalTests` still agree at 1, 4 and 16 threads.
 - **Host.** Clip time and weight are interpolated between the two snapshots (a wrapped clip time shows the new value).
 - **Not made:** strafing (`strafe lower` by the sideways speed), overlays (breathing, wound `pain anim`s, `carrying left arm only`), `head turning`, other
   `is action` clips, weather variants, the ragdoll, and the right-arm override clone of blocks.
@@ -751,12 +763,12 @@ Built 2026-10-13 from [animals.md](game/animals.md). Code: `AnimalData` (`Meitou
 - **Determinism.** Everything new is spawn-time data or reads of the character's own slot; `AnimalTests` runs a pack fight (bonedogs, beak things and wild bulls
   against people, one-slot partitions) at 1, 4 and 16 threads and gets the same hashes. It is not pinned among the golden scenarios: those run without the install.
 - **Cost.** Nothing per tick beyond what any fighter costs; the scale is one multiply per stat read.
-- **Not done.** Animal animations: animals have no appearance and are drawn as markers, and their technique clips (`attack1`...) live in their own skeletons, which the
-  animation library does not load (creature techniques are left out of it, as the original's preprocess does): the animation system runs over animals like anyone
-  (`AnimalTests` include it), finds no clip for their techniques and plays nothing for them, and their other layers are the human clips, which nothing draws; attack timing
-  uses the 1 s default clip length. Nests
-  and the area spawns (wild packs), smell, `VO_Creature_Alert`, `animal strength`, lifespan and ageing, `turn rate`, pack animals' backpacks, death items and
-  butchering, animal AI goals, taming and buying animals, saving the animal factors.
+- **Looks and animation** (2026-10-13). Animals are drawn (their race's mesh, textures and fur at their size, [character-renderer.md](character-renderer.md#animals)) and
+  play their own clips ([Animation](#animation), animals); combat times a creature's blows by the clip lengths of its own skeleton (`AnimationLengths.For`), so a bonedog's
+  bite takes 0.77 s of clip and a beak thing's 5 s instead of the 1 s default. Before, they had no look (markers), and the animation system gave them human layers.
+- **Not done.** Smell, `VO_Creature_Alert`, `animal strength`, lifespan and ageing, `turn rate` (and the `turning anim` / `strafe anim` clips), pack animals' backpacks
+  (the luggage meshes), death items and butchering, animal AI goals (eating, the dogs' limb games), taming and buying animals, saving the animal factors (a loaded animal is
+  drawn at size 1), the ragdoll (a downed animal plays `gotosleep` / `sleep`).
 
 ### Hostility and relations
 
@@ -1010,7 +1022,8 @@ the pain of the medical state are not in the save's keys and start empty and at 
   `--weather` and `--clouds` still override), the sky and sun are the usual. The 1000 x 1000 floor around the origin is drawn as
   screen-space overlay lines (`GameHost.Sandbox.cs`): a line every 10 units, a stronger one every 100, the X axis red and the Z axis blue. They have no
   depth test, so they also cross the characters. SSAO is off by default (it bands a perfectly flat floor).
-- **Characters.** `PopulationSystem.SpawnSandbox` makes one idle character (the first member of the default new-game start, or `--sandbox-character <name>`
+- **Characters.** `PopulationSystem.SpawnSandbox` makes one idle character (the first member of the default new-game start, or `--sandbox-character <name>`, a CHARACTER or
+  an ANIMAL_CHARACTER by name or string id,
   with the loadout the generator gives it, so combat works): the hero, the player's, selected, at the origin facing +X. With `n = 2` a second one of
   a faction hostile to the player's stands 30 units away facing it. With `n > 2` (up to 1000) the rest stand idle in rings 15 units apart round the
   pair, each with a look of its own, of the player's faction (so they keep out of the fight). No navmesh, no towns: paths are straight lines on open ground.
@@ -1024,7 +1037,8 @@ the pain of the medical state are not in the save's keys and start empty and at 
 - **Panel** (bottom right): for the hero and the foe the speed v (the velocity the movement system set) and the speed measured between the last two
   snapshots, the speed chain's top speed, the mode with its cap, the fixed speed, the position and yaw, `CharacterAnimation.Phase` and `Rate`
   (the synch phase and the playback factor F), and every published layer as `name  t time/length  w weight` (lengths from `AnimationLengths`).
-- **Command line.** `--sandbox-mode` (comma-separated: `walk`, `run` or `free`; a fixed speed in u/s; `patrol`, e.g. `run,patrol`) starts the hero in a state; with `--screenshot --ticks n`
+- **Command line.** `--sandbox-mode` (comma-separated: `walk`, `run` or `free`; a fixed speed in u/s; `patrol`; `fight`, the G key at the start, added 2026-10-13 for
+  pictures of animals fighting; e.g. `run,patrol`) starts the hero in a state; with `--screenshot --ticks n`
   the picture is taken after n ticks of it (`--move-to x z` works as in a new game). The start camera is boom 70, pitch 22,
   yaw 35 (`--distance`, `--pitch`, `--yaw`).
 

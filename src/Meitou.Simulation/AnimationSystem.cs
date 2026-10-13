@@ -246,6 +246,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         var upper = upperScratch ?? [];
         lower.Clear();
         upper.Clear();
+        if (Library.Animal(cold.RecordId) is { } animal) return UpdateAnimal(a, cold, PlanOf(animal), speed, dt, seed, key, tick, lower, fight);
         if (a.Rate == 0) a.Rate = cold.Appearance is { } look ? 2 - CharacterShape.MovementScaleOf(look) : 1;
         // Carrying picks the "carrying left" clips and a carried body the "being carried" ones (the ANIMATION booleans, docs/animation.md).
         bool carried = !cold.CarriedBy.IsNone;
@@ -333,6 +334,16 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             a.Idle = -1;
         }
 
+        return Settle(a, wanted, legs, lift, liftTime, technique, fight, speed, dt, Lengths, 1);
+    }
+
+    /// <summary>
+    /// The layers' targets from <paramref name="wanted"/>, the synched phase (from the first <paramref name="legs"/> entries), the weights faded and the times advanced, with
+    /// the clip lengths of <paramref name="lengths"/>; returns the root motion of the relocating clips times <paramref name="rootScale"/>.
+    /// </summary>
+    Vector2 Settle(CharacterAnimation a, List<(int Index, float Weight)> wanted, int legs, int lift, float liftTime, int technique, in CombatView fight, float speed, float dt,
+        AnimationLengths lengths, float rootScale)
+    {
         // Targets: what is wanted fades in, everything else out. The first clips a character ever plays start at full weight (no fade from the binding pose).
         bool first = a.Count == 0;
         for (int k = 0; k < a.Count; k++) a.Layers[k].Target = 0;
@@ -368,7 +379,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             var d = Library.Definitions[layer.Definition];
             layer.Weight = layer.Weight < layer.Target ? MathF.Min(layer.Weight + step, layer.Target) : MathF.Max(layer.Weight - step, layer.Target);
             float before = layer.Time;
-            float length = Lengths.Of(d.Clip);
+            float length = lengths.Of(d.Clip);
             bool synched = d.Synchs && d.MoveSpeed != 0;
             if (layer.Definition == lift) layer.Time = liftTime;
             else if (layer.Definition == technique) layer.Time = fight.Progress * length;   // the combat system's timing: the blow lands at its frame
@@ -377,21 +388,93 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             else if (d.MoveSpeed != 0) layer.Time += dt * a.Rate * d.PlaySpeed * speed;
             else layer.Time += dt * (d.PlaySpeed > 0 ? d.PlaySpeed : d.Technique ? 1 : 0);
             if (!d.Loop && !synched) layer.Time = Math.Clamp(layer.Time, 0, length * 0.999f);   // a one-shot clip holds its last frame
-            if (d.Relocates && layer.Time > before) root += (Lengths.Root(d.Clip, layer.Time) - Lengths.Root(d.Clip, before)) * layer.Weight;
+            if (d.Relocates && layer.Time > before) root += (lengths.Root(d.Clip, layer.Time) - lengths.Root(d.Clip, before)) * layer.Weight;
             if (layer.Weight <= 0 && layer.Target <= 0) continue;   // faded out: dropped
             a.Layers[kept++] = layer;
         }
         a.Count = kept;
-        return root;
+        return root * rootScale;
+    }
+
+    /// <summary>An animal's clips with those its skeleton lacks taken out, and the fall and lying clip chosen (<see cref="PlanOf"/>).</summary>
+    sealed record AnimalPlan(int[] Movement, IReadOnlyList<(int Index, float Weight)> Idles, int Fall, int Lying, AnimationLengths Lengths);
+
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, AnimalPlan> animalPlans = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The plan of an animal's clip set: the race's skeleton lengths (<see cref="AnimationLengths.For"/>), and when that skeleton was read, only the clips it has (a record whose
+    /// clip the skeleton lacks would pose nothing: the skimmer's <c>idle1</c>); the first fall and lying candidates it has.
+    /// </summary>
+    AnimalPlan PlanOf(AnimalClips clips) => animalPlans.GetOrAdd(clips.RecordId, static (_, s) =>
+    {
+        var (self, c) = s;
+        var lengths = self.Lengths.For(c.RaceId);
+        bool known = c.RaceId is { } race && self.Lengths.HasSpecies(race);
+        bool Has(int i) => !known || lengths.Has(self.Library.Definitions[i].Clip);
+        int First(int[] list) { foreach (int i in list) if (Has(i)) return i; return -1; }
+        return new AnimalPlan([.. c.Movement.Where(Has)], [.. c.Idles.Where(x => Has(x.Index))], First(c.Fall), First(c.Lying), lengths);
+    }, (this, clips));
+
+    /// <summary>
+    /// One tick of an animal's animation (docs/simulation.md "Animation", animals): its own clips only. Moving, the movement clips of its list by speed (unsynched: F x
+    /// <c>play speed</c> x v clip seconds per second, F = 1 / its size: the humanoid F = (2 - H) / g with H = 1 and g the size, an <b>engine reading</b>); standing (in a
+    /// fight too), one of its idles; a creature technique the combat system plays, over everything; down, its <c>gotosleep</c> once, then <c>sleep</c> (or the fall's last
+    /// frame held); no hit reactions (no animal record has <c>stumbles</c>) and no getting up (none exists: it fades back to standing). Root motion of an attack is scaled by
+    /// the size.
+    /// </summary>
+    Vector2 UpdateAnimal(CharacterAnimation a, CharacterCold cold, AnimalPlan plan, float speed, float dt, ulong seed, ulong key, long tick, List<(int Index, float Weight)> wanted, in CombatView fight)
+    {
+        float size = cold.Medical?.ScaleK ?? 1;
+        if (!(size > 0.01f)) size = 1;
+        if (a.Rate == 0) a.Rate = 1 / size;
+        bool carried = !cold.CarriedBy.IsNone;
+        bool down = cold.Medical?.Incapacitated ?? false;
+        if (down && !a.WasDown && !carried) StartAction(a, plan.Fall, false);
+        if (carried || !down) a.Action = -1;   // the fall is an animal's only one-shot clip
+        a.WasDown = down;
+        int technique = down ? -1 : fight.Technique;
+        if (a.Action >= 0)
+        {
+            var d = Library.Definitions[a.Action];
+            a.ActionTime += dt * (d.PlaySpeed > 0 ? d.PlaySpeed : 1);
+            if (a.ActionTime >= plan.Lengths.Of(d.Clip) && plan.Lying >= 0) a.Action = -1;   // without a lying clip the fall's last frame is held
+        }
+        wanted.Clear();
+        float v = MathF.Abs(speed);
+        if (a.Action >= 0) wanted.Add((a.Action, 1));
+        else if (down && plan.Lying >= 0)
+        {
+            wanted.Add((plan.Lying, 1));
+            a.Idle = -1;
+        }
+        else if (technique >= 0) wanted.Add((technique, 1));
+        else
+        {
+            // Down without any lying clip (the crab, the robot spiders, gorillos: their skeletons have none) it stays in its idle rather than the binding pose.
+            if (v >= MovingSpeed && !down) Library.Movement(plan.Movement, v, wanted);
+            if (wanted.Count == 0)
+            {
+                bool fresh = a.Idle < 0 || a.IdleLeft <= 0;
+                StandingIdle(a, plan.Idles, dt, seed, key, tick, wanted);
+                // A one-shot idle (the bonedog's "idle noloop", 2.5 s) is held only for its own length, not the record's 10 to 40 s idle time (engine choice).
+                if (fresh && a.Idle >= 0 && Library.Definitions[a.Idle] is { Loop: false } once)
+                    a.IdleLeft = MathF.Min(a.IdleLeft, plan.Lengths.Of(once.Clip) / MathF.Max(once.PlaySpeed, 0.01f));
+            }
+            else a.Idle = -1;
+        }
+        return Settle(a, wanted, 0, -1, 0, technique, fight, v, dt, plan.Lengths, size);
     }
 
     /// <summary>
     /// A standing character's idle: out of combat a whole-body idle, in combat an upper-body guard over the lower movement blend (<paramref name="legs"/>:
     /// the lower clips are already wanted), kept until its time is up and then drawn again by <c>idle chance</c>.
     /// </summary>
-    void StandingIdle(CharacterAnimation a, in AnimationStance stance, bool legs, float dt, ulong seed, ulong key, long tick, List<(int Index, float Weight)> wanted)
+    void StandingIdle(CharacterAnimation a, in AnimationStance stance, bool legs, float dt, ulong seed, ulong key, long tick, List<(int Index, float Weight)> wanted) =>
+        StandingIdle(a, legs ? Library.CombatIdles(stance) : Library.Idles(stance), dt, seed, key, tick, wanted);
+
+    /// <summary>The idle among <paramref name="idles"/> (index, <c>idle chance</c>): kept until its time is up, then drawn again by weight.</summary>
+    void StandingIdle(CharacterAnimation a, IReadOnlyList<(int Index, float Weight)> idles, float dt, ulong seed, ulong key, long tick, List<(int Index, float Weight)> wanted)
     {
-        var idles = legs ? Library.CombatIdles(stance) : Library.Idles(stance);
         if (a.Idle < 0 || a.IdleLeft <= 0 || !idles.Any(x => x.Index == a.Idle))
         {
             float total = 0;

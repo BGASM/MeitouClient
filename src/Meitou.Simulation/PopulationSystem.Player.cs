@@ -73,7 +73,7 @@ public sealed partial class PopulationSystem
         foreach (var m in first)
         {
             CharacterAppearance? look = null;
-            if (!m.IsAnimal && data.Appearances is { } source)
+            if (data.Appearances is { } source)   // an animal gets its species' shared look (GeneratedAppearances)
                 look = source.Create(m.RecordId, factionId, (int)(Rng.Hash(world.Seed, key, RngPurpose.Spawn, SeedSalts.PlayerLook + (ulong)m.Index) & 0x7FFFFFFF));
             members.Add(new BuiltMember(m, look));
         }

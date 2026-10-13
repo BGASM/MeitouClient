@@ -71,6 +71,8 @@ public sealed record CharacterOptions
 public sealed class CharacterAppearance
 {
     public GameRecord? Character { get; private init; }
+    /// <summary>The ANIMAL_CHARACTER this animal was built from (<see cref="BuildAnimal"/>); null for people.</summary>
+    public GameRecord? Animal { get; private init; }
     public required GameRecord Race { get; init; }
     public bool Female { get; private init; }
     public AppearanceFile? Body { get; private init; }
@@ -118,8 +120,9 @@ public sealed class CharacterAppearance
     public static CharacterAppearance Build(GameDatabase db, string installRoot, string nameOrId, CharacterOptions? options = null)
     {
         options ??= new CharacterOptions();
-        var record = Find(db, nameOrId, FcsRecordType.CHARACTER, FcsRecordType.RACE)
-            ?? throw new KeyNotFoundException($"No CHARACTER or RACE record '{nameOrId}'.");
+        var record = Find(db, nameOrId, FcsRecordType.CHARACTER, FcsRecordType.RACE, FcsRecordType.ANIMAL_CHARACTER)
+            ?? throw new KeyNotFoundException($"No CHARACTER, RACE or ANIMAL_CHARACTER record '{nameOrId}'.");
+        if (record.Type == FcsRecordType.ANIMAL_CHARACTER) return BuildAnimal(db, installRoot, record);
         // With a seed the generator rolls everything (docs/characters.md, "Generating a character").
         var faction = options.Faction is { } factionName ? Find(db, factionName, FcsRecordType.FACTION) : null;
         var loadout = options.Loadout ?? (options.Seed is { } seed ? CharacterGenerator.Generate(db, installRoot, record, seed, options.Female, faction) : null);
@@ -258,6 +261,29 @@ public sealed class CharacterAppearance
         int inHand = weapons.FindIndex(w => w.Weapon.Type == FcsRecordType.WEAPON);
         for (int i = 0; i < weapons.Count; i++)
             result.AddWeapon(weapons[i].Weapon, female, weapons[i].Point, drawn: options.WeaponDrawn && i == 0, backCount: 0, weapons[i].Model, both: !options.WeaponDrawn && i == inHand);
+        return result;
+    }
+
+    /// <summary>
+    /// An animal's look (docs/game/animals.md "Appearance", <b>Verified</b> against the records): the ANIMAL_CHARACTER names no mesh or texture; its race does, as a
+    /// person's: <c>male mesh</c> (every animal race names the same file for both genders, so the male one is used), <c>body texture male</c>, <c>nm male</c>, and the fur
+    /// as its <c>hairs</c> ATTACHMENT (a mesh on the body's skeleton, coloured by the race's <c>hair colors</c>). No head, no body file, no clothing, no visible weapon (the
+    /// natural weapon has no mesh). Nothing is rolled: every animal of a record looks the same, so callers can share one instance.
+    /// </summary>
+    public static CharacterAppearance BuildAnimal(GameDatabase db, string installRoot, GameRecord animal)
+    {
+        var race = animal.GetReferences("race").Where(r => r.Values.Value0 > 0).Select(r => db.Find(r.TargetStringId))
+            .FirstOrDefault(r => r is { Type: FcsRecordType.RACE }) ?? throw new KeyNotFoundException($"'{animal.Name}' has no race.");
+        var result = new CharacterAppearance
+        {
+            Animal = animal, Race = race, Female = false,
+            BodyMesh = race.GetPath("male mesh"),
+            BodyTexture = FilePath(race, "body texture male"), BodyNormal = FilePath(race, "nm male"),
+            HairColour = HairColourOf(db, race, null, null),
+        };
+        result.Hair = PickHair(db, race, AttachSlot.Hair, null);
+        if (result.Hair is not null) result.AddWorn(result.Hair, false, []);
+        result.LoadAttachmentPoints(installRoot, race);
         return result;
     }
 

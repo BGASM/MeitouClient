@@ -82,6 +82,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     readonly Dictionary<long, CharState> states = [];
     /// <summary>Characters farther than these distances are posed every 2nd, 4th and 8th frame (a still holds the last palette); 0: every frame.</summary>
     public float[] PoseRangeSteps { get; set; } = [120, 300, 600];
+    /// <summary>The culling radius of a person (<see cref="CharacterAsset.Radius"/>): a bigger body (an animal) takes the pose-rate distances that many times farther, as it fills as much of the screen there.</summary>
+    const float HumanRadius = 16;
 
     int PoseInterval(float distance)
     {
@@ -172,16 +174,18 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                 built++;
             }
             if (asset is null) continue;
-            var centre = inst.Position + new Vector3(0, asset.Height * 0.5f, 0);
-            if (Vector3.Distance(eye, centre) - asset.Radius > DrawDistance) continue;
+            float scale = inst.Scale > 0 ? inst.Scale : 1;
+            var centre = inst.Position + new Vector3(0, asset.Height * 0.5f * scale, 0);
+            if (Vector3.Distance(eye, centre) - asset.Radius * scale > DrawDistance) continue;
             if (liveCount == live.Length) Array.Resize(ref live, liveCount * 2);
             ref var l = ref live[liveCount++];
             l.Asset = asset;
-            // Lowered by the body shape's lift, so a short body's feet stay on the ground (CharacterAsset.GroundOffset).
+            // Lowered by the body shape's lift, so a short body's feet stay on the ground (CharacterAsset.GroundOffset); an animal scaled by its size (its node's scale).
             l.World = Matrix4x4.CreateRotationY(inst.Yaw) * Matrix4x4.CreateTranslation(inst.Position - new Vector3(0, asset.GroundOffset, 0));
+            if (scale != 1) l.World = Matrix4x4.CreateScale(scale) * l.World;
             l.WeaponDrawn = inst.WeaponDrawn;
             l.Centre = centre;
-            l.Radius = asset.Radius;
+            l.Radius = asset.Radius * scale;
             l.BoneBase = boneTotal;
             boneTotal += asset.Rig.BoneCount;
             l.AttachBase = attachCount;
@@ -191,12 +195,12 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             l.State = state;
             state.PreviousWorld = state.HasWorld ? state.World : l.World;
             (state.World, state.HasWorld) = (l.World, true);
-            l.Repose = state.Posed < 0 || state.Bones.Length != asset.Rig.BoneCount || (updateStamp + inst.Key) % PoseInterval(Vector3.Distance(eye, centre)) == 0;
+            l.Repose = state.Posed < 0 || state.Bones.Length != asset.Rig.BoneCount || (updateStamp + inst.Key) % PoseInterval(Vector3.Distance(eye, centre) / MathF.Max(1, l.Radius / HumanRadius)) == 0;
             l.LayerStart = layerCount;
             var rig = asset.Rig;
             if (inst.Poses is { } poses)
                 for (int p = 0; p < poses.Count; p++)
-                    if (rig.Layer(content.Database, poses[p].Animation) is { } def) AddLayer(new ActiveLayer(def, poses[p].Time, poses[p].Weight));
+                    if (rig.Layer(content.Database, poses[p].Animation, asset.Animal) is { } def) AddLayer(new ActiveLayer(def, poses[p].Time, poses[p].Weight));
             foreach (var (def, time) in asset.Fixed) AddLayer(new ActiveLayer(def, time, 1));
             l.LayerCount = layerCount - l.LayerStart;
         }

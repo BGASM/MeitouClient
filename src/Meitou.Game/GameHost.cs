@@ -101,7 +101,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
                 catch (Exception e) when (e is IOException or FormatException) { Console.Error.WriteLine($"population no areas map ({e.Message}): no wild squads"); }
             }
             var data = Meitou.Simulation.PopulationData.Create(gameDb, towns, new Meitou.Simulation.GeneratedAppearances(gameDb, install.Root), biomes: biomes);
-            animationLengths = Meitou.Data.Gameplay.AnimationLengths.Load(install.Root);
+            animationLengths = Meitou.Data.Gameplay.AnimationLengths.Load(install.Root, gameDb);   // with the animals' own skeletons
             animationLibrary = Meitou.Data.Gameplay.AnimationLibrary.FromDatabase(gameDb);
             popData = data;
             townPlacements = towns;
