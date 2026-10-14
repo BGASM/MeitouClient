@@ -25,7 +25,8 @@ public static class BorderlessFullScreen
         var monitor = window.Monitor ?? Silk.NET.Windowing.Monitor.GetMainMonitor(window);
         var origin = monitor.Bounds.Origin;
         var size = monitor.VideoMode.Resolution ?? monitor.Bounds.Size;
-        window.WindowState = WindowState.Normal;
+        // Only when it is not: setting it restores the window, which shows one still hidden (the game sizes its window before showing it).
+        if (window.WindowState != WindowState.Normal) window.WindowState = WindowState.Normal;
         window.WindowBorder = WindowBorder.Hidden;
         window.Position = origin;
         window.Size = size;

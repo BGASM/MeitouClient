@@ -40,13 +40,17 @@ sealed partial class GameHost
         }, vsync, streamline: WantsDlss());
         streamline = display.Streamline;
         var window = display.Window!;
-        BeginLoadingScreen(display);   // its textures and fonts are made before the window shows
-        Splash?.Dispose();
-        window.IsVisible = true;
-        window.WindowState = WindowState.Maximized;
-        // Borderless full screen as the viewer starts (Alt+Enter and the Tab panel switch it); --windowed keeps the window for this run.
+        // Borderless full screen as the viewer starts (Alt+Enter and the Tab panel switch it); --windowed keeps the window for this run, maximised.
+        // Sized while still hidden: resized after it shows (maximised, then borderless) the window flashed white and black before its first frame.
         bool fullScreen = config.FullScreen && !o.Windowed;
         if (fullScreen) BorderlessFullScreen.Toggle(window);
+        else window.WindowState = WindowState.Maximized;
+        BeginLoadingScreen(display);   // its textures and fonts are made before the window shows
+        // The first loading frame is in the swapchain when the window shows, and on screen before the splash closes.
+        LoadingFrame();
+        window.IsVisible = true;
+        LoadingFrame();
+        Splash?.Dispose();
         try
         {
             if (sceneRead is not null)
