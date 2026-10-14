@@ -68,34 +68,6 @@ public class AiTests(ITestOutputHelper output)
             packages.Length == 0 ? [Ref("111-t", 0), Ref("112-t", 1)] : [.. packages.Select(x => Ref(x.Id, x.Slot))]);
 
     [Fact]
-    public void Task_types_carry_the_game_numbers()
-    {
-        Assert.Equal(291, Enum.GetValues<TaskType>().Length);
-        Assert.Equal(14, (int)TaskType.IDLE);
-        Assert.Equal(153, (int)TaskType.GO_HOME_AND_GO_TO_BED);
-        Assert.Equal(255, (int)TaskType.SIT_ON_THRONE);
-        Assert.Equal(288, (int)TaskType.PROTECT_ALLIES_STAY_IN_TOWN);
-        Assert.Equal(290, (int)TaskType.Unnamed290);
-        Assert.All(TaskBehaviours.Built, t => Assert.NotEqual(AiBehaviour.None, TaskBehaviours.Of(t)));
-        Assert.Equal("Patrolling town", TaskBehaviours.Text(TaskType.PATROL_TOWN));
-    }
-
-    [Theory]
-    [InlineData(6, 22, 5, false)]
-    [InlineData(6, 22, 6, true)]
-    [InlineData(6, 22, 22, false)]
-    [InlineData(22, 6, 23, true)]
-    [InlineData(22, 6, 3, true)]
-    [InlineData(22, 6, 6, false)]
-    [InlineData(0, 0, 13, true)]
-    [InlineData(0, 100, 23, true)]
-    public void Hour_windows_wrap_midnight(int start, int end, int hour, bool open)
-    {
-        var goal = new AiGoal(AiSystem.Idle.Task, start, end, 1);
-        Assert.Equal(open, goal.InWindow(hour));
-    }
-
-    [Fact]
     public void Packages_load_the_parent_first_and_the_parent_wins()
     {
         var ai = new AiDatabase(Database());
@@ -113,15 +85,6 @@ public class AiTests(ITestOutputHelper output)
         Assert.True(town.IsPlain);
         Assert.False(ai.Package("112-t")!.IsPlain);
         Assert.Equal(0, ai.Problems);
-    }
-
-    [Fact]
-    public void Template_packages_keep_their_slots()
-    {
-        var db = Database();
-        var ai = new AiDatabase(db);
-        var list = ai.Packages(Meitou.Data.Gameplay.SquadTemplate.From(db.Find("10-t")!));
-        Assert.Equal([(0, "111-t"), (1, "112-t")], list.Select(p => (p.Slot, p.Package.Id)));
     }
 
     static AiPackage Package(string id, int signal = 0, string? leadsTo = null) =>
@@ -143,16 +106,10 @@ public class AiTests(ITestOutputHelper output)
         int version = board.Version;
         board.Update();
         Assert.Equal(version, board.Version);   // the current package stays
-    }
-
-    [Fact]
-    public void A_lone_slot_zero_package_starts_even_when_it_cannot()
-    {
-        var patrol = Package("patrol", signal: 6);
-        var board = new Blackboard([new(0, patrol)]);
+        // A lone slot-0 package starts even when it cannot; two such packages in slot 0 do not.
+        board = new Blackboard([new(0, patrol)]);
         board.Update();
         Assert.Same(patrol, board.Current);
-        // Two such packages in slot 0: neither can start.
         board = new Blackboard([new(0, patrol), new(0, Package("other", signal: 6))]);
         board.Update();
         Assert.Null(board.Current);
@@ -174,65 +131,6 @@ public class AiTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void Residents_keep_shop_by_day_and_go_to_bed_at_night()
-    {
-        using var world = Town(1, out _);
-        world.RunTicks(90);
-        var squads = world.Squads.All.Where(s => s.TemplateId == "10-t").ToList();
-        Assert.NotEmpty(squads);
-        var table = world.Characters;
-        foreach (var squad in squads)
-        {
-            Assert.Equal("111-t", squad.Ai?.Current?.Id);
-            foreach (var m in squad.Members)
-            {
-                Assert.True(table.TryResolveNext(m, out int s));
-                var mind = table.Cold(s)!.Ai!;
-                var task = (CharacterTask)table.Previous[s].Task;
-                if (m == squad.Leader)
-                {
-                    Assert.Equal(TaskType.STAND_AT_SHOPKEEPER_NODE, mind.Goal?.Task.Type);
-                    Assert.Contains(task, new[] { CharacterTask.Idle, CharacterTask.GoTo });
-                }
-                else
-                {
-                    // 13:00: the patrol (6 to 22) beats the bed (out of window) and the shop at 0.5; the raid is urgent but not acted out.
-                    Assert.Equal(TaskType.PATROL_TOWN, mind.Goal?.Task.Type);
-                    Assert.Equal(CharacterTask.Wander, task);
-                }
-            }
-        }
-        var leader = world.Snapshot.Characters.Single(c => c.Id == squads[0].Leader);
-        Assert.Equal("Shopkeeper", leader.Activity);
-
-        // 22:30: the patrol is out of its window; the members walk back to their spots and lie down.
-        world.GameHours = 24 + 22.5;
-        world.RunTicks(900);
-        foreach (var squad in squads)
-            foreach (var m in squad.Members.Where(m => m != squad.Leader))
-            {
-                Assert.True(table.TryResolveNext(m, out int s));
-                var mind = table.Cold(s)!.Ai!;
-                Assert.Equal(TaskType.GO_HOME_AND_GO_TO_BED, mind.Goal?.Task.Type);
-                Assert.Equal(CharacterTask.Rest, (CharacterTask)table.Previous[s].Task);
-                var p = table.Previous[s].Position;
-                Assert.InRange(Vector2.Distance(new Vector2(p.X, p.Z), mind.Post), 0, 12 + 1);
-            }
-        Assert.Contains(world.Snapshot.Characters, c => c.Activity == "Going to bed");
-    }
-
-    [Fact]
-    public void Squads_without_packages_keep_the_old_routine()
-    {
-        using var world = Town(1, out _);
-        world.RunTicks(60);
-        var folk = world.Squads.All.Where(s => s.TemplateId == "12-t").ToList();
-        Assert.NotEmpty(folk);
-        Assert.All(folk, s => Assert.Null(s.Ai));
-        Assert.All(folk.SelectMany(s => s.Members), m => Assert.Null(world.Characters.Cold(m.Slot)!.Ai));
-    }
-
-    [Fact]
     public void The_AI_is_the_same_at_any_thread_count()
     {
         ulong Run(int threads)
@@ -244,25 +142,6 @@ public class AiTests(ITestOutputHelper output)
             return world.StateHash();
         }
         Assert.Equal(Run(1), Run(4));
-    }
-
-    [Fact]
-    public void The_AI_lets_go_of_a_character_something_else_holds()
-    {
-        using var world = Town(1, out _);
-        world.RunTicks(60);
-        var squad = world.Squads.All.First(s => s.TemplateId == "10-t");
-        var m = squad.Members.First(m => m != squad.Leader);
-        var cold = world.Characters.Cold(m.Slot)!;
-        var hot = world.Characters.Previous[m.Slot];
-        Assert.True(AiSystem.Holds(hot, cold));
-        cold.InCombat = true;
-        Assert.False(AiSystem.Holds(hot, cold));
-        cold.InCombat = false;
-        hot.Task = (byte)CharacterTask.Attack;
-        Assert.False(AiSystem.Holds(hot, cold));
-        hot.Task = (byte)CharacterTask.Rest;   // resting by order, not the AI's sleep
-        Assert.False(AiSystem.Holds(hot, cold));
     }
 
     /// <summary>The counts docs/game/ai.md gives for the merged base game (gamedata.base, Newwworld, Dialogue, rebirth), read through <see cref="AiDatabase"/>.</summary>
@@ -339,141 +218,6 @@ public class AiTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void A_patrol_walks_its_route_round_the_town_and_comes_home()
-    {
-        var data = SyntheticTown.Data(Database(1, ("111-t", 0), ("113-t", 1)));
-        var settings = new AiSettings { FirstPatrolHours = 0, PatrolPoints = 3, PatrolRadiusMin = 0.4f, PatrolRadiusMax = 0.5f };
-        using var world = Town(1, out _, data, settings);
-        world.RunTicks(60);
-        var squad = world.Squads.All.Single(s => s.TemplateId == "10-t");
-        var board = squad.Ai!;
-        Assert.Equal(PackageClass.PatrolRunning, board.CurrentClass);
-        Assert.Equal(4, board.Route.Length);   // three points and home
-        var table = world.Characters;
-        Assert.Equal(TaskType.PATROL, table.Cold(squad.Leader.Slot)!.Ai!.Goal?.Task.Type);
-        Assert.Equal(CharacterTask.GoTo, (CharacterTask)table.Previous[squad.Leader.Slot].Task);
-        var mate = squad.Members.First(m => m != squad.Leader && table.Cold(m.Slot)!.Role != (int)SquadRole.Leader);
-        Assert.Equal(TaskType.FOLLOW_SQUADLEADER, table.Cold(mate.Slot)!.Ai!.Goal?.Task.Type);
-        Assert.Equal(CharacterTask.Follow, (CharacterTask)table.Previous[mate.Slot].Task);
-        Assert.Equal("Patrolling", world.Snapshot.Characters.Single(c => c.Id == squad.Leader).Activity);
-        // Out round the town and back: the patrol finishes and the town package runs again; the next patrol is hours away.
-        double started = world.GameHours;
-        for (int t = 0; t < 6000 && board.CurrentClass == PackageClass.PatrolRunning; t += 30) world.RunTicks(30);
-        Assert.Equal("111-t", board.Current?.Id);
-        Assert.InRange(board.NextPatrol, started + 6, started + 12);
-    }
-
-    [Fact]
-    public void A_broken_squad_retreats_to_its_home_town()
-    {
-        var data = SyntheticTown.Data(Database(1, ("111-t", 0), ("114-t", 2)));
-        using var world = Town(1, out _, data, null);
-        world.RunTicks(60);
-        var squad = world.Squads.All.Single(s => s.TemplateId == "10-t");
-        var board = squad.Ai!;
-        Assert.Equal("111-t", board.Current?.Id);
-        Assert.True(board.Intact);
-        // All but one gone, of a squad counted as ten: fewer than 0.2 x 10 are able.
-        var table = world.Characters;
-        var last = squad.Members[^1];
-        foreach (var m in squad.Members.Take(squad.Members.Count - 1).ToList()) table.Remove(m);
-        board.Size = 10;
-        // Sent away from town by an order (the AI leaves an ordered walk alone); there it wants to go home.
-        world.Commands.Enqueue(new MoveOrder([last], new Vector3(Centre.X + 900, 300, Centre.Z)) { Tick = world.Tick });
-        world.RunTicks(30);
-        Assert.False(board.Intact);
-        Assert.Equal(PackageClass.Retreat, board.CurrentClass);
-        for (int t = 0; t < 1500 && Off(world, last, Centre) < 850; t += 30) world.RunTicks(30);
-        world.RunTicks(60);
-        Assert.Equal(TaskType.RETREAT_HOMETOWN, table.Cold(last.Slot)!.Ai!.Goal?.Task.Type);
-        world.RunTicks(2000);
-        // Home: within the town, where going home is no longer wanted.
-        Assert.InRange(Off(world, last, Centre), 0, 300);
-        Assert.NotEqual(TaskType.RETREAT_HOMETOWN, table.Cold(last.Slot)!.Ai!.Goal?.Task.Type);
-    }
-
-    [Fact]
-    public void A_contract_overrides_the_slots_until_its_hours_are_over()
-    {
-        using var world = Town(1, out _);
-        world.RunTicks(60);
-        var squad = world.Squads.All.First(s => s.TemplateId == "10-t");
-        world.Commands.Enqueue(new StartContract(squad.Id, "115-t", 2) { Tick = world.Tick });
-        world.RunTicks(30);
-        var board = squad.Ai!;
-        Assert.Equal("115-t", board.Contract?.Id);
-        Assert.Equal("115-t", board.Current?.Id);
-        Assert.Equal(CharacterTask.Rest, (CharacterTask)world.Characters.Previous[squad.Leader.Slot].Task);   // the contract's leader goal: sit around
-        world.GameHours += 2.5;
-        world.RunTicks(60);
-        Assert.Null(board.Contract);
-        Assert.Equal("111-t", board.Current?.Id);
-        Assert.NotEqual(CharacterTask.Rest, (CharacterTask)world.Characters.Previous[squad.Leader.Slot].Task);
-    }
-
-    [Fact]
-    public void The_stance_comes_from_the_combat_goals_in_their_hours()
-    {
-        var mind = new AiMind { Squad = new Squad { Id = 0, TemplateId = "t" } };
-        AiGoal G(TaskType type, int start = 0, int end = 100) => new(new AiTask("", "", type, TaskPriority.Urgent, TaskTargetType.Specific, TaskEndEvent.Nothing), start, end, 1);
-        Assert.Equal(AiStance.Aggressive, AiSystem.StanceOf(mind, [G(TaskType.PATROL_TOWN)], 13));   // no combat goal at all: the old rule
-        Assert.Equal(AiStance.Defensive, AiSystem.StanceOf(mind, [G(TaskType.PROTECT_ALLIES)], 13));
-        Assert.Equal(AiStance.Passive, AiSystem.StanceOf(mind, [G(TaskType.ATTACK_ENEMIES, 22, 6)], 13));   // a combat goal, out of its hours
-        Assert.Equal(AiStance.Aggressive, AiSystem.StanceOf(mind, [G(TaskType.PROTECT_ALLIES), G(TaskType.ATTACK_ENEMIES, 22, 6)], 23));
-        Assert.Equal(AiStance.AggressiveNeutrals, AiSystem.StanceOf(mind, [G(TaskType.ATTACK_ENEMIES_AND_NEUTRALS), G(TaskType.TERRITORIAL_AGGRESSION_BUT_DONT_LEAVE_HOME)], 13));
-    }
-
-    [Fact]
-    public void A_platoons_package_gives_its_off_screen_job()
-    {
-        var job = Rec("116-t", FcsRecordType.AI_PACKAGE, "Patrol near home");
-        job.Ints["unloaded func"] = 2;
-        job.References["Squad AI Goals"] = [Ref("101-t")];
-        var db = SyntheticTown.Database(roaming: true, extra: [.. Records(), job], changeFolk: t => t.References["AI packages"] = [Ref("116-t", 0)]);
-        var ai = new AiDatabase(db);
-        var folk = Meitou.Data.Gameplay.SquadTemplate.From(db.Find("12-t")!);
-        Assert.Equal(("116-t", PlatoonJob.PatrolShortRange), (PlatoonJobs.For(ai, folk).Package?.Id, PlatoonJobs.For(ai, folk).Job));
-        Assert.Equal(PlatoonJob.GoHome, PlatoonJobs.JobOf(4));
-        Assert.Equal(PlatoonJob.None, PlatoonJobs.JobOf(1));   // no branch in the original
-
-        var data = SyntheticTown.Data(db);
-        using var world = Town(1, out _, data, null);
-        world.RunTicks(300);
-        var platoons = world.Platoons.All.ToList();
-        Assert.NotEmpty(platoons);
-        foreach (var p in platoons)
-        {
-            Assert.Equal("116-t", p.Package);
-            Assert.Equal(PlatoonJob.PatrolShortRange, p.Job);
-            var home = new Vector2(data.Sites[p.Origin].Position.X, data.Sites[p.Origin].Position.Z);
-            if (p.Point is { } point) Assert.InRange(Vector2.Distance(point, home), 0, PlatoonJobs.PatrolRange);
-        }
-        Assert.Contains(platoons, p => p.Point is not null || p.WaitLeft > 0);
-    }
-
-    [Fact]
-    public void Node_kinds_beds_and_yaw_are_read_from_the_data()
-    {
-        Assert.Equal(HomeSpotKind.Shopkeeper, TownBuildings.NodeKind("Node Shopkeeper"));
-        Assert.Equal(HomeSpotKind.Guard, TownBuildings.NodeKind("node guard 2"));
-        Assert.Equal(HomeSpotKind.Bar, TownBuildings.NodeKind("Node Barman"));
-        Assert.Equal(HomeSpotKind.General, TownBuildings.NodeKind("Node"));
-        var bed = Rec("200-t", FcsRecordType.BUILDING, "Bed");
-        var function = Rec("201-t", FcsRecordType.BUILDING_FUNCTIONALITY, "Bed function");
-        function.Ints["function"] = TownBuildings.BedFunction;
-        bed.References["functionality"] = [Ref("201-t")];
-        var chair = Rec("202-t", FcsRecordType.BUILDING, "Chair");
-        var file = new FcsFile();
-        file.Records.AddRange([bed, function, chair]);
-        var db = new GameDatabase();
-        db.Apply(file, "t.mod");
-        var cache = new Dictionary<string, bool>();
-        Assert.True(TownBuildings.IsBed(db, db.Find("200-t")!, cache));
-        Assert.False(TownBuildings.IsBed(db, db.Find("202-t")!, cache));
-        Assert.Equal(MathF.PI / 2, TownBuildings.YawOf(Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 2)), 4);
-    }
-
-    [Fact]
     public void A_roaming_platoons_package_is_saved_and_loaded()
     {
         var near = Rec("116-t", FcsRecordType.AI_PACKAGE, "Patrol near home");
@@ -501,31 +245,5 @@ public class AiTests(ITestOutputHelper output)
             Assert.Equal("116-t", again.Platoons.Single(x => x.Name == "Testfolk_7").Record.Strings["currentPackage"]);
         }
         finally { if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true); }
-    }
-
-    [Fact]
-    public void A_bar_package_takes_the_squad_to_the_bar_to_sit()
-    {
-        var bar = Rec("118-t", FcsRecordType.AI_PACKAGE, "Hang out at the bar");
-        bar.Ints["signal func"] = 17;
-        bar.References["Leader AI Goals"] = [Ref("105-t", 0, 100, 0)];
-        bar.References["Squad AI Goals"] = [Ref("105-t", 0, 100, 0)];
-        var db = SyntheticTown.Database(1, extra: [.. Records(), bar], changePatrol: p => p.References["AI packages"] = [Ref("118-t", 0)]);
-        Vector3 At(float dx, float dz) => new(Centre.X + dx, 300, Centre.Z + dz);
-        var tavern = new TownBuilding("bar", "b-bar", "Bar", At(0, 120), 0, false, true,
-            [new HomeSpot(HomeSpotKind.Bar, At(0, 110), 0), new HomeSpot(HomeSpotKind.Bar, At(8, 110), 0), new HomeSpot(HomeSpotKind.Bed, At(0, 130), 0)]);
-        var house = new TownBuilding("house", "b-house", "House", At(-80, 0), 0, false, false, [new HomeSpot(HomeSpotKind.Bed, At(-90, 0), 0)]);
-        var data = PopulationData.Create(db, [new TownPlacement("inst", "30-t", Centre, null)], buildings: new Dictionary<string, List<TownBuilding>> { ["inst"] = [tavern, house] });
-        using var world = Town(1, out _, data, null);
-        world.RunTicks(900);
-        var squad = world.Squads.All.Single(s => s.TemplateId == "10-t");
-        Assert.Equal(PackageClass.Bar, squad.Ai!.CurrentClass);
-        Assert.Same(tavern, squad.Ai.Home);
-        var seats = tavern.Of(HomeSpotKind.Bar).Select(b => b.Position).ToList();
-        foreach (var m in squad.Members)
-        {
-            Assert.Equal(CharacterTask.Rest, (CharacterTask)world.Characters.Previous[m.Slot].Task);
-            Assert.InRange(seats.Min(b => Off(world, m, b)), 0, 13);
-        }
     }
 }

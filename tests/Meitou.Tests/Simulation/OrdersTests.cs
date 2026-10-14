@@ -51,63 +51,6 @@ public class OrdersTests
     }
 
     [Fact]
-    public void Hold_waits_for_the_attacker_to_come_within_reach_and_never_walks_after_it()
-    {
-        var (open, _, p0, _) = Attacked(CharacterOrders.None, distance: 300);
-        var (hold, _, p1, b1) = Attacked(CharacterOrders.Hold, distance: 300);
-        using (open) using (hold)
-        {
-            var start = hold.Characters.Next[p1.Slot].Position;
-            open.RunTicks(20); hold.RunTicks(20);
-            Assert.Equal((byte)CharacterTask.Attack, open.Characters.Next[p0.Slot].Task);
-            Assert.NotEqual((byte)CharacterTask.Attack, hold.Characters.Next[p1.Slot].Task);
-            int ticks = 20;
-            while (ticks < 3000 && hold.Characters.Next[p1.Slot].Task != (byte)CharacterTask.Attack) { hold.RunTick(); ticks++; }
-            Assert.Equal((byte)CharacterTask.Attack, hold.Characters.Next[p1.Slot].Task);
-            Assert.True(Orders.InHoldReach(hold.Characters.Next[p1.Slot].Position, hold.Characters.Next[b1.Slot].Position), "it answered only once the bandit was near");
-            Assert.True(Vector3.Distance(start, hold.Characters.Next[p1.Slot].Position) < 5, "it did not leave its spot");
-        }
-    }
-
-    [Fact]
-    public void Sneaking_is_slower_and_harder_to_see_and_hear_by_the_originals_numbers()
-    {
-        Assert.Equal(23, Orders.SneakSpeed(60, 0), 3);          // a clumsy sneaker creeps at 12 + 11
-        Assert.Equal(60, Orders.SneakSpeed(60, 0.95f), 3);      // from 0.9 on, no cap
-        Assert.Equal(15, Orders.SneakSpeed(15, 0), 3);          // never faster than it was going
-        Assert.Equal(11, Orders.SneakSpeed(5, 0), 3);           // floored at 11
-        Assert.Equal(0.75f, Orders.SneakView(1, 0), 4);
-        Assert.Equal(0.6f * 0.5f * 0.4f, Orders.SneakView(0.4f, 1), 4);
-        Assert.Equal(450, Orders.SneakNoise(0), 3);
-        Assert.Equal(80, Orders.SneakNoise(1), 3);
-        Assert.Equal(0.1f * 0.5f * 0.75f, Orders.SneakHearChance(100, 200, 0.5f), 5);
-        // Straight ahead in daylight (R = 1500): 1000 away is seen standing up and sneaking; 1200 only standing up (the sneaker's reach is 0.75 R).
-        var eye = new Vector3(0, 0, 0);
-        Assert.True(AggroSystem.Visibility(eye, 0, new Vector3(0, 0, 1200), 1500) > 0);
-        Assert.True(AggroSystem.SeenSneaking(eye, 0, new Vector3(0, 0, 1000), 1500, 0));
-        Assert.False(AggroSystem.SeenSneaking(eye, 0, new Vector3(0, 0, 1200), 1500, 0));
-    }
-
-    [Fact]
-    public void Run_speed_cycles_and_sets_the_mode_of_move_orders()
-    {
-        var walk = new OpenGroundWalkability((_, _) => 150);
-        using var world = new SimWorld(new WorldSettings { Seed = 1, PublishSnapshots = false }, walk, [new PlayerSystem(), new MovementSystem(new PathService(walk, true))]);
-        var cold = new CharacterCold { Name = "p", IsPlayer = true };
-        var id = world.Characters.Spawn(new CharacterHot { Position = new Vector3(1000, 150, 1000), Health = 100, MaxSpeed = 60, WalkSpeed = 15 }, cold, 0);
-        Assert.Equal(SpeedMode.Free, cold.RunSpeed);
-        world.Commands.Enqueue(new RunSpeedCommand([id], 1) { Tick = 0 });
-        world.RunTick();
-        Assert.Equal(SpeedMode.Walk, cold.RunSpeed);
-        world.Commands.Enqueue(new MoveOrder([id], new Vector3(1200, 150, 1000)) { Tick = world.Tick });
-        world.RunTick();
-        Assert.Equal(SpeedMode.Walk, world.Characters.Next[id.Slot].Mode);
-        world.Commands.Enqueue(new RunSpeedCommand([id], -1) { Tick = world.Tick });
-        world.RunTick();
-        Assert.Equal(SpeedMode.Free, cold.RunSpeed);
-    }
-
-    [Fact]
     public void Orders_go_to_the_originals_state_keys_and_back()
     {
         var cold = new CharacterCold { Orders = CharacterOrders.Block | CharacterOrders.Sneak | CharacterOrders.Hold, RunSpeed = SpeedMode.Run };

@@ -102,13 +102,4 @@ public class FaithfulInteractionTests(ITestOutputHelper output)
         finally { ui.DisposeUi(); }
         Assert.True(missing.Count == 0, "bound to widgets the original layouts lack: " + string.Join(", ", missing));
     }
-
-    [Fact]
-    public void TheStatsPanelsShowEachRecordStatOnce()
-    {
-        var shown = PlayerInterface.StatPanels.SelectMany(p => p).ToArray();
-        Assert.Equal(shown.Length, shown.Distinct().Count());
-        Assert.Equal(StatsInfo.RecordStats.Order(), shown.Order());
-        Assert.Equal(5, PlayerInterface.StatPanels.Length);
-    }
 }

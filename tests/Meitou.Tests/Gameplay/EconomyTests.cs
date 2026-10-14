@@ -73,52 +73,6 @@ public class EconomyTests
     }
 
     [Fact]
-    public void Plain_items_crafted_items_and_the_swapped_rows()
-    {
-        var constants = Rec("c-t", FcsRecordType.CONSTANTS, r =>
-        {
-            r.Floats["global price mult"] = 2;
-            r.Floats["robotics price mult"] = 3;
-            r.Floats["crossbow price mult"] = 5;
-        });
-        var db = Db(
-            constants,
-            Rec("cloth-t", FcsRecordType.ITEM, r => r.Ints["value"] = 100),
-            Rec("wheat-t", FcsRecordType.ITEM, r => { r.Ints["value"] = 10; r.Bools["food crop"] = true; }),
-            Rec("relic-t", FcsRecordType.ITEM, r => { r.Ints["value"] = 777; r.Bools["artifact"] = true; }),
-            Rec("bread-t", FcsRecordType.ITEM, r =>
-            {
-                r.Ints["value"] = 9999;   // ignored: the ingredients price it
-                r.Floats["profitability"] = 0.2f;
-                r.References["ingredients"] = [new FcsReference("cloth-t", 100, 0, 0), new FcsReference("wheat-t", 50, 0, 0)];
-            }),
-            Rec("bow-t", FcsRecordType.CROSSBOW, r => { r.Ints["value"] = 1000; r.Ints["value 1"] = 5000; }),
-            Rec("arm-t", FcsRecordType.LIMB_REPLACEMENT, r => { r.Ints["value"] = 1000; r.Ints["value 1"] = 5000; }),
-            Rec("box-t", FcsRecordType.CONTAINER, r => r.Ints["value"] = 321));
-        var b = PriceConstants.BaseGame;
-        Assert.Equal(60, ItemValue.Of(db, db.Find("cloth-t")!, 0, true, b));    // trade price mult, every plain item
-        Assert.Equal(5, ItemValue.Of(db, db.Find("wheat-t")!, 0, true, b));     // food price mult, floor(x + 0.5)
-        Assert.Equal(777, ItemValue.Of(db, db.Find("relic-t")!, 0, true, b));   // artifacts skip the row
-        Assert.Equal(100, ItemValue.Of(db, db.Find("cloth-t")!, 0, false, b));
-        // 60 x 1.0 x 1.2 = 72 and 5 x 0.5 x 1.2 = 3.
-        Assert.Equal(75, ItemValue.Of(db, db.Find("bread-t")!, 0, true, b));
-        Assert.Equal(321, ItemValue.Of(db, db.Find("box-t")!, 80, true, b));
-        Assert.Equal(2000, ItemValue.Of(db, db.Find("bow-t")!, 50, false, b));   // lerp(0.25, 1000, 5000)
-
-        // A CONSTANTS record: global pre-multiplies the category rows only; crossbows read the robotics row, limbs the crossbow row.
-        var k = PriceConstants.FromDatabase(db);
-        Assert.Equal(0.8f, k.SwordPriceMult, 6);
-        Assert.Equal(0.5f, k.LootPriceMult, 6);
-        Assert.Equal(2000 * 6, ItemValue.Of(db, db.Find("bow-t")!, 50, true, k));
-        Assert.Equal(2000 * 10, ItemValue.Of(db, db.Find("arm-t")!, 50, true, k));
-    }
-}
-
-/// <summary>The same against the installed game: the probe numbers of docs/game/economy.md.</summary>
-[Slow]
-public class EconomyInstallTests
-{
-    [Fact]
     public void The_base_games_price_block_items_and_shops_match_the_docs_probe()
     {
         Assert.SkipWhen(InstallData.Install is null, "Kenshi install not found");

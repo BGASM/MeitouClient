@@ -1109,12 +1109,10 @@ Stage 9, begun 2026-10-14, from [game/ai.md](game/ai.md) and [game/ai-tasks.md](
   race goals looked up once (the lookup's lock made four threads slower than one), index loops (no boxed enumerators), flat tables by type number for the behaviour and stance (a
   dictionary lookup per goal), the stance kept until the hour or the package changes, and the members, intact test and crowding counts visited on the 30-tick package cadence (the
   per-tick recount was 200 us). Building the homes at start is not measured (it needs the install).
-- **Tests.** `AiTests`: the data rules (parent wins, fallbacks, weights, slots), the hour windows, the slot rule, a town whose shopkeeper keeps shop while its guards patrol at 13:00
-  and walk back and lie down at 22:30; homes (one each, the shopkeeper at its node, everyone in a bed of its own house at night); a running patrol round the town and back; a broken
-  squad retreating home; a contract overriding the slots for its hours; a bar package seating the squad in the bar; the stance rules; a platoon's job from its package and its
-  `currentPackage` through a save and back; node kinds, beds and yaw from records; thread-count independence; `[Slow]` the merged base game's counts from ai.md (219 packages, 124
-  tasks, 804/561/58/64 goal entries, no unresolved link). `AggroTests`: passive, defensive and territorial stances starting no fight with calm enemies outside the home, the
-  territorial one fighting inside it, attacking neutrals but not coexisting factions.
+- **Tests** (trimmed to the lean standard 2026-10-14). `AiTests`: the package data rules (parent first, parent wins, fallbacks, weights), the slot rule (highest slot that can
+  start, a lone slot-0 package), homes (one each, the shopkeeper at its node, everyone in a bed of its own house at night), a roaming platoon's `currentPackage` through a save and
+  back, thread-count independence, and `[Slow]` the merged base game's counts from ai.md (219 packages, 124 tasks, 804/561/58/64 goal entries, no unresolved link). `AggroTests`:
+  a territorial stance fighting enemies inside its home. Patrols, retreat, contracts, bars, the other stances and the node-kind reading have no test of their own.
 - **Not built:** the wars, prisoner, slaver, refugee, raid, occupation and campaign packages, and `canActivate`/`isFinished` of the subclasses beyond the engine's; the GOAP planner,
   TaskData conditions and desire functions; jobs and task requests; the senses-driven goals beyond the stance (rescue, looting, bounty hunting); doors, locking up, gates and turrets;
   dialogue's `AI contract` and `change AI` (the contract mechanism is there); faction campaigns; resident squads off screen; saving more of the AI than the platoons' packages.
