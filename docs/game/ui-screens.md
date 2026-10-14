@@ -119,6 +119,12 @@ Layer Middle, per-frame update FUN_140728d50 (**Observed**):
   - State lines: `State:` Dead / Locked (lvl: N) / Sleeping / Unconscious (Rebooting for skeletons) / Defensive / Normal (Bad for the bad ones);
     `Goal:` the AI goal package's name, else Aimless; `Encumbrance:` (int)((1 - f) × 100) "%" with f the encumbrance factor in 0..1, Bad from 50 %.
     Extended (when expanded): Athletics XP, Strength XP, Toughness XP, KO point, Run speed, Hunger Rate.
+    Extended values (**Verified**, decompile of `FUN_140895350`, 2026-10-14; Meitou: `BodySystem.ExtendedOf`, `PlayerInterface.ExtendedLines`):
+    Athletics XP `{n}%` = (int)(100 × `FUN_1408c5ec0`): the encumbrance factor, ×1.5 when the current speed is over 80 % of the run value V (the `xp rate athletics` constant is applied elsewhere).
+    Strength XP `{n}%` = (int)(100 × `FUN_1408c60c0`), the carrying rate (includes `xp rate strength from walking`); with a weapon in hand the original shows a "Weapon weight" figure from a field at `+0x184` instead (**Unknown**, Meitou keeps the carrying rate).
+    Toughness XP `{n}x` (the suffix is the `x` at `0x1416bc008`, **Verified** in the exe) = `FUN_1408c5f40`: 1, but 2 with the left arm crippled, +2 right arm crippled, +2 blood-loss KO, +2 when a counter at `+0xa4` is under 15 (**Unknown**, Meitou omits it).
+    KO point = (int)`FUN_140643ae0` (negative HP, [character-stats.md](character-stats.md#knock-out-coma-death)). Run speed = the current top speed S × 0.22369362 (units per second to mph) rounded, `{S} (+{d}) mph` or `(-{d})` where d is S minus V in mph; plain when equal. Hunger Rate `{n}%` = (int)(100 × `FUN_1408837a0`), the race's hunger rate × its situation factor.
+    Each line also carries a tooltip with its breakdown (Encumbrance penalty, Full speed bonus, Carrying somebody, Crippled arms ...), not modelled.
   - Stats lines: Martial Arts when unarmed; Crossbows, Precision, Perception with a crossbow in ranged mode; else Attack and Defense; then Strength,
     Dexterity, Toughness and (not in ranged mode) Dodge. A value is the effective number, then its change in brackets: `{1} ({2})` all Bad when lower,
     `{1} (+{2})` all Good when higher, plain when equal. The code passes the labels in mixed case ("Martial Arts:"); the original shows them upper case in
@@ -137,6 +143,7 @@ Layer Middle, per-frame update FUN_140728d50 (**Observed**):
 - Information panel: `ExtendingPanel` starts collapsed, its bottom moved onto the panel's bottom (behind the Overlapped `StatsPanel`), and slides over
   0.5 s to its layout place when `ExtendedStatsButton` is pressed (**Verified**). `BountyPanel` shows only for one selected character with a bounty or
   a status line (Imprisoned, Slave, Escaped slave, Committing Crime!, Leader...; **Verified**).
+- Inspecting another faction's character (**Observed** in the original, not traced in the code): a left click on a character that is not yours drops your selection and fills the information and medical panels with that character (name, faction, state, stats, extended stats, medical rows). Meitou keeps this as display state, `PlayerState.Inspected` set by `InspectCommand` (not hashed, not saved); a click on your own character or the ground clears it, shift keeps your selection.
 - Money panel: `MoneyLabelText` is set to "Money" (without the layout's colon; 25 % opacity when the amount would overlap it), `DayText` "Day: {1,num}", `TimeText` HH:MM (**Verified**). A "1x"
   seen next to the clock in a player's screenshot is not written by the vanilla code (**Observed**; most likely a mod).
 - Squad tabs: one per player squad with members, captioned with the squad's name unchanged (**Verified**); the first player squad reads `Nameless_0`
@@ -184,6 +191,20 @@ Layer Middle, per-frame update FUN_140728d50 (**Observed**):
 - Item placement failure messages (FUN_14070f7e0; the checks behind them are in [economy.md](economy.md#8-buying-selling-fencing)): Out of trading range; No room for that item; You can't
   afford that; The shopkeeper can't afford that; That's not for sale; Got caught stealing; Smugglers only buy
   illegal goods. Stealing and fencing chance text: FUN_140712920. Item icon: FUN_140711200.
+- Item icons (inventory and trader cells; code `ItemIcons`, `ItemIconCache`, `PlayerInterface.AddItemCell`). Two sources:
+  - **Static icons** (**Verified**, base game): 318 records (ITEM 268, ARMOUR 31, MAP_ITEM 17, CROSSBOW 2) have an `icon` filename field naming a PNG under
+    `data/items/` (`.\data\items\icons\Fuel.png`, a few in `armour\pants\`); all 318 exist on disk (test `Every_icon_file_a_base_game_record_names_exists`). The 211
+    files in `data/items/icons` are sized to the item's footprint (75x75 for 3x3, 150x25 for 6x1: 25 px per cell, **Observed** on a few files). BUILDING, WEAPON, ARMOUR
+    (111 more), CONTAINER and other records have an empty `icon`: their icon is drawn.
+  - **Rendered icons**: the game draws the others from the item mesh (`RTTIcons_*` materials, [runtime-materials.md](../formats/runtime-materials.md)) and saves the PNG under
+    `<install>/data/icons/<item>.<material>[.<colour>].png`, each a string id (`1012-gamedata.base`); the third is a COLOR_DATA record (**Observed**: `1254-gamedata.base`
+    is "Player"). That folder is a cache made on the player's machine (**Observed**: 843 files dated when the game last ran, holding mod items too), so it holds only
+    items they have seen; `data/icons/buildings/` is the same for BUILDING records (618 files, not used yet). Sizes vary (256x256 for a bag, 128x512 for limb parts).
+    The 4 or 6 dot-separated parts are item and material, with the colour when present (**Observed**, all 842 files parse that way).
+  - Meitou's order: the record's static icon, else the cached file with the item's exact `material sid`, else one of its colours, else any cached file of the item
+    (an approximation: another grade's texture), else the name box. Why 23 cached files exist for records that have a static icon is **Unknown** (the order the game
+    tries them in is not traced: FUN_140711200 is the game's code). Not done: rendering an icon when none exists, the colour part (the instance carries no colour
+    choice), building icons.
 - Build window ([buildings-production.md](buildings-production.md#construction) for the rules it enforces): groups come from BUILDING `building category` and `building group`; placement error messages in
   FUN_1404e27e0 (**Observed**).
 

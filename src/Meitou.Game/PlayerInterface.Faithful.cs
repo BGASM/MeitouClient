@@ -183,10 +183,7 @@ sealed partial class PlayerInterface
             if (controls.FirstOrDefault(c => c.Name == item.Section) is not { } slot) continue;
             var area = slot.Bounds;
             if (item.Section == gridSection && columns > 0 && rows > 0) area = new(area.X + item.X * area.Width / columns, area.Y + item.Y * area.Height / rows, item.Width * area.Width / columns, item.Height * area.Height / rows);
-            string caption = item.Name + (item.Quantity > 1 ? $" x{item.Quantity}" : "");
-            if (SellCaption(lead.Id, item.Index) is { } price) caption += "\n" + price;
-            controls.Add(new($"inventory-item-{item.Index}", "TextBox", area, caption, "", "", true,
-                new Dictionary<string, string> { ["WordWrap"] = "true", ["TextAlign"] = "Center", ["FontName"] = "Kenshi_StandardFont_Medium", ["InventoryItem"] = item.Index.ToString(CultureInfo.InvariantCulture) }, new(0.2f, 0.2f, 0.16f, 0.6f), Pickable: true, TextScale: 0.8f, Clip: slot.Clip));
+            AddItemCell(controls, $"inventory-item-{item.Index}", area, item.Record, item.Material, item.Name, item.Quantity, SellCaption(lead.Id, item.Index), "InventoryItem", item.Index, slot.Clip);
         }
     }
     readonly List<string> uiMessages = [];

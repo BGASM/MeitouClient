@@ -65,7 +65,7 @@ sealed partial class GameHost
         DrawWorld(w, h);
         display.EndFrame();
         using var overlay = playerSquad is not null || player.UiMode == Meitou.Data.Ui.UiMode.Faithful ? DebugOverlay.TryCreate(context) : null;
-        if (overlay is not null) player.CreateUiPainter(overlay, assets.Find);
+        if (overlay is not null) { player.CreateUiPainter(overlay, assets.Find); player.SetItemIcons(ItemIconsOfInstall()); }
         if (gpu.Characters is { } portraits) { var (atlas, sampled) = portraits.PortraitAtlas; player.SetUiTexture(PlayerInterface.PortraitTexture, atlas, sampled); }
         string?[] panels = g.UiShowcase ? player.UiMode == Meitou.Data.Ui.UiMode.Faithful
             ? [null, "inventory", "stats", "overview", "menu", "new-game", "save", "load", "title"]

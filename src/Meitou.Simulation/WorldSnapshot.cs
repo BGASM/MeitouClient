@@ -22,7 +22,11 @@ public readonly record struct HudStatLine(string Label, float Value, float Base)
 /// rate, the encumbrance factor (1 unburdened) and the stats panel's lines.
 /// </summary>
 public sealed record HudView(float Blood, float BloodCapacity, float Bleeding, float Encumbrance, IReadOnlyList<HudStatLine> Stats);
-public sealed record InventoryItemView(int Index, string Record, string Name, string Section, int X, int Y, int Width, int Height, int Quantity, float Weight, float Quality);
+public sealed record InventoryItemView(int Index, string Record, string Name, string Section, int X, int Y, int Width, int Height, int Quantity, float Weight, float Quality)
+{
+    /// <summary>The item's material record (<c>material sid</c>; "" none), which picks its icon.</summary>
+    public string Material { get; init; } = "";
+}
 public sealed record InventoryView(int Width, int Height, int BagWidth, int BagHeight, IReadOnlyList<InventoryItemView> Items);
 
 /// <summary>A character as the renderer needs it after one tick; <c>Appearance</c> is null for one that is simulated but has nothing to draw (a failed build, a world without looks): the host shows a marker (docs/simulation.md, "Threading", step 8).</summary>

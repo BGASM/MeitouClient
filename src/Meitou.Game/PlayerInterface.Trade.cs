@@ -92,11 +92,9 @@ sealed partial class PlayerInterface
         };
         var area = slot.Bounds;
         foreach (var item in trade.Stock)
-            controls.Add(new($"trade-item-{item.Index}", "TextBox",
+            AddItemCell(controls, $"trade-item-{item.Index}",
                 new(area.X + item.X * area.Width / columns, area.Y + item.Y * area.Height / rows, item.Width * area.Width / columns, item.Height * area.Height / rows),
-                $"{item.Name}{(item.Quantity > 1 ? $" x{item.Quantity}" : "")}\nc.{Money(item.Price)}", "", "", true,
-                new Dictionary<string, string> { ["WordWrap"] = "true", ["TextAlign"] = "Center", ["FontName"] = "Kenshi_StandardFont_Medium", ["TradeItem"] = item.Index.ToString(CultureInfo.InvariantCulture) },
-                new(0.2f, 0.2f, 0.16f, 0.6f), Pickable: true, TextScale: 0.8f, Clip: slot.Clip));
+                item.Record, item.Material, item.Name, item.Quantity, $"c.{Money(item.Price)}", "TradeItem", item.Index, slot.Clip);
     }
 
     /// <summary>While trading, what one of the customer's items fetches (null: no trade, or another character's grid).</summary>

@@ -29,6 +29,8 @@ public sealed record SellItem(InventoryItemToken Item, int Quantity) : SimComman
 /// <summary>One item of a trade window, with what it costs (stock) or fetches (the customer's goods) as a whole stack.</summary>
 public sealed record TradeItemView(int Index, string Record, string Name, string Section, int X, int Y, int Width, int Height, int Quantity, float Quality, long Price, long UnitPrice, bool Stolen)
 {
+    /// <summary>The item's material record ("" none), which picks its icon.</summary>
+    public string Material { get; init; } = "";
     public InventoryItemToken Token => new(Index, Record, Section, X, Y, Quantity, Quality);
 }
 
@@ -360,7 +362,7 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
         var cold = world.Characters.Cold(c)!;
         var squad = world.Squads.Find(world.Characters.Cold(t)!.SquadId)!;
         TradeItemView View(ItemInstance item, int index, bool sell, int holder) => new(index, item.Record, item.Name, item.Section, item.X, item.Y, item.Width, item.Height, item.Quantity,
-            item.Quality, m.StackPrice(item, sell, shop.Terms, holder), m.UnitPrice(item.Quantity == 1 ? item : item.WithQuantity(1), sell, shop.Terms, holder), item.IsStolenFor(holder));
+            item.Quality, m.StackPrice(item, sell, shop.Terms, holder), m.UnitPrice(item.Quantity == 1 ? item : item.WithQuantity(1), sell, shop.Terms, holder), item.IsStolenFor(holder)) { Material = item.MaterialId };
         var stock = shop.Stock.All().Select((item, index) => View(item, index, false, squad.Faction)).ToArray();
         var goods = cold.Inventory!.All().Select((item, index) => (item, index)).Where(p => p.item.Section is "main" or "backpack_content")
             .Select(p => View(p.item, p.index, true, cold.Faction)).ToArray();

@@ -40,6 +40,7 @@ public sealed class UiPainter : IDisposable
 
     public void Draw(IReadOnlyList<UiControl> controls, int width, int height, Vector2 mouse, string? active)
     {
+        for (int uploads = 0; uploads < IconUploadsPerFrame && decodedIcons.TryDequeue(out var icon); uploads++) Upload(icon.Name, icon.Image);
         foreach (var c in controls)
         {
             var b = c.Bounds;
@@ -55,7 +56,7 @@ public sealed class UiPainter : IDisposable
                 overlay.Rect(b.X, b.Y, b.X + b.Width, b.Y + b.Height, colour);
             }
             overlay.Flush(width, height, clip);
-            if (c.Type == "ImageBox" && MyGuiImages.Resolve(resources, c.Properties) is { } image)
+            if (c.Type == "ImageBox" && MyGuiImages.Resolve(resources, c.Properties) is { } image && (!image.Texture.StartsWith(IconPrefix, StringComparison.Ordinal) || textures.ContainsKey(image.Texture)))
             {
                 var loaded = LoadTexture(image.Texture);
                 var source = image.Source.Width > 0 && image.Source.Height > 0 ? image.Source : new UiRect(0, 0, loaded.Texture.Desc.Width, loaded.Texture.Desc.Height);
@@ -171,11 +172,39 @@ public sealed class UiPainter : IDisposable
         return new(numbers[0], numbers[1], numbers[2], parts.Length == 4 ? numbers[3] : 1);
     }
 
+    /// <summary>
+    /// Whether the image file <paramref name="path"/> (an item icon) is on the GPU and can be shown as an ImageBox's <c>ImageTexture</c> of <see cref="IconTexture"/>.
+    /// The first ask starts decoding it on a worker, <see cref="Draw"/> uploads it when done; a file that cannot be read stays false.
+    /// </summary>
+    public bool IconReady(string path)
+    {
+        string name = IconTexture(path);
+        if (textures.ContainsKey(name)) return true;
+        if (requestedIcons.Add(name))
+            Task.Run(() =>
+            {
+                try { decodedIcons.Enqueue((name, TextureLoader.LoadFile(path, allMips: false).Levels[0])); }
+                catch (Exception e) when (e is IOException or InvalidDataException or NotSupportedException) { }
+            });
+        return false;
+    }
+
+    /// <summary>The <c>ImageTexture</c> name under which the image file <paramref name="path"/> is shown once <see cref="IconReady"/>.</summary>
+    public static string IconTexture(string path) => IconPrefix + path;
+    const string IconPrefix = "file:";
+    const int IconUploadsPerFrame = 4;
+    readonly HashSet<string> requestedIcons = new(StringComparer.Ordinal);
+    readonly System.Collections.Concurrent.ConcurrentQueue<(string Name, RgbaImage Image)> decodedIcons = new();
+
     (Texture Texture, SampledTexture Sampled) LoadTexture(string name)
     {
         if (external.TryGetValue(name, out var given) || textures.TryGetValue(name, out given)) return given;
         string path = resolve(name) ?? throw new FileNotFoundException($"MyGUI texture not found: {name}");
-        var image = TextureLoader.LoadFile(path, allMips: false).Levels[0];
+        return Upload(name, TextureLoader.LoadFile(path, allMips: false).Levels[0]);
+    }
+
+    (Texture Texture, SampledTexture Sampled) Upload(string name, RgbaImage image)
+    {
         var gpu = overlay.Gpu;
         using var upload = gpu.Uploads.Begin();
         var texture = upload.Create(new TextureDesc(Format.R8G8B8A8Unorm, image.Width, image.Height, Name: $"UI {name}"));

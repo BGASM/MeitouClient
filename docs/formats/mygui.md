@@ -91,7 +91,7 @@ markers and right-click movement. Original map placement/zoom equivalence remain
 unverified. Other overview gameplay bindings are unfinished.
 
 Limitations: exact MyGUI font sizing, Unicode shaping, original medical row order
-and injury layer mapping, portraits, item icons, equipment/stack/split operations,
+and injury layer mapping, portraits, icons of items with no image file (see [ui-screens.md](../game/ui-screens.md)), equipment/stack/split operations,
 and advanced controls are unfinished. Unsupported original HUD buttons are disabled.
 Pockets and backpacks support validated drag/move and arrangement commands;
 equipment changes are not simulated by those commands. Live medical rows use the
