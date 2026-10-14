@@ -27,7 +27,7 @@ Each stage ends with tests and something the owner can run.
 | **6. Player** | New game from NEW_GAME_STARTOFF, selection, move orders, minimal HUD | Done ([Player](#player)); formation and queued orders included |
 | **7. Bodies** | Stats and XP, hunger, blood, body parts, KO and death | Done and wired into `World` ([Bodies](#bodies)); first aid, resting and XP on the move are in play (2026-10-13, `FirstAidSystem`); beds and the time scale are open |
 | **8. Combat** | Melee per [combat.md](game/combat.md); ranged later | Melee done and wired ([Combat](#combat)); fights start by faction hostility, the player's idle characters defend themselves, the player's assaults and killings change the relations (2026-10-13, `AggroSystem`, [Hostility](#hostility-and-relations)); crossbows done ([Ranged](#ranged)); animals fight with their natural weapons and bodies, drawn and animated with their own clips (2026-10-13, [Animals](#animals)); turrets and attack slots not built |
-| **9. AI proper** | Packages, blackboard, scoring and planner ([ai.md](game/ai.md)), off-screen squads | Started 2026-10-14 ([AI](#ai)): the AI_PACKAGE and AI_TASK data, the blackboard's package choice by slot, the members' goal choice by tier, weight, hour window and continuity, 22 goal types acted out on the movement tasks; residents keep shop, patrol and go to bed by the clock. Not built: the package subclasses, the planner, the senses-driven goals (combat, rescue, prisoners), off-screen squads. `PursuitSystem`, `RetaliationSystem`, `AggroSystem` and the roaming squads are still engine stand-ins |
+| **9. AI proper** | Packages, blackboard, scoring and planner ([ai.md](game/ai.md)), off-screen squads | Started 2026-10-14 ([AI](#ai)): the AI_PACKAGE and AI_TASK data, the blackboard's package choice by slot and package class (retreat, patrols, bars, contracts), the members' goal choice by tier, weight, hour window and continuity, homes with beds and nodes from the level data, 24 goal types acted out, combat stances from the combat goals, roaming platoons' off-screen jobs and saved packages. Not built: wars and the other subclasses, the planner, rescue and prisoner goals, resident squads off screen. `PursuitSystem`, `RetaliationSystem`, `AggroSystem` and the roaming squads are still engine stand-ins |
 | **10. Saves** | Read and write the world state ([save.md](formats/save.md)) | API done ([Saves](#saves)); the game host quicksaves (F5) and quickloads (F9) the player's squad into its own slot ([Quicksave and quickload](#quicksave-and-quickload)); no save menu, no loading of the original game's saves in play |
 | **11+** | Economy and trade, buildings and production, the MyGUI screens, audio | Crimes and bounties (2026-10-13, [Crimes and bounties](#crimes-and-bounties)); item prices, shops and trading (2026-10-14, [Trade](#trade)); the rest not started |
 
@@ -207,7 +207,7 @@ holds id, appearance, position, yaw, animation layers (`AnimationLayer(record na
   (section 7, with the setup rules for `town radius mult` and the NEST_MARKER foliage range), `NewGameStart`, `AnimationLibrary`, the body
   views in `Gameplay/Bodies/` (`RaceData`, `BodyPartTemplate`, `LimbReplacement`, `StatsEnumerated`, `StatsData`) and the combat views in
   `Gameplay/Combat/` (`CombatDatabase`). `RecordReading.cs` holds the shared record helpers and `ConstantsRecord` (finding the CONSTANTS
-  record). AI packages and tasks are still read by field name. Probe tables are `[Slow]` tests: the CONSTANTS values, 103 factions with
+  record). The AI packages and tasks have their views in `Gameplay/Ai/` ([AI](#ai)). Probe tables are `[Slow]` tests: the CONSTANTS values, 103 factions with
   10,302 NPC pairs of which 3,356 hostile and 62 allied and 221 explicit entries, 959 squad templates, 346 towns by type.
 - **Population data** (`PopulationData.cs`). What the systems share about the game: the database, the placed towns (`TownSite`), the
   factions and their index (`FactionIndex`), the player's faction (Nameless), the relations, the body options, and lazily the
@@ -224,7 +224,7 @@ result (the golden hashes pin it):
 |---|---|---|---|
 | 1 | `PopulationSystem` | Inputs, SlowWorld | Zones, residents, bar and roaming squads, the wild (homeless squads and nests), the player's squad |
 | 2 | `PlayerSystem` | Inputs, SlowWorld | Selection and stop; prunes the selection |
-| 3 | `AiSystem` | Think, SlowWorld | Blackboards and package choice of squads with AI packages, the members' goals and their act-out ([AI](#ai)) |
+| 3 | `AiSystem` | Inputs, Think, SlowWorld | Contracts; blackboards, homes and package choice of squads with AI packages, the members' goals, stances and their act-out ([AI](#ai)) |
 | 4 | `PursuitSystem` | Schedule | Paths for attackers towards their targets |
 | 5 | `MovementSystem` | Inputs, Schedule, Think, Move | Orders, paths, tasks, steering |
 | 6 | `FirstAidSystem` | Inputs, Schedule, Act, Apply, SlowWorld | First aid and resting: treat / rest / medic job orders, the walk to the patient, the bandaging, NPCs treating by themselves ([Bodies](#bodies)) |
@@ -315,7 +315,7 @@ positions and the cold state no other `Act` writes). The game's `CombatOptions` 
   Wild sites load and unload like towns (zone gate, 60 s grace, built on the population thread, taken in at a tick boundary); every roll is keyed by the
   world seed and the zone or nest and the squad's number, never the tick, so a reload makes the same squads (the spots of homeless squads move when the
   player stands elsewhere). Wild squads are plain `Squad`s (`Town` -1), not platoons: they do not travel between towns and are not saved.
-- **Not made:** roads for long trips (`road preference`), the AI package subclasses (`GoOutOnPatrol` and others; the plain packages run, [AI](#ai)), faction campaigns,
+- **Not made:** roads for long trips (`road preference`), the war, prisoner, raid and campaign AI packages (the plain, retreat, patrol, bar and contract ones run, [AI](#ai)), faction campaigns,
   the island-wide homeless budget and nest respawns (6.2, 6.3), the nests' debris and loot (section 8), unique squads, the residents' unloaded half (a town is all or nothing).
 
 ## Player
@@ -779,7 +779,9 @@ Built 2026-10-13 from [animals.md](game/animals.md). Code: `AnimalData` (`Meitou
 
 An **engine stand-in** for the stage 9 senses and target choice, with the original's sight and hearing figures ([perception.md](game/perception.md)); the relation rules are the original's
 ([factions-squads-towns.md section 3](game/factions-squads-towns.md#3-relations)). Code: `AggroSystem.cs`, `Relations.cs` (`PlayerRelations`), `FactionRelations` in
-`Meitou.Data/Gameplay/FactionData.cs`; tests `AggroTests` (synthetic factions) and `TownAggroTests` (`[Slow]`, the install).
+`Meitou.Data/Gameplay/FactionData.cs`; tests `AggroTests` (synthetic factions) and `TownAggroTests` (`[Slow]`, the install). For a character the AI runs, its combat goals
+set a stance that holds the look back (passive, defensive, territorial) or widens it to neutrals ([AI](#ai), Combat goals); everyone else, and an AI character whose lists hold no
+combat goal, looks as below.
 
 - **The table.** `PopulationData.Relations` is the game's one live table (no copy per world): built by the **Verified** rules of 3.2 (explicit entry, else the smaller default,
   self 100), with the 3.3 predicates (hostile at -30 or below, ally at 50 or above or self, coexistence from the FACTION list). The player's faction (Nameless) has no table:
@@ -1009,7 +1011,7 @@ Item prices, shops and trading (2026-10-14), from [game/economy.md](game/economy
 ## AI
 
 Stage 9, begun 2026-10-14, from [game/ai.md](game/ai.md) and [game/ai-tasks.md](game/ai-tasks.md). Code: `Meitou.Data.Gameplay.Ai` (`TaskType`, `AiDatabase`, `AiPackage`,
-`AiGoal`) and `Meitou.Simulation.Ai` (`Blackboard`, `AiMind`, `TaskBehaviours`, `AiSystem`).
+`AiGoal`), `Meitou.Data.World.TownBuildings` (homes) and `Meitou.Simulation.Ai` (`Blackboard`, `AiMind`, `TaskBehaviours`, `AiSystem`, `PlatoonJobs`).
 
 - **Data.** `TaskType` is the game's `taskType` with its numbers (the names of ai-tasks.md's first table; 0 has no name there, 289 and 290 have none in the exe). `AiTask` reads an
   AI_TASK's `enum`, `classification` (the tier), `targeting` and `ending`. `AiDatabase.Package` resolves an AI_PACKAGE as ai.md "Goal loading" says: `inherits from` first, an entry
@@ -1018,44 +1020,82 @@ Stage 9, begun 2026-10-14, from [game/ai.md](game/ai.md) and [game/ai-tasks.md](
   weight val2 x 0.01, 0 meaning 1. `Packages(template)` gives a template's `AI packages` with their slots (v0); `RaceGoals` a RACE's `AI Goals` (weight val1 x 0.01, always in
   window). The FACTION `AI fallback` (one record uses it) is not read.
 - **Blackboards.** A squad whose template lists AI packages, and which is neither the player's nor a roaming platoon's active half, gets a `Blackboard` at the AI's first look after
-  it appears (the platoons keep their travel stand-in, [Population](#population)). Every 30 ticks it chooses the package by ai.md's slot rule: slots from the highest down; in a slot
-  the current package stays unless finished (then its `Leads to` starts), an earlier entry that can start pre-empts it, and a lone slot-0 package starts even when it cannot. Plain
-  packages (signals 0, 2, 3, 7, 8, 9, 18 and 21: the base class) can always start and never finish. **The subclasses are not built**: here they never start, except as that lone
-  slot-0 package, and never finish, so a template's higher-slot patrols and wars stay idle and its slot-0 town package runs.
-- **Choosing a goal.** Each member has an `AiMind` and thinks every 15 ticks (staggered by slot), and at once when its squad starts another package. The goals of its role list (the
-  squad leader takes the Leader list, the others by squad role: Squad, Squad2, Slave), its race's `AI Goals` and the default IDLE (fluff tier, weight 0.1, ai.md "Default tasks")
-  are scored tier by tier, urgent, then non-urgent, then fluff; the first tier with a positive score wins (ai.md's passes; the job and task-request lists do not exist yet).
-  Score = desire x weight x crowding^n, x 1.25 for the goal it is acting out already (**Observed**; near ties do not flip). A goal outside its hour window (the integer hour of
-  `World.GameHours`; start >= end wraps midnight) is skipped. **Engine choices**: the desire is 1 for a goal it can act out and 0 for the rest (the TaskData desire functions are
-  not decoded), the crowding factor is 1 (per TaskData in the original, **Unknown**), and the sticky commitment timers are not modelled.
-- **Acting out.** The original runs a `Task_*` class and a GOAP plan; towns have no buildings, beds or nodes here yet, so `TaskBehaviours` maps 22 goal types onto the movement
-  tasks. IDLE mills about the character's post (wander within 25 units). PATROL_TOWN, PATROL, WANDERER, RELAX_IN_TOWN_PACKAGE and SHOPPING roam the squad's home. The
-  stand-at-node goals (shopkeeper, guards, general), HOLD_POSITION, STAY_IN_HOME, MAN_THE_GATE and SIT_ON_THRONE walk to the post and stand. FOLLOW_SQUADLEADER, FOLLOW_SLAVEMASTER
-  and BODYGUARD follow the leader (the leader itself cannot). GO_HOME_AND_GO_TO_BED, its SECURE twin and SLEEP_ON_FLOOR walk to the post and lie down (`Rest`); SIT_AROUND sits
-  where it is. **The post** is where the character stood when the AI took it over, the stand-in for a node of its home building; three walks in a row that end elsewhere make the
-  spot it stands on its post. Every other type (combat, rescue, prisoners, slaves, machines, doors, ...) is not acted out and never chosen; combat, fleeing, rescue and first aid
-  stay with their systems.
+  it appears (the platoons keep their travel stand-in, [Population](#population), and get an off-screen job, below). Every 30 ticks it chooses the package by ai.md's slot rule: a
+  running contract first; then slots from the highest down; in a slot the current package stays unless finished (then its `Leads to` starts), an earlier entry that can start
+  pre-empts it, and a lone slot-0 package starts even when it cannot (and, finished without a `Leads to`, starts again once it can).
+- **Package classes** (`PackageClass`, from the `signal func` by ai.md's Verified table; what each subclass does is **Unknown** except the retreat, so the rest are **engine choices**):
+  - *Plain* (0, 2, 3, 7, 8, 9, 18, 21): can always start, never finishes (the base class).
+  - *Retreat and refresh* (5, **Observed**, perception.md 7.3): starts when the squad is not intact, finishes when it is. Intact: able members (alive, not down) of a squad of fewer
+    than 4 while its leader is up (while retreating, while anyone is), of a bigger one while at least 0.2 of its size is able (0.4 with the leader down). The size is the members
+    it was made with. Its goal RETREAT_HOMETOWN (and RUN_AWAY_HOMETOWN, which runs) is wanted at 0.5 away from the home town and 0 in it (perception.md 7.2, Observed).
+  - *Patrol* (6, 4) and *running patrol* (23): can start once the squad's patrol timer is due (the first within 4 game hours of the squad appearing, then 6 to 12 hours after
+    the last one started) and its leader is alive. Starting lays a route: 4 seeded points round the home town between 1.5 and 3 town radii out (each pulled in until walkable,
+    dropped when none is), then home. The leader acting out PATROL walks (runs) the route, the others follow it; it finishes at the end of the route, after 6 hours, or when the
+    leader is gone. While no patrol runs, PATROL roams the town.
+  - *Bar* (17): can start where the town has a bar (a building whose exterior layout says `is bar`), or where there is no building data; it moves the squad's home to the bar.
+    *Outdoors* (26): always; the squad uses no building. Neither finishes.
+  - *Contracts* (12 to 15, 33): start only as a contract: `StartContract(squad, package, hours)` (dialogue's `AI contract`, not built yet, will send it) runs the package for the
+    hours (under 1 hour means 10 minutes, Observed), ahead of every slot; then the slots choose again. The contract-end dialogues are not built.
+  - *The rest* (wars, prisoner shipping, refugees, cannibal raids, occupation, campaigns, the wandering trader): never start except as a lone slot-0 package, never finish.
+- **Homes** (`TownBuildings`, built by the game host from the level data: [zones.md](formats/zones.md) "Building layouts"). A town's buildings are the placed ones its state's town
+  handle names, else the nearest town's, within 1.5 town radii (**engine choice**); destroyed ones, nodes and resource buildings are left out. Each keeps the beds of its interior
+  layout (objects whose BUILDING lists a BUILDING_FUNCTIONALITY of function 6 BED or 25 SKELETON_BED, found by record type, not a field name), its `is node` objects with a kind read
+  from the node's name (shop, guard, throne, bar, else general: **engine reading**, the layouts name them like "Node Shopkeeper") and the shop and bar flags of its exterior
+  layout. When a squad gets its blackboard it gets a home (**engine choice**; how the original assigns homes is **Unknown**): among its town's buildings no other squad has, the
+  nearest of the template's `building`, else by `building designation` a shop (SHOP) or the bar (BAR, shared), else the nearest with beds, else the nearest. Member k takes the
+  k-th node of a kind and the k-th bed, round robin.
+- **Choosing a goal.** Each member has an `AiMind` and thinks every 15 ticks (staggered by slot), and at once when its squad starts another package or its patrol moves on. The goals
+  of its role list (the squad leader takes the Leader list, the others by squad role: Squad, Squad2, Slave), its race's `AI Goals` and the default IDLE (fluff tier, weight 0.1,
+  ai.md "Default tasks") are scored tier by tier, urgent, then non-urgent, then fluff; the first tier with a positive score wins (ai.md's passes; the job and task-request lists do
+  not exist yet). Score = desire x weight x crowding^n, x 1.25 for the goal it is acting out already (**Observed**; near ties do not flip). A goal outside its hour window (the
+  integer hour of `World.GameHours`; start >= end wraps midnight) is skipped. **Engine choices**: the desire is 1 for a goal it can act out and 0 for the rest except going home
+  (the TaskData desire functions are not decoded), the crowding factor is 1 (per TaskData in the original, **Unknown**), and the sticky commitment timers are not modelled.
+- **Acting out.** The original runs a `Task_*` class and a GOAP plan; here `TaskBehaviours` maps 24 goal types onto the movement tasks. IDLE mills about the character's post
+  (wander within 25 units; round the bar while a bar package lends the squad one). PATROL_TOWN, WANDERER, RELAX_IN_TOWN_PACKAGE and SHOPPING roam the squad's home; PATROL patrols
+  (above). The stand-at-node goals walk to a node of the home: the shopkeeper node for the shopkeeper, a guard node for the guards, the throne for SIT_ON_THRONE, a general node
+  for the general node and STAY_IN_HOME (any node when the home has none of the kind; STAY_IN_HOME then the house itself); HOLD_POSITION and MAN_THE_GATE keep to the post.
+  FOLLOW_SQUADLEADER, FOLLOW_SLAVEMASTER and BODYGUARD follow the leader (the leader itself cannot). GO_HOME_AND_GO_TO_BED, its SECURE twin and SLEEP_ON_FLOOR walk to the
+  member's bed (no bed: into the house) and lie down (`Rest`); SIT_AROUND sits at a bar or general node of the home (else inside; without a home, where it is). **The post** is
+  where the character stood when the AI took it over: where a goal needs a spot the home cannot give, and when the home's spots fail: three walks in a row that end away from a
+  spot give the home up (`HomeUnreachable`), or for the post make the spot it stands on its post. Every other type (rescue, prisoners, slaves, machines, doors, ...) is not acted
+  out and never chosen; fleeing, rescue and first aid stay with their systems.
+- **Combat goals** (`AiStance`, **engine reading**: how the original turns a sighting into an attack is **Unknown**, perception.md). The combat goals of a character's role list
+  and race in their hours set how readily `AggroSystem` starts a fight for it: ATTACK_ENEMIES on sight (*aggressive*), ATTACK_ENEMIES_AND_NEUTRALS also neutrals (neither ally
+  nor hostile; coexisting factions stay safe), TERRITORIAL_AGGRESSION_BUT_DONT_LEAVE_HOME enemies inside its squad's home radius, PROTECT_ALLIES, PROTECT_OWN_SQUAD,
+  PROTECT_ALLIES_STAY_IN_TOWN, ATTACK_TROUBLE_MAKERS, ATTACK_ENEMIES_OF_MY_SLAVEMASTER and BODYGUARD enemies that are fighting (*defensive*); combat goals none of which is in its
+  hours give *passive* (no fight started; it still fights back when attacked, the retaliation rule). The most aggressive wins. A character whose lists hold no combat goal at all
+  keeps *aggressive*, the rule every NPC had before (so data without these goals plays as before); SELF_PRESERVATION (30 races) is not a combat goal. Police looking for a wanted
+  character are not held back by a stance. An NPC the AI put to bed or sat down can be roused into a fight (one resting by order still cannot).
 - **Who runs whom.** The AI gives a character a task only while nothing else holds it (`AiSystem.Holds`): not the player's, not in a fight, fleeing, down, carrying, carried or
-  trading, and its task is idle, wander, follow, or the AI's own walk, sleep or sit. A fight takes it over; the aggro's stand-down hands it back. **Known effect**: a sleeping
-  (`Rest`) NPC is skipped by the aggro's look, as a resting one always was, so it fights only when attacked.
+  trading, and its task is idle, wander, follow, or the AI's own walk, sleep or sit. A fight takes it over; the aggro's stand-down hands it back.
+- **Off screen** (`PlatoonJobs`, ai.md "Unloaded squads"). A roaming platoon gets the package its template's slot rule picks (base-class rules) or the one its save names, and that
+  package's `unloaded func` as its job: 2 walks between points within 3000 units of its home town, a new one when within 500 of the last (**Observed**: the 500; the range is an
+  engine choice), at a walk while loaded; 4 goes home and stays; 5 and 6 travel as the stand-in did; 0, 1 and 3 keep the travel stand-in (the original turns 0 into 2 or 4 by a test
+  whose meaning is **Unknown**, and has no branch for 1 and 3). Loaded or not, the platoon heads for the same point. Resident squads still load and unload with their town.
 - **Time.** `World.GameHours` (day x 24 + hour, from `WorldSettings.StartHours`, default day 1 at 13:00) advances one tick of game time per tick; `WorldSession` sets it from its
   `GameClock` before each tick, so the debug hour slider and a loaded save's clock reach the AI. It is an input, not hashed.
-- **Shown.** `CharacterSnapshot.Activity` is the goal's TaskData text (`Shopkeeper`, `Patrolling town`, `Going to bed`) while the AI runs the character; the host shows the name
-  and the activity beside the cursor over any other character, in both UI modes (the original's mouse-over text is its `TooltipPanel`, layout **Unknown**).
-- **Hash and saves.** Blackboards and minds are hashed with their squads and characters only when present, so worlds without AI packages hash as before (no pin moved). Nothing of
-  the AI is saved (the original's `currentPackage`, `pjobT`, `tjobT` and the rest, [save.md](formats/save.md)): residents are made again on load and choose again.
+- **Shown.** `CharacterSnapshot.Activity` is the goal's TaskData text (`Shopkeeper`, `Patrolling`, `Going to bed`, `Retreating`) while the AI runs the character; the host shows the
+  name and the activity beside the cursor over any other character, in both UI modes (the original's mouse-over text is its `TooltipPanel`, layout **Unknown**). The host prints the
+  homes it found at start (`homes     N town buildings, B beds, K nodes in T towns`).
+- **Hash and saves.** Blackboards, minds and platoon jobs are hashed only when present, so worlds without AI packages hash as before (no pin moved). A roaming platoon's package
+  is saved as its PLATOON's `currentPackage` string ([save.md](formats/save.md)) and read back on load (the job follows from it). Nothing else of the AI is saved (`contractjob`,
+  `jobhr`, `pjobT`, `tjobT`, the patrol timer and route): residents are made again on load, get their homes again and choose again.
 - **Cost** (**Observed**, 2026-10-14, `AiBenchTests` in Release on the 4-core cloud container: a synthetic town of 1807 residents in 301 squads inside a 300-unit radius, 900
-  ticks with night falling halfway). One thread: the AI's think 148 us and its serial step 24 us per tick, of a 5.6 to 6.1 ms tick (3 %; the rest is mostly separation steering in that
-  crowd), about 0.1 us per character per tick. Four threads: think 155 us summed over the workers, serial 17 us, tick 3.1 ms. A character is due every 15 ticks, so about 120 choose per
-  tick; the rest cost a slot test. Made so by: the squad held on the mind (a sorted-dictionary lookup per character per tick was half the think), the race goals looked up once (the
-  lookup's lock made four threads slower than one), index loops (no boxed enumerators), and the members and crowding counts visited on the 30-tick package cadence (the per-tick
-  recount was 200 us).
+  ticks with night falling halfway). One thread: the AI's think 131 us and its serial step 24 us per tick, of a 5.3 to 7.5 ms tick (the container is noisy; the rest is mostly
+  separation steering in that crowd), under 0.1 us per character per tick. Four threads: think 178 us summed over the workers, serial 23 us, tick 3.5 ms. A character is due every 15
+  ticks, so about 120 choose per tick; the rest cost a slot test. Made so by: the squad held on the mind (a sorted-dictionary lookup per character per tick was half the think), the
+  race goals looked up once (the lookup's lock made four threads slower than one), index loops (no boxed enumerators), flat tables by type number for the behaviour and stance (a
+  dictionary lookup per goal), the stance kept until the hour or the package changes, and the members, intact test and crowding counts visited on the 30-tick package cadence (the
+  per-tick recount was 200 us). Building the homes at start is not measured (it needs the install).
 - **Tests.** `AiTests`: the data rules (parent wins, fallbacks, weights, slots), the hour windows, the slot rule, a town whose shopkeeper keeps shop while its guards patrol at 13:00
-  and walk back and lie down at 22:30, thread-count independence; `[Slow]` the merged base game's counts from ai.md (219 packages, 124 tasks, 804/561/58/64 goal entries, no
-  unresolved link).
-- **Not built:** the package subclasses (patrols out of town, wars, contracts, bar hang-outs, prisoner shipping) and `canActivate`/`isFinished` beyond the base class; the GOAP
-  planner, TaskData conditions and desire functions; jobs and task requests; the urgent goals that need the senses (`SELF_PRESERVATION`, `PROTECT_ALLIES`, `ATTACK_ENEMIES`: the
-  aggro and flee systems stand in); homes, beds, doors and nodes; dialogue's `AI contract` and `change AI`; the unloaded modes; saving the AI state.
+  and walk back and lie down at 22:30; homes (one each, the shopkeeper at its node, everyone in a bed of its own house at night); a running patrol round the town and back; a broken
+  squad retreating home; a contract overriding the slots for its hours; a bar package seating the squad in the bar; the stance rules; a platoon's job from its package and its
+  `currentPackage` through a save and back; node kinds, beds and yaw from records; thread-count independence; `[Slow]` the merged base game's counts from ai.md (219 packages, 124
+  tasks, 804/561/58/64 goal entries, no unresolved link). `AggroTests`: passive, defensive and territorial stances starting no fight with calm enemies outside the home, the
+  territorial one fighting inside it, attacking neutrals but not coexisting factions.
+- **Not built:** the wars, prisoner, slaver, refugee, raid, occupation and campaign packages, and `canActivate`/`isFinished` of the subclasses beyond the engine's; the GOAP planner,
+  TaskData conditions and desire functions; jobs and task requests; the senses-driven goals beyond the stance (rescue, looting, bounty hunting); doors, locking up, gates and turrets;
+  dialogue's `AI contract` and `change AI` (the contract mechanism is there); faction campaigns; resident squads off screen; saving more of the AI than the platoons' packages.
 
 ## Saves
 

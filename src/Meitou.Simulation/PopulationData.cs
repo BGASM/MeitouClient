@@ -42,7 +42,11 @@ public sealed class GeneratedAppearances(GameDatabase db, string installRoot) : 
 }
 
 /// <summary>A town placed in the world.</summary>
-public sealed record TownSite(int Index, TownData Town, Vector3 Position, ZoneCoordinate Zone);
+public sealed record TownSite(int Index, TownData Town, Vector3 Position, ZoneCoordinate Zone)
+{
+    /// <summary>The town's placed buildings with their beds and nodes (<see cref="TownBuildings"/>), the AI's homes; empty when the host gave none.</summary>
+    public IReadOnlyList<TownBuilding> Buildings { get; init; } = [];
+}
 
 /// <summary>What the population needs to know about the game: its data, the placed towns, the factions.</summary>
 public sealed class PopulationData
@@ -96,13 +100,18 @@ public sealed class PopulationData
     /// <summary>The AI_TASK and AI_PACKAGE records with their inheritance resolved (<see cref="Ai.AiSystem"/>).</summary>
     public Meitou.Data.Gameplay.Ai.AiDatabase Ai => LazyInitializer.EnsureInitialized(ref ai, () => new Meitou.Data.Gameplay.Ai.AiDatabase(Db));
 
-    public static PopulationData Create(GameDatabase db, IEnumerable<TownPlacement> placements, IAppearanceSource? appearances = null, BodyOptions? bodyOptions = null, BiomeMap? biomes = null)
+    /// <param name="buildings">The towns' buildings by placement id (<see cref="TownBuildings.Build"/>), for the AI's homes; null: none.</param>
+    public static PopulationData Create(GameDatabase db, IEnumerable<TownPlacement> placements, IAppearanceSource? appearances = null, BodyOptions? bodyOptions = null, BiomeMap? biomes = null,
+        IReadOnlyDictionary<string, List<TownBuilding>>? buildings = null)
     {
         var sites = new List<TownSite>();
         foreach (var p in placements)
         {
             if (db.Find(p.TownId) is not { Type: FcsRecordType.TOWN } record) continue;
-            sites.Add(new TownSite(sites.Count, TownData.From(record), p.Position, WorldLayout.ZoneOf(p.Position.X, p.Position.Z)));
+            sites.Add(new TownSite(sites.Count, TownData.From(record), p.Position, WorldLayout.ZoneOf(p.Position.X, p.Position.Z))
+            {
+                Buildings = buildings is not null && buildings.TryGetValue(p.InstanceId, out var list) ? list : [],
+            });
         }
         var factions = FactionData.LoadAll(db);
         var byId = BuildFactionIndex(factions);

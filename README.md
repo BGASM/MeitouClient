@@ -28,12 +28,14 @@ game you can sink hours into. What works today:
   crossbow combat, fights started by faction relations, sight and hearing, fleeing, carrying and looting bodies,
   crimes with witnesses, police and bounties. Shops: traders stock and restock their wares at the game's prices,
   and a right click on one opens a trade window to buy and sell (stolen goods risk getting caught unless the trader
-  is a fence). The first of the original's AI: squads run their AI packages, so shopkeepers keep to their spot, guards
-  patrol and residents go to bed at night; hover over anyone to see what they are doing. A HUD with inventory and map
+  is a fence). The first of the original's AI: squads run their AI packages, so shopkeepers stand at their counter node,
+  guards patrol round the town, bar squads sit in the bar, residents sleep in their own beds at night, broken
+  squads retreat home, and each NPC's urgent goals decide whether it attacks on sight; hover over anyone to see what
+  they are doing. A HUD with inventory and map
   panels, and F5 / F9 quicksave and quickload into Meitou's own slot.
 
-Not there yet: most of the original's AI (package subclasses such as patrols out of town and wars, the planner, off-screen
-squads; fights and fleeing still run on simpler stand-ins), building shops and the rest of the economy, building and research,
+Not there yet: the rest of the original's AI (wars, prisoners and slavers, the planner, towns simulated off screen; fleeing
+and the fight itself still run on simpler stand-ins), building shops and the rest of the economy, building and research,
 dialogue and recruiting, audio, a save menu and loading the original game's saves. See [ROADMAP.md](ROADMAP.md)
 and [docs/simulation.md](docs/simulation.md).
 

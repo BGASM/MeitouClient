@@ -201,6 +201,10 @@ public static class SaveLoader
             loaded.Notes.Add($"{platoon.Name}: no placed town for its base town '{baseTown}' or no squad template; its platoon stays in the save only.");
             return;
         }
+        // Its AI package: the saved currentPackage when the template lists it, else the slot rule's; the package's unloaded func is its off-screen job.
+        string? saved = platoon.Record.Strings.TryGetValue("currentPackage", out var current) && current.Length > 0 ? current : null;   // a string: the AI_PACKAGE id (docs/formats/save.md)
+        var (package, job) = data.Db.Find(platoon.SquadTemplate) is { } templateRecord && SquadFactory.IsTemplate(templateRecord)
+            ? Ai.PlatoonJobs.For(data.Ai, Meitou.Data.Gameplay.SquadTemplate.From(templateRecord), saved) : (null, Ai.PlatoonJob.None);
         var p = new Platoon
         {
             Id = world.Platoons.NextId(),
@@ -211,6 +215,7 @@ public static class SaveLoader
             Size = Math.Max(platoon.CharCount, platoon.Characters.Count),
             Position = new Vector2(platoon.Position.X, platoon.Position.Z),
             State = PlatoonState.Unloaded,
+            Package = package?.Id, Job = job,
         };
         world.Platoons.Add(p);
         loaded.RoamingPlatoons[p.Id] = platoon.Name;

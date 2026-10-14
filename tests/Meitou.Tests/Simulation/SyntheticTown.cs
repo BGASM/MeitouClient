@@ -23,9 +23,10 @@ static class SyntheticTown
     public static readonly Vector3 Far = new(9500, 300, 2000);
 
     /// <summary><paramref name="roaming"/> adds a second town (<c>31-t</c>, far away), roaming squads and bar squads at the first, and a roaming budget for the faction;
-    /// <paramref name="extra"/> adds records, and <paramref name="changePatrol"/> changes the resident <c>Patrol</c> template (<c>10-t</c>) before the database is made.</summary>
+    /// <paramref name="extra"/> adds records, <paramref name="changePatrol"/> changes the resident <c>Patrol</c> template (<c>10-t</c>) and <paramref name="changeFolk"/> the
+    /// <c>Faction folk</c> one (<c>12-t</c>, the roaming squads') before the database is made.</summary>
     public static GameDatabase Database(int residentSquads = 3, bool overrideFlag = false, bool roaming = false, bool anatomy = false, bool items = false,
-        IReadOnlyList<FcsRecord>? extra = null, Action<FcsRecord>? changePatrol = null)
+        IReadOnlyList<FcsRecord>? extra = null, Action<FcsRecord>? changePatrol = null, Action<FcsRecord>? changeFolk = null)
     {
         var race = Rec("1-t", FcsRecordType.RACE, "Testers");
         var parts = new List<FcsRecord>();
@@ -122,6 +123,7 @@ static class SyntheticTown
         file.Records.AddRange([race, guard, boss, dog, patrol, gated, factionTemplate, faction, town, nameless, startoff]);
         if (far is not null) file.Records.Add(far);
         changePatrol?.Invoke(patrol);
+        changeFolk?.Invoke(factionTemplate);
         if (extra is not null) file.Records.AddRange(extra);
         var db = new GameDatabase();
         db.Apply(file, "test.mod");

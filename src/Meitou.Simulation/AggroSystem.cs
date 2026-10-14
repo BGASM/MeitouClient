@@ -185,6 +185,10 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         public Vector3 Eye;
         public float Yaw, Range;
         public ulong Seed, Key, Tick;
+        /// <summary>The looker's AI stance (<see cref="Ai.AiStance.Aggressive"/> for a character the AI does not run) and, for the territorial one, its home.</summary>
+        public Ai.AiStance Stance;
+        public Vector2 Home;
+        public float HomeR2;
         public int Best;
         public float BestD2;
     }
@@ -201,10 +205,11 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         {
             if (!prev[i].Alive || i >= slots.Length || world.Tick < slots[i].CalmUntil) continue;
             byte task = next[i].Task;
-            if (task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat or (byte)CharacterTask.Rest) continue;
+            if (task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat || task == (byte)CharacterTask.Rest && !AiSleeper(table.Cold(i))) continue;
             if (table.Cold(i) is not { IsPlayer: false, InCombat: false, Fleeing: false, Fighter.CanAttack: true, Medical.Incapacitated: false, Carrying.IsNone: true } cold || !Relations.Contains(cold.Faction)) continue;
             bool police = wanted[cold.Faction] && Crimes is { } crimes && crimes.IsPoliceLike(world, cold);
-            if (!hasEnemy[cold.Faction] && !police) continue;
+            var stance = cold.Ai?.Stance ?? Ai.AiStance.Aggressive;
+            if (!police && (stance == Ai.AiStance.Passive || !hasEnemy[cold.Faction] && stance != Ai.AiStance.AggressiveNeutrals)) continue;
             float range = RangeOf(cold, Settings.SightRange);
             if (!(range > 0)) continue;
             var scan = new Scan
@@ -212,6 +217,8 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
                 Table = table, Relations = Relations, Self = i, Faction = cold.Faction, Police = police,
                 Eye = prev[i].Position, Yaw = prev[i].Yaw, Range = range, Best = -1, BestD2 = float.MaxValue,
                 Seed = world.Seed, Key = Rng.Key(new CharacterId(i, prev[i].Generation)), Tick = (ulong)world.Tick,
+                Stance = stance,
+                Home = cold.Ai?.Squad.HomeCentre ?? default, HomeR2 = cold.Ai is { } mind ? mind.Squad.HomeRadius * mind.Squad.HomeRadius : 0,
             };
             world.Grid.Query(scan.Eye.X, scan.Eye.Z, MathF.Max(range, NoiseFar), ref scan, Visit);
             if (scan.Best >= 0) effects.Emit(i, scan.Best, SightEffect, MathF.Sqrt(scan.BestD2));
@@ -227,7 +234,16 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         // order is the grid's fixed one. Either way it is a function of the state.
         if (d2 >= s.BestD2 || (d2 > s.Range * s.Range && d2 > NoiseFar * NoiseFar)) return;
         if (s.Table.Cold(slot) is not { Medical.Incapacitated: false } c) return;
-        if (!IsEnemy(s.Relations, s.Faction, c.Faction) && !(s.Police && Crime.CrimeSystem.IsWantedBy(c, s.Faction))) return;
+        bool wanted = s.Police && Crime.CrimeSystem.IsWantedBy(c, s.Faction);
+        bool enemy = s.Stance != Ai.AiStance.Passive
+            && (IsEnemy(s.Relations, s.Faction, c.Faction) || s.Stance == Ai.AiStance.AggressiveNeutrals && IsNeutral(s.Relations, s.Faction, c.Faction));
+        if (!enemy && !wanted) return;
+        if (!wanted)
+        {
+            // The AI's stances (docs/simulation.md "AI", Combat goals): the defensive one joins fights only, the territorial one keeps to its home.
+            if (s.Stance == Ai.AiStance.Defensive && !c.InCombat) return;
+            if (s.Stance == Ai.AiStance.Territorial && Vector2.DistanceSquared(new Vector2(other.Position.X, other.Position.Z), s.Home) > s.HomeR2) return;
+        }
         if (Visibility(s.Eye, s.Yaw, other.Position, s.Range) <= 0)
         {
             float p = HearChance(MathF.Sqrt(d2), NoiseRange(new Vector2(other.Velocity.X, other.Velocity.Z).Length(), other.MaxSpeed));
@@ -242,6 +258,13 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
     /// and neither lists the other in <c>coexistence</c> (engine choice: the flag's effect in the original is <b>Unknown</b>, so either side's is enough).
     /// Same faction and allies are never enemies (an ally is at 50 or above, so not hostile).
     /// </summary>
+    /// <summary>Neither an ally (nor the same faction) nor hostile: whom ATTACK_ENEMIES_AND_NEUTRALS adds to the enemies.</summary>
+    public static bool IsNeutral(FactionRelations relations, int mine, int theirs) =>
+        relations.Contains(theirs) && !relations.IsAlly(mine, theirs) && !relations.IsHostile(mine, theirs);
+
+    /// <summary>A character the AI put to bed or sat down (<see cref="Ai.AiBehaviour.Sleep"/>, <see cref="Ai.AiBehaviour.Sit"/>): unlike one resting by order, it can be roused into a fight.</summary>
+    static bool AiSleeper(CharacterCold? cold) => cold?.Ai is { Behaviour: Ai.AiBehaviour.Sleep or Ai.AiBehaviour.Sit };
+
     public static bool IsEnemy(FactionRelations relations, int mine, int theirs) =>
         relations.Contains(theirs) && relations.IsHostile(mine, theirs) && !relations.Coexists(mine, theirs) && !relations.Coexists(theirs, mine);
 
@@ -287,7 +310,7 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
     {
         if (taken.Contains(slot) || !table.Next[slot].Alive) return false;
         byte task = table.Next[slot].Task;
-        if (task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat or (byte)CharacterTask.Rest) return false;
+        if (task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat || task == (byte)CharacterTask.Rest && !AiSleeper(table.Cold(slot))) return false;
         return table.Cold(slot) is { IsPlayer: false, InCombat: false, Fleeing: false, Fighter.CanAttack: true, Medical.Incapacitated: false, Carrying.IsNone: true };   // a carrier picks no fight (the original's engagement weight is 0 while carrying)
     }
 

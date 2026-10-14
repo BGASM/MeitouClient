@@ -85,7 +85,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         {
             // The sandbox and the duel walk on open ground (the heightmap): the sandbox has no world, and the duel's spot may be a navmesh island the build prunes.
             // Neither has towns: the duel's two characters are the only ones.
-            var levels = IsSandbox || IsDuel ? null : scene.Objects?.Levels ?? Meitou.Data.World.WorldLevelData.Load(install);
+            var levels = IsSandbox || IsDuel ? null : scene.Objects?.Levels ?? Meitou.Data.World.WorldLevelData.Load(install, includeInteriors: true);
             if (levels is not null)
             {
                 nav = new Meitou.Navigation.NavSystem(install, gameDb, levels!, heights.HeightAt);
@@ -100,7 +100,17 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
                 try { biomes = Meitou.Data.Gameplay.BiomeMap.Create(gameDb, gpu.WeatherAreas ?? Meitou.Data.World.WeatherAreas.Load(install)); }
                 catch (Exception e) when (e is IOException or FormatException) { Console.Error.WriteLine($"population no areas map ({e.Message}): no wild squads"); }
             }
-            var data = Meitou.Simulation.PopulationData.Create(gameDb, towns, new Meitou.Simulation.GeneratedAppearances(gameDb, install.Root), biomes: biomes);
+            // The towns' buildings with their beds and nodes: the AI's homes (docs/simulation.md "AI").
+            Dictionary<string, List<Meitou.Data.World.TownBuilding>>? buildings = null;
+            if (levels is not null)
+            {
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                var layouts = scene.Objects?.Layouts ?? new Meitou.Data.World.BuildingLayouts(gameDb, levels.Interiors);
+                buildings = Meitou.Data.World.TownBuildings.Build(gameDb, levels, layouts, (x, z) => heights.HeightAt((float)x, (float)z));
+                Console.WriteLine($"homes     {buildings.Values.Sum(l => l.Count)} town buildings, {buildings.Values.Sum(l => l.Sum(b => b.Beds))} beds, " +
+                    $"{buildings.Values.Sum(l => l.Sum(b => b.Spots.Count - b.Beds))} nodes in {buildings.Count} towns ({watch.ElapsedMilliseconds} ms)");
+            }
+            var data = Meitou.Simulation.PopulationData.Create(gameDb, towns, new Meitou.Simulation.GeneratedAppearances(gameDb, install.Root), biomes: biomes, buildings: buildings);
             animationLengths = Meitou.Data.Gameplay.AnimationLengths.Load(install.Root, gameDb);   // with the animals' own skeletons
             animationLibrary = Meitou.Data.Gameplay.AnimationLibrary.FromDatabase(gameDb);
             popData = data;

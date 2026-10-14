@@ -197,4 +197,54 @@ public class AggroTests
         Assert.Equal(one, Hashes(16));
         Assert.NotEqual(one[^1], one[^2]);
     }
+
+    // ------------------------------------------------------------------ the AI's stances (docs/simulation.md "AI", Combat goals)
+
+    static void Stance(Arena a, Squad squad, Meitou.Simulation.Ai.AiStance stance)
+    {
+        foreach (var m in squad.Members) a.World.Characters.Cold(m.Slot)!.Ai = new Meitou.Simulation.Ai.AiMind { Squad = squad, Stance = stance };
+    }
+
+    [Theory]
+    [InlineData(Meitou.Simulation.Ai.AiStance.Passive)]
+    [InlineData(Meitou.Simulation.Ai.AiStance.Defensive)]
+    [InlineData(Meitou.Simulation.Ai.AiStance.Territorial)]
+    public void An_AI_stance_short_of_aggressive_starts_no_fight_with_calm_enemies_away_from_home(Meitou.Simulation.Ai.AiStance stance)
+    {
+        var (a, raiders, _, _, _, _) = Crossroads(3, 1);
+        using var _ = a;
+        Stance(a, raiders, stance);
+        a.World.RunTicks(90);
+        Assert.Empty(a.Aggro.Log);   // the villagers 150 away are enemies, but nobody fights them and they are outside the raiders' home (30)
+    }
+
+    [Fact]
+    public void A_territorial_stance_fights_enemies_inside_its_home()
+    {
+        var (a, raiders, _, _, _, _) = Crossroads(3, 1);
+        using var _ = a;
+        Stance(a, raiders, Meitou.Simulation.Ai.AiStance.Territorial);
+        raiders.HomeRadius = 400;
+        a.World.RunTicks(90);
+        Assert.NotEmpty(a.Aggro.Log);
+        Assert.All(a.Aggro.Log, e => Assert.Equal(Villagers, e.TargetFaction));
+    }
+
+    [Fact]
+    public void Attacking_neutrals_adds_the_neutral_but_not_the_coexisting()
+    {
+        var a = Make(5, 1);
+        using var _ = a;
+        var o = new Vector2(2000, 2000);
+        var raiders = a.Squad(Raiders, o, o);
+        var townsfolk = a.Squad(Townsfolk, o + new Vector2(0, 60), o + new Vector2(0, 60));
+        var nomads = a.Squad(Nomads, o + new Vector2(0, -60), o + new Vector2(0, -60));
+        a.World.RunTicks(60);
+        Assert.Empty(a.Aggro.Log);   // aggressive: the neutral townsfolk and the coexisting nomads are left alone
+        Stance(a, raiders, Meitou.Simulation.Ai.AiStance.AggressiveNeutrals);
+        a.World.RunTicks(90);
+        Assert.NotEmpty(a.Aggro.Log);
+        Assert.All(a.Aggro.Log, e => Assert.Equal(Townsfolk, e.TargetFaction));
+        Assert.All(nomads.Members, m => Assert.False(a.Fighting(m)));
+    }
 }

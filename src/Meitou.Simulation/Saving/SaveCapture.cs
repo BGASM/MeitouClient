@@ -295,7 +295,7 @@ public static class SaveCapture
         if (n == 0) camera.SelectedCharacter = Hand.Null;
     }
 
-    /// <summary>Puts the roaming platoons' positions into their PLATOON records.</summary>
+    /// <summary>Puts the roaming platoons' positions and AI packages (<c>currentPackage</c>, docs/formats/save.md PLATOON) into their PLATOON records.</summary>
     static void WriteRoaming(SaveGame game, World world, LoadedSave loaded)
     {
         foreach (var (id, name) in loaded.RoamingPlatoons)
@@ -305,6 +305,7 @@ public static class SaveCapture
             if (platoon is null) continue;
             var at = platoon.Position;
             platoon.Position = new Vector3(p.Position.X, at.Y, p.Position.Y);
+            if (p.Package is { } package) platoon.Record.Strings["currentPackage"] = package;
         }
     }
 }

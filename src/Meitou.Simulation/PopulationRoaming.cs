@@ -64,14 +64,14 @@ public sealed partial class PopulationSystem
             if (p.WaitLeft <= 0) ChooseNext(world, p);
             return;
         }
-        if (p.Target < 0)
+        if (Goal(p) is not { } goal)
         {
             ChooseNext(world, p);
             return;
         }
-        var to = SiteCentre(p.Target) - p.Position;
+        var to = goal - p.Position;
         float d = to.Length();
-        if (d <= settings.RoamArrivalRadius)
+        if (d <= (p.Point is not null ? Ai.PlatoonJobs.PatrolArrive : settings.RoamArrivalRadius))
         {
             Arrive(world, p);
             return;
@@ -84,12 +84,34 @@ public sealed partial class PopulationSystem
     {
         ulong roll = Rng.Hash(world.Seed, (ulong)p.Id, RngPurpose.Wander, (ulong)world.Tick);
         p.WaitLeft = settings.RoamWaitMin + Rng.Float(roll) * (settings.RoamWaitMax - settings.RoamWaitMin);
+        if (p.Point is not null)
+        {
+            p.Point = null;   // a short-range patrol point: the next one after the wait
+            return;
+        }
         p.GoingHome = p.Target != p.Origin;   // having reached another town, the way home is next
     }
+
+    /// <summary>Where a platoon is heading: its patrol point, else its target town's centre; null when it has neither.</summary>
+    Vector2? Goal(Platoon p) => p.Point ?? (p.Target >= 0 ? SiteCentre(p.Target) : null);
 
     /// <summary>Picks where a platoon goes next: home after a visit, else one of the 4 nearest settlements that are not hostile to it.</summary>
     void ChooseNext(World world, Platoon p)
     {
+        // The off-screen job of its package (docs/simulation.md "AI", Off screen): a point near home, or home; the rest travel as below.
+        if (p.Job == Ai.PlatoonJob.PatrolShortRange)
+        {
+            p.Point = PatrolPoint(world, p);
+            p.Target = p.Origin;
+            p.GoingHome = false;
+            return;
+        }
+        if (p.Job == Ai.PlatoonJob.GoHome)
+        {
+            p.Target = p.Origin;
+            p.GoingHome = false;
+            return;
+        }
         if (p.GoingHome)
         {
             p.Target = p.Origin;
@@ -113,6 +135,19 @@ public sealed partial class PopulationSystem
         ulong roll = Rng.Hash(world.Seed, (ulong)p.Id, RngPurpose.Wander, (ulong)world.Tick ^ SeedSalts.RoamNext);
         p.Target = candidates[(int)(Rng.Float(roll) * n) % n].Site;
         p.GoingHome = false;
+    }
+
+    /// <summary>A walkable point within <see cref="Ai.PlatoonJobs.PatrolRange"/> of the home town (seeded; 8 tries, else the town's centre).</summary>
+    Vector2 PatrolPoint(World world, Platoon p)
+    {
+        var home = SiteCentre(p.Origin);
+        for (int k = 0; k < 8; k++)
+        {
+            ulong roll = Rng.Hash(world.Seed, (ulong)p.Id, RngPurpose.Wander, (ulong)world.Tick ^ SeedSalts.PlatoonPatrol ^ (ulong)k << 32);
+            var at = Rng.PointInDisc(roll, home, Ai.PlatoonJobs.PatrolRange);
+            if (world.Walkability.IsWalkable(at.X, at.Y)) return at;
+        }
+        return home;
     }
 
     // ---- loaded roaming squads ----
@@ -157,13 +192,13 @@ public sealed partial class PopulationSystem
             }
             return;
         }
-        if (p.Target < 0)
+        if (Goal(p) is not { } goal)
         {
             ChooseNext(world, p);
             OrderLeader(world, p, squad);
             return;
         }
-        var goal = SiteCentre(p.Target);
+        bool point = p.Point is not null;
         if (Vector2.Distance(p.Position, goal) <= settings.RoamArrivalRadius)
         {
             Arrive(world, p);
@@ -176,7 +211,7 @@ public sealed partial class PopulationSystem
                 table.Next[slot].TaskTime = 0.5f;
             }
             squad.HomeCentre = goal;
-            squad.HomeRadius = Math.Max(data.Sites[p.Target].Town.SizeRadius * data.Sites[p.Target].Town.TownRadiusMult * 0.5f, 40);
+            squad.HomeRadius = point ? 60 : Math.Max(data.Sites[p.Target].Town.SizeRadius * data.Sites[p.Target].Town.TownRadiusMult * 0.5f, 40);
             return;
         }
         // On the way: the leader keeps a go-to; ask again when it has none (arrived short, blocked, or just loaded).
@@ -195,8 +230,9 @@ public sealed partial class PopulationSystem
 
     void OrderLeader(World world, Platoon p, Squad squad)
     {
-        if (p.Target < 0 || !world.Characters.TryResolveNext(squad.Leader, out int slot)) return;
-        MovementSystem.GoTo(world.Characters, slot, SiteCentre(p.Target), SpeedMode.Run);
+        if (Goal(p) is not { } goal || !world.Characters.TryResolveNext(squad.Leader, out int slot)) return;
+        // A short-range patrol and going home walk; travel runs (as before the packages).
+        MovementSystem.GoTo(world.Characters, slot, goal, p.Job is Ai.PlatoonJob.PatrolShortRange or Ai.PlatoonJob.GoHome ? SpeedMode.Walk : SpeedMode.Run);
     }
 
     // ---- unloaded to loaded ----
@@ -242,7 +278,7 @@ public sealed partial class PopulationSystem
         p.State = PlatoonState.Loaded;
         p.SquadId = squad.Id;
         p.UnloadAtTick = -1;
-        if (p.Target >= 0 && p.WaitLeft <= 0) OrderLeader(world, p, squad);
+        if (Goal(p) is not null && p.WaitLeft <= 0) OrderLeader(world, p, squad);
     }
 
     // ---- the pools ----
@@ -300,10 +336,11 @@ public sealed partial class PopulationSystem
                 if (Vector2.Distance(at, position) < 36) { crowded = true; break; }
             if (crowded) continue;
             int squadFaction = template.Faction is { } tf && data.FactionIndex(tf) is var ti and >= 0 ? ti : factionIndex;
+            var (package, job) = Ai.PlatoonJobs.For(data.Ai, template);
             var platoon = new Platoon
             {
                 Id = id, Origin = site.Index, TemplateId = chosen.Id, Faction = squadFaction, Key = key, Size = plan.TotalMembers,
-                Position = position,
+                Position = position, Package = package?.Id, Job = job,
             };
             world.Platoons.Add(platoon);
             ChooseNext(world, platoon);

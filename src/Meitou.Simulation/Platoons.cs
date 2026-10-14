@@ -45,6 +45,11 @@ public sealed class Platoon
     public long UnloadAtTick { get; set; } = -1;
     /// <summary>Seconds before a loaded platoon's leader is sent on again when it has no go-to (a blocked path must not be retried every look).</summary>
     public float OrderCooldown { get; set; }
+    /// <summary>The AI package it runs (an AI_PACKAGE id, saved as <c>currentPackage</c>; null: none) and the off-screen job that package gives (<see cref="Ai.PlatoonJobs"/>).</summary>
+    public string? Package { get; set; }
+    public Ai.PlatoonJob Job { get; set; }
+    /// <summary>A short-range patrol's next point (null: none; it goes to <see cref="Target"/> instead).</summary>
+    public Vector2? Point { get; set; }
 }
 
 /// <summary>The roaming squads of a world, by id. Ids are never reused. Part of the state hash.</summary>
@@ -80,6 +85,13 @@ public sealed class PlatoonRegistry
             h.Add(p.SquadId);
             h.Add(p.UnloadAtTick);
             h.Add(p.OrderCooldown);
+            if (p.Job != Ai.PlatoonJob.None || p.Point is not null)
+            {
+                // Only for platoons whose package gives an off-screen job, so worlds without AI packages hash as before.
+                h.Add((int)p.Job);
+                h.Add(p.Point.HasValue);
+                h.Add(p.Point ?? default);
+            }
         }
     }
 }
