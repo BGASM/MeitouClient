@@ -14,6 +14,11 @@ public sealed class UiPainter : IDisposable
     readonly Func<string, string?> resolve;
     DebugOverlay? standardFont, paintedFont;
     readonly Dictionary<string, (Texture Texture, SampledTexture Sampled)> textures = new(StringComparer.Ordinal);
+    /// <summary>Textures the host draws at run time (the squad portraits), shown by an ImageBox's <c>ImageTexture</c> under their name; not owned.</summary>
+    readonly Dictionary<string, (Texture Texture, SampledTexture Sampled)> external = new(StringComparer.Ordinal);
+
+    /// <summary>Makes <paramref name="texture"/> the image an ImageBox shows for <c>ImageTexture</c> <paramref name="name"/> (the caller keeps and frees it).</summary>
+    public void SetTexture(string name, Texture texture, SampledTexture sampled) => external[name] = (texture, sampled);
 
     public UiPainter(DebugOverlay overlay, MyGuiResources resources, Func<string, string?> resolve)
     {
@@ -54,9 +59,13 @@ public sealed class UiPainter : IDisposable
             {
                 var loaded = LoadTexture(image.Texture);
                 var source = image.Source.Width > 0 && image.Source.Height > 0 ? image.Source : new UiRect(0, 0, loaded.Texture.Desc.Width, loaded.Texture.Desc.Height);
+                // ImageFlipV: an image drawn by the renderer (bottom row first, as its targets keep it) shown the right way up.
+                bool flip = c.Properties.GetValueOrDefault("ImageFlipV") == "true";
+                float v0 = source.Y / loaded.Texture.Desc.Height, v1 = (source.Y + source.Height) / loaded.Texture.Desc.Height;
+                if (flip) (v0, v1) = (v1, v0);
                 overlay.Image(loaded.Sampled, new(b.X, b.Y, b.X + b.Width, b.Y + b.Height),
-                    new(source.X / loaded.Texture.Desc.Width, source.Y / loaded.Texture.Desc.Height,
-                        (source.X + source.Width) / loaded.Texture.Desc.Width, (source.Y + source.Height) / loaded.Texture.Desc.Height),
+                    new(source.X / loaded.Texture.Desc.Width, v0,
+                        (source.X + source.Width) / loaded.Texture.Desc.Width, v1),
                     Colour(c.Properties.GetValueOrDefault("Colour"), Vector4.One) * new Vector4(1, 1, 1, Alpha(c.Properties)));
                 overlay.Flush(width, height, clip);
             }
@@ -164,7 +173,7 @@ public sealed class UiPainter : IDisposable
 
     (Texture Texture, SampledTexture Sampled) LoadTexture(string name)
     {
-        if (textures.TryGetValue(name, out var loaded)) return loaded;
+        if (external.TryGetValue(name, out var given) || textures.TryGetValue(name, out given)) return given;
         string path = resolve(name) ?? throw new FileNotFoundException($"MyGUI texture not found: {name}");
         var image = TextureLoader.LoadFile(path, allMips: false).Levels[0];
         var gpu = overlay.Gpu;

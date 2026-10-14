@@ -68,6 +68,9 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public int BoneBase, AttachBase, LayerStart, LayerCount;
         public CharState State;
         public bool Repose, WeaponDrawn;
+        public long Key;
+        /// <summary>Beyond <see cref="DrawDistance"/> but posed for its portrait (<see cref="PortraitRequests"/>): not drawn in the world.</summary>
+        public bool PortraitOnly;
     }
 
     /// <summary>What the renderer keeps of a character between frames (by <see cref="CharacterInstance.Key"/>): its last posed palette and the one before.</summary>
@@ -77,6 +80,9 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public Matrix4x4 World, PreviousWorld;
         public bool HasWorld;
         public long Posed = -1, Seen;
+        /// <summary>The head bone's position in the model's space at the last pose (<see cref="CharacterAsset.HeadBone"/>), for the portrait camera.</summary>
+        public Vector3 Head;
+        public bool HasHead;
     }
 
     readonly Dictionary<long, CharState> states = [];
@@ -154,6 +160,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         var watch = Stopwatch.StartNew();
         Draws.Clear();
         Source?.Invoke(Draws);
+        GatherPortraitKeys();
         content.Textures.Pump(wait: LoadBudget == 0, max: 8, budgetMs: 1.0);
         textureBias = Gpu.LodBias;
         textureStandIn = Gpu.StandIn2D;
@@ -177,10 +184,12 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             if (asset is null) continue;
             float scale = inst.Scale > 0 ? inst.Scale : 1;
             var centre = inst.Position + new Vector3(0, asset.Height * 0.5f * scale, 0);
-            if (Vector3.Distance(eye, centre) - asset.Radius * scale > DrawDistance) continue;
+            bool far = Vector3.Distance(eye, centre) - asset.Radius * scale > DrawDistance;
+            if (far && !portraitKeys.Contains(inst.Key)) continue;
             if (liveCount == live.Length) Array.Resize(ref live, liveCount * 2);
             ref var l = ref live[liveCount++];
             l.Asset = asset;
+            (l.Key, l.PortraitOnly) = (inst.Key, far);
             // Lowered by the body shape's lift, so a short body's feet stay on the ground (CharacterAsset.GroundOffset); an animal scaled by its size (its node's scale).
             l.World = Matrix4x4.CreateRotationY(inst.Yaw) * Matrix4x4.CreateTranslation(inst.Position - new Vector3(0, asset.GroundOffset, 0));
             if (scale != 1) l.World = Matrix4x4.CreateScale(scale) * l.World;
@@ -238,6 +247,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                     scratch.Pose(asset.Shape, layerArray.AsSpan(l.LayerStart, l.LayerCount), state.Bones);
                     foreach (var part in asset.Parts)
                         if (part.AttachIndex >= 0) state.Attach[part.AttachIndex] = part.Offset * scratch.BoneTransform(part.Bone);
+                    if (asset.HeadBone >= 0) (state.Head, state.HasHead) = (scratch.BoneTransform(asset.HeadBone).Translation, true);
                     rig.Return(scratch);
                     if (state.Posed < 0) { state.Bones.CopyTo(state.Previous, 0); state.Attach.CopyTo(state.PreviousAttach, 0); }
                     state.Posed = stamp;
@@ -380,5 +390,6 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         motionProg.Dispose();
         nativeFrame.Dispose();
         content.Dispose();
+        DisposePortraits();
     }
 }

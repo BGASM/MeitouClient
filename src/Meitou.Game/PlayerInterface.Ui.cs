@@ -140,14 +140,7 @@ sealed partial class PlayerInterface
         var centreText = new Dictionary<string, string> { ["TextAlign"] = "Center" };
         if (UiMode == UiMode.Faithful)
         {
-            if (controls.FirstOrDefault(c => c.Name == "SquadPanel") is { } squadPanel)
-            {
-                var members = session.CurrentSnapshot.Characters.Where(c => c.IsPlayer).Take(8).ToArray();
-                float memberWidth = Math.Min(100, squadPanel.Bounds.Width / Math.Max(1, members.Length));
-                for (int i = 0; i < members.Length; i++)
-                    controls.Add(new($"member-{i}", "Button", new(squadPanel.Bounds.X + i * memberWidth, squadPanel.Bounds.Y + 24, memberWidth - 4, 40),
-                        members[i].Name, "meitou:member", "", true, centreText, members[i].Selected ? new(0.25f, 0.35f, 0.3f, 1) : new(0.12f, 0.15f, 0.16f, 1), Argument: i.ToString(CultureInfo.InvariantCulture)));
-            }
+            if (controls.FirstOrDefault(c => c.Name == "SquadPanel") is { } squadPanel) AddSquadPortraits(controls, squadPanel.Bounds);
         }
         if (UiMode == UiMode.Faithful)
             foreach (var screen in faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent)) controls.AddRange(screen.Controls);

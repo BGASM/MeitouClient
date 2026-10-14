@@ -137,6 +137,12 @@ Layer Middle, per-frame update FUN_140728d50 (**Observed**):
 - Squads tab (the caps `max squads`, `max squad size`, `max faction size` are in [factions-squads-towns.md](factions-squads-towns.md#9-settings-and-constants-that-matter)): faction size text, new squad button, dismiss panel. Messages: "Maximum number of squads
   reached.", "The squad needs to be empty before it can be removed.", "You must have at least one squad."
   Cell views `Kenshi_SquadBox` and `Kenshi_SquadsPanel_PortraitCharacter`.
+- Squad bar (the HUD's `SquadPanel`, a TabControl in `Kenshi_MainPanel`; its page is the TabItem rectangle 1.8 % in, 20.7 % down, 96.6 % x 73.7 %, **Verified** by
+  parsing the layout): a `PortraitMainItemBox` of `PortraitMainCellView`s (class names in the exe's RTTI, **Observed**). Each cell is `Kenshi_PortraitCharacter`
+  (136 x 136): `BackgroundImage` (`Kenshi_PortraitImage` Background: Normal or Hurt), `BackImage` (BackOverlay: Combat, Hunger), the `PortraitImage`, `FrontImage`
+  (FrontOverlay: Slave, Prison, Eaten), `NameText` along the bottom and `BorderPanel`, a button in `Kenshi_PortraitFrameSkin` (**Verified**, layout and
+  `kenshi_images.xml`). Which overlay shows when is **Unknown**. Meitou lays the cells left to right at the page's height, narrower when they do not fit, shows Hurt
+  for an unconscious or dead member, checks the frame of a selected one and has no overlays yet; the picture is the renderer's ([../character-renderer.md](../character-renderer.md#portraits)).
 - AI tab (FUN_140494ce0; the toggles inject jobs into the AI chooser, [ai.md](ai.md#scoring)): Ditch items, Sleep when injured, Sit when idle, Heal Allies and similar options.
 - Research tab (FUN_140497930; [buildings-production.md](buildings-production.md#research-and-tech)): requirements, "Right-click to learn tech", unlock categories (buildings,
   weapons, armour, items, crossbow, backpack, robotics).

@@ -103,6 +103,33 @@ Animals go through the same skinned path as people ([game/animals.md](game/anima
 - Not done: crossbow bolts in flight (an unskinned mesh per projectile) and bodies carried on the carrier's `Bip01 L UpperArm` (a second attach pass after posing);
   turning and strafe clips, ragdolls.
 
+## Portraits
+
+The squad bar's pictures of each member (Faithful UI, `PlayerInterface.Portraits.cs`; the cell layout is in [game/ui-screens.md](game/ui-screens.md)).
+
+The original's portrait camera, read from `kenshi_x64.exe` `FUN_14084b890` (the function that reads the `portrait offset` fields and renders through the
+`RTT_Portrait` compositor):
+- **Observed** (disassembly): the character is drawn alone at the origin, in its posture layers (`postures`, `neck set`, `shoulder set` at the body file's
+  sliders). The camera looks at the `Bip01 Head` bone's position plus the RACE's (`portrait offset x`, `y`, `z`), the offset times a size of the character's
+  (a virtual call, most likely its scale).
+- **Observed**: the camera stands at (0, 0, `portrait distance`) from that point, turned about the vertical by ((s mod 500) / 1000 − 0.25)·π (up to 45 degrees
+  either way) and about the side axis by ((s mod 252) / 1000 − 0.083)·π, where s is a number the character carries (+0x664, **Unknown** what it is). The yaw
+  axis is held vertical.
+- **Unknown**: the call before the camera is placed takes 25 and 400. Meitou reads them as a 25 degree vertical field of view and a 400 unit far plane; that
+  framing matches the original's head-and-shoulders pictures.
+- **Observed** (`FUN_140414380`, [formats/save.md](formats/save.md)): the pictures live in a 2048 × 2048 atlas of 128 px cells, saved with the game.
+- RACE values (**Verified**, merged base game, dumped with a scratch tool): people (Greenlander, Scorchlander, Shek, Hive, Skeletons, Fishmen) distance 10, offset
+  (0, 0.5, 0). Bonedogs and Land Bats 15 (0, −2.5, 6); bulls 20 (0, 0.5, 5); Garru 25 (0, 0, 5); Beak Thing 10 (0, −1, 21); Leviathan and Big-Bones
+  10 (0, 5, 280). The z offset puts an animal's long head in front of its head bone.
+
+Meitou (engine choices, 2026-10-14): `CharacterRenderer.DrawPortraits` runs after `Update` every frame for the host's `PortraitRequests` (the squad bar's members,
+member *i* in cell *i*, at most 32 in a 2048 × 256 sRGB atlas). It draws each character where it stands in the world, in its current pose, from the original's
+camera; s is a hash of the character's id. The light is the shader's plain model (no fog, sky, shadows or GI), a key light from the camera's side, so a portrait
+looks the same by day and night. The background is transparent, so the cell's own background shows. A member beyond the draw distance is still posed for its
+portrait but not drawn in the world; one not in the draw list keeps its last picture. The UI shows a cell with the ImageBox properties `ImageTexture
+meitou:portraits` and `ImageFlipV` (the renderer's targets are stored bottom row first). **Observed**: the people's pictures look like the original's;
+a young Bonedog ("Guy with a dog") shows whole and small, as the distance does not scale with size.
+
 ## Findings
 
 - **Observed**: `human_male.mesh` has 23 Ogre poses (cheekbones, mouth, nose, brow, eyes, jaw bite), all on the one submesh, none with
@@ -121,7 +148,7 @@ generated LOD as a Faithful/Meitou switch (`Enhancements`, `--faithful`; the old
 ## Code layout
 
 `CharacterRenderer` is a partial class: `CharacterRenderer.cs` (fields, `Update`, materials, `Settle`, teardown), `.Draw.cs` (culling, LOD choice, batches, the recorded draw job), `.Motion.cs`
-(`AttachMotion`: the near slice's hook into the post chain, called once per frame by `WorldFrame`; `DrawMotion`), `.Stats.cs` (timing rings, the `characters ...` line). The texture
+(`AttachMotion`: the near slice's hook into the post chain, called once per frame by `WorldFrame`; `DrawMotion`), `.Stats.cs` (timing rings, the `characters ...` line), `.Portraits.cs` (the squad portraits). The texture
 governor is `CharacterTextureBudget`. `CharacterContent` is disposable and owns the mesh buffers, textures and the morph arena. The program wrapper and the sphere test are
 shared (`ReflectedProgram.cs`; the objects renderer still has its own copy of both). `CharacterShaders` names the set 0 bindings (bones 6, materials 7, morphs 8, last frame's bones 9) and
 the material's texture slot count (20) and builds the GLSL from them; the push block's `depthIndex` is the near depth texture's bindless index in the motion pass and 0 otherwise

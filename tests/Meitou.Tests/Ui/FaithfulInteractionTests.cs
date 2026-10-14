@@ -101,6 +101,30 @@ public class FaithfulInteractionTests(ITestOutputHelper output)
         finally { ui.DisposeUi(); }
     }
 
+    [Fact, Slow]
+    public void TheSquadBarShowsEachMembersPortraitCellAndAClickOnItSelectsThem()
+    {
+        using var session = new WorldSession(Vector3.Zero, (-100, -100, 100, 100), (_, _) => 0, systems: [new PlayerSystem()]);
+        var first = session.World.Characters.Spawn(new() { Position = new(-3, 0, 0) }, new() { Name = "First", IsPlayer = true }, 0);
+        var second = session.World.Characters.Spawn(new() { Position = new(3, 0, 0) }, new() { Name = "Second", IsPlayer = true }, 0);
+        session.World.Player.Faction = 0; session.World.Player.Selection.Add(first); session.World.RunTick();
+        var ui = Ui(session);
+        try
+        {
+            Assert.Equal([first, second], ui.SquadBarMembers().Select(c => c.Id));
+            var frame = ui.UiFrame;
+            // The renderer draws member i into atlas cell i (CharacterRenderer.PortraitRequests): the second cell is the atlas's second 128 px square.
+            var portrait = Assert.Single(frame, c => c.Name == "portrait-1");
+            Assert.Equal(PlayerInterface.PortraitTexture, portrait.Properties["ImageTexture"]);
+            Assert.Equal("128 0 128 128", portrait.Properties["ImageRect"]);
+            Assert.Contains(frame, c => c.Name == "portrait-name-1" && c.Caption == "Second");
+            Click(ui, "member-1");
+            session.World.RunTick();
+            Assert.Equal([second], session.World.Player.Selection);
+        }
+        finally { ui.DisposeUi(); }
+    }
+
     /// <summary>Names the HUD bindings carry for the Meitou mode's native HUD only; the faithful layout has no widget for them.</summary>
     static readonly HashSet<string> NativeOnly = ["clock", "hunger", "condition", "blood", "body", "bloodFraction", "bodyFraction", "hungerFraction", "squad.count", "members"];
 

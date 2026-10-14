@@ -93,6 +93,8 @@ internal sealed class CharacterAsset
     public bool Animal;
     /// <summary>How far the body shape lifts the feet in the bind pose (negative: sinks them); the renderer lowers the character by it.</summary>
     public float GroundOffset;
+    /// <summary>The skeleton's <c>Bip01 Head</c> (-1: none), which the portrait camera looks at.</summary>
+    public int HeadBone = -1;
 }
 
 /// <summary>
@@ -347,6 +349,7 @@ internal sealed class CharacterContent : IDisposable
         }
         asset.Shape = asset.Animal ? null : Shape(c, rig);
         asset.GroundOffset = GroundOffset(rig, asset.Shape);
+        asset.HeadBone = rig.Handle("Bip01 Head") ?? -1;
         if (body.Morphs is { } bodyMorphs && bodyMorphs.Deltas(c.PoseWeights, c.Character?.GetBool("shaved") == true && bodyMorphs.HasCuttableHorns) is { } deltas)
         {
             var key = string.Join(';', c.PoseWeights.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => FormattableString.Invariant($"{p.Key}={p.Value}"))) + "@" + bodyPath + (c.Character?.GetBool("shaved") == true);

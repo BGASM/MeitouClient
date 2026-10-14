@@ -64,10 +64,25 @@ sealed partial class GameHost
     void FillDrawList(CharacterDrawList list)
     {
         long f0 = Stopwatch.GetTimestamp();
-        try { FillDrawListCore(list); }
+        try { FillDrawListCore(list); FillPortraits(); }
         finally { fillTotal += Stopwatch.GetElapsedTime(f0).TotalMilliseconds; fillCalls++; }
     }
 
+
+    /// <summary>A character's key in the draw list: stable while it exists, new for every world (the renderer keeps its poses by it).</summary>
+    long DrawKey(CharacterId id) => (((long)id.Slot << 32 | (uint)id.Generation) + 1) | (long)worldEpoch << 56;
+
+    /// <summary>The squad bar's portraits for the renderer to draw this frame: its members in their cells (docs/character-renderer.md "Portraits").</summary>
+    void FillPortraits()
+    {
+        if (gpu.Characters is not { } characters) return;
+        characters.PortraitRequests.Clear();
+        if (!player.UiVisible || player.UiMode != Meitou.Data.Ui.UiMode.Faithful) return;
+        var members = player.SquadBarMembers();
+        // The serial turns each portrait's camera (the original uses a number of the character's; this is the id's, stable for the character).
+        for (int i = 0; i < members.Count; i++)
+            characters.PortraitRequests.Add(new PortraitRequest(DrawKey(members[i].Id), i, (uint)members[i].Id.Slot * 2654435761u ^ (uint)members[i].Id.Generation));
+    }
 
     void FillDrawListCore(CharacterDrawList list)
     {
@@ -103,7 +118,7 @@ sealed partial class GameHost
                         }
                 poses[i] = new CharacterPose(layer.Name, time, weight);
             }
-            list.Add(new CharacterInstance((((long)c.Id.Slot << 32 | (uint)c.Id.Generation) + 1) | (long)worldEpoch << 56, c.Appearance, position, yaw, poses) { WeaponDrawn = c.WeaponDrawn, Scale = c.Scale });
+            list.Add(new CharacterInstance(DrawKey(c.Id), c.Appearance, position, yaw, poses) { WeaponDrawn = c.WeaponDrawn, Scale = c.Scale });
         }
     }
 

@@ -66,11 +66,12 @@ internal sealed unsafe partial class CharacterRenderer
         active.Clear();
 
         // 1. Cull, choose each part's level and group the instances by (mesh part, level, sidedness).
-        for (int i = 0; i < liveCount; i++)
+        // A portrait (portraitLive) draws that one character, unculled.
+        for (int i = portraitLive >= 0 ? portraitLive : 0, end = portraitLive >= 0 ? portraitLive + 1 : liveCount; i < end; i++)
         {
             ref var l = ref live[i];
-            if (!FrustumTests.SphereVisible(frustum, l.Centre, l.Radius)) continue;
-            if (!depthPass && FogCull?.Hidden(l.Centre, l.Radius, FogVolumes.CullKind.Characters) == true) continue;
+            if (portraitLive < 0 && (l.PortraitOnly || !FrustumTests.SphereVisible(frustum, l.Centre, l.Radius))) continue;
+            if (!depthPass && portraitLive < 0 && FogCull?.Hidden(l.Centre, l.Radius, FogVolumes.CullKind.Characters) == true) continue;
             DrawnCharacters++;
             foreach (var part in l.Asset.Parts)
             {
@@ -151,11 +152,11 @@ internal sealed unsafe partial class CharacterRenderer
         }
         job.Count = n;
         var timer = depthPass ? depthTimer : colourTimer;
-        timer.Begin();
+        if (portraitLive < 0) timer.Begin();
         Gpu.Record(label, job);
-        timer.End();
+        if (portraitLive < 0) timer.End();
         LastDrawCpuMs = cpu.Elapsed.TotalMilliseconds;
-        if (!depthPass) drawCpu.Add(LastDrawCpuMs);
+        if (!depthPass && portraitLive < 0) drawCpu.Add(LastDrawCpuMs);
     }
 
     /// <summary><paramref name="world"/> with <paramref name="origin"/> taken off its translation.</summary>
