@@ -19,16 +19,17 @@ public class ItemIconTests
     public void Other_names_are_not_icons(string name) => Assert.Null(ItemIconCache.Parse(name));
 
     [Fact]
-    public void The_cache_prefers_the_exact_material_then_any_colour_then_any_file_of_the_item()
+    public void The_cache_gives_the_colourless_file_of_exactly_that_item_and_material()
     {
         string dir = Directory.CreateTempSubdirectory("meitou-icons").FullName;
         try
         {
-            foreach (string name in new[] { "1-a.mod.2-a.mod.png", "1-a.mod.3-a.mod.9-a.mod.png", "1-a.mod.3-a.mod.png" }) File.WriteAllBytes(Path.Combine(dir, name), []);
+            foreach (string name in new[] { "1-a.mod.2-a.mod.png", "1-a.mod.3-a.mod.9-a.mod.png", "1-a.mod.3-a.mod.png", "1-a.mod.9-a.mod.4-a.mod.png" }) File.WriteAllBytes(Path.Combine(dir, name), []);
             var cache = new ItemIconCache(dir);
             Assert.EndsWith("1-a.mod.3-a.mod.png", cache.Find("1-a.mod", "3-a.mod"));
             Assert.EndsWith("1-a.mod.2-a.mod.png", cache.Find("1-a.mod", "2-a.mod"));
-            Assert.NotNull(cache.Find("1-a.mod", "7-a.mod"));
+            Assert.Null(cache.Find("1-a.mod", "7-a.mod"));
+            Assert.Null(cache.Find("1-a.mod", "9-a.mod"));   // only a coloured picture of that material
             Assert.Null(cache.Find("2-a.mod", ""));
         }
         finally { Directory.Delete(dir, true); }

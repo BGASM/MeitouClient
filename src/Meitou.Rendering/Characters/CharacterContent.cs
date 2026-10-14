@@ -556,7 +556,7 @@ internal sealed class CharacterContent : IDisposable
 
     /// <summary>
     /// The asset of <paramref name="item"/>'s inventory icon (docs/game/ui-screens.md "Item icons"): its mesh (a weapon's bare blade) unskinned, with the textures of <paramref name="spec"/>,
-    /// dyed by the item's own <c>color</c> when its material has a colour map (the instance's colour is not known). Null when the mesh is missing or unreadable.
+    /// undyed (the game dyes with the instance's colour, which is not known: its saved picture of an armour whose record names a <c>color</c> has no colour part and shows none). Null when the mesh is missing or unreadable.
     /// </summary>
     public CharacterAsset? BuildIcon(GameRecord item, GameRecord? spec)
     {
@@ -568,18 +568,9 @@ internal sealed class CharacterContent : IDisposable
         var m = new PartMaterial { Shading = CharacterShaders.ShadeItem };
         if (spec is not null)
         {
-            var dye = item.GetBool("dont colorise") ? null : item.GetReferences("color").Select(r => db.Find(r.TargetStringId)).FirstOrDefault(x => x is not null);
-            bool dyed = dye is not null && Tex(spec, "color map") is not null;
-            m.Description = $"icon {spec.Type} '{spec.Name}'" + (dyed ? $", dye '{dye!.Name}'" : "");
+            m.Description = $"icon {spec.Type} '{spec.Name}'";
             m.Tex[CharacterShaders.SlotDiffuse] = Texture(Tex(spec, "texture map"), false);
             m.Tex[CharacterShaders.SlotNormal] = Texture(Tex(spec, "normal map"), false);
-            if (dyed)
-            {
-                m.Tex[CharacterShaders.SlotColourMap] = Texture(Tex(spec, "color map"), false);
-                m.Dyed = true;
-                m.Colour1 = new Vector4(CharacterAppearance.Rgb(dye!.GetInt("color 1")), spec.GetFloat("paint factor 1"));
-                m.Colour2 = new Vector4(CharacterAppearance.Rgb(dye.GetInt("color 2")), spec.GetFloat("paint factor 2"));
-            }
             m.DoubleSided = spec.GetInt("material type") == 2;
         }
         else

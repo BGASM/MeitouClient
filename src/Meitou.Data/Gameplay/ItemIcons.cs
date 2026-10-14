@@ -154,17 +154,10 @@ public sealed class ItemIconCache
         return dash > 0 && dash < id.Length - 1 && id[..dash].All(char.IsAsciiDigit);
     }
 
-    /// <summary>The cached icon of <paramref name="item"/> in <paramref name="material"/>: the file of exactly those two ids, else one with the same material (any colour), else any of the item; null when none.</summary>
-    public string? Find(string item, string material)
-    {
-        if (!byItem.TryGetValue(item, out var list)) return null;
-        string? sameMaterial = null;
-        foreach (var (m, colour, path) in list)
-        {
-            if (m != material) continue;
-            if (colour.Length == 0) return path;
-            sameMaterial ??= path;
-        }
-        return sameMaterial ?? list[0].Path;
-    }
+    /// <summary>
+    /// The cached icon of <paramref name="item"/> in <paramref name="material"/>: the file of exactly those two ids (no colour part, as an item without a colour is drawn); null when none.
+    /// A picture of another material or colour would show another texture, and the renderer draws the exact one.
+    /// </summary>
+    public string? Find(string item, string material) =>
+        byItem.TryGetValue(item, out var list) ? list.FirstOrDefault(f => f.Material == material && f.Colour.Length == 0).Path : null;
 }

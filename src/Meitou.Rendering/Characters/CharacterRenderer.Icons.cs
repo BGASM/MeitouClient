@@ -128,7 +128,14 @@ internal sealed unsafe partial class CharacterRenderer
             DrawIcon(entry, i);
             // Shown once its textures were all resident (before that it would show stand-ins), or after a while if they never are (the video memory guard keeps them out).
             if (entry.TexturesReady || ++entry.Frames > IconGiveUpFrames) entry.Drawn = true;
-            if (entry.TexturesReady) { entry.Settled = true; iconsUnsettled.Remove(entry); }
+            if (entry.TexturesReady)
+            {
+                // Final: the depth buffer is only needed while drawing.
+                entry.Settled = true;
+                iconsUnsettled.Remove(entry);
+                entry.Depth?.Dispose();
+                entry.Depth = null;
+            }
         }
     }
 

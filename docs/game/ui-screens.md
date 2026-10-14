@@ -212,14 +212,16 @@ Layer Middle, per-frame update FUN_140728d50 (**Observed**):
     (one item kind, 0x11) or `RTTIcons_Base`, double sided for `material type` 2, textured from the instance's material record. Lighting (rtticons.hlsl, lightingFunctions.hlsl): one white punctual
     light along the view axis, no ambient: colour = albedo x pi x N.L x 0.6 + GGX specular (roughness 1 - 0.99 x gloss, F0 0.4), stored linearly in an 8-bit target; the background is transparent.
     The reflection cube (`cloudy_noon.jpg`) is missing from the install, so the game's own pictures have none.
-  - **Meitou's order** (`ItemIcons.Choose`): a drawn kind takes the game's saved picture (the exact material, else one of its colours, else any of the item: an approximation), else is drawn by
-    `CharacterRenderer` (below); the other kinds take their static file, else `default_icon.png`; with nothing, the cell shows the item's name.
+  - **Meitou's order** (`ItemIcons.Choose`): a drawn kind takes the game's saved picture of exactly that item and material without a colour part, else is drawn by `CharacterRenderer`
+    (below); the other kinds take their static file, else `default_icon.png`; with nothing (or while the picture loads), the cell shows the item's name.
   - **Meitou's drawing** (`CharacterRenderer.Icons.cs`, `ItemIconStyle`): the item's mesh through the character shader's item mode with the lighting above (a negative `FogDistance` in the view
-    constants selects it), into its own UNORM texture, drawn each frame until the textures it uses are resident, then kept (rows bottom first like every target: shown with `ImageFlipV`). Against the
-    saved pictures (test `Icons_drawn_from_the_mesh_cover_the_same_part_of_the_picture_as_the_games_saved_ones`): silhouette overlap at least 0.9 on six items (a bag, a sword, armour), mean colour
-    identical on two bags (142 114 91) and 8 to 12 % darker on two swords (**Unknown** why: gloss or normal-map handling). Not done: BUILDING icons, the instance's colour (an icon is dyed only by the
-    item record's own `color`), the vertex-colour and DXT5N variants (the item shader is used), writing the pictures to disk (a readback inside the frame would stall it), bounding the icon textures
-    (one per item and material seen, at most 512 x 512).
+    constants selects it), into its own UNORM texture, drawn each frame until the textures it uses are resident, then kept (rows bottom first like every target: shown with `ImageFlipV`).
+    Against six saved pictures (test `Icons_drawn_from_the_mesh_cover_the_same_part_of_the_picture_as_the_games_saved_ones`, silhouettes agree to two decimals on all): mean colour identical on two bags
+    (142 114 91 and 131 104 81), 5 % darker on two armours (108 95 82 against 113 100 87), 10 % and 7 % darker on two swords (131 123 113 against 143 136 127; 122 119 117 against 130 128 125);
+    why the weapons and armour run dark is **Unknown** (gloss, normal-map or colour-map handling). An icon is drawn undyed: the game's dye is the instance's colour, which `ItemInstance` does not carry
+    (the saved picture of an armour whose record names a `color` has no colour part and shows none). **Observed** in the viewer (`--ui-showcase` inventory): both starting items were drawn this way.
+    Not done: BUILDING icons, the vertex-colour and DXT5N variants (the item shader is used), writing the pictures to disk (a readback inside the frame would stall it), bounding the icon textures
+    (one per item and material seen, at most 512 x 512, colour only).
 - Build window ([buildings-production.md](buildings-production.md#construction) for the rules it enforces): groups come from BUILDING `building category` and `building group`; placement error messages in
   FUN_1404e27e0 (**Observed**).
 

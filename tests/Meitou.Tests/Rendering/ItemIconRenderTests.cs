@@ -53,6 +53,21 @@ public class ItemIconRenderTests
         return either == 0 ? 0 : (double)both / either;
     }
 
+    /// <summary>The largest relative difference of a channel's mean between the pixels both pictures draw (<paramref name="ours"/> upside down, as the targets are).</summary>
+    static double MeanColourDifference(byte[] ours, byte[] theirs, int w, int h)
+    {
+        var (a, b, n) = (new double[3], new double[3], 0);
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int i = (y * w + x) * 4, j = ((h - 1 - y) * w + x) * 4;
+                if (theirs[i + 3] <= 127 || ours[j + 3] <= 127) continue;
+                for (int c = 0; c < 3; c++) { a[c] += ours[j + c]; b[c] += theirs[i + c]; }
+                n++;
+            }
+        return n == 0 ? 1 : Enumerable.Range(0, 3).Max(c => Math.Abs(a[c] - b[c]) / Math.Max(b[c], 1));
+    }
+
     [Fact]
     [Slow]
     public void Icons_drawn_from_the_mesh_cover_the_same_part_of_the_picture_as_the_games_saved_ones()
@@ -86,6 +101,8 @@ public class ItemIconRenderTests
             PngWriter.Write(Path.Combine(dump, name + ".ours.png"), ours.Width, ours.Height, flipped);
             File.Copy(file, Path.Combine(dump, name + ".game.png"), overwrite: true);
             Assert.True(overlap >= 0.9, $"{name}: the drawn icon covers {overlap:0.00} of the saved one's picture (ours {ours.Width}x{ours.Height})");
+            double colour = MeanColourDifference(ours.Pixels, theirs.Pixels, ours.Width, ours.Height);
+            Assert.True(colour <= 0.15, $"{name}: the drawn icon's mean colour is {colour:P0} off the saved one's");
         }
     }
 }
