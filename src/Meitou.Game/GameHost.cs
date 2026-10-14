@@ -26,6 +26,8 @@ namespace Meitou.Game;
 /// </summary>
 sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocator assets, WorldOptions o, GameOptions g, UserConfig config, Meitou.Data.Gameplay.NewGameStart? start)
 {
+    /// <summary>The save the run starts in (<c>--load</c>), loaded at the end of <see cref="Boot"/> through the menu's load path; null for a new world.</summary>
+    public Meitou.Data.Save.SaveGame? StartSave { get; init; }
     WorldSession session = null!;   // disposed with the host (Run)
     Meitou.Simulation.PopulationSystem? population;
     /// <summary>The fights started by faction hostility (printed to the log); null in the sandbox and without the population.</summary>
@@ -142,7 +144,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             () => Meitou.Data.Save.SaveCatalog.Scan(Meitou.Simulation.Saving.QuickSave.DefaultRoot, install.SaveDirectory,
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "kenshi", "save")),
             assets.Find("credits.txt") is { } creditsFile ? File.ReadAllText(creditsFile) : "");
-        if (interactive && start is null && !IsSandbox && !IsDuel && !g.NoPopulation && player.UiMode == Meitou.Data.Ui.UiMode.Faithful) player.ShowTitle();
+        if (interactive && start is null && StartSave is null && !IsSandbox && !IsDuel && !g.NoPopulation && player.UiMode == Meitou.Data.Ui.UiMode.Faithful) player.ShowTitle();
         if (nav is not null && (start is not null || !interactive))
         {
             // The squad is placed on the mesh, and a still has its town at once: wait for the zones round the start (a cold build is about 2 s, then cached).
@@ -169,6 +171,11 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             (o.Pitch ?? Meitou.Data.World.KenshiCamera.InitialPitchDegrees) * MathF.PI / 180, o.Distance ?? Meitou.Data.World.KenshiCamera.InitialDistance);
         SendFocus();
         ApplyCamera(session.Camera.Current);
+        if (StartSave is { } save && g.Load is { } folder)
+        {
+            readingFolder = folder;
+            if (!FinishQuickLoad(Task.FromResult(save), interactive)) throw new InvalidDataException($"--load {folder}: the save did not load (see above)");
+        }
         if (interactive) WorldFrame.FinishLoading(context);
     }
 

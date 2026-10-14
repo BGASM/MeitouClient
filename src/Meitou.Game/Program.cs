@@ -107,8 +107,26 @@ static class Program
             world.Town = null;
             Console.WriteLine($"new game  {start.Name}: {start.Money} cats, {start.Squad.Count} squad link(s), at {at.Value.X:0}, {at.Value.Y:0}");
         }
+        Meitou.Data.Save.SaveGame? save = null;
+        if (game.Load is { } folder)
+        {
+            if (game.NewGame || game.NoPopulation || game.Duel)
+            {
+                Console.Error.WriteLine("--load starts in the save: drop --new-game, --no-population and --duel.");
+                return 2;
+            }
+            try { save = Meitou.Data.Save.SaveGame.Load(folder); }
+            catch (Exception e) when (e is IOException or FormatException or ArgumentException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine($"--load {folder}: {e.Message}");
+                return 1;
+            }
+            // The world round the saved camera; the load then puts the camera on the player's leader (GameHost.FinishQuickLoad).
+            var at = save.Camera.Position;
+            (world.X, world.Z, world.Town, world.Zone) = (at.X, at.Z, null, null);
+        }
         using var scene = WorldFrame.Load(install, world, db);
         if (scene is null) return 1;
-        return new GameHost(install, scene, new AssetLocator(install), world, game, config, start).Run();
+        return new GameHost(install, scene, new AssetLocator(install), world, game, config, start) { StartSave = save }.Run();
     }
 }

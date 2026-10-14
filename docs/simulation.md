@@ -1285,6 +1285,13 @@ buildings). They are not to be unified; `MoveOrder.Target.Y` is ignored (the mov
   is set again, the camera is cut to the player's leader keeping the heading, pitch and boom (the free camera is left), the navmesh of the zones round the leader is awaited like a new game's start (at most 15 s), one tick runs (it publishes the snapshot,
   so a paused game draws the squad, and takes the first look at the zones), the draw list's per-character renderer state is not reused (the host's world counter is part of the key), the mouse state (drag box, steering right click) is dropped and the HUD says "Loaded".
   The selection is the saved one (CAMERA `selected_character`s), not cleared. The speed (paused or 1x/2x/5x) and the camera settings are the running game's. Loading works in a run that began without `--new-game` (it gives the player a squad).
+- **At start** (`--load <save folder>`, 2026-10-14, engine choice): the run starts in a save, Meitou's or the original's. `Program` reads it first and builds the scene round its CAMERA
+  `pos`; at the end of `Boot` the host hands it to `FinishQuickLoad`, the menu's Load path (an offscreen `--screenshot` run builds the systems with synchronous paths), so no title is
+  shown, and a load that fails ends the run. It works with `--screenshot`, `--ticks`, `--ui-showcase` and `--quit-after`; not with `--new-game`, `--no-population` or `--duel`.
+  **Observed** 2026-10-14 (install load order, Release): `wade` (Metaru near Squin) loads in 0.4 s with 1 player character, 1 roaming stand-in and 353 town platoons left to the towns,
+  the camera on him at day 4 08:11; the showcase shows his saved kit (the legs item worn, the rest in the main grid, as the save has it) and 15 characters drawn round him. `autosave0`
+  loads in 1.4 s in the window (447 town platoons left; the HUD names the mod it lacks, FreecamUnbound) and runs 20 s at 103 fps with no errors; its spot (-29370, -80543) is open
+  country, and a fresh world there is as empty.
 - **Saved and loaded:** the clock, the player's money and faction, the factions' relations (the data's table is replaced by the save's on load) and prosperity, the player's squad(s) with each character's position, facing, name, role and leader flag,
   stats and medical state (blood, bleeding, hunger, parts: flesh, bandage, rig, stun, wear, hit multiplier), the look (the appearance record, and the seed in the handle), the inventories, the bounties and the selection. **Not saved:** the town residents and roaming squads (made again from the towns near the player; they are not
   where they were), the weather (rolled anew), orders, paths, queued moves, animation and combat state (everyone stands idle and unengaged), the wound list and pain, pending crimes, buildings and

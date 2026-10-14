@@ -28,6 +28,8 @@ sealed class GameOptions
     public (float X, float Z)? MoveTo;
     /// <summary>Interactive run that closes itself after this many seconds and prints the frame rate (an unattended smoke test).</summary>
     public double? QuitAfter;
+    /// <summary>A save folder (Meitou's or the original game's) started in instead of a new world, loaded as the game menu's Load does (<c>--load</c>).</summary>
+    public string? Load;
 
     public const string Usage = """
         meitou [where] [options]     boots into the world with the Kenshi camera (default --town "The Hub")
@@ -47,6 +49,7 @@ sealed class GameOptions
           --move-to <x> <z>          with --new-game: select the squad and order it to walk (for screenshots)
           --ticks <n>                with --screenshot: run n control ticks (and the same real time of the simulation, at speed 1) before the picture
           --quit-after <s>           close after s seconds and print the frame rate (smoke test)
+          --load <save folder>       start in a save, Meitou's or the original game's (%LOCALAPPDATA%\kenshi\save\<name>), loaded as the game menu's Load does; works with --screenshot
           --yaw/--pitch/--distance   start view: heading, pitch above the horizon and boom (Kenshi: 30 degrees, boom 150; clamped to 10..2000)
           world options as meitou-viewer --world: --at, --zone, --town, --radius, --time, --screenshot, --size, --no-foliage, ...
         Keys: W/A/S/D move, Q/E or Left/Right rotate, Up/Down pitch, wheel or PageUp/PageDown zoom, middle drag orbit, left click or drag selects, right click moves (shift queues), 1..9 / ` select, R stops,
@@ -99,6 +102,7 @@ sealed class GameOptions
                     break;
                 case "--move-to": g.MoveTo = (float.Parse(Next(), CultureInfo.InvariantCulture), float.Parse(Next(), CultureInfo.InvariantCulture)); break;
                 case "--quit-after": g.QuitAfter = double.Parse(Next(), CultureInfo.InvariantCulture); break;
+                case "--load": g.Load = Next(); break;
                 default: rest.Add(a); break;
             }
         }

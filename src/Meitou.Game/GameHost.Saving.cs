@@ -133,21 +133,21 @@ sealed partial class GameHost
     }
 
     /// <summary>Swaps in a world made from the save (at a tick boundary, the frame loop's) and hooks the host to it: the game clock, the camera on the player's squad, the draw list, the mouse state.</summary>
-    void FinishQuickLoad(Task<SaveGame> read)
+    bool FinishQuickLoad(Task<SaveGame> read, bool interactive = true)
     {
         if (read.IsFaulted || read.IsCanceled)
         {
             string why = read.Exception?.GetBaseException().Message ?? "cancelled";
             Console.Error.WriteLine($"load      read failed: {read.Exception?.GetBaseException()}");
             player.Notice($"Load failed: {why}", true);
-            return;
+            return false;
         }
         var watch = Stopwatch.StartNew();
         LoadedSave? loaded = null;
         StandardSystemSet built;
         try
         {
-            built = BuildSystems(interactive: true);
+            built = BuildSystems(interactive);
             var data = popData!;
             // A world that fails to load leaves the old one running (ReplaceWorld drops the half-made one).
             session.ReplaceWorld(built.Systems, world => loaded = SaveLoader.Load(world, read.Result, data, new SaveLoadOptions { Appearances = data.Appearances }));
@@ -156,7 +156,7 @@ sealed partial class GameHost
         {
             Console.Error.WriteLine($"load      failed: {e}");
             player.Notice($"Load failed: {e.Message}", true);
-            return;
+            return false;
         }
         population = built.Population;
         aggro = built.Aggro;
@@ -187,6 +187,7 @@ sealed partial class GameHost
         player.CloseFrontend();
         Console.WriteLine($"load      {readingFolder}: {loaded.PlayerPlatoons.Sum(p => p.Squad.Members.Count)} player character(s), {loaded.RoamingPlatoons.Count} roaming platoon(s), {loaded.TownBoundPlatoons} town platoon(s) left to the towns, day {loaded.Clock.Day} {loaded.Clock.Hour:00}:{loaded.Clock.Minute:00}, in {watch.ElapsedMilliseconds} ms");
         player.Notice(loaded.MissingMods.Count == 0 ? "Loaded" : $"Loaded; the save was made with mods not loaded now: {string.Join(", ", loaded.MissingMods)}", loaded.MissingMods.Count > 0);
+        return true;
     }
 
     /// <summary>Waits (at most 15 s) for the navmesh of the zones round <paramref name="at"/>; the ones already loaded cost nothing.</summary>

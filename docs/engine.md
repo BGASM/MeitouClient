@@ -579,4 +579,4 @@ the `detail` lines at the end of a benchmark log give the instances and calls of
   a flight; serialized (the GPU waited for each frame, 60 fps pacing) or pipelined (two frames in flight, no pacing: the
   interval between frames).
 - `meitou --screenshot out.png --ticks n`: boots the game offscreen, runs n ticks, saves the picture; `meitou --quit-after 20`
-  runs the real window for 20 s and prints the frame rate.
+  runs the real window for 20 s and prints the frame rate; `--load <save folder>` starts either of them in a save.
