@@ -65,13 +65,24 @@ sealed partial class GameHost
         DrawWorld(w, h);
         display.EndFrame();
         using var overlay = playerSquad is not null || player.UiMode == Meitou.Data.Ui.UiMode.Faithful ? DebugOverlay.TryCreate(context) : null;
-        if (overlay is not null) { player.CreateUiPainter(overlay, assets.Find); player.SetItemIcons(ItemIconsOfInstall()); }
+        if (overlay is not null) { player.CreateUiPainter(overlay, assets.Find); ConnectItemIcons(); }
         if (gpu.Characters is { } portraits) { var (atlas, sampled) = portraits.PortraitAtlas; player.SetUiTexture(PlayerInterface.PortraitTexture, atlas, sampled); }
         string?[] panels = g.UiShowcase ? player.UiMode == Meitou.Data.Ui.UiMode.Faithful
             ? [null, "inventory", "stats", "overview", "menu", "new-game", "save", "load", "title"]
             : [null, "inventory", "stats", "menu"] : [null];
         foreach (string? panelName in panels)
         {
+            // Item icons are drawn from the frame after a cell asks for them, and their textures stream in: show the panel until they are done.
+            for (int frames = 0; panelName is not null && overlay is not null && frames < 400 && (frames < 3 || gpu.Characters is { PendingIcons: > 0 }); frames++)
+            {
+                DrawWorld(w, h);
+                overlay.Target = target;
+                UpdateView(w, h);
+                player.ShowUiPanel(panelName);
+                player.Draw(overlay, w, h);
+                display.EndFrame();
+                Thread.Sleep(5);
+            }
             DrawWorld(w, h);
             if (overlay is not null)
             {

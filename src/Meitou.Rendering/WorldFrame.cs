@@ -1113,6 +1113,7 @@ static class WorldFrame
         StageClock.Lap(2);
         gpu.Characters?.Update(eye);
         gpu.Characters?.DrawPortraits();   // the squad portraits, from this update's poses
+        gpu.Characters?.DrawIcons();   // the item icons being made, from the same update
         StageClock.Lap(StageClock.UpdChars);
         float floor = gpu.Terrain.HeightAt(eye.X, eye.Z);
         if (render.Water) floor = Math.Max(floor, WorldWater.Height);

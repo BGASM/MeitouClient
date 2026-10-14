@@ -214,6 +214,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         Posed = 0;
         for (int i = 0; i < liveCount; i++) if (live[i].Repose) Posed++;
         if (updateStamp % 120 == 0) EvictStates();
+        GatherIcons(eye, ref attachCount);
         if (attach.Length < attachCount) attach = new Matrix4x4[Math.Max(attachCount, attach.Length * 2)];
 
         // 2. The bone palettes, posed in parallel straight into the frame's memory.
@@ -233,6 +234,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             {
                 ref var l = ref liveArray[i];
                 var asset = l.Asset;
+                if (asset.IsIcon) return;
                 var rig = asset.Rig;
                 var state = l.State;
                 if (l.Repose)
@@ -258,6 +260,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                 }
             });
         LastPoseMs = poseWatch.Elapsed.TotalMilliseconds;
+        PoseIcons();
 
         // 3. The materials of the parts in range.
         slotParts.Clear();
@@ -387,5 +390,6 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         nativeFrame.Dispose();
         content.Dispose();
         DisposePortraits();
+        DisposeIcons();
     }
 }

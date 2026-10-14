@@ -244,6 +244,24 @@ static class CharacterShaders
             gloss = clamp(gloss, 0.0, 1.0);
             vec3 colour;
             if (view.fogDistance > 0.0 && uAtmoParams.x > 0.5) colour = kenshiLight(albedo, n, v, gloss, vWorld);
+            else if (view.fogDistance < 0.0)
+            {
+                // An inventory icon (CharacterRenderer.DrawIcon, a negative fog distance): the game's rtticons.hlsl, one white punctual light along the view axis and no ambient
+                // (CalcPunctualLight: diffuse = pi * N.L * (1 - mean specular colour), GGX specular for roughness 1 - 0.99 * gloss, specular colour 0.4). The game stores that linear
+                // result as it is in an 8-bit target, so the icon target is UNORM, not sRGB (the lit values match the saved pictures: backpack mean 133 102 77 computed, 142 114 91 saved).
+                const float PI = 3.14159265;
+                vec3 l = normalize(view.lightDir);
+                vec3 hv = normalize(v + l);
+                float nl = clamp(dot(n, l), 0.0, 1.0), lh = clamp(dot(l, hv), 0.0, 1.0), nh = clamp(dot(n, hv), 0.0, 1.0);
+                float rough = 1.0 - gloss * 0.99, alpha = rough * rough, alphaSqr = alpha * alpha;
+                float denom = max(1e-6, nh * nh * (alphaSqr - 1.0) + 1.0);
+                float D = alphaSqr / (PI * denom * denom);
+                float fresnel = exp2((-5.55473 * lh - 6.98316) * lh);
+                float k = alpha * 0.5, k2 = k * k, vis = 1.0 / (lh * lh * (1.0 - k2) + k2);
+                float fv = (0.4 + (1.0 - 0.4) * fresnel) * vis;
+                float specular = nl * D * fv / PI;
+                colour = clamp(albedo * (PI * nl * 0.6) + specular, 0.0, 1.0);
+            }
             else
             {
                 vec3 l = normalize(view.lightDir);

@@ -56,7 +56,7 @@ public sealed class UiPainter : IDisposable
                 overlay.Rect(b.X, b.Y, b.X + b.Width, b.Y + b.Height, colour);
             }
             overlay.Flush(width, height, clip);
-            if (c.Type == "ImageBox" && MyGuiImages.Resolve(resources, c.Properties) is { } image && (!image.Texture.StartsWith(IconPrefix, StringComparison.Ordinal) || textures.ContainsKey(image.Texture)))
+            if (c.Type == "ImageBox" && MyGuiImages.Resolve(resources, c.Properties) is { } image && (!image.Texture.StartsWith(IconPrefix, StringComparison.Ordinal) || textures.ContainsKey(image.Texture)) && (!image.Texture.StartsWith(RenderedIconPrefix, StringComparison.Ordinal) || RenderedIconReady(image.Texture)))
             {
                 var loaded = LoadTexture(image.Texture);
                 var source = image.Source.Width > 0 && image.Source.Height > 0 ? image.Source : new UiRect(0, 0, loaded.Texture.Desc.Width, loaded.Texture.Desc.Height);
@@ -189,6 +189,25 @@ public sealed class UiPainter : IDisposable
         return false;
     }
 
+    /// <summary>The <c>ImageTexture</c> name of the icon the renderer draws from an item's mesh (<see cref="RenderedIcons"/>), shown once it exists; flip it (<c>ImageFlipV</c>), as the renderer's targets are upside down.</summary>
+    public static string RenderedIconTexture(string record, string material) => RenderedIconPrefix + record + "|" + material;
+    public const string RenderedIconPrefix = "meitou:icon:";
+
+    /// <summary>The record and material of a <see cref="RenderedIconTexture"/> name.</summary>
+    public static bool TryParseRenderedIcon(string name, out string record, out string material)
+    {
+        (record, material) = ("", "");
+        if (!name.StartsWith(RenderedIconPrefix, StringComparison.Ordinal) || name.IndexOf('|') is not (>= 0 and var bar)) return false;
+        (record, material) = (name[RenderedIconPrefix.Length..bar], name[(bar + 1)..]);
+        return record.Length > 0;
+    }
+
+    /// <summary>Looks up the texture of a <see cref="RenderedIconTexture"/> name, asking for it to be made when it is not (the host sets this; null: no icons are drawn).</summary>
+    public Func<string, (Texture Texture, SampledTexture Sampled)?>? RenderedIcons { get; set; }
+
+    /// <summary>Whether the rendered icon <paramref name="name"/> can be drawn now (this asks for it too).</summary>
+    public bool RenderedIconReady(string name) => RenderedIcons?.Invoke(name) is not null;
+
     /// <summary>The <c>ImageTexture</c> name under which the image file <paramref name="path"/> is shown once <see cref="IconReady"/>.</summary>
     public static string IconTexture(string path) => IconPrefix + path;
     const string IconPrefix = "file:";
@@ -199,6 +218,7 @@ public sealed class UiPainter : IDisposable
     (Texture Texture, SampledTexture Sampled) LoadTexture(string name)
     {
         if (external.TryGetValue(name, out var given) || textures.TryGetValue(name, out given)) return given;
+        if (name.StartsWith(RenderedIconPrefix, StringComparison.Ordinal) && RenderedIcons?.Invoke(name) is { } rendered) return rendered;
         string path = resolve(name) ?? throw new FileNotFoundException($"MyGUI texture not found: {name}");
         return Upload(name, TextureLoader.LoadFile(path, allMips: false).Levels[0]);
     }

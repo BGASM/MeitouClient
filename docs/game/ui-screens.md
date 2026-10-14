@@ -191,20 +191,35 @@ Layer Middle, per-frame update FUN_140728d50 (**Observed**):
 - Item placement failure messages (FUN_14070f7e0; the checks behind them are in [economy.md](economy.md#8-buying-selling-fencing)): Out of trading range; No room for that item; You can't
   afford that; The shopkeeper can't afford that; That's not for sale; Got caught stealing; Smugglers only buy
   illegal goods. Stealing and fencing chance text: FUN_140712920. Item icon: FUN_140711200.
-- Item icons (inventory and trader cells; code `ItemIcons`, `ItemIconCache`, `PlayerInterface.AddItemCell`). Two sources:
-  - **Static icons** (**Verified**, base game): 318 records (ITEM 268, ARMOUR 31, MAP_ITEM 17, CROSSBOW 2) have an `icon` filename field naming a PNG under
-    `data/items/` (`.\data\items\icons\Fuel.png`, a few in `armour\pants\`); all 318 exist on disk (test `Every_icon_file_a_base_game_record_names_exists`). The 211
-    files in `data/items/icons` are sized to the item's footprint (75x75 for 3x3, 150x25 for 6x1: 25 px per cell, **Observed** on a few files). BUILDING, WEAPON, ARMOUR
-    (111 more), CONTAINER and other records have an empty `icon`: their icon is drawn.
-  - **Rendered icons**: the game draws the others from the item mesh (`RTTIcons_*` materials, [runtime-materials.md](../formats/runtime-materials.md)) and saves the PNG under
-    `<install>/data/icons/<item>.<material>[.<colour>].png`, each a string id (`1012-gamedata.base`); the third is a COLOR_DATA record (**Observed**: `1254-gamedata.base`
-    is "Player"). That folder is a cache made on the player's machine (**Observed**: 843 files dated when the game last ran, holding mod items too), so it holds only
-    items they have seen; `data/icons/buildings/` is the same for BUILDING records (618 files, not used yet). Sizes vary (256x256 for a bag, 128x512 for limb parts).
-    The 4 or 6 dot-separated parts are item and material, with the colour when present (**Observed**, all 842 files parse that way).
-  - Meitou's order: the record's static icon, else the cached file with the item's exact `material sid`, else one of its colours, else any cached file of the item
-    (an approximation: another grade's texture), else the name box. Why 23 cached files exist for records that have a static icon is **Unknown** (the order the game
-    tries them in is not traced: FUN_140711200 is the game's code). Not done: rendering an icon when none exists, the colour part (the instance carries no colour
-    choice), building icons.
+- Item icons (inventory and trader cells; code `ItemIcons`, `ItemIconStyle`, `ItemIconCache`, `PlayerInterface.AddItemCell`, `CharacterRenderer.Icons.cs`; the game's code is FUN_140711200
+  building the cell and FUN_140847bf0 choosing the picture):
+  - **Which kind** (**Verified**: FUN_140847bf0 decompiled, and against the saved pictures below). The game draws an item's icon from its mesh when the record is a WEAPON or its
+    `auto icon image` is true (fcs.def default: true for CROSSBOW, ITEM, NEST_ITEM, WEAPON; false for ARMOUR, CONTAINER, LIMB_REPLACEMENT, MAP_ITEM; the base game's records all store it).
+    Any other record shows the PNG its `icon` field names, else `default_icon.png` (`data/items/icons`; the game logs "[Icon] Missing image").
+  - **Static files** (**Verified**, base game): 318 records (ITEM 268, ARMOUR 31, MAP_ITEM 17, CROSSBOW 2) name a PNG under `data/items/` (`.\data\items\icons\Fuel.png`, a few in
+    `armour\pants\`); all 318 exist (test `Every_icon_file_a_base_game_record_names_exists`). The files are sized to the footprint at 25 px a cell (75x75 for 3x3, 150x25 for 6x1; **Observed**).
+  - **The game's saved pictures**: it looks for the texture name in its `Icons` resource group first and draws only when it is not there, saving `<install>/data/icons/<name>`.
+    The name is the item's string id, `.`, the instance's material string id and, only when the item has a colour record, its `dont colorise` is false and the material has a non-empty `color map`,
+    `.` and the colour's string id (FUN_140845e80 and FUN_140847bf0, **Verified**). The folder is made on the player's machine, so it holds only items they have seen (**Observed**: 842 files,
+    all of that form; 116 with a colour; also mod items; `data/icons/buildings/` holds BUILDING pictures, 618 files, not used yet). Every picture of a base-game record is of a drawn kind
+    (test `Every_picture_the_game_saved_of_a_base_game_item_is_of_a_kind_it_draws`) except limbs.mod's eight severed limbs (ITEM with a static icon; why they are drawn is **Unknown**). The colour is
+    mostly not the record's own `color` reference (15 of 116 are), so it is the instance's colour, which `ItemInstance` does not carry.
+  - **How it is drawn** (**Verified** against FUN_1408473d0, FUN_140846060, FUN_140845f30 and FUN_140840380): a picture of 50 x 50 pixels a footprint cell, each side rounded up to a power of two (saved
+    files: 5x4 256x256, 7x1 512x64, 8x2 512x128, 2x6 128x512, 3x3 256x256); a perspective camera, vertical field of view 45 degrees, aspect the footprint's, at (0, 0, 5 x `icon zoom`) looking at the origin;
+    the item's node at (`icon offset H`, `icon offset V`, 0) turned by pitch (`icon offset pitch`), then yaw (`icon offset yaw` - 90), then roll (`icon offset roll`) about its own axes. A WEAPON uses the
+    fixed pitch -90, yaw -90, roll 90, its `bare sword` mesh (the others `mesh`) and a node scale of (`scale thickness`, `scale length`, `scale width`) times `overall scale`, the item's times the material's.
+    fcs.def defaults: zoom 2.7, V -8, yaw 90, the rest 0; WEAPON and CROSSBOW zoom 1.0 and V 0; WEAPON H -4. The material is a clone of `RTTIcons_Coloured` (mesh with vertex colours), `RTTIcons_DXT5N`
+    (one item kind, 0x11) or `RTTIcons_Base`, double sided for `material type` 2, textured from the instance's material record. Lighting (rtticons.hlsl, lightingFunctions.hlsl): one white punctual
+    light along the view axis, no ambient: colour = albedo x pi x N.L x 0.6 + GGX specular (roughness 1 - 0.99 x gloss, F0 0.4), stored linearly in an 8-bit target; the background is transparent.
+    The reflection cube (`cloudy_noon.jpg`) is missing from the install, so the game's own pictures have none.
+  - **Meitou's order** (`ItemIcons.Choose`): a drawn kind takes the game's saved picture (the exact material, else one of its colours, else any of the item: an approximation), else is drawn by
+    `CharacterRenderer` (below); the other kinds take their static file, else `default_icon.png`; with nothing, the cell shows the item's name.
+  - **Meitou's drawing** (`CharacterRenderer.Icons.cs`, `ItemIconStyle`): the item's mesh through the character shader's item mode with the lighting above (a negative `FogDistance` in the view
+    constants selects it), into its own UNORM texture, drawn each frame until the textures it uses are resident, then kept (rows bottom first like every target: shown with `ImageFlipV`). Against the
+    saved pictures (test `Icons_drawn_from_the_mesh_cover_the_same_part_of_the_picture_as_the_games_saved_ones`): silhouette overlap at least 0.9 on six items (a bag, a sword, armour), mean colour
+    identical on two bags (142 114 91) and 8 to 12 % darker on two swords (**Unknown** why: gloss or normal-map handling). Not done: BUILDING icons, the instance's colour (an icon is dyed only by the
+    item record's own `color`), the vertex-colour and DXT5N variants (the item shader is used), writing the pictures to disk (a readback inside the frame would stall it), bounding the icon textures
+    (one per item and material seen, at most 512 x 512).
 - Build window ([buildings-production.md](buildings-production.md#construction) for the rules it enforces): groups come from BUILDING `building category` and `building group`; placement error messages in
   FUN_1404e27e0 (**Observed**).
 

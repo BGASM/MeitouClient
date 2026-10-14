@@ -69,7 +69,7 @@ sealed partial class GameHost
             return 0;
         }
         var overlay = DebugOverlay.TryCreate(display.Context);
-        if (overlay is not null) { player.CreateUiPainter(overlay, assets.Find); player.SetItemIcons(ItemIconsOfInstall()); }
+        if (overlay is not null) { player.CreateUiPainter(overlay, assets.Find); ConnectItemIcons(); }
         if (gpu.Characters is { } portraits) { var (atlas, sampled) = portraits.PortraitAtlas; player.SetUiTexture(PlayerInterface.PortraitTexture, atlas, sampled); }
         // The viewer's debug overlays (docs/engine.md): F10 the key list, F11 the frame statistics, F12 the profiler chart.
         var profiler = overlay is null ? null : new FrameProfiler(display.Context, () => display.Context.GpuFrameMs);

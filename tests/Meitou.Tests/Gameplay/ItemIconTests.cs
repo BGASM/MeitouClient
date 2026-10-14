@@ -1,3 +1,4 @@
+using Meitou.Data;
 using Meitou.Data.Gameplay;
 
 namespace Meitou.Tests.Gameplay;
@@ -41,5 +42,58 @@ public class ItemIconTests
         var named = InstallData.BaseGame!.Records.Values.Where(r => ItemIcons.StaticIconOf(r).Length > 0).ToList();
         Assert.NotEmpty(named);
         Assert.All(named, r => Assert.NotNull(locator.Find(ItemIcons.StaticIconOf(r))));
+    }
+
+    /// <summary>A record of <paramref name="type"/> with only the given integer fields, made through the database as the game data is.</summary>
+    static GameRecord Record(Meitou.Data.Fcs.FcsRecordType type, params (string Key, int Value)[] ints)
+    {
+        var source = new Meitou.Data.Fcs.FcsRecord { StringId = "1-a.mod", Flags = 0x10, Name = "thing", RecordType = type };
+        foreach (var (key, value) in ints) source.Ints[key] = value;
+        var file = new Meitou.Data.Fcs.FcsFile();
+        file.Records.Add(source);
+        var db = new GameDatabase();
+        db.Apply(file, "a.mod");
+        return db.Find("1-a.mod")!;
+    }
+
+    [Theory]
+    [InlineData(5, 4, 256, 256)]
+    [InlineData(7, 1, 512, 64)]
+    [InlineData(8, 2, 512, 128)]
+    [InlineData(2, 6, 128, 512)]
+    [InlineData(3, 3, 256, 256)]
+    public void An_icon_is_made_at_50_pixels_a_cell_rounded_up_to_powers_of_two(int columns, int rows, int width, int height)
+    {
+        var item = Record(Meitou.Data.Fcs.FcsRecordType.ITEM, ("inventory footprint width", columns), ("inventory footprint height", rows));
+        var style = ItemIconStyle.Of(item);
+        Assert.Equal((columns * 50, rows * 50), (style.Width, style.Height));
+        Assert.Equal((width, height), style.TextureSize);
+    }
+
+    [Fact]
+    public void A_weapon_is_turned_by_the_fixed_angles_and_a_record_without_offsets_takes_the_defaults()
+    {
+        var weapon = Record(Meitou.Data.Fcs.FcsRecordType.WEAPON);
+        var style = ItemIconStyle.Of(weapon);
+        Assert.Equal((-90f, -90f, 90f), (style.Pitch, style.Yaw, style.Roll));
+        Assert.Equal((1f, 0f, -4f), (style.Zoom, style.OffsetV, style.OffsetH));
+        var plain = ItemIconStyle.Of(Record(Meitou.Data.Fcs.FcsRecordType.ITEM));
+        Assert.Equal((0f, 90f, 0f), (plain.Pitch, plain.Yaw, plain.Roll));
+        Assert.Equal((2.7f, -8f, 0f), (plain.Zoom, plain.OffsetV, plain.OffsetH));
+        Assert.Equal(13.5f, plain.Distance);
+    }
+
+    [Fact]
+    public void Every_picture_the_game_saved_of_a_base_game_item_is_of_a_kind_it_draws()
+    {
+        Assert.SkipWhen(InstallData.Install is null || InstallData.BaseGame is null, "no Kenshi install");
+        string folder = Path.Combine(InstallData.Install!.DataDirectory, "icons");
+        Assert.SkipWhen(!Directory.Exists(folder), "the game has not saved any icons here");
+        var saved = Directory.EnumerateFiles(folder, "*.png").Select(f => ItemIconCache.Parse(Path.GetFileNameWithoutExtension(f))).OfType<(string Item, string Material, string Colour)>()
+            .Select(p => InstallData.BaseGame!.Find(p.Item)).OfType<GameRecord>().ToList();
+        Assert.NotEmpty(saved);
+        // The exception: limbs.mod's eight severed limbs (ITEM, a static icon, auto icon image false) have a saved picture too; why is not traced.
+        saved.RemoveAll(r => r.StringId.EndsWith("-limbs.mod", StringComparison.Ordinal));
+        Assert.All(saved, r => Assert.True(ItemIcons.Renders(r), $"{r.StringId} {r.Type} has a saved picture but is not of a drawn kind"));
     }
 }

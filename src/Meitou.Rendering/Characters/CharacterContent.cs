@@ -5,6 +5,7 @@ using Meitou.Content;
 using Meitou.Data;
 using Meitou.Data.Characters;
 using Meitou.Data.Fcs;
+using Meitou.Data.Gameplay;
 using Meitou.Data.Ogre;
 using Meitou.Rendering.Gpu;
 
@@ -95,6 +96,8 @@ internal sealed class CharacterAsset
     public float GroundOffset;
     /// <summary>The skeleton's <c>Bip01 Head</c> (-1: none), which the portrait camera looks at.</summary>
     public int HeadBone = -1;
+    /// <summary>An item's inventory icon (<see cref="CharacterContent.BuildIcon"/>): one unskinned part, no body (<see cref="Appearance"/> and <see cref="Rig"/> are null) and nothing to pose.</summary>
+    public bool IsIcon;
 }
 
 /// <summary>
@@ -539,5 +542,60 @@ internal sealed class CharacterContent : IDisposable
         m.Tex[CharacterShaders.SlotNormal] = Texture(candidate?.Normal, false);
         m.DoubleSided = candidate?.DoubleSided ?? false;
         return m;
+    }
+
+    // ---- item icons ----
+
+    /// <summary>The material record an icon is drawn with: the instance's, else the item's first (likeliest) <c>material</c> reference.</summary>
+    public GameRecord? IconMaterialOf(GameRecord item, string materialId)
+    {
+        static bool IsSpec(GameRecord? r) => r is { Type: FcsRecordType.MATERIAL_SPECS_CLOTHING or FcsRecordType.MATERIAL_SPEC or FcsRecordType.MATERIAL_SPECS_WEAPON };
+        if (materialId.Length > 0 && db.Find(materialId) is { } chosen && IsSpec(chosen)) return chosen;
+        return item.GetReferences("material").OrderByDescending(r => r.Values.Value0).Select(r => db.Find(r.TargetStringId)).FirstOrDefault(IsSpec);
+    }
+
+    /// <summary>
+    /// The asset of <paramref name="item"/>'s inventory icon (docs/game/ui-screens.md "Item icons"): its mesh (a weapon's bare blade) unskinned, with the textures of <paramref name="spec"/>,
+    /// dyed by the item's own <c>color</c> when its material has a colour map (the instance's colour is not known). Null when the mesh is missing or unreadable.
+    /// </summary>
+    public CharacterAsset? BuildIcon(GameRecord item, GameRecord? spec)
+    {
+        string field = ItemIconStyle.MeshOf(item);
+        if (field.Length == 0 || FindMesh(field) is not { } path) { Messages.Add($"icon mesh not found: {field}"); return null; }
+        // The level the icon is drawn at is the first: the generated ones start far out.
+        var loaded = Mesh(path, null, float.MaxValue / 4);
+        if (loaded is null || loaded.Gpu.Parts.Count == 0) return null;
+        var m = new PartMaterial { Shading = CharacterShaders.ShadeItem };
+        if (spec is not null)
+        {
+            var dye = item.GetBool("dont colorise") ? null : item.GetReferences("color").Select(r => db.Find(r.TargetStringId)).FirstOrDefault(x => x is not null);
+            bool dyed = dye is not null && Tex(spec, "color map") is not null;
+            m.Description = $"icon {spec.Type} '{spec.Name}'" + (dyed ? $", dye '{dye!.Name}'" : "");
+            m.Tex[CharacterShaders.SlotDiffuse] = Texture(Tex(spec, "texture map"), false);
+            m.Tex[CharacterShaders.SlotNormal] = Texture(Tex(spec, "normal map"), false);
+            if (dyed)
+            {
+                m.Tex[CharacterShaders.SlotColourMap] = Texture(Tex(spec, "color map"), false);
+                m.Dyed = true;
+                m.Colour1 = new Vector4(CharacterAppearance.Rgb(dye!.GetInt("color 1")), spec.GetFloat("paint factor 1"));
+                m.Colour2 = new Vector4(CharacterAppearance.Rgb(dye.GetInt("color 2")), spec.GetFloat("paint factor 2"));
+            }
+            m.DoubleSided = spec.GetInt("material type") == 2;
+        }
+        else
+        {
+            var candidate = loaded.FirstMaterialName is null ? null : resolver.Candidates(path, new OgreSubMesh { MaterialName = loaded.FirstMaterialName }).FirstOrDefault();
+            m.Description = candidate?.Description ?? "untextured";
+            m.Tex[CharacterShaders.SlotDiffuse] = Texture(candidate?.Diffuse, false);
+            m.Tex[CharacterShaders.SlotNormal] = Texture(candidate?.Normal, false);
+            m.DoubleSided = candidate?.DoubleSided ?? false;
+        }
+        var asset = new CharacterAsset { Appearance = null!, Rig = null!, IsIcon = true, AttachCount = 1 };
+        asset.Parts.Add(new AssetPart
+        {
+            Label = $"icon {item.Type} '{item.Name}'", Mesh = loaded.Gpu, Shared = false, Material = m, AttachIndex = 0,
+            BoundsCentre = loaded.Centre, BoundsRadius = loaded.Radius,
+        });
+        return asset;
     }
 }
