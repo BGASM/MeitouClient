@@ -80,9 +80,6 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public Matrix4x4 World, PreviousWorld;
         public bool HasWorld;
         public long Posed = -1, Seen;
-        /// <summary>The head bone's position in the model's space at the last pose (<see cref="CharacterAsset.HeadBone"/>), for the portrait camera.</summary>
-        public Vector3 Head;
-        public bool HasHead;
     }
 
     readonly Dictionary<long, CharState> states = [];
@@ -247,7 +244,6 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                     scratch.Pose(asset.Shape, layerArray.AsSpan(l.LayerStart, l.LayerCount), state.Bones);
                     foreach (var part in asset.Parts)
                         if (part.AttachIndex >= 0) state.Attach[part.AttachIndex] = part.Offset * scratch.BoneTransform(part.Bone);
-                    if (asset.HeadBone >= 0) (state.Head, state.HasHead) = (scratch.BoneTransform(asset.HeadBone).Translation, true);
                     rig.Return(scratch);
                     if (state.Posed < 0) { state.Bones.CopyTo(state.Previous, 0); state.Attach.CopyTo(state.PreviousAttach, 0); }
                     state.Posed = stamp;

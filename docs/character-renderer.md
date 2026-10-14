@@ -118,13 +118,19 @@ The original's portrait camera, read from `kenshi_x64.exe` `FUN_14084b890` (the 
 - **Unknown**: the call before the camera is placed takes 25 and 400. Meitou reads them as a 25 degree vertical field of view and a 400 unit far plane; that
   framing matches the original's head-and-shoulders pictures.
 - **Observed** (`FUN_140414380`, [formats/save.md](formats/save.md)): the pictures live in a 2048 × 2048 atlas of 128 px cells, saved with the game.
+- **Verified** (decompile, 2026-10-14): portraits are stills rendered to texture. A re-render is queued, after a 1 s delay and at most one portrait a
+  frame, when the appearance changes (body rebuild, hair, clothing, barefoot and similar). The pose is the race's `idle stance` animation plus
+  `postures` at the body's "Posture" %, `shoulder set` at "Neck position" % and `neck set` at "Shoulder set" % (the last two pairs crossed in the
+  portrait code; whether the world pose crosses them too is **Unknown**, Meitou does not).
 - RACE values (**Verified**, merged base game, dumped with a scratch tool): people (Greenlander, Scorchlander, Shek, Hive, Skeletons, Fishmen) distance 10, offset
   (0, 0.5, 0). Bonedogs and Land Bats 15 (0, −2.5, 6); bulls 20 (0, 0.5, 5); Garru 25 (0, 0, 5); Beak Thing 10 (0, −1, 21); Leviathan and Big-Bones
   10 (0, 5, 280). The z offset puts an animal's long head in front of its head bone.
 
 Meitou (engine choices, 2026-10-14): `CharacterRenderer.DrawPortraits` runs after `Update` every frame for the host's `PortraitRequests` (the squad bar's members,
-member *i* in cell *i*, at most 32 in a 2048 × 256 sRGB atlas). It draws each character where it stands in the world, in its current pose, from the original's
-camera; s is a hash of the character's id. The light is the shader's plain model (no fog, sky, shadows or GI), a key light from the camera's side, so a portrait
+member *i* in cell *i*, at most 32 in a 2048 × 256 sRGB atlas). A portrait is a still, as in the original (**Observed**: the original's squad bar pictures do
+not move while the character animates): the character is posed on its own in its idle stance (the body file's `IdleStance`, else `idle_stand_relax`) at time 0
+plus its posture layers, weapon sheathed, and drawn where it stands from the original's camera; s is a hash of the character's id. A cell is posed and drawn anew
+when its character or appearance (equipment) changes, and redrawn as the same still every 30 frames (one cell at a time) so textures that streamed in later show. The light is the shader's plain model (no fog, sky, shadows or GI), a key light from the camera's side, so a portrait
 looks the same by day and night. The background is transparent, so the cell's own background shows. A member beyond the draw distance is still posed for its
 portrait but not drawn in the world; one not in the draw list keeps its last picture. The UI shows a cell with the ImageBox properties `ImageTexture
 meitou:portraits` and `ImageFlipV` (the renderer's targets are stored bottom row first). **Observed**: the people's pictures look like the original's;

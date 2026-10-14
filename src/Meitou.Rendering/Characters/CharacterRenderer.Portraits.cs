@@ -39,6 +39,7 @@ internal sealed unsafe partial class CharacterRenderer
                 portraitSampled = new SampledTexture(Gpu.Samplers.Get(SamplerDesc.FromGl(TextureMinFilter.Linear, TextureMagFilter.Linear,
                     TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge, false, DepthFunction.Lequal, false, 1, false, 0)), portraitColour.View(), portraitColour.Image);
                 cleared = false;
+                portraitShown.Clear();
             }
             return (portraitColour, portraitSampled!.Value);
         }
@@ -53,16 +54,31 @@ internal sealed unsafe partial class CharacterRenderer
         foreach (var r in PortraitRequests) portraitKeys.Add(r.Key);
     }
 
+    /// <summary>What each cell last showed: the character's key and appearance.</summary>
+    readonly Dictionary<int, (long Key, CharacterAsset Asset)> portraitShown = [];
+    /// <summary>A shown portrait is drawn again (the same still) every this many frames, one cell at a time, so textures that streamed in since show.</summary>
+    const int PortraitRefresh = 30;
+    long portraitFrame;
+    Matrix4x4[] portraitBones = [], portraitAttach = [];
+    readonly List<ActiveLayer> portraitLayers = [];
+
     /// <summary>
-    /// Draws the requested portraits into their cells (after <see cref="Update"/>, outside any pass). A character not posed this frame (not in the list) keeps
-    /// what its cell last showed.
+    /// Draws the requested portraits into their cells (after <see cref="Update"/>, outside any pass). Like the original's, a portrait is a still: the character in its
+    /// idle stance at its start and its posture layers, not its live animation. A cell is posed and drawn anew when its character or appearance (equipment) changes,
+    /// else redrawn as the same still now and then (<see cref="PortraitRefresh"/>); a
+    /// character not posed this frame (not in the list) keeps what its cell last showed.
     /// </summary>
     public void DrawPortraits()
     {
         if (PortraitRequests.Count == 0) return;
+        portraitFrame++;
         var (atlas, _) = PortraitAtlas;
         liveByKey.Clear();
         for (int i = 0; i < liveCount; i++) liveByKey[live[i].Key] = i;
+        bool any = !cleared;
+        foreach (var request in PortraitRequests)
+            if (Due(request, out _)) { any = true; break; }
+        if (!any) return;
         var cmd = Gpu.BeginNative("portraits");
         var target = PassTargets.Of(atlas, portraitDepth);
         cmd.BeginRendering(new RenderingDesc(target.Colour, target.Depth with { Load = AttachmentLoadOp.Clear, Clear = new ClearValue(depthStencil: new ClearDepthStencilValue(1f, 0)) },
@@ -71,27 +87,68 @@ internal sealed unsafe partial class CharacterRenderer
         if (!cleared) { Gpu.Clear(cmd, true, default, false, 1, new Rect2D(default, new Extent2D((uint)target.Width, (uint)target.Height))); cleared = true; }
         foreach (var request in PortraitRequests)
         {
-            if (request.Cell < 0 || request.Cell >= PortraitColumns * PortraitRows || !liveByKey.TryGetValue(request.Key, out int index)) continue;
+            if (!Due(request, out int index)) continue;
             ref var l = ref live[index];
-            if (!l.State.HasHead && l.Asset.HeadBone >= 0) continue;   // not posed yet
+            var head = PosePortrait(in l);
+            portraitShown[request.Cell] = (request.Key, l.Asset);
             int x = request.Cell % PortraitColumns * PortraitSize, y = request.Cell / PortraitColumns * PortraitSize;
             var rect = new Rect2D(new Offset2D(x, y), new Extent2D(PortraitSize, PortraitSize));
             Gpu.Clear(cmd, true, default, true, 1, rect);
             Gpu.SetPassViewport(new Viewport(x, y, PortraitSize, PortraitSize, 0, 1), rect);
-            var (eye, look) = PortraitCamera(in l, request.Serial);
+            var (eye, look) = PortraitCamera(in l, head, request.Serial);
             var view = Matrix4x4.CreateLookAt(eye, look, Vector3.UnitY);
             var projection = Matrix4x4.CreatePerspectiveFieldOfView(PortraitFieldOfView, 1, 0.5f, 400);
             // The key light from the camera's side, above and a little to the left.
             var toEye = Vector3.Normalize(eye - look);
             var left = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, toEye));
             var light = Vector3.Normalize(toEye + 0.7f * Vector3.UnitY + 0.4f * left);
+            // The still pose's palette in place of the live one: this view's own bone memory and attachments past the frame's, weapon sheathed.
+            var (liveBones, livePrevious) = (bones, previousBones);
+            var (boneBase, attachBase, weapon) = (l.BoneBase, l.AttachBase, l.WeaponDrawn);
+            int bonesCount = l.Asset.Rig.BoneCount;
+            bones = previousBones = Gpu.Frame.Constants.Allocate((ulong)Math.Max(bonesCount, 1) * 64, 256);
+            portraitBones.AsSpan(0, bonesCount).CopyTo(new Span<Matrix4x4>(bones.Pointer, bonesCount));
+            if (attach.Length < attachCount + l.Asset.AttachCount) Array.Resize(ref attach, attachCount + l.Asset.AttachCount);
+            portraitAttach.AsSpan(0, l.Asset.AttachCount).CopyTo(attach.AsSpan(attachCount));
+            (l.BoneBase, l.AttachBase, l.WeaponDrawn) = (0, attachCount, false);
             portraitLive = index;
             try { DrawView(new ViewConstants { ViewProjection = view * projection, Eye = eye, LightDir = light }, eye, []); }
-            finally { portraitLive = -1; }
+            finally { portraitLive = -1; (bones, previousBones) = (liveBones, livePrevious); (l.BoneBase, l.AttachBase, l.WeaponDrawn) = (boneBase, attachBase, weapon); }
         }
         Gpu.EndHostPass(cmd);
         cmd.EndRendering();
         Gpu.EndNative(cmd);
+    }
+
+    /// <summary>Whether <paramref name="request"/>'s cell needs drawing this frame: its character is in the list and the cell shows someone else or another
+    /// appearance, or it is the cell's turn to be refreshed.</summary>
+    bool Due(PortraitRequest request, out int index)
+    {
+        index = -1;
+        if (request.Cell < 0 || request.Cell >= PortraitColumns * PortraitRows || !liveByKey.TryGetValue(request.Key, out index)) return false;
+        return !portraitShown.TryGetValue(request.Cell, out var shown) || shown.Key != request.Key || shown.Asset != live[index].Asset || (portraitFrame + request.Cell) % PortraitRefresh == 0;
+    }
+
+    /// <summary>Poses <paramref name="l"/> still for its portrait (its idle stance at time 0 and its posture layers) into <see cref="portraitBones"/> and
+    /// <see cref="portraitAttach"/>; returns the head bone's position in the model's space.</summary>
+    Vector3 PosePortrait(in Live l)
+    {
+        var asset = l.Asset;
+        var rig = asset.Rig;
+        portraitLayers.Clear();
+        if (rig.Layer(content.Database, asset.Idle, asset.Animal) is { } idle) portraitLayers.Add(new ActiveLayer(idle, 0, 1));
+        foreach (var (def, time) in asset.Fixed) portraitLayers.Add(new ActiveLayer(def, time, 1));
+        if (portraitBones.Length < rig.BoneCount) portraitBones = new Matrix4x4[rig.BoneCount];
+        if (portraitAttach.Length < asset.AttachCount) portraitAttach = new Matrix4x4[asset.AttachCount];
+        var scratch = rig.Rent();
+        try
+        {
+            scratch.Pose(asset.Shape, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(portraitLayers), portraitBones);
+            foreach (var part in asset.Parts)
+                if (part.AttachIndex >= 0) portraitAttach[part.AttachIndex] = part.Offset * scratch.BoneTransform(part.Bone);
+            return asset.HeadBone >= 0 ? scratch.BoneTransform(asset.HeadBone).Translation : new Vector3(0, asset.Height * 0.85f, 0);
+        }
+        finally { rig.Return(scratch); }
     }
 
     /// <summary>
@@ -99,11 +156,10 @@ internal sealed unsafe partial class CharacterRenderer
     /// axes, times the character's size) from <c>portrait distance</c> along the model's front, turned about the vertical by up to 45 degrees either way and about
     /// the side axis by a few degrees, both by the character's serial.
     /// </summary>
-    static (Vector3 Eye, Vector3 Target) PortraitCamera(in Live l, uint serial)
+    static (Vector3 Eye, Vector3 Target) PortraitCamera(in Live l, Vector3 head, uint serial)
     {
         var race = l.Asset.Appearance.Race;
         float scale = l.World.ScaleLength();
-        var head = l.State.HasHead ? l.State.Head : new Vector3(0, l.Asset.Height * 0.85f, 0);
         var offset = new Vector3(race.GetFloat("portrait offset x"), race.GetFloat("portrait offset y"), race.GetFloat("portrait offset z"));
         var target = Vector3.Transform(head, l.World) + Vector3.TransformNormal(offset, l.World);
         float yaw = (serial % 500 / 1000f - 0.25f) * MathF.PI, pitch = (serial % 252 / 1000f - 0.083f) * MathF.PI;
