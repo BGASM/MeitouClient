@@ -65,6 +65,11 @@ On exit a `characters ...` line gives counts per LOD level and timings (means of
 - **Texture memory**: character textures are loaded on demand (deferred) with the world's mip streaming (`MipStreaming` through `WorldTextureCache.Mips`): a texture
   loads without the top levels its nearest user cannot show, and finer when something comes near. A governor scales every need up by 1.6x (up to 512x) while the cache
   is above 90% of its mark (`MarkMb`, which the `VramGuard` budget lowers), back down under 50%. A still waits for everything once the camera is known.
+- **Building on workers**: a new appearance's files are read and its meshes prepared on the shared background workers first (`CharacterContent.Fetched`, six
+  appearances at once): the body's skeleton link, the rig, each mesh's model, morphs, generated and shadow levels and index buffers, each mesh once however many
+  appearances share it. The appearance is not drawn until then; afterwards `Build` only uploads and makes the materials, four a frame (`LoadBudget`). A still
+  (`LoadBudget` 0) prepares on the render thread. **Observed** 2026-10-14 (new game at The Hub): before, frames of 0.2 to 1.0 s for 5 s, the edge collapse on the
+  render thread; after, a build takes at most 70 ms (`human_female.mesh`).
 - LOD radius is bounded by the model's real extent (`min(stored radius, model.Radius)`): `human_female.mesh` stores 116 for a body about 20 units tall.
 - No root motion: the walk loop's root translation starts and ends in the same place (**Observed** on `walk lower`), so characters walk in place and the simulation moves them.
 - **Face poses**: the vertices any pose moves get a slot (1..n, in the vertex's colour X as raw bits; characters use no vertex colours); an appearance's offsets, the poses

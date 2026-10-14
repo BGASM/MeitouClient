@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Meitou.Content;
@@ -107,7 +108,7 @@ internal sealed class CharacterContent : IDisposable
     readonly GameDatabase db;
     readonly MaterialResolver resolver;
     public WorldTextureCache Textures { get; }
-    readonly Dictionary<string, SkeletonRig> rigs = new(StringComparer.OrdinalIgnoreCase);
+    readonly ConcurrentDictionary<string, Lazy<SkeletonRig>> rigs = new(StringComparer.OrdinalIgnoreCase);
     readonly Dictionary<(string Path, int Bones), LoadedMesh?> meshes = [];
     public List<string> Messages { get; } = [];
     public long MeshBytes { get; private set; }
@@ -144,6 +145,7 @@ internal sealed class CharacterContent : IDisposable
                     part.Indices.Dispose();
                 }
         meshes.Clear();
+        prepared.Clear();
         MeshBytes = 0;
         Textures.Dispose();
         Morphs.Dispose();
@@ -160,81 +162,135 @@ internal sealed class CharacterContent : IDisposable
     {
         var path = assets.Find(name);
         if (path is null) return null;
-        if (rigs.TryGetValue(path, out var rig)) return rig;
-        return rigs[path] = new SkeletonRig(OgreSkeletonReader.ReadFile(path));
+        return rigs.GetOrAdd(path, p => new Lazy<SkeletonRig>(() => new SkeletonRig(OgreSkeletonReader.ReadFile(p)))).Value;
     }
 
-    readonly Dictionary<string, string?> skeletonNames = new(StringComparer.OrdinalIgnoreCase);
-    /// <summary>The body mesh as <see cref="BodySkeletonName"/> parsed it, for <see cref="Mesh"/> to take instead of reading the file again (cleared by <see cref="Build"/>).</summary>
-    (string Path, OgreMesh Mesh)? parsed;
+    readonly ConcurrentDictionary<string, Lazy<string?>> skeletonNames = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>The skeleton a body mesh file links, read from the file once per path; throws what the reader throws.</summary>
-    string? BodySkeletonName(string path)
-    {
-        if (skeletonNames.TryGetValue(path, out var name)) return name;
-        var mesh = OgreMeshReader.ReadFile(path);
-        parsed = (path, mesh);
-        return skeletonNames[path] = mesh.SkeletonName;
-    }
+    /// <summary>The skeleton a body mesh file links, read from the file once per path (any thread); throws what the reader throws.</summary>
+    string? BodySkeletonName(string path) => skeletonNames.GetOrAdd(path, p => new Lazy<string?>(() => OgreMeshReader.ReadFile(p).SkeletonName)).Value;
 
-    /// <summary>Reads and uploads a mesh file, with its skinning weights for a skeleton of <paramref name="boneCount"/> bones (null: unskinned); its generated levels start <paramref name="lodScale"/> times farther than the rule gives.</summary>
-    LoadedMesh? Mesh(string path, int? boneCount, float lodScale = 1, bool shadowLevels = false)
+    /// <summary>What a worker makes of a mesh file (<see cref="PrepareMesh"/>): everything but the GPU buffers.</summary>
+    sealed record PreparedMesh(PreparedPart[] Parts, float[] Distances, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs, float[]? ShadowDistances, int ShadowFirst);
+    /// <summary>A prepared mesh (null: it could not be read) and the messages its reading left.</summary>
+    sealed record Prepared(PreparedMesh? Mesh, List<string> Messages);
+    static readonly Prepared Uploaded = new(null, []);
+
+    /// <summary>The meshes prepared or being prepared, by the key of <see cref="meshes"/>; an uploaded one is left as <see cref="Uploaded"/> so no worker prepares it again.</summary>
+    readonly ConcurrentDictionary<(string Path, int Bones), Lazy<Prepared>> prepared = new();
+
+    /// <summary>The preparation of a mesh, made once (any thread; the first caller's level settings stand).</summary>
+    Lazy<Prepared> Prepare(string path, int? boneCount, float lodScale, bool shadowLevels, float pixelsPerRadian) =>
+        prepared.GetOrAdd((path.ToLowerInvariant(), boneCount ?? -1), _ => new Lazy<Prepared>(() => PrepareMesh(path, boneCount, lodScale, shadowLevels, pixelsPerRadian)));
+
+    /// <summary>Reads a mesh file and makes its levels and index buffers (no GPU work, any thread): with its skinning weights for a skeleton of <paramref name="boneCount"/>
+    /// bones (null: unskinned); its generated levels start <paramref name="lodScale"/> times farther than the rule gives.</summary>
+    static Prepared PrepareMesh(string path, int? boneCount, float lodScale, bool shadowLevels, float pixelsPerRadian)
     {
-        var key = (path.ToLowerInvariant(), boneCount ?? -1);
-        if (meshes.TryGetValue(key, out var cached)) return cached;
-        LoadedMesh? result = null;
+        var messages = new List<string>();
         try
         {
-            var mesh = parsed is { } p && p.Path == path ? p.Mesh : OgreMeshReader.ReadFile(path);
-            parsed = null;
+            var mesh = OgreMeshReader.ReadFile(path);
             var model = Model.Build(mesh, boneCount);
-            var morphs = MeshMorphs.From(mesh, model, Messages, Path.GetFileName(path));
-            foreach (var w in model.Warnings) Messages.Add($"{Path.GetFileName(path)}: {w}");
+            var morphs = MeshMorphs.From(mesh, model, messages, Path.GetFileName(path));
+            foreach (var w in model.Warnings) messages.Add($"{Path.GetFileName(path)}: {w}");
             var centre = mesh.Bounds is { } b ? (b.Min + b.Max) / 2 : model.Center;
             float radius = mesh.Bounds is { } bb ? bb.Radius : model.Radius;
             // The LOD value is distance minus this radius. A few character meshes carry a stored radius many times their size (human_female:
             // 116 for a 20 unit tall body), which would keep them at full detail for another hundred units: the model's own extent bounds it.
             radius = Math.Min(radius, Math.Max(model.Radius, 1));
             // Hair and beards (HairLodScale) are alpha-tested cards: a collapse merges cards and strands go while the surface hardly moves, so the deviation underrates it.
-            var levels = GeneratedLevels(mesh, model, radius, LodPixelsPerRadian * lodScale, LodSettings);
+            var levels = GeneratedLevels(mesh, model, radius, pixelsPerRadian * lodScale, LodSettings);
             // Shadow-only levels (the body, which has no cut-outs): built without the texture guard, whose refusals stop the body at about 1300 triangles, so a crowd's
             // shadows can be coarser than its picture; never picked by the picture (distance infinity), the depth pass chooses among them by ShadowDistances.
             float[]? shadowDistances = null;
             int shadowFirst = levels.Count;
-            if (shadowLevels && GeneratedLevels(mesh, model, radius, LodPixelsPerRadian, ShadowSettings) is { Count: > 1 } shadow)
+            if (shadowLevels && GeneratedLevels(mesh, model, radius, pixelsPerRadian, ShadowSettings) is { Count: > 1 } shadow)
             {
                 shadowDistances = [.. shadow.Select(l => l.Distance)];
                 levels.AddRange(shadow.Skip(1).Select(l => l with { Distance = float.PositiveInfinity }));
             }
             var decoded = new DecodedObjectMesh { Model = model, Levels = levels, Manual = [], Centre = centre, Radius = radius };
-            var gpuMesh = new GpuObjectMesh { Distances = [.. levels.Select(l => l.Distance)], Manual = new GpuObjectMesh?[levels.Count], Centre = centre, Radius = radius };
-            gpu.EnsureFrame();
-            foreach (var part in model.Parts)
-            {
-                var prepared = ObjectMeshCache.PreparePart(decoded, part, keepLevels: false);
-                int vertexBytes = part.Vertices.Length * Vertex.Size, indexBytes = prepared.All.Length * 4;
-                var vertices = DeviceBuffer.Create(gpu, (ulong)vertexBytes, BufferUse.Vertex, AllocationName);
-                var indices = DeviceBuffer.Create(gpu, (ulong)indexBytes, BufferUse.Index, AllocationName);
-                gpu.Uploads.Write(vertices, 0, MemoryMarshal.AsBytes(part.Vertices.AsSpan()));
-                gpu.Uploads.Write(indices, 0, MemoryMarshal.AsBytes(prepared.All.AsSpan()));
-                var gp = new GpuObjectPart
-                {
-                    SubMeshIndex = part.SubMeshIndex, MaterialName = part.MaterialName, HasTangents = part.HasTangents, HasColours = part.HasColours,
-                    Vertices = vertices, Indices = indices, Offset = prepared.Offset, Count = prepared.Count, UvScale = prepared.UvScale,
-                    Attributes = ObjectMeshCache.VertexAttributes(vertices),
-                };
-                gpuMesh.Parts.Add(gp);
-                gpuMesh.Bytes += vertexBytes + indexBytes;
-            }
-            MeshBytes += gpuMesh.Bytes;
-            result = new LoadedMesh(gpuMesh, mesh.SubMeshes.FirstOrDefault()?.MaterialName, centre, radius, morphs, shadowDistances, shadowFirst);
+            var parts = model.Parts.Select(part => ObjectMeshCache.PreparePart(decoded, part, keepLevels: false)).ToArray();
+            return new(new PreparedMesh(parts, [.. levels.Select(l => l.Distance)], mesh.SubMeshes.FirstOrDefault()?.MaterialName, centre, radius, morphs, shadowDistances, shadowFirst), messages);
         }
         catch (Exception e) when (e is OgreFormatException or IOException or EndOfStreamException or InvalidDataException)
         {
-            Messages.Add($"{Path.GetFileName(path)}: {e.Message}");
+            messages.Add($"{Path.GetFileName(path)}: {e.Message}");
+            return new(null, messages);
         }
-        return meshes[key] = result;
     }
+
+    /// <summary>A mesh by file, uploaded the first time: prepared here unless a worker has done it (<see cref="Fetched"/>), or after waiting for the worker preparing it.</summary>
+    LoadedMesh? Mesh(string path, int? boneCount, float lodScale = 1, bool shadowLevels = false)
+    {
+        var key = (path.ToLowerInvariant(), boneCount ?? -1);
+        if (meshes.TryGetValue(key, out var cached)) return cached;
+        var (ready, messages) = Prepare(path, boneCount, lodScale, shadowLevels, LodPixelsPerRadian).Value;
+        prepared[key] = new Lazy<Prepared>(Uploaded);
+        Messages.AddRange(messages);
+        return meshes[key] = ready is null ? null : Upload(ready);
+    }
+
+    LoadedMesh Upload(PreparedMesh ready)
+    {
+        var gpuMesh = new GpuObjectMesh { Distances = ready.Distances, Manual = new GpuObjectMesh?[ready.Distances.Length], Centre = ready.Centre, Radius = ready.Radius };
+        gpu.EnsureFrame();
+        foreach (var made in ready.Parts)
+        {
+            var part = made.Part;
+            int vertexBytes = part.Vertices.Length * Vertex.Size, indexBytes = made.All.Length * 4;
+            var vertices = DeviceBuffer.Create(gpu, (ulong)vertexBytes, BufferUse.Vertex, AllocationName);
+            var indices = DeviceBuffer.Create(gpu, (ulong)indexBytes, BufferUse.Index, AllocationName);
+            gpu.Uploads.Write(vertices, 0, MemoryMarshal.AsBytes(part.Vertices.AsSpan()));
+            gpu.Uploads.Write(indices, 0, MemoryMarshal.AsBytes(made.All.AsSpan()));
+            var gp = new GpuObjectPart
+            {
+                SubMeshIndex = part.SubMeshIndex, MaterialName = part.MaterialName, HasTangents = part.HasTangents, HasColours = part.HasColours,
+                Vertices = vertices, Indices = indices, Offset = made.Offset, Count = made.Count, UvScale = made.UvScale,
+                Attributes = ObjectMeshCache.VertexAttributes(vertices),
+            };
+            gpuMesh.Parts.Add(gp);
+            gpuMesh.Bytes += vertexBytes + indexBytes;
+        }
+        MeshBytes += gpuMesh.Bytes;
+        return new LoadedMesh(gpuMesh, ready.FirstMaterialName, ready.Centre, ready.Radius, ready.Morphs, ready.ShadowDistances, ready.ShadowFirst);
+    }
+
+    readonly Dictionary<CharacterAppearance, Task> fetching = [];
+    int fetchesRunning;
+    /// <summary>How many appearances are prepared on workers at once (the workers are shared with the objects and the foliage).</summary>
+    const int FetchLimit = 6;
+
+    /// <summary>
+    /// Whether <see cref="Build"/> will find the appearance's skeleton read and its meshes prepared, so that it only uploads. The first call starts that on a worker
+    /// (at most <see cref="FetchLimit"/> at once) and the answer is false until it is done. Render thread.
+    /// </summary>
+    public bool Fetched(CharacterAppearance c)
+    {
+        if (fetching.TryGetValue(c, out var task)) return task.IsCompleted;
+        if (Volatile.Read(ref fetchesRunning) >= FetchLimit) return false;
+        var bodyPath = FindMesh(c.BodyMesh);
+        if (bodyPath is null) return true;   // Build reports it
+        var parts = c.Parts.Select(p => (Path: FindMesh(p.Mesh), Shared: p.Mode == AttachMode.SharedSkeleton, Scale: PartLodScale(c, p))).Where(p => p.Path is not null).ToList();
+        float pixels = LodPixelsPerRadian;
+        Interlocked.Increment(ref fetchesRunning);
+        fetching[c] = BackgroundWork.Run(() =>
+        {
+            try
+            {
+                if (BodySkeletonName(bodyPath) is not { } name || Rig(name) is not { } rig) return;
+                _ = Prepare(bodyPath, rig.BoneCount, 1, true, pixels).Value;
+                foreach (var (path, shared, scale) in parts) _ = Prepare(path!, shared ? rig.BoneCount : null, scale, false, pixels).Value;
+            }
+            catch (Exception) { }   // a file that cannot be read: Build meets it again on the render thread and reports it
+            finally { Interlocked.Decrement(ref fetchesRunning); }
+        });
+        return false;
+    }
+
+    /// <summary>How much farther a part's generated levels start (<see cref="HairLodScale"/> for a person's hair and beard).</summary>
+    static float PartLodScale(CharacterAppearance c, CharacterPart part) => part.Record.Type == FcsRecordType.ATTACHMENT && c.Animal is null ? HairLodScale : 1;
 
     /// <summary>The steps (share of a part's triangles), floor per part, limits and guards the character levels are built with: the objects' limits, and collapses keep the
     /// texture coordinates (without that a face's eyes and mouth smeared across their UV islands from the second level on).</summary>
@@ -270,6 +326,7 @@ internal sealed class CharacterContent : IDisposable
     /// <summary>Assembles the asset for <paramref name="c"/>; null when its body mesh or skeleton cannot be found.</summary>
     public CharacterAsset? Build(CharacterAppearance c)
     {
+        fetching.Remove(c);
         var bodyPath = FindMesh(c.BodyMesh);
         if (bodyPath is null) { Messages.Add($"body mesh not found: {c.BodyMesh}"); return null; }
         // The body's own skeleton link (Kenshi shares that instance with worn items); the rig's bone count decides the weights kept.
@@ -277,9 +334,8 @@ internal sealed class CharacterContent : IDisposable
         try { skeletonName = BodySkeletonName(bodyPath); }
         catch (Exception e) when (e is OgreFormatException or IOException or EndOfStreamException or InvalidDataException) { Messages.Add($"{c.BodyMesh}: {e.Message}"); return null; }
         var rig = skeletonName is null ? null : Rig(skeletonName);
-        if (rig is null) { parsed = null; Messages.Add($"{c.BodyMesh} has no skeleton ({skeletonName})"); return null; }
+        if (rig is null) { Messages.Add($"{c.BodyMesh} has no skeleton ({skeletonName})"); return null; }
         var body = Mesh(bodyPath, rig.BoneCount, shadowLevels: true);
-        parsed = null;
         if (body is null) return null;
 
         var asset = new CharacterAsset { Appearance = c, Rig = rig, Animal = c.Animal is not null };
@@ -308,7 +364,7 @@ internal sealed class CharacterContent : IDisposable
             if (path is null) continue;
             bool shared = part.Mode == AttachMode.SharedSkeleton;
             // An animal's fur is a shell over the whole body (5.5k triangles on the bonedog, more than its body), not a few hair cards: it takes the rule's own distances.
-            var loaded = Mesh(path, shared ? rig.BoneCount : null, part.Record.Type == FcsRecordType.ATTACHMENT && c.Animal is null ? HairLodScale : 1);
+            var loaded = Mesh(path, shared ? rig.BoneCount : null, PartLodScale(c, part));
             if (loaded is null || loaded.Gpu.Parts.Count == 0) continue;
             var ap = new AssetPart
             {

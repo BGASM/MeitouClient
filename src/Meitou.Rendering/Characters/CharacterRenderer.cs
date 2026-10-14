@@ -168,7 +168,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             var inst = items[i];
             if (!assets.TryGetValue(inst.Appearance, out var asset))
             {
-                if (LoadBudget > 0 && built >= LoadBudget) continue;
+                // Interactive: the files are read and the meshes prepared on a worker first (CharacterContent.Fetched), then a few a frame are uploaded.
+                if (LoadBudget > 0 && (!content.Fetched(inst.Appearance) || built >= LoadBudget)) continue;
                 asset = content.Build(inst.Appearance);
                 assets[inst.Appearance] = asset;
                 built++;

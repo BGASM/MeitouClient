@@ -110,8 +110,9 @@ The interactive game never blocks its window for long while it loads (engine cho
 - **Warm-up.** After the start and after every scene load the world is drawn (and advances) under the loading screen until its frames have run
   smoothly (each under 40 ms) for 0.5 s, or for 5 s at most: the first frames of a new place load its characters and stream its terrain and objects.
   The UI is drawn under the cover too, so the game and its interface appear together. **Observed** 2026-10-14 (The Hub, new game, quickload,
-  main menu): each scene's stages took 0.1 to 0.3 s; the warm-ups 0.5 to 4.7 s, held by frames of up to 0.9 s spent building character models
-  (`CharacterRenderer.Update`, four new appearances a frame).
+  main menu): each scene's stages took 0.1 to 0.3 s. The warm-ups were 0.5 to 4.7 s while character models were built on the render thread (frames of up to
+  0.9 s); with them prepared on workers ([character-renderer.md](character-renderer.md)) a new game's warm-up is about 3 s. Its longest frame is the first
+  frame of the world after the start (about 0.9 s, every stage slower: pipelines and first uploads), then the first simulation ticks (up to 0.2 s).
 
 - **System order**: the host does not list systems; it calls `StandardSystems.Build` (`src/Meitou.Simulation/StandardSystems.cs`), which
   holds the order and the reasons for it. Tests that mean the game's wiring ask it for the parts they need (`SyntheticTown.Standard`).
