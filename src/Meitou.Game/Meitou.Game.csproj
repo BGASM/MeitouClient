@@ -5,6 +5,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>meitou</AssemblyName>
+    <ApplicationIcon>../../assets/branding/meitou.ico</ApplicationIcon>
     <RootNamespace>Meitou.Game</RootNamespace>
     <!-- Tiered PGO re-JITs hot render code for minutes; each install suspends the runtime and stalled frames 10-20 ms (DECISIONS 11). -->
     <TieredPGO>false</TieredPGO>

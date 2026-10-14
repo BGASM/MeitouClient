@@ -4,6 +4,8 @@
        GpuContext, the presenter and (optionally) Streamline. Kept apart so Meitou.Rendering does not depend on windowing. -->
 
   <ItemGroup>
+    <!-- The window icon: the two moons, 256 x 256 raw RGBA (assets/branding). -->
+    <EmbeddedResource Include="../../assets/branding/meitou-256.rgba" LogicalName="meitou-256.rgba" />
     <PackageReference Include="Silk.NET.Windowing" Version="2.23.0" />
   </ItemGroup>
 
