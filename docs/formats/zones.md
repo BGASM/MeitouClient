@@ -314,7 +314,8 @@ kenshi_x64.exe; `PI` is the player-interface singleton). **Verified (decompiled)
   BUILDING's `interior` list, the same seed as the parts) and goes into the same floor lists; it is unloaded about
   **10 s** after the last player character left (a timer reset to 10 every frame the building is in the view). The
   `interior mask` part is created then too, as a render-only mask entity (visibility flags 0x800, no shadows) for the
-  `rt_interiormask` clip of terrain, map features and particles; it is not the trigger.
+  `rt_interiormask` clip of terrain, map features and particles. That entity is render-only; the part's collision (group 13,
+  [collision.md](collision.md)) is presumably what sets the character's building reference (**Unknown**: not traced).
 - **Objects of the building** (layout furniture, signs and other child buildings) have their own floor, the
   `floornum` of their state. In the view: shown iff `floornum` <= the viewed floor. Out of the view: shown only when
   flagged for the outside (**Observed**: the flag reads as "exterior furniture"), else hidden. Characters and items on
