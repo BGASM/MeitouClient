@@ -48,7 +48,8 @@ sealed partial class PlayerInterface
         {
             var info = SaveCatalog.ReadInfo(slot);
             slotReadable = true;
-            slotDetails = $"File version: {info.Version}\nFaction name: {info.Faction}\nFunds: c.{info.Funds.ToString("N0", CultureInfo.InvariantCulture)}\nMembers: {info.Members}\nLocation: {info.Area}\nDay {info.Day}, {info.Hour:00}:{info.Minute:00}";
+            // The five labels of the original info panel (FUN_14047e390 / FUN_14047e780, docs/game/ui-screens.md section 3), in their order.
+            slotDetails = $"File version: {info.Version}\nFaction name: {info.Faction}\nFunds: c.{info.Funds.ToString("N0", CultureInfo.InvariantCulture)}\nMembers size: {info.Members}\nLocation: {info.Area}";
         }
         catch (Exception e) when (e is IOException or FormatException or ArgumentException) { slotDetails = "Unable to read save:\n" + e.Message; }
     }
@@ -127,7 +128,8 @@ sealed partial class PlayerInterface
         {
             Enable("NewGameButton", "LoadGameButton", "OptionsButton", "ExitButton", "ExitGameButton", "ResumeButton", "CreditsButton");
             if (session.World.Player.Exists) Enable("SaveGameButton");
-            if (slots.Count > 0 && slotReadable) Enable("ContinueButton");
+            // Continue is shown only when a save exists (docs/game/ui-screens.md section 3), not greyed out.
+            if (slots.Count > 0 && slotReadable) Enable("ContinueButton"); else b.Hidden.Add("ContinueButton");
             if (starts.Count == 0) b.Disabled.Add("NewGameButton");
             b.Properties["CreditsPanel"] = new Dictionary<string, string> { ["Visible"] = showCredits ? "true" : "false" };
             Paragraph("CreditsPanelContent", credits);

@@ -1,6 +1,7 @@
 using System.Numerics;
 using Meitou.Content;
 using Meitou.Data;
+using Meitou.Data.Gameplay.Bodies;
 using Meitou.Data.Ogre;
 using Meitou.Data.Ui;
 using Meitou.Engine;
@@ -13,7 +14,7 @@ using Meitou.Ui;
 
 namespace Meitou.Tests.Ui;
 
-public class FaithfulInteractionTests
+public class FaithfulInteractionTests(ITestOutputHelper output)
 {
     static PlayerInterface Ui(WorldSession session)
     {
@@ -67,5 +68,47 @@ public class FaithfulInteractionTests
             session.World.RunTick(); Assert.Equal((2, 1), (item.X, item.Y)); Assert.False(ui.UiCapturesPointer);
         }
         finally { ui.DisposeUi(); }
+    }
+
+    /// <summary>Names the HUD bindings carry for the Meitou mode's native HUD only; the faithful layout has no widget for them.</summary>
+    static readonly HashSet<string> NativeOnly = ["clock", "hunger", "condition", "blood", "body", "bloodFraction", "bodyFraction", "hungerFraction", "squad.count", "members"];
+
+    [Fact, Slow]
+    public void EveryWidgetTheFaithfulModeFillsExistsInTheOriginalLayout()
+    {
+        using var session = new WorldSession(Vector3.Zero, (-100, -100, 100, 100), (_, _) => 0, systems: [new PlayerSystem()]);
+        var character = session.World.Characters.Spawn(new(), new() { Name = "Player", IsPlayer = true, Inventory = new Inventory(8, 6) }, 0);
+        session.World.Player.Faction = 0; session.World.Player.Selection.Add(character); session.World.RunTick();
+        var ui = Ui(session);
+        var missing = new List<string>();
+        try
+        {
+            foreach (string id in PlayerInterface.FaithfulScreenFiles.Select(f => f.Id).Prepend("hud"))
+            {
+                var (layout, b) = ui.FaithfulBindings(id);
+                var names = layout.Widgets.Select(w => w.Name).Where(n => n.Length > 0).ToHashSet(StringComparer.Ordinal);
+                bool Native(string n) => id == "hud" && (NativeOnly.Contains(n) || n.StartsWith("squad.", StringComparison.Ordinal));
+                // What the screen shows or answers to must land on a real widget; hiding or styling an absent one is only reported.
+                foreach (string n in b.Text.Keys.Concat(b.Actions.Keys).Concat(b.Lists.Keys).Concat(b.Progress.Keys).Distinct())
+                    if (!names.Contains(n) && !Native(n)) missing.Add($"{id}: {n}");
+                foreach (string n in b.Hidden.Concat(b.Disabled).Concat(b.Properties.Keys).Distinct().Where(n => !names.Contains(n) && !Native(n)))
+                    output.WriteLine($"{id}: hides or styles absent widget {n}");
+                // Named widgets with an editor caption that the code neither fills nor hides keep showing the layout's sample text.
+                foreach (var w in layout.Widgets.Where(w => w.Name.Length > 0 && w.Properties.TryGetValue("Caption", out string? c) && c.Length > 0))
+                    if (!b.Text.ContainsKey(w.Name) && !b.Hidden.Contains(w.Name))
+                        output.WriteLine($"{id}: {w.Type} {w.Name} keeps its caption \"{w.Properties["Caption"]}\"");
+            }
+        }
+        finally { ui.DisposeUi(); }
+        Assert.True(missing.Count == 0, "bound to widgets the original layouts lack: " + string.Join(", ", missing));
+    }
+
+    [Fact]
+    public void TheStatsPanelsShowEachRecordStatOnce()
+    {
+        var shown = PlayerInterface.StatPanels.SelectMany(p => p).ToArray();
+        Assert.Equal(shown.Length, shown.Distinct().Count());
+        Assert.Equal(StatsInfo.RecordStats.Order(), shown.Order());
+        Assert.Equal(5, PlayerInterface.StatPanels.Length);
     }
 }

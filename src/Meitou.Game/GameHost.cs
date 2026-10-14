@@ -137,6 +137,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         if (session.Bindings.Get(InputAction.ToggleFps).SequenceEqual([Binding.Of(EngineKey.F9)])) session.Bindings.Set(InputAction.ToggleFps);
         player = new PlayerInterface(session, heights.HeightAt, DrawnPosition);
         player.LoadUi(g.UiMode ?? config.UiMode, assets.Find);
+        if (IsSandbox) player.ReservedKeys.UnionWith([Meitou.Engine.Input.Key.Z, Meitou.Engine.Input.Key.X, Meitou.Engine.Input.Key.C, Meitou.Engine.Input.Key.Y, Meitou.Engine.Input.Key.P, Meitou.Engine.Input.Key.G]);
         player.ConfigureFrontend(scene.Database,
             () => Meitou.Data.Save.SaveCatalog.Scan(Meitou.Simulation.Saving.QuickSave.DefaultRoot, install.SaveDirectory,
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "kenshi", "save")),

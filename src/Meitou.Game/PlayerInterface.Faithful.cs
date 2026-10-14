@@ -11,6 +11,8 @@ sealed partial class PlayerInterface
 {
     string selectedStat = "";
     public bool UiCapturesPointer => UiVisible && UiMode == UiMode.Faithful && (faithfulScreens.CapturesPointer || mapDrag is not null || inventoryDrag is not null || tradeDrag is not null);
+    /// <summary>Keys the host keeps for itself (the sandbox's letters), so the faithful window shortcuts leave them alone.</summary>
+    public HashSet<Key> ReservedKeys { get; } = [];
     void UpdateMenuPause() => session.Simulation.RequestedPause = UiMode == UiMode.Faithful && faithfulScreens.HasModal;
     public bool UiKey(Key key, bool ctrl = false, bool shift = false)
     {
@@ -18,7 +20,9 @@ sealed partial class PlayerInterface
         if (key == Meitou.Engine.Input.Key.Escape)
         {
             if (faithfulScreens.IsOpen("title") && faithfulScreens.OpenScreens.Count == 1) return true;
-            if (!faithfulScreens.Escape()) faithfulScreens.Open("menu");
+            // Esc presses the last button of the top message box (Return the first, docs/game/ui-input.md section 5).
+            if (faithfulScreens.IsOpen("message")) HandleFrontendAction(new("message", "ButtonB", "ButtonB"));
+            else if (!faithfulScreens.Escape()) faithfulScreens.Open("menu");
             UpdateMenuPause();
             return true;
         }
@@ -35,8 +39,17 @@ sealed partial class PlayerInterface
         if (key == Meitou.Engine.Input.Key.Tab && faithfulScreens.FocusNext(shift)) return true;
         if (key == Meitou.Engine.Input.Key.Enter && faithfulScreens.Submit()) return true;
         if (faithfulScreens.HasModal) return true;
+        if (ReservedKeys.Contains(key)) return false;
         if (key is Meitou.Engine.Input.Key.I or Meitou.Engine.Input.Key.C) { ExecuteUiAction(key == Meitou.Engine.Input.Key.I ? "inventory" : "stats", ""); return true; }
-        if (key == Meitou.Engine.Input.Key.M) { if (faithfulScreens.IsOpen("overview")) faithfulScreens.Close("overview"); else { faithfulScreens.Open("overview"); faithfulScreens.SetTab("overview", "TabsMain", 0); } return true; }
+        // toggle_map / toggle_research / toggle_crafting (M / T / Y) ask for overview tabs 0 / 2 / 3 (docs/game/ui-input.md section 6); toggle_faction (tab 1) is unbound.
+        // Pressing the key of the tab already showing closes the window (engine choice: the original's toggle rule is not traced).
+        int? tab = key switch { Meitou.Engine.Input.Key.M => 0, Meitou.Engine.Input.Key.T => 2, Meitou.Engine.Input.Key.Y => 3, _ => null };
+        if (tab is { } t)
+        {
+            if (faithfulScreens.IsOpen("overview") && faithfulScreens.GetTab("overview", "TabsMain") == t) faithfulScreens.Close("overview");
+            else { faithfulScreens.Open("overview"); faithfulScreens.SetTab("overview", "TabsMain", t); }
+            return true;
+        }
         return false;
     }
     public void UiText(char value) { if (UiVisible && UiMode == UiMode.Faithful) faithfulScreens.TextInput(value); }
@@ -82,9 +95,8 @@ sealed partial class PlayerInterface
             else
             {
                 UiListItem Skill(StatsEnumerated s) => new(((int)s).ToString(CultureInfo.InvariantCulture), $"{StatLabel(s)}  {(lead?.AllSkills.ElementAtOrDefault((int)s) ?? 0):0}");
-                b.Lists["AttributesPanel"] = new[] { StatsEnumerated.Strength, StatsEnumerated.Toughness, StatsEnumerated.Dexterity, StatsEnumerated.Perception }.Select(Skill).ToArray();
-                var skills = StatsInfo.RecordStats.Where(s => s is not (StatsEnumerated.Strength or StatsEnumerated.Toughness or StatsEnumerated.Dexterity or StatsEnumerated.Perception)).ToArray();
-                for (int i = 0; i < 4; i++) b.Lists[$"Skills{i + 1}Panel"] = skills.Skip(i * 8).Take(8).Select(Skill).ToArray();
+                b.Lists["AttributesPanel"] = StatPanels[0].Select(Skill).ToArray();
+                for (int i = 1; i < StatPanels.Length; i++) b.Lists[$"Skills{i}Panel"] = StatPanels[i].Select(Skill).ToArray();
                 if (int.TryParse(selectedStat, out int stat) && stat > 0 && stat < StatsInfo.Count)
                     b.Text["Description1Panel"] = $"{StatLabel((StatsEnumerated)stat)}\nCurrent level: {(lead?.AllSkills.ElementAtOrDefault(stat) ?? 0):0.00}";
                 b.Text["Description2Panel"] = lead?.Body is { } body ? $"Blood {body.Blood * 100:0}%\nHunger {body.Hunger:0.00}\n{(body.Dead ? "Dead" : body.Unconscious ? "Unconscious" : "Conscious")}" : "";
@@ -108,12 +120,29 @@ sealed partial class PlayerInterface
         }
         return b;
     }
+    /// <summary>
+    /// The 33 record stats by panel: the attributes, then Skills1..4. The groups are the STATS record's field groups (docs/game/character-stats.md: attributes;
+    /// attack, defence, dodge, unarmed; athletics, swimming; engineer, medic, robotics, science; the thief four; the six trades; the nine weapons), with the weapons
+    /// split into melee and ranged. Which group goes in which of the four panels, and the order inside one, are <b>engine choices</b> (the layout's panel captions are not read).
+    /// </summary>
+    internal static readonly StatsEnumerated[][] StatPanels =
+    [
+        [StatsEnumerated.Strength, StatsEnumerated.Dexterity, StatsEnumerated.Toughness, StatsEnumerated.Perception],
+        [StatsEnumerated.MeleeAttack, StatsEnumerated.MeleeDefence, StatsEnumerated.Dodge, StatsEnumerated.MartialArts,
+            StatsEnumerated.Katanas, StatsEnumerated.Sabres, StatsEnumerated.Hackers, StatsEnumerated.HeavyWeapons, StatsEnumerated.Blunt, StatsEnumerated.Polearms],
+        [StatsEnumerated.Crossbows, StatsEnumerated.Turrets, StatsEnumerated.FriendlyFire, StatsEnumerated.Athletics, StatsEnumerated.Swimming],
+        [StatsEnumerated.Stealth, StatsEnumerated.Lockpicking, StatsEnumerated.Thieving, StatsEnumerated.Assassination],
+        [StatsEnumerated.Science, StatsEnumerated.Engineering, StatsEnumerated.Robotics, StatsEnumerated.Medic,
+            StatsEnumerated.SmithingWeapon, StatsEnumerated.SmithingArmour, StatsEnumerated.SmithingBow, StatsEnumerated.Labouring, StatsEnumerated.Farming, StatsEnumerated.Cooking],
+    ];
+
     static string StatLabel(StatsEnumerated stat) => stat switch
     {
+        StatsEnumerated.Thieving => "Thievery", StatsEnumerated.HeavyWeapons => "Heavy weapons",
         StatsEnumerated.MeleeAttack => "Melee attack", StatsEnumerated.MeleeDefence => "Melee defence",
         StatsEnumerated.SmithingWeapon => "Weapon smithing", StatsEnumerated.SmithingArmour => "Armour smithing",
         StatsEnumerated.SmithingBow => "Crossbow smithing", StatsEnumerated.FriendlyFire => "Precision shooting",
-        StatsEnumerated.HeavyWeapons => "Heavy weapons", StatsEnumerated.MartialArts => "Martial arts",
+        StatsEnumerated.MartialArts => "Martial arts",
         StatsEnumerated.Medic => "Field medic", _ => stat.ToString(),
     };
     void AddFaithfulContent(string id, List<UiControl> controls)

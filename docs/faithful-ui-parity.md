@@ -21,6 +21,37 @@ about undocumented original behaviour. Original-file facts are in
 | Trade | Trader stock in an original inventory window beside the character's, opened and closed with the trade; drag stock onto the pocket or bag grid to buy, own items onto the stock to sell; purses in the data panel, prices in captions | The trader variant's own layout (Unknown; the generic inventory window stands in), price tooltips, stack splitting, the fencing prompt |
 | Other screens | XML is readable; confirmation message boxes used by menu flows | Dialogue, building, prospecting, tutorials, import, file dialogs |
 
+## Fidelity audit (2026-10-14)
+
+Faithful mode was checked against the facts in [UI screens](game/ui-screens.md) and
+[UI input](game/ui-input.md); no install was at hand, so nothing here is checked
+against the running original.
+
+Brought in line with a documented fact:
+
+| What | Now | Source |
+| --- | --- | --- |
+| HUD money | `c.1,234`, no space after the point | format string `c.{1,num}` (ui-screens.md section 1) |
+| Save/load info panel | the five original labels in order: File version, Faction name, Funds, Members size, Location; the extra "Day" line is gone | FUN_14047e390 / FUN_14047e780 (section 3) |
+| Continue | hidden, not greyed, when no readable save exists | section 3 |
+| Esc on a message box | presses its last button (Return already pressed the first) | ui-input.md section 5 |
+| T / Y | open the overview on Research / Craft (M on Map); faction has no default key | events 3..6, ui-input.md sections 4 and 6 |
+
+Engine choices that remain; the original is **Unknown** for each:
+
+- Stats window: skills are grouped by the STATS record's field groups (combat, melee weapons; ranged weapons, athletics; thief; science, trades) across
+  `Skills1..4Panel`; which group goes in which panel, the order inside, and the row labels are guesses until the installed layout's captions and the locale msgids are read.
+- Message box captions (YES / CANCEL), window titles ("INVENTORY - name"), confirmation texts other than "Are you sure you want to exit?".
+- Overview faction name shows "Player"; the original shows the player faction's name.
+- The hover label is a plain text box; the original uses the HUD's `TooltipPanel`, whose children are not mapped.
+- Medical rows: parts in anatomy order, then blood, then hunger, in `LifeBar1..9`; the colour-layer widget names (`LifeBarNRed`, `...Robot`) come from the panel code's colour words, not the layout.
+- Save list rows carry a `[Meitou]` / `[Kenshi]` source tag; the title's version text reads "Meitou - Faithful UI" (the original's is "Kenshi 1.0.68 - x64 (Newland)"), on purpose.
+- The sandbox keeps Z X C Y P G; with `--sandbox` the faithful C (stats) and Y (craft) shortcuts give way to it.
+
+`FaithfulInteractionTests.EveryWidgetTheFaithfulModeFillsExistsInTheOriginalLayout` [Slow] binds the HUD and every faithful screen against the installed layouts. It
+fails on any text, action, list or progress bound to a widget the layout lacks. It also prints the absent widgets that are only hidden or styled, and the named widgets
+that keep their editor caption, which is the list of original text the mode does not fill yet. It has not been run (no install here).
+
 ## Gameplay backends tracked separately
 
 | Backend | State / dependency |

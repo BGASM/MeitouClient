@@ -28,19 +28,28 @@ sealed partial class PlayerInterface
         uiResources = MyGuiResources.Load("kenshi_init.xml", resolve);
         faithfulHud = MyGuiTemplates.Expand(MyGuiReader.ReadLayout(resolve("Kenshi_MainPanel.layout") ?? throw new FileNotFoundException("Kenshi_MainPanel.layout not found.")), uiResources);
         faithfulScreens = new(uiResources);
-        foreach (var (id, file, modal) in new[] {
-            ("inventory", "Kenshi_InventoryCharacterWindow", false), ("stats", "Kenshi_StatsWindow", false),
-            ("overview", "Kenshi_OverviewWindow", false), ("menu", "Kenshi_MainMenuPopupPanel", true),
-            ("title", "Kenshi_MainMenu", true), ("new-game", "Kenshi_NewGamePanel", true),
-            ("advanced", "Kenshi_AdvancedOptionsWindow", true), ("save", "Kenshi_SaveGamePanel", true),
-            ("load", "Kenshi_LoadGamePanel", true), ("message", "Kenshi_MessageBox", true),
-            ("bag", "Kenshi_InventoryGenericWindow", false), ("limbs", "Kenshi_LimbReplacementWindow", false), ("trader", "Kenshi_InventoryGenericWindow", false) })
+        foreach (var (id, file, modal) in FaithfulScreenFiles)
             faithfulScreens.Register(id, MyGuiReader.ReadLayout(resolve(file + ".layout") ?? throw new FileNotFoundException(file)), modal,
                 centreRoot: id is "new-game" or "save" or "load");
         faithfulScreens.Activated += FaithfulAction;
         uiHost.Diagnostic += d => Console.Error.WriteLine($"ui        {d.Extension} {d.Operation}: {d.Error.Message}");
         nativeHudRegistration = uiHost.Register(new NativeHudExtension(ExecuteUiAction));
     }
+
+    /// <summary>The original layouts the faithful mode opens as screens: id, layout file, modal.</summary>
+    internal static readonly (string Id, string File, bool Modal)[] FaithfulScreenFiles =
+    [
+        ("inventory", "Kenshi_InventoryCharacterWindow", false), ("stats", "Kenshi_StatsWindow", false),
+        ("overview", "Kenshi_OverviewWindow", false), ("menu", "Kenshi_MainMenuPopupPanel", true),
+        ("title", "Kenshi_MainMenu", true), ("new-game", "Kenshi_NewGamePanel", true),
+        ("advanced", "Kenshi_AdvancedOptionsWindow", true), ("save", "Kenshi_SaveGamePanel", true),
+        ("load", "Kenshi_LoadGamePanel", true), ("message", "Kenshi_MessageBox", true),
+        ("bag", "Kenshi_InventoryGenericWindow", false), ("limbs", "Kenshi_LimbReplacementWindow", false), ("trader", "Kenshi_InventoryGenericWindow", false),
+    ];
+
+    /// <summary>The expanded layout and the current bindings of the HUD (<c>"hud"</c>) or of a faithful screen, for the layout audit test.</summary>
+    internal (MyGuiLayout Layout, UiBindings Bindings) FaithfulBindings(string id) =>
+        id == "hud" ? (faithfulHud, BindUi()) : (faithfulScreens.Layout(id), BindFaithfulScreen(id));
 
     public void CreateUiPainter(DebugOverlay overlay, Func<string, string?> resolve) => uiPainter = new(overlay, uiResources, resolve);
     public void DisposeUi() { uiPainter?.Dispose(); uiPainter = null; nativeHudRegistration?.Dispose(); nativeHudRegistration = null; }
@@ -71,7 +80,8 @@ sealed partial class PlayerInterface
         b.Text["clock"] = $"{session.Clock.DayText}  {session.Clock.TimeText}";
         b.Text["DayText"] = session.Clock.DayText;
         b.Text["TimeText"] = session.Clock.TimeText;
-        b.Text["MoneyAmountText"] = "c. " + session.World.Player.Money.ToString("N0", CultureInfo.InvariantCulture);
+        // The exe's money format string is c.{1,num} (docs/game/ui-screens.md section 1): no space after the point.
+        b.Text["MoneyAmountText"] = "c." + session.World.Player.Money.ToString("N0", CultureInfo.InvariantCulture);
         b.Text["NameText"] = lead?.Name ?? "No character selected";
         b.Text["HealthText"] = lead?.Body is { } body ? body.Dead ? "Dead" : body.Unconscious ? "Unconscious" : $"Blood {body.Blood * 100:0}%  Health {body.WorstPart * 100:0}%" : "";
         b.Text["hunger"] = lead?.Body is { } hungry ? $"Hunger {hungry.Hunger:0.00} / 3" : "";
