@@ -70,6 +70,7 @@ sealed partial class PlayerInterface
         steering = false;
         mapDrag = null;
         inventoryDrag = null;
+        menuOpen = false;
         UpdateMenuPause();
     }
 
@@ -150,6 +151,7 @@ sealed partial class PlayerInterface
             foreach (var screen in faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent)) controls.AddRange(screen.Controls);
         else if (openPanel is not null) AddDetailsPanel(controls);
         if (UiMode == UiMode.Meitou) AddTradePanel(controls);
+        if (UiMode == UiMode.Meitou && menuOpen) AddMenuPanel(controls);
         if (UiMode == UiMode.Faithful) AddInventoryDrag(controls);
         AddHoverLabel(controls);
         return controls;
@@ -182,6 +184,7 @@ sealed partial class PlayerInterface
             else openPanel = openPanel == action ? null : action;
         }
         else if (action == "close") openPanel = null;
+        else if (action == "menu") MenuAction(argument);
         else if (action == "squad") Select(PlayerCharacters(), false);
         else if (action == "member")
         {
@@ -210,6 +213,7 @@ sealed partial class PlayerInterface
     public void ShowUiPanel(string? panel)
     {
         openPanel = null;
+        menuOpen = false;
         faithfulScreens.CloseAll();
         UpdateMenuPause();
         if (panel is null) return;
@@ -220,6 +224,7 @@ sealed partial class PlayerInterface
             else { faithfulScreens.Open(panel); if (panel == "overview") faithfulScreens.SetTab(panel, "TabsMain", 0); }
             UpdateMenuPause(); return;
         }
+        if (panel == "menu") { ToggleMenu(); return; }
         if (panel is not ("inventory" or "stats")) throw new ArgumentException("Unknown UI panel.", nameof(panel));
         var control = ArrangeUi().First(c => c.Action == $"meitou:{panel}");
         uiHost.Dispatch(control);

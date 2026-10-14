@@ -43,6 +43,11 @@ public static class SaveLoader
 
         var camera = save.Camera;
         var loaded = new LoadedSave { Source = save, Clock = new SaveClock(camera.Day, camera.Hour, camera.Minute) };
+        // The CAMERA's mods list names the data files the save was made with (without extension; gamedata.base as "base", docs/formats/save.md).
+        var running = new HashSet<string>(data.Db.Files.Select(f => f == "gamedata.base" ? "base" : Path.GetFileNameWithoutExtension(f)), StringComparer.OrdinalIgnoreCase);
+        foreach (var mod in camera.Record.References.GetValueOrDefault("mods") ?? [])
+            if (!running.Contains(mod.TargetStringId)) loaded.MissingMods.Add(mod.TargetStringId);
+        if (loaded.MissingMods.Count > 0) loaded.Notes.Add($"Made with data files this game does not load: {string.Join(", ", loaded.MissingMods)}.");
         LoadFactions(save, data, options, loaded);
         loaded.RelationBaseline = Snapshot(data.Relations);
 
@@ -150,7 +155,13 @@ public static class SaveLoader
             string ownerId = sc.OwnerFactionId;
             int faction = ownerId.Length > 0 && data.FactionIndex(ownerId) is var fi and >= 0 ? fi : playerIndex;
             var handle = sc.Handle;
-            CharacterAppearance? look = options.Appearances?.Create(sc.RecordId, ownerId.Length > 0 ? ownerId : null, handle.S & 0x7FFFFFFF);
+            // The kit: a character whose INVENTORY_STATE holds items gets them, and its look is its saved appearance wearing them. One with none (a Meitou save from before
+            // inventories were written) keeps the old rule: the look rolled from the handle's serial and the inventory a new character of the look would have.
+            var savedItems = sc.Inventory is { } invState && platoon.File is { } platoonFile ? SaveInventory.Read(platoonFile, invState) : [];
+            CharacterAppearance? look = null;
+            if (savedItems.Count > 0 && options.Appearances is { } source && SavedKit.LoadoutOf(sc.Appearance, savedItems, data.Db, handle.S & 0x7FFFFFFF) is { } kit)
+                look = source.Create(sc.RecordId, kit);
+            look ??= options.Appearances?.Create(sc.RecordId, ownerId.Length > 0 ? ownerId : null, handle.S & 0x7FFFFFFF);
             var cold = new CharacterCold
             {
                 Name = sc.Name.Length > 0 ? sc.Name : record.Name,
@@ -176,7 +187,8 @@ public static class SaveLoader
             cold.Bounties = BountySave.Read(sc.GameState, data.Relations, loaded.Clock, world.Tick, world.TickSeconds);
             if (cold.IsPlayer && sc.GameState is { } orders) Orders.Read(orders, cold);
             // The body: the saved stats and medical state go to the body systems, the rest of the assembly (inventory, fighter) is made as for a new character.
-            if (race is not null && stats is not null && medical is not null) assembly.AttachSaved(cold, race, stats, medical, record);
+            if (race is not null && stats is not null && medical is not null)
+                assembly.AttachSaved(cold, race, stats, medical, record, savedItems.Count > 0 ? SavedKit.ToInventory(savedItems, data.Items, loaded.Notes) : null);
             else if (race is not null)
                 loaded.Notes.Add($"{platoon.Name}: {cold.Name} has no stats or medical state that could be read; it has no body in the world.");
             var id = table.Spawn(hot, cold, world.Tick);
@@ -206,6 +218,14 @@ public static class SaveLoader
         string? saved = platoon.Record.Strings.TryGetValue("currentPackage", out var current) && current.Length > 0 ? current : null;   // a string: the AI_PACKAGE id (docs/formats/save.md)
         var (package, job) = data.Db.Find(platoon.SquadTemplate) is { } templateRecord && SquadFactory.IsTemplate(templateRecord)
             ? Ai.PlatoonJobs.For(data.Ai, Meitou.Data.Gameplay.SquadTemplate.From(templateRecord), saved) : (null, Ai.PlatoonJob.None);
+        // Town-bound platoons are the town's own: its residents, bar squads, slaves and farm animals, which the population makes again when the town loads.
+        // A stand-in for them as well would double the town, so they stay in the save only (docs/simulation.md "Saves").
+        int siteFaction = data.SiteFactions.Count > origin ? data.SiteFactions[origin] : -1;
+        if (!Travels(platoon, job, data.Sites[origin].Town, siteFaction >= 0 ? data.Factions[siteFaction] : null))
+        {
+            loaded.TownBoundPlatoons++;
+            return;
+        }
         var p = new Platoon
         {
             Id = world.Platoons.NextId(),
@@ -220,6 +240,20 @@ public static class SaveLoader
         };
         world.Platoons.Add(p);
         loaded.RoamingPlatoons[p.Id] = platoon.Name;
+    }
+
+    /// <summary>
+    /// Whether a saved NPC platoon travels and so gets a roaming stand-in (<b>engine rule</b>, from the five saves of docs/formats/save.md: residents are marked <c>is resident</c>, and
+    /// the bar squads, slaves and farm animals of a town have a package whose unloaded func keeps them home, 4, or 0): not a resident, and an off-screen job that moves it
+    /// (unloaded func 2, 5 or 6) and not a bar squad of the town or its faction (which the population makes with the town), or a template of its base town's <c>roaming squads</c>.
+    /// </summary>
+    internal static bool Travels(SavePlatoon platoon, Ai.PlatoonJob job, TownData baseTown, FactionData? townFaction)
+    {
+        string template = platoon.SquadTemplate;
+        if (platoon.Record.Bools.GetValueOrDefault("is resident")) return false;
+        if (baseTown.RoamingSquads.Any(r => r.Id == template)) return true;
+        if (baseTown.BarSquads.Any(r => r.Id == template) || townFaction?.BarSquads.Any(r => r.Id == template) == true) return false;
+        return job is Ai.PlatoonJob.PatrolShortRange or Ai.PlatoonJob.TravelTarget or Ai.PlatoonJob.TravelTargetFast;
     }
 
     static RaceData? RaceOf(SaveCharacter sc, GameRecord record, GameDatabase db, Dictionary<string, RaceData?> cache)

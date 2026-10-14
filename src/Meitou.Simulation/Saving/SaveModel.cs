@@ -63,6 +63,10 @@ public sealed class LoadedSave
     public float[] RelationBaseline { get; set; } = [];
     /// <summary>The roaming platoons made from the save's NPC platoons: the world's platoon id to the save's platoon name.</summary>
     public Dictionary<int, string> RoamingPlatoons { get; } = [];
+    /// <summary>NPC platoons of a placed town left in the save only because they stay in their town (residents, bar squads, slaves): the population makes the town's own again.</summary>
+    public int TownBoundPlatoons { get; set; }
+    /// <summary>The CAMERA <c>mods</c> entries the running load order lacks (the save was made with mods this game does not load).</summary>
+    public List<string> MissingMods { get; } = [];
     /// <summary>What was left out or changed, one line each (a record that could not be resolved, characters that are dead, platoons without a town...).</summary>
     public List<string> Notes { get; } = [];
 

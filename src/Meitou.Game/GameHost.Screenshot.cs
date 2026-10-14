@@ -62,7 +62,7 @@ sealed partial class GameHost
         if (overlay is not null) player.CreateUiPainter(overlay, assets.Find);
         string?[] panels = g.UiShowcase ? player.UiMode == Meitou.Data.Ui.UiMode.Faithful
             ? [null, "inventory", "stats", "overview", "menu", "new-game", "save", "load", "title"]
-            : [null, "inventory", "stats"] : [null];
+            : [null, "inventory", "stats", "menu"] : [null];
         foreach (string? panelName in panels)
         {
             DrawWorld(w, h);

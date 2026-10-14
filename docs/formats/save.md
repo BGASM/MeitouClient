@@ -495,11 +495,22 @@ Saves go to a folder of our own while testing (`%LOCALAPPDATA%\Meitou\save-test\
 **Not done / Unknown** (the writer is untested against the original game, which was not run):
 - Whether the original minds that a roaming platoon's PLATOON `position`, which `SaveCapture` updates, then disagrees with the character positions in its `.platoon` file (**Unknown**).
 - Whether the original loads a save made from nothing: its BIOMES, RESEARCH and TERRAIN_DECALS are empty records, towns have no `trade goods`, population pools or artifacts, war states start at defaults (`updatetime` 40), and slot lists 2 and 3 are the zone registry only. A save made from a loaded one carries all of that through unchanged, which is the safe path.
-- The saved look (CHARACTER_APPEARANCE sliders) is written for a new character from its generated `Loadout` record when it has one, but not read back into a drawable `CharacterAppearance`.
-- **The look's seed as the handle serial** (engine choice, 2026-10-13): the save documents the serial of a character's handle (`handleS`) only as its own random number, and the loader
-  rolls the look of a character from it. A character Meitou writes that has a rolled look (`Loadout.Seed`) gets that seed as its serial (`SaveCapture`), so loading rolls the same face, body, hair and
-  clothes and rebuilds the same inventory (`QuickSaveTests`, with the install's data: the seed, body mesh, part meshes and inventory records equal). The saved CHARACTER_APPEARANCE is still not read.
-  **Unknown**: whether the original minds that a serial is not random (it is only compared as an id as far as the sample shows, **Unknown**).
+- **Looks and inventories** (2026-10-14): the player's characters' CHARACTER_APPEARANCE is read back into a drawable look (its keys are a body file's, so it feeds `Loadout.Appearance`), with
+  the worn items of its INVENTORY_STATE; the inventory (`SaveInventory`: items, sections, cells, quantity, quality, level, charges, material, company, a container's contents through its one
+  instance, **Verified** in the samples: the instance is numbered `1` and names an INVENTORY_STATE whose instances count from 1) is read, and written back on saving (`SaveBuilder.SetInventory`,
+  keeping each read item's record keys and its id and place in the file, so an unchanged inventory is written back byte for byte: **Verified** against the five saves by
+  `A_real_save_captured_again_keeps_every_record`). In the five saves every item's `base data sid` resolves on the base load order (12,946 items in `quicksave`, **Verified** by a probe);
+  `main` items reach cell row 7 with a 2-high item (an 8 x 8 grid at least, **Observed**). An item made in play gets the key set of the real records (`uniform`, `color sid` empty, null
+  `ownedby` and `insideBuilding` handles, `death` false). The `ownedby` handle (a character handle on bought items, null on starting kit in the sample) is carried, not interpreted.
+- **The look's seed as the handle serial** (engine choice, 2026-10-13): the save documents the serial of a character's handle (`handleS`) only as its own random number. A character Meitou writes
+  that has a rolled look (`Loadout.Seed`) gets that seed as its serial (`SaveCapture`); the loader rolls the look from it only for a character saved without items (a Meitou quicksave from before
+  inventories were written). **Unknown**: whether the original minds that a serial is not random (it is only compared as an id as far as the sample shows, **Unknown**).
+- **NPC platoons on loading** (2026-10-14, counted in the five saves): 7 to 313 PLATOONs per save are `is resident` (all with a file); most of the other non-player ones are the towns'
+  bar squads (package `hang out in a bar`, signal 17, unloaded func 4), slave squads (`Slave only squad`, unloaded func 0) and farm animals (unloaded func 0); the travellers are the few
+  with unloaded func 2 (`Patrol map (short range)`) or a template in their town's `roaming squads` (1 or 2 per save). Which keys the original uses to choose an unloaded platoon's
+  behaviour beyond the package is **Unknown**.
+- The CAMERA `mods` list of the user's saves names `FreecamUnbound` and `KenshiCinema` besides the base four (**Observed**); neither is needed to read them.
 - `MEDICAL_STATE` has no wound list or pain (the keys above), so a loaded character starts with no wounds and pain 1 (the medical tick works pain out again); the dead are not loaded.
-- Inventory contents, AI jobs and orders, the `5-redirect` table, bounties and the rest of the platoon data (missions, owned buildings) are kept as raw records in a loaded save and not interpreted; items a character gains in play are not written.
+- AI jobs and orders, the `5-redirect` table and the rest of the platoon data (missions, owned buildings) are kept as raw records in a loaded save and not interpreted; the NPCs' inventories
+  are not read (their characters are made again).
 - Building placement and state of zones the world changes (there is no building simulation): zone files are carried through unchanged.

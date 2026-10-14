@@ -328,6 +328,69 @@ public sealed class SaveBuilder
         platoon.CharCount = platoon.Characters.Count;
     }
 
+    /// <summary>
+    /// Replaces what a character's INVENTORY_STATE holds with <paramref name="items"/>: the old item records (and the contents of containers among them) leave the file, and
+    /// each item gets an INVENTORY_ITEM_STATE (<see cref="SaveInventory"/>) linked by an instance numbered from 1; a container's contents get an INVENTORY_STATE of their
+    /// own, linked by the item's one instance, as the game writes them. An item read from this inventory keeps its record's id and place in the file (and a container its
+    /// contents' state), so an inventory that did not change is written back the same.
+    /// </summary>
+    public void SetInventory(SavePlatoon platoon, SaveCharacter character, IReadOnlyList<SaveItem> items)
+    {
+        var file = platoon.File ?? throw new InvalidOperationException("The platoon has no file.");
+        var inventory = character.Inventory ?? throw new InvalidOperationException("The character has no INVENTORY_STATE.");
+        var old = SaveInventory.Reachable(file, inventory);
+        var oldRecords = file.Records.Where(r => old.Contains(r.StringId)).ToDictionary(r => r.StringId, StringComparer.Ordinal);
+        var reused = new Dictionary<string, FcsRecord>(StringComparer.Ordinal);
+        var added = new List<FcsRecord>();
+        int next = NextNumber(file);
+
+        FcsRecord Take(FcsRecord fresh, string? oldId)
+        {
+            if (oldId is not null && oldRecords.TryGetValue(oldId, out var was) && !reused.ContainsKey(oldId))
+            {
+                (fresh.Id, fresh.StringId, fresh.Name, fresh.Flags) = (was.Id, was.StringId, was.Name, was.Flags);
+                reused[oldId] = fresh;
+            }
+            else
+            {
+                fresh.Id = next;
+                fresh.StringId = $"{next}--INGAME";
+                file.Data.NextId = Math.Max(file.Data.NextId, next++);
+                added.Add(fresh);
+            }
+            return fresh;
+        }
+
+        void Fill(FcsRecord state, IReadOnlyList<SaveItem> list, int depth)
+        {
+            state.Instances.Clear();
+            int index = 0;
+            foreach (var item in list)
+            {
+                var r = Take(SaveInventory.ItemRecord(item), item.Source?.StringId);
+                state.Instances.Add(SaveInventory.Link(++index, r.StringId));
+                if (item.Contents is { } contents && depth < 4)
+                {
+                    string? oldInner = item.Source is { Instances.Count: > 0 } s ? s.Instances[0].Target : null;
+                    var inner = Take(new FcsRecord { Type = (int)FcsRecordType.INVENTORY_STATE, Name = "0" }, oldInner);
+                    r.Instances.Add(SaveInventory.Link(1, inner.StringId));
+                    Fill(inner, contents, depth + 1);
+                }
+            }
+        }
+
+        Fill(inventory, items, 0);
+        // Reused records take the place of the ones they replace; the rest of the old ones leave; new ones go at the end.
+        for (int i = file.Records.Count - 1; i >= 0; i--)
+        {
+            string id = file.Records[i].StringId;
+            if (!old.Contains(id)) continue;
+            if (reused.TryGetValue(id, out var replacement)) file.Records[i] = replacement;
+            else file.Records.RemoveAt(i);
+        }
+        file.Records.AddRange(added);
+    }
+
     // ------------------------------------------------------------------ STATS defaults
 
     /// <summary>The STATS floats a record always has that the stat system does not write (the legacy ones): zero.</summary>

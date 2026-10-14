@@ -14,10 +14,17 @@ sealed partial class PlayerInterface
     public bool UiCapturesPointer => UiVisible && UiMode == UiMode.Faithful && (faithfulScreens.CapturesPointer || mapDrag is not null || inventoryDrag is not null || tradeDrag is not null);
     /// <summary>Keys the host keeps for itself (the sandbox's letters), so the faithful window shortcuts leave them alone.</summary>
     public HashSet<Key> ReservedKeys { get; } = [];
-    void UpdateMenuPause() => session.Simulation.RequestedPause = UiMode == UiMode.Faithful && faithfulScreens.HasModal;
+    void UpdateMenuPause() => session.Simulation.RequestedPause = UiMode == UiMode.Faithful ? faithfulScreens.HasModal : menuOpen;
     public bool UiKey(Key key, bool ctrl = false, bool shift = false)
     {
-        if (!UiVisible || UiMode != UiMode.Faithful) return false;
+        if (!UiVisible) return false;
+        // The Meitou mode: Esc closes an open panel, else opens or closes the game menu (it no longer quits at once).
+        if (UiMode == UiMode.Meitou)
+        {
+            if (key != Meitou.Engine.Input.Key.Escape) return false;
+            if (openPanel is not null && !menuOpen) openPanel = null; else ToggleMenu();
+            return true;
+        }
         if (key == Meitou.Engine.Input.Key.Escape)
         {
             if (faithfulScreens.IsOpen("title") && faithfulScreens.OpenScreens.Count == 1) return true;

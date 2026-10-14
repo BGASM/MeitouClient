@@ -6,6 +6,7 @@ using Meitou.Data.Gameplay;
 using Meitou.Data.Save;
 using Meitou.Data.World;
 using Meitou.Simulation;
+using Meitou.Simulation.Items;
 using Meitou.Simulation.Saving;
 using Meitou.Tests.Simulation;
 using static Meitou.Tests.Save.SaveSamples;
@@ -22,9 +23,9 @@ public class SaveWorldTests
     }
 
     /// <summary>A started game on the synthetic town: the player's squad of four, 500 cats.</summary>
-    static Game NewGame(ulong seed = 11)
+    static Game NewGame(ulong seed = 11, bool items = false)
     {
-        var db = SyntheticTown.Database();
+        var db = SyntheticTown.Database(items: items);
         var data = SyntheticTown.Data(db);
         var walk = new OpenGroundWalkability(SyntheticTown.Ground);
         var systems = SyntheticTown.Standard(data, walk, StandardParts.Population | StandardParts.Player | StandardParts.Movement, new PopulationSettings { CheckEveryTicks = 1 });
@@ -92,7 +93,59 @@ public class SaveWorldTests
         finally { Directory.Delete(Path.GetDirectoryName(folder)!, recursive: true); }
     }
 
+    [Fact]
+    public void An_inventory_changed_in_play_is_saved_and_loaded()
+    {
+        using var g = NewGame(items: true);
+        var cold = g.World.Characters.Cold(g.Squad.Leader.Slot)!;
+        var ration = g.Data.Items.Create("70-t", 3)!;
+        (ration.X, ration.Y, ration.Charges) = (2, 1, 40);
+        cold.Inventory = new Inventory();
+        cold.Inventory.Items.Add(ration);
+        var save = SaveCapture.Capture(g.World, g.Data, new SaveClock(1, 12, 0));
+        string folder = Path.Combine(Dir("inventory"), "slot");
+        try
+        {
+            save.Write(folder);
+            using var world2 = EmptyWorld();
+            SaveLoader.Load(world2, SaveGame.Load(folder), g.Data);
+            var squad = world2.Squads.Find(world2.Player.Squad)!;
+            var item = Assert.Single(world2.Characters.Cold(squad.Leader.Slot)!.Inventory!.Items);
+            Assert.Equal(("70-t", "main", 2, 1, 3, 40f), (item.Record, item.Section, item.X, item.Y, item.Quantity, item.Charges));
+            Assert.NotNull(item.Saved);
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(folder)!, recursive: true); }
+    }
+
     // ------------------------------------------------------------------ the user's saves
+
+    /// <summary>A save of the original loaded on the install's own load order: each character in its saved look carrying its saved items; the towns' own platoons left to the population.</summary>
+    [Theory, Trait("Category", "Slow")]
+    [MemberData(nameof(SaveSamples.Names), MemberType = typeof(SaveSamples))]
+    public void A_real_save_loads_its_characters_kit_and_look_and_leaves_the_towns_to_the_population(string folder)
+    {
+        SkipWithoutSaves(folder);
+        var db = InstallData.FullLoadOrder!;
+        var data = PopulationData.Create(db, InstallData.Levels!.Towns(), new GeneratedAppearances(db, InstallData.Install!.Root));
+        var save = Load(folder);
+        using var world = EmptyWorld();
+        var loaded = SaveLoader.Load(world, save, data, new SaveLoadOptions { ApplyRelations = false, Appearances = data.Appearances });
+
+        int kits = 0;
+        foreach (var id in loaded.Characters)
+        {
+            var cold = world.Characters.Cold(id.Slot)!;
+            var sc = cold.Save!.Source;
+            var items = SaveInventory.Read(sc.Platoon.File!, sc.Inventory!);
+            if (items.Count == 0) continue;
+            kits++;
+            Assert.Equal(items.Count, cold.Inventory!.Items.Count);
+            if (sc.Appearance!.Strings.GetValueOrDefault("head", "") is { Length: > 0 } head) Assert.Equal(head, cold.Appearance!.Head?.StringId);
+        }
+        Assert.True(kits > 0);
+        Assert.True(loaded.TownBoundPlatoons > 0);
+        Assert.DoesNotContain(loaded.RoamingPlatoons.Values, name => save.Platoons.First(p => p.Name == name).Record.Bools.GetValueOrDefault("is resident"));
+    }
 
     static (GameDatabase Db, PopulationData Data)? cached;
 

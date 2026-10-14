@@ -96,15 +96,16 @@ sealed class CharacterAssembly(PopulationData data)
 
     /// <summary>
     /// <see cref="Attach"/> for a character loaded from a save: the race, stats and medical state are the saved ones (not rolled), the inventory and the fighter are
-    /// built from the character's record and look like a new character's (the save's inventory is not read yet). The top speed is the loader's.
+    /// the saved <paramref name="inventory"/> when there is one, else built from the character's record and look like a new character's; the fighter from the inventory. The top
+    /// speed is the loader's.
     /// </summary>
-    public void AttachSaved(CharacterCold cold, RaceData race, CharacterStats stats, MedicalState medical, GameRecord? record)
+    public void AttachSaved(CharacterCold cold, RaceData race, CharacterStats stats, MedicalState medical, GameRecord? record, Inventory? inventory = null)
     {
         cold.NpcClass = NpcClassOf(record);
         cold.Race = race;
         cold.Stats = stats;
         cold.Medical = medical;
-        cold.Inventory = data.Items.Build(record, cold.Appearance?.Loadout);
+        cold.Inventory = inventory ?? data.Items.Build(record, cold.Appearance?.Loadout);
         cold.Fighter = FighterOf(record, cold.Inventory);
         cold.WaterFactor = race.WaterAvoidance * (cold.Faction == data.PlayerFaction && data.PlayerFaction >= 0 ? 0.5f : 1);
     }

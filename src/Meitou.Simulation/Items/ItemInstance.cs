@@ -45,6 +45,8 @@ public sealed class ItemInstance
     public Inventory? Contents { get; init; }
     /// <summary>The factor of the contents' weight (a bag's <c>encumbrance effect</c>).</summary>
     public float ContentsFactor { get; init; } = 1;
+    /// <summary>The INVENTORY_ITEM_STATE a loaded item was read from; saving copies it so the keys the engine does not model survive (null for an item made in play). Not hashed.</summary>
+    public FcsRecord? Saved { get; set; }
 
     /// <summary>A copy of this item with another quantity (a stack split off; never used for a backpack, whose contents are not copied).</summary>
     public ItemInstance WithQuantity(int quantity) => new()

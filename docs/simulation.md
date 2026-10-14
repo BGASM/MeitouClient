@@ -28,7 +28,7 @@ Each stage ends with tests and something the owner can run.
 | **7. Bodies** | Stats and XP, hunger, blood, body parts, KO and death | Done and wired into `World` ([Bodies](#bodies)); first aid, resting and XP on the move are in play (2026-10-13, `FirstAidSystem`); beds and the time scale are open |
 | **8. Combat** | Melee per [combat.md](game/combat.md); ranged later | Melee done and wired ([Combat](#combat)); fights start by faction hostility, the player's idle characters defend themselves, the player's assaults and killings change the relations (2026-10-13, `AggroSystem`, [Hostility](#hostility-and-relations)); crossbows done ([Ranged](#ranged)); animals fight with their natural weapons and bodies, drawn and animated with their own clips (2026-10-13, [Animals](#animals)); turrets and attack slots not built |
 | **9. AI proper** | Packages, blackboard, scoring and planner ([ai.md](game/ai.md)), off-screen squads | Started 2026-10-14 ([AI](#ai)): the AI_PACKAGE and AI_TASK data, the blackboard's package choice by slot and package class (retreat, patrols, bars, contracts), the members' goal choice by tier, weight, hour window and continuity, homes with beds and nodes from the level data, 24 goal types acted out, combat stances from the combat goals, roaming platoons' off-screen jobs and saved packages. Not built: wars and the other subclasses, the planner, rescue and prisoner goals, resident squads off screen. `PursuitSystem`, `RetaliationSystem`, `AggroSystem` and the roaming squads are still engine stand-ins |
-| **10. Saves** | Read and write the world state ([save.md](formats/save.md)) | API done ([Saves](#saves)); the game host quicksaves (F5) and quickloads (F9) the player's squad into its own slot ([Quicksave and quickload](#quicksave-and-quickload)); no save menu, no loading of the original game's saves in play |
+| **10. Saves** | Read and write the world state ([save.md](formats/save.md)) | API done ([Saves](#saves)); the game host quicksaves (F5) and quickloads (F9) the player's squad into its own slot ([Quicksave and quickload](#quicksave-and-quickload)); save menus in both UI modes list Meitou's and the original game's saves, and an original save loads in play with its characters' looks and inventories (2026-10-14, [Saves](#saves)) |
 | **11+** | Economy and trade, buildings and production, the MyGUI screens, audio | Crimes and bounties (2026-10-13, [Crimes and bounties](#crimes-and-bounties)); item prices, shops and trading (2026-10-14, [Trade](#trade)); the rest not started |
 
 ## Principles
@@ -1020,7 +1020,7 @@ Item prices, shops and trading (2026-10-14), from [game/economy.md](game/economy
   decoded and not built.
 - **Hash and saves.** The shops (stock, restock tick, fill count) are hashed with their squads, so a world without shops hashes as before; the open trade is not world state. The
   stolen mark is **not hashed yet** (adding it moves the `carry` and `crime` golden hashes; [Open questions](#open-questions-and-known-gaps)). Nothing of the economy is saved beyond
-  the player's money: shops are rolled again for the squads a load makes; inventories are not saved anyway.
+  the player's money and the player's characters' inventories: shops are rolled again for the squads a load makes, and the stolen mark is not saved.
 - **The windows.** Faithful (2026-10-14): as in the original, trading shows the trader's stock as an inventory window (the original's trader variant of the inventory GUI,
   [ui-screens.md](game/ui-screens.md) section 2) beside the character's inventory window, opened when the trade opens and closed with it. Dragging stock onto the pocket or bag grid
   buys it into the cell under the drop (`BuyItem.Section/X/Y`; elsewhere when that cell is taken), dragging an own item onto the stock sells it (`SellItem.X/Y`); the whole stack, split
@@ -1131,15 +1131,20 @@ Stage 9, begun 2026-10-14, from [game/ai.md](game/ai.md) and [game/ai-tasks.md](
 | GAMESTATE_FACTION relation tables | `PopulationData.Relations`, the game's live table (`FactionRelations.Set`, on by default; the player's faction has no table and is answered by the others', [Hostility](#hostility-and-relations)); prosperity, platoon counters and trust stay in `LoadedSave.Factions` (`FactionState`) |
 | The player's platoons that have a file | One `Squad` each (`Name` = platoon name, `TemplateId`, leader = the `is leader` character) and their characters: saved position (with height), yaw from the rotation quaternion, name, role (`squad mem type`), `IsPlayer`, speed from the race and the saved stats; `World.Player.Squad` is the first platoon |
 | STATS, MEDICAL_STATE of those characters | `CharacterCold.Save` (`SavedCharacterLink`) with `Stats` and `Medical` (race from the appearance record or the CHARACTER); a dead character is not made and stays in the save |
+| INVENTORY_STATE and its INVENTORY_ITEM_STATEs (2026-10-14) | `CharacterCold.Inventory` (`SavedKit.ToInventory`): each item at its saved section and cell, with quantity, quality, level, charges, material and company, a backpack with its contents; `ItemInstance.Saved` keeps the record. The main grid is 8 wide and as tall as the saved items need (at least 6): the five saves place items down to row 8 (**Observed**; the original's size is **Unknown**). Items whose record the data lacks are left out with a note |
+| CHARACTER_APPEARANCE and the worn items | The look (`SavedKit.LoadoutOf` into `IAppearanceSource.Create(record, loadout)`): race, sex, head, hair, beard, skin tone and sliders from the record, clothing from the worn sections, the backpack, the weapons at hip and back (company = manufacturer, material = model); nothing is rolled. A character whose inventory is empty (a Meitou quicksave from before inventories were written) gets the old rule: the look rolled from its handle's serial and a new character's kit |
 | CAMERA `selected_character`, `selected_characters<k>` | `World.Player.Selection` |
-| Other platoons with a placed base town and a squad template | A roaming `Platoon` stand-in (state `Unloaded`, saved position, size = character count, template, faction); members are made again from the template when a zone near it is active. `LoadedSave.RoamingPlatoons` maps the world's platoon id to the save's name |
+| CAMERA `mods` | `LoadedSave.MissingMods`: the entries the running load order lacks; the host says so when the load finishes |
+| Other platoons with a placed base town and a squad template that travel | A roaming `Platoon` stand-in (state `Unloaded`, saved position, size = character count, template, faction); members are made again from the template when a zone near it is active. `LoadedSave.RoamingPlatoons` maps the world's platoon id to the save's name. **Engine rule** (`SaveLoader.Travels`): a platoon travels when it is not `is resident` and either its template is in its base town's `roaming squads`, or its off-screen job moves it (unloaded func 2, 5, 6) and it is not a bar squad of its town or the town's faction. The rest are the town's own (in the five saves: 7 to 313 `is resident` platoons, the bar squads, slave and farm-animal squads, whose packages have unloaded func 4 or 0, **Observed** 2026-10-14) and stay in the save only (`LoadedSave.TownBoundPlatoons`): the population makes a town's residents and bar squads again when it loads, so a stand-in for them would double the town. In the five saves 1 platoon of 20 to 452 gets a stand-in |
 
 **Saving** (`SaveCapture.Capture(world, data, clock, loaded, options)` returns a `SaveGame`; `SaveGame.Write(folder)` commits it). With the
 `LoadedSave` the world came from, the loaded save is cloned and the modelled parts are written over it: the clock, money, relations changed
 since loading (`RelationBaseline`), prosperity and platoon counters, and for every player squad the platoon and its characters (position,
 facing (the saved quaternion is kept while the yaw has not changed), name, leader flag, STATS and MEDICAL_STATE from `SaveCaptureOptions.Bodies`
-or the loaded ones, new recruits as new characters with the real key sets, characters that left the world removed with their items), the
-selection, the CAMERA squad and member counts, the roaming platoons' positions. Everything else is carried through unchanged (towns, nests, war
+or the loaded ones, new recruits as new characters with the real key sets, characters that left the world removed with their items, and each
+character's inventory as it is now: `SaveBuilder.SetInventory` writes an INVENTORY_ITEM_STATE per item (a copy of the record it was read from, so `color sid`, `uniform`, the
+`ownedby` handle and the rest survive, with the modelled keys written over; an item made in play gets the key set of the real records with null handles), keeping the ids and file
+places of the records it read, so an unchanged inventory is written back byte for byte), the selection, the CAMERA squad and member counts, the roaming platoons' positions. Everything else is carried through unchanged (towns, nests, war
 state, weather, research, decals, zone files, the NPC platoons' own files, the portrait atlas, the CAMERA's unique-character and camera data).
 Without a `LoadedSave` (a new game) a save is built from the data: all factions with the data's relations (prosperity 1000), war states at
 defaults, one default GAMESTATE_TOWN per `SaveCaptureOptions.Placements`, empty BIOMES / RESEARCH / TERRAIN_DECALS, the player's squads as
@@ -1150,15 +1155,15 @@ own folder while testing, never into the original game's `save` folders.
 selection, relations equal), saved again byte for byte; changes reach the file while a record the world does not hold survives. Against three
 real saves (`[Slow]`): each loads (195 to 354 roaming stand-ins), loading and capturing again changes only the PLATOON and CAMERA records of
 `quick.save` and nothing in the player's characters, a change made in the world survives writing and reading, and a world loaded from a real
-save runs 150 ticks and captures again with the same platoons and characters.
+save runs 150 ticks and captures again with the same platoons and characters. Since 2026-10-14: an inventory changed in play is saved and loaded (synthetic), and
+each of the user's five saves, on the install's own load order, loads every player character with its saved head and all its items, with no `is resident` platoon as a stand-in.
 
 **Not carried yet** (kept as the save had it, or regenerated): first aid and resting (the `Treat` / `Rest` tasks, the medic job: no key in MEDICAL_STATE or GAMESTATE_CHARACTER holds them; the squad toggles `heal`, `sleep`, `sit` of the CAMERA record have **Unknown** short-key meanings and are not mapped); carrying (GAMESTATE_CHARACTER
 has `carrying` and the handle `carrying*`, but the carried body is usually an NPC, whose character is not saved, so a quicksave drops the link and
 the body lies where it was), a pick-up, put-down or loot under way, the rescue job (the CAMERA squad toggle `rescue` is not mapped either) and what
-a loot moved (inventories are not saved); and a kit's used charges with the rest of the inventory, the NPC platoons' characters (regenerated from the template; their files stay as
-they were), towns and their state, war state, weather and season (the weather rolls anew on loading), research, zone buildings and loose items, inventories and equipment (a loaded character's are rebuilt from its record and look; a loaded animal gets its natural weapon back, but its age, size and HP mult factors
-(`CharacterStats.Scale`, `MedicalState.ScaleK` / `ScaleZ` / `HasStatsObject`) come back as a person's 1s, [Animals](#animals)), AI jobs,
-the saved look of a loaded character (rolled again from the saved serial through `IAppearanceSource`; the serial of a character Meitou saved is its look's seed), pending crimes (no key known), `5-redirect`.
+a loot moved into an NPC's inventory; the stolen mark of an item; the NPC platoons' characters (regenerated from the template; their files stay as
+they were), towns and their state, war state, weather and season (the weather rolls anew on loading), research, zone buildings and loose items, a loaded animal's age, size and HP mult factors
+(`CharacterStats.Scale`, `MedicalState.ScaleK` / `ScaleZ` / `HasStatsObject`: they come back as a person's 1s, [Animals](#animals)), AI jobs, pending crimes (no key known), `5-redirect`.
 The player's characters' bounty ledgers are carried (2026-10-13, `BountySave`: the GAMESTATE_CHARACTER keys `bountyfac<k>`, `bountyexp<k>`, `amount<k>`, `crimes<k>`, `claim<k>`;
 the raise time converted between world ticks and the save's game hours, day x 24 + hour, [Crimes and bounties](#crimes-and-bounties)). **Unknown**:
 whether the original loads a save written from nothing ([save.md](formats/save.md#implementation-as-built-stage-10)); the orientation convention
@@ -1170,8 +1175,7 @@ quaternion bit for bit).
 character gets its race, its saved stats and medical state, an inventory and a fighter (`CharacterAssembly.AttachSaved`, the loader does it, so the body, combat and
 movement systems treat it like a new game's character); `SaveCapture` reads the live `CharacterCold.Stats` / `Medical` (`SaveCaptureOptions.Bodies` stays as an override). A character with a rolled
 look is saved with the look's seed as the serial of its handle (save.md documents the serial only as the handle's own random number), so loading rolls the same face, body, hair and clothes
-again; the inventory is rebuilt from the same look. Still to do: keep the population system from making residents for a town whose platoons were loaded as
-stand-ins (a quicksave made by Meitou holds none, so this only matters when loading a save of the original game, which the host cannot do yet); the wound list and
+again (only for a save without its items, above). The save menus ([Quicksave and quickload](#quicksave-and-quickload)) load the original game's saves too. The wound list and
 the pain of the medical state are not in the save's keys and start empty and at 1 (the medical tick works the pain out again).
 
 ## Sandbox
@@ -1263,8 +1267,13 @@ buildings). They are not to be unified; `MoveOrder.Target.Y` is ignored (the mov
 `ToggleFps` binding of `F9` is dropped at start like the old screenshot `F12`). `GameHost.Saving.cs`; the rules are engine choices.
 
 - **Where.** `%LOCALAPPDATA%\Meitou\save\quicksave` (`QuickSave.Folder()`), Meitou's own slot next to its other caches. The original's quicksave is `%LOCALAPPDATA%\kenshi\save\quicksave`
-  ([save.md](formats/save.md#autosave-and-quicksave)); the host never reads, writes or deletes anything under `kenshi\save`, so the user's saves of the original game are safe, and
-  the original never meets a save with Meitou's differences. Nothing is written to `settings.cfg` (no `continue=`). A run without the town population (`--no-population`, the sandbox) says so on the HUD and does nothing.
+  ([save.md](formats/save.md#autosave-and-quicksave)); the host never writes or deletes anything under `kenshi\save` (it reads those saves only to list and load them), so the user's saves of
+  the original game are safe, and the original never meets a save with Meitou's differences. Nothing is written to `settings.cfg` (no `continue=`). A run without the town population (`--no-population`, the sandbox) says so on the HUD and does nothing.
+- **Menus** (engine choices). Named saves go to `%LOCALAPPDATA%\Meitou\save\<name>` (`SaveCatalog`); the lists show those (`[Meitou]`) and the original's folders in `%LOCALAPPDATA%\kenshi\save` and
+  the install's `save` (`[Kenshi]`, read only), newest first. Faithful mode uses the original's save and load dialogs from the Esc menu and the title. The Meitou mode's Esc opens a game menu of
+  its own (2026-10-14, `PlayerInterface.Menu.cs`; before, Esc quit at once): it pauses the game and offers RESUME, SAVE NEW (a slot named `Meitou <date time>`), SAVE OVER the chosen Meitou slot,
+  LOAD the chosen save, OPTIONS (the Tab panel) and EXIT; LOAD (with a game running), SAVE OVER and EXIT ask for a second press. Loading a save made with mods the running load order
+  lacks says which on the HUD.
 - **Saving.** The key only sets a request (the control tick runs inside `WorldSession.Advance`); the frame loop takes it right after `Advance` returns, when no world tick is in flight.
   `SaveCapture.Capture` runs there (the clock is `GameClock.Day/Hour/Minute`, the placed towns and the install's load order go in): it only reads the squad (0.8 to 10 ms in a run with the full load order; the first F5 of a run took 50 ms, mostly the JIT, the host runs without tiered compilation. **Observed**, Release, this PC). The save it starts from, which costs 40 to 50 ms (the clone of the quicksave the world was loaded from, or the new save with every faction and town), holds nothing of the world and is made ahead on a worker (`SaveCapture.PrepareBase`, started whenever none is ready and discarded after a load); `SaveGame.Write` also runs on a worker
   (it writes into `_current<N>` beside the slot and swaps the folder in with two renames, so a crash or a full disk leaves the old quicksave). The worker only queues the result; the HUD message
@@ -1277,8 +1286,8 @@ buildings). They are not to be unified; `MoveOrder.Target.Y` is ignored (the mov
   so a paused game draws the squad, and takes the first look at the zones), the draw list's per-character renderer state is not reused (the host's world counter is part of the key), the mouse state (drag box, steering right click) is dropped and the HUD says "Loaded".
   The selection is the saved one (CAMERA `selected_character`s), not cleared. The speed (paused or 1x/2x/5x) and the camera settings are the running game's. Loading works in a run that began without `--new-game` (it gives the player a squad).
 - **Saved and loaded:** the clock, the player's money and faction, the factions' relations (the data's table is replaced by the save's on load) and prosperity, the player's squad(s) with each character's position, facing, name, role and leader flag,
-  stats and medical state (blood, bleeding, hunger, parts: flesh, bandage, rig, stun, wear, hit multiplier), the look (as the seed in the handle), the bounties and the selection. **Not saved:** the town residents and roaming squads (made again from the towns near the player; they are not
-  where they were), the weather (rolled anew), orders, paths, queued moves, animation and combat state (everyone stands idle and unengaged), inventories (rebuilt from the record and look: eaten food is back, loot is gone), the wound list and pain, pending crimes, buildings and
+  stats and medical state (blood, bleeding, hunger, parts: flesh, bandage, rig, stun, wear, hit multiplier), the look (the appearance record, and the seed in the handle), the inventories, the bounties and the selection. **Not saved:** the town residents and roaming squads (made again from the towns near the player; they are not
+  where they were), the weather (rolled anew), orders, paths, queued moves, animation and combat state (everyone stands idle and unengaged), the wound list and pain, pending crimes, buildings and
   items on the ground, the camera's position (the leader's), the game speed. The state hash of a loaded world is not the original's (the tick, paths and the rest above differ); `QuickSaveTests` compares the carried state field by field and that two loads run the same at 1 and 4 threads.
 
 ## Measurements

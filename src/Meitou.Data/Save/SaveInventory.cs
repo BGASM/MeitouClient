@@ -1,0 +1,126 @@
+using System.Numerics;
+using Meitou.Data.Fcs;
+
+namespace Meitou.Data.Save;
+
+/// <summary>
+/// One item of a saved inventory: an INVENTORY_ITEM_STATE (docs/formats/save.md), with what the engine models. <see cref="Source"/> is the record it was read from, so
+/// the keys the engine does not model (<c>color sid</c>, <c>uniform</c>, <c>unique</c>, <c>death</c>, the <c>ownedby</c> and <c>insideBuilding</c> handles) survive a round trip.
+/// </summary>
+public sealed class SaveItem
+{
+    public required string BaseId { get; init; }
+    public string MaterialId { get; init; } = "";
+    public string CompanyId { get; init; } = "";
+    public string Section { get; init; } = "main";
+    public int X { get; init; }
+    public int Y { get; init; }
+    public int Quantity { get; init; } = 1;
+    public int Level { get; init; }
+    public int ItemFunction { get; init; }
+    public float Quality { get; init; }
+    public float Charges { get; init; } = 1;
+    /// <summary>A container's contents (the INVENTORY_STATE its one instance names); null for other items.</summary>
+    public List<SaveItem>? Contents { get; init; }
+    public FcsRecord? Source { get; init; }
+}
+
+/// <summary>Reads and writes the items of an INVENTORY_STATE inside one save file (a platoon's).</summary>
+public static class SaveInventory
+{
+    /// <summary>
+    /// The items an INVENTORY_STATE holds: each instance names an INVENTORY_ITEM_STATE of the same file; a container item's single instance names the INVENTORY_STATE of its
+    /// contents (<b>Verified</b> in the samples, save.md). Instances whose target is missing are skipped.
+    /// </summary>
+    public static List<SaveItem> Read(SaveFile file, FcsRecord inventory)
+    {
+        var byId = new Dictionary<string, FcsRecord>(StringComparer.Ordinal);
+        foreach (var r in file.Records) byId.TryAdd(r.StringId, r);
+        return Read(byId, inventory, 0);
+    }
+
+    static List<SaveItem> Read(Dictionary<string, FcsRecord> byId, FcsRecord inventory, int depth)
+    {
+        var items = new List<SaveItem>();
+        if (depth > 4) return items;
+        foreach (var instance in inventory.Instances)
+        {
+            if (!byId.TryGetValue(instance.Target, out var r) || r.RecordType != FcsRecordType.INVENTORY_ITEM_STATE) continue;
+            List<SaveItem>? contents = null;
+            if (r.Instances.Count > 0 && byId.TryGetValue(r.Instances[0].Target, out var inner) && inner.RecordType == FcsRecordType.INVENTORY_STATE)
+                contents = Read(byId, inner, depth + 1);
+            items.Add(new SaveItem
+            {
+                BaseId = r.Strings.GetValueOrDefault("base data sid", ""),
+                MaterialId = r.Strings.GetValueOrDefault("material sid", ""),
+                CompanyId = r.Strings.GetValueOrDefault("company sid", ""),
+                Section = r.Strings.GetValueOrDefault("section", "main"),
+                X = r.Ints.GetValueOrDefault("inventory x"),
+                Y = r.Ints.GetValueOrDefault("inventory y"),
+                Quantity = r.Ints.GetValueOrDefault("quantity", 1),
+                Level = r.Ints.GetValueOrDefault("level"),
+                ItemFunction = r.Ints.GetValueOrDefault("item function"),
+                Quality = r.Floats.GetValueOrDefault("quality"),
+                Charges = r.Floats.GetValueOrDefault("charges", 1),
+                Contents = contents,
+                Source = r,
+            });
+        }
+        return items;
+    }
+
+    /// <summary>The records an INVENTORY_STATE reaches: its items and, through containers, their contents' states and items (not the state itself).</summary>
+    internal static HashSet<string> Reachable(SaveFile file, FcsRecord inventory)
+    {
+        var byId = new Dictionary<string, FcsRecord>(StringComparer.Ordinal);
+        foreach (var r in file.Records) byId.TryAdd(r.StringId, r);
+        var found = new HashSet<string>(StringComparer.Ordinal);
+        void Walk(FcsRecord r)
+        {
+            foreach (var i in r.Instances)
+                if (found.Add(i.Target) && byId.TryGetValue(i.Target, out var next)) Walk(next);
+        }
+        Walk(inventory);
+        return found;
+    }
+
+    /// <summary>
+    /// The INVENTORY_ITEM_STATE of an item: a copy of its <see cref="SaveItem.Source"/> when it has one (the keys the engine does not model kept), else the key set every
+    /// real item record has (null handles, no colour or uniform), with the modelled keys written over.
+    /// </summary>
+    internal static FcsRecord ItemRecord(SaveItem item)
+    {
+        var r = new FcsRecord { Type = (int)FcsRecordType.INVENTORY_ITEM_STATE, Name = "0" };
+        if (item.Source is { } s)
+        {
+            foreach (var (k, v) in s.Strings) r.Strings[k] = v;
+            foreach (var (k, v) in s.Ints) r.Ints[k] = v;
+            foreach (var (k, v) in s.Floats) r.Floats[k] = v;
+            foreach (var (k, v) in s.Bools) r.Bools[k] = v;
+            foreach (var (k, v) in s.Vector3s) r.Vector3s[k] = v;
+        }
+        else
+        {
+            r.Strings["uniform"] = "";
+            r.Strings["color sid"] = "";
+            Hand.Null.Write(r, "insideBuilding");
+            Hand.Null.Write(r, "ownedby");
+            r.Bools["death"] = false;
+        }
+        r.Strings["material sid"] = item.MaterialId;
+        r.Strings["company sid"] = item.CompanyId;
+        r.Strings["section"] = item.Section;
+        r.Strings["base data sid"] = item.BaseId;
+        r.Ints["item function"] = item.ItemFunction;
+        r.Ints["inventory x"] = item.X;
+        r.Ints["inventory y"] = item.Y;
+        r.Ints["level"] = item.Level;
+        r.Ints["quantity"] = item.Quantity;
+        r.Floats["charges"] = item.Charges;
+        r.Floats["quality"] = item.Quality;
+        r.Bools["in inventory"] = true;
+        return r;
+    }
+
+    internal static FcsInstance Link(int index, string target) => new() { Id = index.ToString(System.Globalization.CultureInfo.InvariantCulture), Target = target, Position = Vector3.Zero, Rotation = Quaternion.Identity };
+}

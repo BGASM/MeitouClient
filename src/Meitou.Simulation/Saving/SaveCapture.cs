@@ -192,7 +192,7 @@ public static class SaveCapture
                 sc ??= builder.AddCharacter(platoon, cold.RecordId, cold.Name, playerFactionId, hot.Position, SaveRotation.OfYaw(hot.Yaw),
                     isLeader: squad.Leader == id, squadMemberType: cold.Role);
                 // The handle's own serial is "random" in the original, and the loader rolls a character's look from it: a character with a rolled look gets the look's seed
-                // as its serial, so loading rolls the same face, hair and clothes again (the saved CHARACTER_APPEARANCE is not read back into a look yet).
+                // as its serial, so loading a save without its items (one written before inventories were) rolls the same face, hair and clothes again.
                 if (isNew && cold.Appearance?.Loadout is { } loadout) sc.Handle = sc.Handle with { S = loadout.Seed };
 
                 // Where and which way.
@@ -222,6 +222,8 @@ public static class SaveCapture
                 if (medical is not null && sc.Medical is { } mr)
                     medical.WriteSave(mr.Floats, mr.Bools, mr.Strings);
                 if (isNew) WriteAppearance(sc, cold, data.Db, races);
+                // What it carries and wears, as it is now; items read from a save keep their records' other keys.
+                if (cold.Inventory is { } inventory) builder.SetInventory(platoon, sc, SavedKit.FromInventory(inventory));
                 written[id] = sc;
             }
             platoon.CharCount = platoon.Characters.Count;

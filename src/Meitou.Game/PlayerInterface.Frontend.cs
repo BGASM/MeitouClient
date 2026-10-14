@@ -29,7 +29,7 @@ sealed partial class PlayerInterface
     public void CloseFrontend()
     {
         foreach (string id in new[] { "title", "menu", "new-game", "advanced", "save", "load", "message" }) faithfulScreens.Close(id);
-        confirmation = null; UpdateMenuPause();
+        confirmation = null; menuOpen = false; menuArmed = null; UpdateMenuPause();
     }
     void Confirm(string title, string text, Action action)
     {

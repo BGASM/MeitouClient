@@ -185,8 +185,8 @@ sealed partial class GameHost
         previousById.Clear();
         player.Reset();
         player.CloseFrontend();
-        Console.WriteLine($"load      {readingFolder}: {loaded.PlayerPlatoons.Sum(p => p.Squad.Members.Count)} player character(s), {loaded.RoamingPlatoons.Count} roaming platoon(s), day {loaded.Clock.Day} {loaded.Clock.Hour:00}:{loaded.Clock.Minute:00}, in {watch.ElapsedMilliseconds} ms");
-        player.Notice("Loaded");
+        Console.WriteLine($"load      {readingFolder}: {loaded.PlayerPlatoons.Sum(p => p.Squad.Members.Count)} player character(s), {loaded.RoamingPlatoons.Count} roaming platoon(s), {loaded.TownBoundPlatoons} town platoon(s) left to the towns, day {loaded.Clock.Day} {loaded.Clock.Hour:00}:{loaded.Clock.Minute:00}, in {watch.ElapsedMilliseconds} ms");
+        player.Notice(loaded.MissingMods.Count == 0 ? "Loaded" : $"Loaded; the save was made with mods not loaded now: {string.Join(", ", loaded.MissingMods)}", loaded.MissingMods.Count > 0);
     }
 
     /// <summary>Waits (at most 15 s) for the navmesh of the zones round <paramref name="at"/>; the ones already loaded cost nothing.</summary>

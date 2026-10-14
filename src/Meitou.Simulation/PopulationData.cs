@@ -14,6 +14,9 @@ public interface IAppearanceSource
 {
     /// <summary>The look of a CHARACTER record, rolled from <paramref name="seed"/>; <paramref name="factionId"/> limits hair and beards.</summary>
     CharacterAppearance? Create(string recordId, string? factionId, int seed);
+
+    /// <summary>The look of a CHARACTER record drawn from a given loadout (a saved character's appearance and worn items); nothing is rolled. Null: no look.</summary>
+    CharacterAppearance? Create(string recordId, Loadout loadout) => null;
 }
 
 /// <summary><see cref="IAppearanceSource"/> over the game data and the install.</summary>
@@ -33,6 +36,19 @@ public sealed class GeneratedAppearances(GameDatabase db, string installRoot) : 
                     catch (KeyNotFoundException) { return null; }
                 }, (db, installRoot, animal));
             return CharacterAppearance.Build(db, installRoot, recordId, new CharacterOptions { Seed = seed, Faction = factionId });
+        }
+        catch (Exception e) when (e is IOException or FcsFormatException or KeyNotFoundException or InvalidDataException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    public CharacterAppearance? Create(string recordId, Loadout loadout)
+    {
+        try
+        {
+            if (db.Find(recordId) is { Type: FcsRecordType.ANIMAL_CHARACTER }) return Create(recordId, null, loadout.Seed);
+            return CharacterAppearance.Build(db, installRoot, recordId, new CharacterOptions { Loadout = loadout });
         }
         catch (Exception e) when (e is IOException or FcsFormatException or KeyNotFoundException or InvalidDataException or UnauthorizedAccessException)
         {

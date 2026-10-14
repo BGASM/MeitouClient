@@ -130,6 +130,8 @@ published snapshot's actual values; these are aggregate indicators, not a guesse
 mapping to the original game's individual body-part bars. Stats bars show 0..100
 visually while retaining the exact numeric value. Inventory shows the published
 item names and quantities with decorative slot frames; it remains read-only.
+Esc opens the game menu (`PlayerInterface.Menu.cs`, registered action `menu`): it pauses the game and saves,
+loads (Meitou's and the original game's saves), opens the options or exits ([Saves](simulation.md#quicksave-and-quickload)).
 
 Capture actual HUD, inventory and stats states in one run:
 
@@ -137,8 +139,8 @@ Capture actual HUD, inventory and stats states in one run:
 dotnet run --project src/Meitou.Game -- --new-game --ui meitou --ui-showcase --screenshot artifacts/ui/kenshi-native.png --size 1600x900 --ticks 2
 ```
 
-This writes `kenshi-native-hud.png`, `kenshi-native-inventory.png` and
-`kenshi-native-stats.png`. The showcase opens the inventory/stats through their
+This writes `kenshi-native-hud.png`, `kenshi-native-inventory.png`,
+`kenshi-native-stats.png` and `kenshi-native-menu.png` (the Esc game menu). The showcase opens the inventory/stats through their
 registered button actions, after selecting the player's leader through the normal
 selection command and publishing at least one tick. It omits the animation sandbox's diagnostic panel when
 used with `--sandbox`, and leaves ordinary single-frame screenshots unchanged.
