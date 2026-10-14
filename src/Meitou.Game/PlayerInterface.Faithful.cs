@@ -10,7 +10,7 @@ namespace Meitou.Game;
 sealed partial class PlayerInterface
 {
     string selectedStat = "";
-    public bool UiCapturesPointer => UiVisible && UiMode == UiMode.Faithful && (faithfulScreens.CapturesPointer || mapDrag is not null || inventoryDrag is not null);
+    public bool UiCapturesPointer => UiVisible && UiMode == UiMode.Faithful && (faithfulScreens.CapturesPointer || mapDrag is not null || inventoryDrag is not null || tradeDrag is not null);
     void UpdateMenuPause() => session.Simulation.RequestedPause = UiMode == UiMode.Faithful && faithfulScreens.HasModal;
     public bool UiKey(Key key, bool ctrl = false, bool shift = false)
     {
@@ -66,6 +66,7 @@ sealed partial class PlayerInterface
         var lead = Selected().FirstOrDefault();
         foreach (var button in layout.Widgets.Where(w => w.Type == "Button" && !w.Properties.ContainsKey("TemplateEvent"))) b.Disabled.Add(button.Name);
         if (BindFrontend(id, b)) return b;
+        else if (id == "trader") BindTraderScreen(b);
         else if (id is "inventory" or "stats" or "bag" or "limbs")
         {
             b.Text["Root"] = (id == "stats" ? "CHARACTER STATS" : id == "limbs" ? "LIMBS" : id == "bag" ? "BACKPACK" : "INVENTORY") + " - " + (lead?.Name ?? "No character selected");
@@ -118,7 +119,8 @@ sealed partial class PlayerInterface
     void AddFaithfulContent(string id, List<UiControl> controls)
     {
         AddMapContent(id, controls);
-        if (id is not ("inventory" or "bag" or "limbs") || Selected().FirstOrDefault()?.ItemGrid is not { } grid) return;
+        if (id == "trader") { AddTraderContent(controls); return; }
+        if (id is not ("inventory" or "bag" or "limbs") || Selected().FirstOrDefault() is not { ItemGrid: { } grid } lead) return;
         string gridSection = id == "bag" ? "backpack_content" : "main";
         int columns = id == "bag" ? grid.BagWidth : grid.Width, rows = id == "bag" ? grid.BagHeight : grid.Height;
         int mainIndex = controls.FindIndex(c => c.Name == gridSection);
@@ -133,7 +135,9 @@ sealed partial class PlayerInterface
             if (controls.FirstOrDefault(c => c.Name == item.Section) is not { } slot) continue;
             var area = slot.Bounds;
             if (item.Section == gridSection && columns > 0 && rows > 0) area = new(area.X + item.X * area.Width / columns, area.Y + item.Y * area.Height / rows, item.Width * area.Width / columns, item.Height * area.Height / rows);
-            controls.Add(new($"inventory-item-{item.Index}", "TextBox", area, item.Name + (item.Quantity > 1 ? $" x{item.Quantity}" : ""), "", "", true,
+            string caption = item.Name + (item.Quantity > 1 ? $" x{item.Quantity}" : "");
+            if (SellCaption(lead.Id, item.Index) is { } price) caption += "\n" + price;
+            controls.Add(new($"inventory-item-{item.Index}", "TextBox", area, caption, "", "", true,
                 new Dictionary<string, string> { ["WordWrap"] = "true", ["TextAlign"] = "Center", ["FontName"] = "Kenshi_StandardFont_Medium", ["InventoryItem"] = item.Index.ToString(CultureInfo.InvariantCulture) }, new(0.2f, 0.2f, 0.16f, 0.6f), Pickable: true, TextScale: 0.8f, Clip: slot.Clip));
         }
     }

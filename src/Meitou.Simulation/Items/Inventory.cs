@@ -35,12 +35,13 @@ public sealed class Inventory(int width, int height)
     {
         for (y = 0; y + h <= Height; y++)
             for (x = 0; x + w <= Width; x++)
-                if (Free(section, x, y, w, h)) return true;
+                if (IsFree(section, x, y, w, h)) return true;
         x = y = 0;
         return false;
     }
 
-    bool Free(string section, int x, int y, int w, int h)
+    /// <summary>Whether a w x h footprint at (x, y) of <paramref name="section"/> overlaps no item (bounds are the caller's to check).</summary>
+    public bool IsFree(string section, int x, int y, int w, int h)
     {
         foreach (var i in Items)
         {

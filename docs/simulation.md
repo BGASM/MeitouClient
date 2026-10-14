@@ -959,7 +959,7 @@ kidnapping). Code: `src/Meitou.Simulation/Crime/` (`CrimeSystem`, `CrimeTypes.cs
 ## Trade
 
 Item prices, shops and trading (2026-10-14), from [game/economy.md](game/economy.md) sections 3 to 9 and 13. Code: `Meitou.Data.Gameplay.Economy` (`PriceConstants`, `ItemValue`,
-`TradeCulture`, `VendorList`) and `Meitou.Simulation.Trading` (`Market`, `Shop`, `ShopFiller`, `TradeSystem`); the window is `src/Meitou.Game/PlayerInterface.Trade.cs`.
+`TradeCulture`, `VendorList`) and `Meitou.Simulation.Trading` (`Market`, `Shop`, `ShopFiller`, `TradeSystem`); the windows are `src/Meitou.Game/PlayerInterface.Trade.cs`.
 
 - **Prices.** `ItemValue` is the original's base value in 32-bit float with its truncations (the worked examples of economy.md 4.6 are its tests: a Katana at quality 50 is 43750 raw
   and 17500 with `sword price mult`, Edgewalkers 61250 / 24500, Samurai Armour 15450 / 9270, Chainmail 20587 / 12352). `Market.UnitPrice` and `StackPrice` are the item classes' slots
@@ -993,7 +993,13 @@ Item prices, shops and trading (2026-10-14), from [game/economy.md](game/economy
 - **Hash and saves.** The shops (stock, restock tick, fill count) are hashed with their squads, so a world without shops hashes as before; the open trade is not world state. The
   stolen mark is **not hashed yet** (adding it moves the `carry` and `crime` golden hashes; [Open questions](#open-questions-and-known-gaps)). Nothing of the economy is saved beyond
   the player's money: shops are rolled again for the squads a load makes; inventories are not saved anyway.
-- **Not built:** the original's drag-and-drop trade window (Kenshi_TradeWindow), building shops and `vendor money`, `special items`, artifacts, the culture's illegal goods, smuggling,
+- **The windows.** Faithful (2026-10-14): as in the original, trading shows the trader's stock as an inventory window (the original's trader variant of the inventory GUI,
+  [ui-screens.md](game/ui-screens.md) section 2) beside the character's inventory window, opened when the trade opens and closed with it. Dragging stock onto the pocket or bag grid
+  buys it into the cell under the drop (`BuyItem.Section/X/Y`; elsewhere when that cell is taken), dragging an own item onto the stock sells it (`SellItem.X/Y`); the whole stack, split
+  to what the payer affords. Closing the trader window (its close button or Escape) ends the trade. **Engine readings**: the trader variant's layout is **Unknown** (the class is known,
+  not its `.layout`), so the bag's `Kenshi_InventoryGenericWindow` is used, its grid found as `backpack_content`, else `main`, else the largest inventory-slot widget; prices are in the
+  item captions (the original's tooltip is not built); the trader window is placed left of the inventory window. Meitou mode has its own panel (stock and goods lists, "1" and "ALL").
+- **Not built:** the item tooltips with prices, the stack-splitting drag, building shops and `vendor money`, `special items`, artifacts, the culture's illegal goods, smuggling,
   slaves, prisoners and animals for sale (12), bail, NPC shopping (`Task_Shopping`), picking up money items, blueprint and research costs.
 
 ## Saves

@@ -204,18 +204,19 @@ public class TradeTests
 
         // Buy one unit of the first stack: its unit price leaves the purse and enters the shop's.
         var first = view.Stock[0];
-        b.Say(new BuyItem(first.Token, 1) { Tick = 0 });
+        b.Say(new BuyItem(first.Token, 1) { Tick = 0, Section = "main", X = 3, Y = 2 });   // dropped on a pocket cell
         b.World.RunTicks(1);
         Assert.Equal(1000 - first.UnitPrice, b.World.Player.Money);
         Assert.Equal(3500 + first.UnitPrice, b.SquadOf(shopkeeper).Money);
-        Assert.Equal(1, b.Bag(hero).All().Sum(i => i.Quantity));
+        Assert.Equal((1, 3, 2), b.Bag(hero).All().Select(i => (i.Quantity, i.X, i.Y)).Single());
 
         // Sell it back: the sell price (a trade item at full price, junk at half).
         var mine = b.View.Goods.Single();
-        b.Say(new SellItem(mine.Token, 1) { Tick = 0 });
+        b.Say(new SellItem(mine.Token, 1) { Tick = 0, X = 11, Y = 19 });   // dropped on the stock's last cell
         b.World.RunTicks(1);
         Assert.Equal(1000 - first.UnitPrice + mine.Price, b.World.Player.Money);
         Assert.Empty(b.Bag(hero).All());
+        Assert.Contains(shop.Stock.Items, i => (i.X, i.Y) == (11, 19));
 
         // Too poor: nothing moves.
         b.World.Player.Money = 0;

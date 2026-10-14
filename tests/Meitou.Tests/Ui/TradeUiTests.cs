@@ -13,15 +13,24 @@ using Meitou.Tests.Simulation;
 
 namespace Meitou.Tests.Ui;
 
-/// <summary>The trade window (docs/simulation.md "Trade"): its buttons become trade commands at the world's tick.</summary>
+/// <summary>The Faithful trade (docs/simulation.md "Trade"): the trader window opens with the trade, drags between it and the pockets buy and sell at the next tick, closing it ends the trade.</summary>
 public class TradeUiTests
 {
+    static Vector2 Centre(UiControl c) => new(c.Bounds.X + c.Bounds.Width / 2, c.Bounds.Y + c.Bounds.Height / 2);
+
+    static void Drag(PlayerInterface ui, Vector2 from, Vector2 to)
+    {
+        ui.MouseDown(MouseButton.Left, from, false);
+        ui.MouseMove(to);
+        ui.MouseUp(MouseButton.Left, to, false);
+    }
+
     [Fact, Slow]
-    public void The_trade_windows_buy_button_buys_at_the_next_tick()
+    public void Dragging_between_the_trader_window_and_the_pockets_buys_and_sells()
     {
         var install = GameInstall.Locate(); Assert.SkipWhen(install is null, "No Kenshi install configured");
         var data = TradeTests.Data(TradeTests.Shops);
-        using var session = new WorldSession(Vector3.Zero, (-100, -100, 100, 100), (_, _) => 150, systems: [new TradeSystem(data)]);
+        using var session = new WorldSession(Vector3.Zero, (-100, -100, 100, 100), (_, _) => 150, systems: [new PlayerSystem(), new TradeSystem(data)]);
         var world = session.World;
         CharacterId Spawn(string name, float x, int faction, bool player, string template)
         {
@@ -46,13 +55,32 @@ public class TradeUiTests
         ui.LoadUi(UiMode.Faithful, name => resources.Find(name));
         try
         {
-            var price = world.Snapshot.Trade!.Stock[0].UnitPrice;
-            var button = ui.UiFrame.Last(c => c.Name == "stock-one-0");
-            ui.MouseDown(MouseButton.Left, new(button.Bounds.X + button.Bounds.Width / 2, button.Bounds.Y + button.Bounds.Height / 2), false);
+            // The trade opened both windows: the stock shows in the trader's.
+            var stock = world.Snapshot.Trade!.Stock[0];
+            var source = ui.UiFrame.Single(c => c.Name == $"trade-item-{stock.Index}");
+            var pockets = ui.UiFrame.First(c => c.Name == "main").Bounds;   // the inventory window opened first, so its pocket grid comes first
+            var cell = new Vector2(pockets.X + pockets.Width * 4.5f / 8, pockets.Y + pockets.Height * 3.5f / 6);
+            Drag(ui, Centre(source), cell);
             Assert.Equal(100_000, world.Player.Money);   // nothing moves before the tick
             world.RunTick();
-            Assert.Equal(100_000 - price, world.Player.Money);
-            Assert.Single(world.Characters.Cold(hero.Slot)!.Inventory!.All());
+            Assert.Equal(100_000 - stock.Price, world.Player.Money);
+            var bought = Assert.Single(world.Characters.Cold(hero.Slot)!.Inventory!.All());
+            Assert.Equal(stock.Quantity, bought.Quantity);
+
+            // Back onto the stock: sold at the sell price.
+            world.RunTick();
+            var goods = world.Snapshot.Trade!.Goods.Single();
+            var own = ui.UiFrame.Single(c => c.Name == $"inventory-item-{goods.Index}");
+            Drag(ui, Centre(own), Centre(ui.UiFrame.First(c => c.Name.StartsWith("trade-item-", StringComparison.Ordinal))));
+            world.RunTick();
+            Assert.Equal(100_000 - stock.Price + goods.Price, world.Player.Money);
+            Assert.Empty(world.Characters.Cold(hero.Slot)!.Inventory!.All());
+
+            // Escape closes the top window, the trader's: the trade ends.
+            ui.UiKey(Key.Escape);
+            _ = ui.UiFrame;
+            world.RunTicks(2);
+            Assert.Null(world.Snapshot.Trade);
         }
         finally { ui.DisposeUi(); }
     }

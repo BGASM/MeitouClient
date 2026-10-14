@@ -53,6 +53,9 @@ public sealed class MyGuiScreenHost(MyGuiResources resources)
     }
     public void CloseAll() { foreach (string id in open.ToArray()) Close(id); }
     public void SetTab(string id, string widget, int index) => screens[id].Tabs[widget] = Math.Max(0, index);
+    /// <summary>Where a screen has been moved from its layout position (a dragged window keeps its offset; the host may place a window beside another).</summary>
+    public Vector2 GetOffset(string id) => screens[id].Offset;
+    public void SetOffset(string id, Vector2 offset) => screens[id].Offset = offset;
     public void SetText(string id, string widget, string text) { screens[id].Text[widget] = text; if (focus == (id, widget)) edit?.Set(text); }
     public string GetText(string id, string widget) => screens[id].Text.GetValueOrDefault(widget) ?? "";
     public int GetTab(string id, string widget) => screens[id].Tabs.GetValueOrDefault(widget);

@@ -8,10 +8,23 @@ namespace Meitou.Simulation.Trading;
 public sealed record OpenTrade(CharacterId Customer, CharacterId Trader) : SimCommand;
 /// <summary>Closes the open trade.</summary>
 public sealed record CloseTrade : SimCommand;
-/// <summary>Buys <see cref="Quantity"/> units of the stock item <see cref="Item"/> (its index in the shop's stock) into the customer's inventory.</summary>
-public sealed record BuyItem(InventoryItemToken Item, int Quantity) : SimCommand;
-/// <summary>Sells <see cref="Quantity"/> units of the customer's item <see cref="Item"/> (its index in the customer's inventory) to the shop.</summary>
-public sealed record SellItem(InventoryItemToken Item, int Quantity) : SimCommand;
+/// <summary>
+/// Buys <see cref="Quantity"/> units of the stock item <see cref="Item"/> (its index in the shop's stock) into the customer's inventory: at the cell <see cref="X"/>, <see cref="Y"/> of
+/// <see cref="Section"/> (<c>main</c> or <c>backpack_content</c>, the cell the item was dropped on) when that is free, else wherever it fits.
+/// </summary>
+public sealed record BuyItem(InventoryItemToken Item, int Quantity) : SimCommand
+{
+    public string? Section { get; init; }
+    public int X { get; init; }
+    public int Y { get; init; }
+}
+
+/// <summary>Sells <see cref="Quantity"/> units of the customer's item <see cref="Item"/> (its index in the customer's inventory) to the shop, at the stock cell dropped on when free.</summary>
+public sealed record SellItem(InventoryItemToken Item, int Quantity) : SimCommand
+{
+    public int? X { get; init; }
+    public int Y { get; init; }
+}
 
 /// <summary>One item of a trade window, with what it costs (stock) or fetches (the customer's goods) as a whole stack.</summary>
 public sealed record TradeItemView(int Index, string Record, string Name, string Section, int X, int Y, int Width, int Height, int Quantity, float Quality, long Price, long UnitPrice, bool Stolen)
@@ -229,7 +242,7 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
         }
         var bought = item.WithQuantity(units);
         long price = m.StackPrice(bought, false, shop.Terms, squad.Faction);
-        int placed = Place(cold.Inventory!, bought, units);
+        int placed = buy.Section is { } section ? PlaceAt(cold.Inventory!, bought, units, section, buy.X, buy.Y) : Place(cold.Inventory!, bought, units);
         if (placed == 0)
         {
             world.Post("No room for that item.");
@@ -265,7 +278,7 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
         }
         var sold = item.WithQuantity(units);
         long price = m.StackPrice(sold, true, shop.Terms, cold.Faction);
-        int placed = Place(shop.Stock, sold, units);
+        int placed = sell.X is { } sx ? PlaceAt(shop.Stock, sold, units, "main", sx, sell.Y) : Place(shop.Stock, sold, units);
         if (placed == 0)
         {
             world.Post("No room for that item.");
@@ -305,6 +318,25 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
     }
 
     /// <summary>Puts <paramref name="units"/> of an item into an inventory; returns how many went in.</summary>
+    /// <summary>
+    /// Puts the units at the cell they were dropped on (the trade window's <c>placeItemFromMouse</c>): the cell of <paramref name="section"/> in <paramref name="root"/> (the backpack's
+    /// contents for <c>backpack_content</c>) when the footprint is inside the grid, free and the stack within the limit; otherwise wherever they fit, as <see cref="Place"/>.
+    /// </summary>
+    static int PlaceAt(Inventory root, ItemInstance copy, int units, string section, int x, int y)
+    {
+        var grid = section == "main" ? root : section == "backpack_content" ? root.Backpack?.Contents : null;
+        if (grid is not null && x >= 0 && y >= 0 && x + copy.Width <= grid.Width && y + copy.Height <= grid.Height && units <= grid.LimitOf(copy)
+            && grid.IsFree(section, x, y, copy.Width, copy.Height))
+        {
+            copy.Section = section;
+            copy.X = x;
+            copy.Y = y;
+            grid.Items.Add(copy);
+            return units;
+        }
+        return Place(root, copy, units);
+    }
+
     static int Place(Inventory into, ItemInstance copy, int units)
     {
         copy.Section = "main";

@@ -34,7 +34,7 @@ sealed partial class PlayerInterface
             ("title", "Kenshi_MainMenu", true), ("new-game", "Kenshi_NewGamePanel", true),
             ("advanced", "Kenshi_AdvancedOptionsWindow", true), ("save", "Kenshi_SaveGamePanel", true),
             ("load", "Kenshi_LoadGamePanel", true), ("message", "Kenshi_MessageBox", true),
-            ("bag", "Kenshi_InventoryGenericWindow", false), ("limbs", "Kenshi_LimbReplacementWindow", false) })
+            ("bag", "Kenshi_InventoryGenericWindow", false), ("limbs", "Kenshi_LimbReplacementWindow", false), ("trader", "Kenshi_InventoryGenericWindow", false) })
             faithfulScreens.Register(id, MyGuiReader.ReadLayout(resolve(file + ".layout") ?? throw new FileNotFoundException(file)), modal,
                 centreRoot: id is "new-game" or "save" or "load");
         faithfulScreens.Activated += FaithfulAction;
@@ -111,6 +111,7 @@ sealed partial class PlayerInterface
 
     IReadOnlyList<UiControl> ArrangeUi()
     {
+        SyncTradeScreens();
         var b = BindUi();
         var controls = UiMode == UiMode.Faithful && !faithfulScreens.IsOpen("title") ? MyGuiPresentation.Arrange(faithfulHud, Width, Height, b, uiResources.Layers).ToList() : [];
         UiRect FaithfulSlot(string name) => controls.FirstOrDefault(c => c.Name == name)?.Bounds ?? default;
@@ -137,7 +138,7 @@ sealed partial class PlayerInterface
         if (UiMode == UiMode.Faithful)
             foreach (var screen in faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent)) controls.AddRange(screen.Controls);
         else if (openPanel is not null) AddDetailsPanel(controls);
-        AddTradePanel(controls);
+        if (UiMode == UiMode.Meitou) AddTradePanel(controls);
         if (UiMode == UiMode.Faithful) AddInventoryDrag(controls);
         return controls;
     }

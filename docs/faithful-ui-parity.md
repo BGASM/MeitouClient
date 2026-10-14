@@ -18,13 +18,14 @@ about undocumented original behaviour. Original-file facts are in
 | Overview | All original tabs; live messages and squad names; installed map image, pan/zoom/centre, player/camera markers and right-click move orders | Original map projection/zoom equivalence, settlement discovery/markers, faction data, squad editing, research/crafting/AI data bindings |
 | Escape menu | Original layout, pause/resume, Options via Tab settings, exit confirmation, new game, original named save/load dialogs | Original options window content; menu and dialog keyboard shortcuts beyond defaults |
 | Frontend | Original title image/buttons and credits; start selection and Begin using existing spawn backend; save metadata/slot selection/name editing and overwrite confirmation; load confirmation | Splash, advanced option bindings, character creation, loading/progress, continue-slot persistence (currently newest listed slot, disabled if unreadable) |
-| Other screens | XML is readable; confirmation message boxes used by menu flows | Dialogue, trade, building, prospecting, tutorials, import, file dialogs |
+| Trade | Trader stock in an original inventory window beside the character's, opened and closed with the trade; drag stock onto the pocket or bag grid to buy, own items onto the stock to sell; purses in the data panel, prices in captions | The trader variant's own layout (Unknown; the generic inventory window stands in), price tooltips, stack splitting, the fencing prompt |
+| Other screens | XML is readable; confirmation message boxes used by menu flows | Dialogue, building, prospecting, tutorials, import, file dialogs |
 
 ## Gameplay backends tracked separately
 
 | Backend | State / dependency |
 | --- | --- |
-| Trading and stealing | No complete trade transaction/shop/stealing backend; UI must not fake transactions |
+| Trading and stealing | Shops, prices, buying, selling and fencing exist ([Trade](simulation.md#trade)); stealing from a conscious owner, building shops and smuggling need implementation |
 | Dialogue | No complete conversation/choice/effect backend |
 | Research and crafting | No complete research queue, benches or production queue backend |
 | Construction/prospecting | No complete placement/construction or prospecting backend |

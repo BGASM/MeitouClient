@@ -1,18 +1,112 @@
 using System.Globalization;
 using System.Numerics;
 using Meitou.Data.Ui;
+using Meitou.Simulation;
 using Meitou.Simulation.Trading;
+using Meitou.Ui;
 
 namespace Meitou.Game;
 
 /// <summary>
-/// The trade window (docs/simulation.md "Trade"): open while the world publishes a trade (<see cref="TradeView"/>), in both interface modes. The trader's stock on the left with what each
-/// stack costs, the customer's goods on the right with what they fetch; "1" moves one unit, "ALL" the stack (the original drags items between two inventory grids, Kenshi_TradeWindow, not
-/// built yet). A stolen item that the trader is no fence for is marked: selling it may get the seller caught.
+/// Trading (docs/simulation.md "Trade"), shown while the world publishes a trade (<see cref="TradeView"/>).
+/// <list type="bullet">
+/// <item><b>Faithful</b>: as the original, the trader's stock is an inventory window (the original's trader variant of the inventory GUI, <c>140155ee0</c>) beside the character's
+/// inventory window, and items are dragged between the grids: stock dropped on the pocket or bag grid is bought into that cell, the character's items dropped on the stock are sold. Which
+/// layout the trader variant loads is <b>Unknown</b>; this uses <c>Kenshi_InventoryGenericWindow</c>, the bag's. Item captions carry the price (the original shows it in the tooltip, not built).
+/// Closing the trader window ends the trade.</item>
+/// <item><b>Meitou</b>: one native panel, the stock on the left with what each stack costs, the customer's goods on the right with what they fetch; "1" moves one unit, "ALL" the stack.</item>
+/// </list>
+/// A stolen item that the trader is no fence for is marked: selling it may get the seller caught.
 /// </summary>
 sealed partial class PlayerInterface
 {
     int stockPage, goodsPage;
+    /// <summary>The trader whose window the Faithful interface opened (none: no trade shown) and whether its closing was already sent.</summary>
+    CharacterId shownTrader = CharacterId.None;
+    bool tradeCloseSent;
+
+    /// <summary>Faithful: opens the trader and inventory windows when a trade opens (the trader's beside the inventory), closes them when it ends, and ends it when the player closes the trader window.</summary>
+    void SyncTradeScreens()
+    {
+        if (UiMode != UiMode.Faithful || faithfulScreens is null) return;
+        var trade = session.CurrentSnapshot.Trade;
+        if (trade is null)
+        {
+            if (!shownTrader.IsNone && faithfulScreens.IsOpen("trader")) faithfulScreens.Close("trader");
+            shownTrader = CharacterId.None;
+            tradeCloseSent = false;
+            return;
+        }
+        if (trade.Trader != shownTrader)
+        {
+            shownTrader = trade.Trader;
+            tradeCloseSent = false;
+            if (!faithfulScreens.IsOpen("inventory")) faithfulScreens.Open("inventory");
+            faithfulScreens.Open("trader");
+            PlaceTraderWindow();
+            return;
+        }
+        if (!faithfulScreens.IsOpen("trader") && !tradeCloseSent)
+        {
+            Say(new CloseTrade { Tick = session.World.Tick });
+            tradeCloseSent = true;
+        }
+    }
+
+    /// <summary>Moves the trader window so that its right edge is left of the inventory window's (both open at their layout places otherwise, which may overlap).</summary>
+    void PlaceTraderWindow()
+    {
+        var frames = faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent);
+        UiRect? Root(string id) => frames.FirstOrDefault(f => f.Id == id)?.Controls.FirstOrDefault(c => c.Type == "Window")?.Bounds;
+        if (Root("trader") is not { } trader || Root("inventory") is not { } inventory) return;
+        float x = Math.Max(8, inventory.X - trader.Width - 8);
+        faithfulScreens.SetOffset("trader", faithfulScreens.GetOffset("trader") + new Vector2(x - trader.X, inventory.Y - trader.Y));
+    }
+
+    /// <summary>The grid widget of an inventory window: the bag's contents grid, a pocket grid, else the largest widget drawn with the inventory slot skin (the trader layout is not known).</summary>
+    static string? GridIn(IReadOnlyList<UiControl> controls) =>
+        controls.FirstOrDefault(c => c.Name == "backpack_content")?.Name ?? controls.FirstOrDefault(c => c.Name == "main")?.Name
+        ?? controls.Where(c => c.Skin.Contains("InventorySlot", StringComparison.Ordinal)).OrderByDescending(c => c.Bounds.Width * c.Bounds.Height).FirstOrDefault()?.Name;
+
+    string? TraderGrid(string screen) => GridIn(faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent).First(f => f.Id == screen).Controls);
+
+    /// <summary>The trader window's texts: the trader in the caption, both purses in the data panel.</summary>
+    void BindTraderScreen(UiBindings b)
+    {
+        var trade = session.CurrentSnapshot.Trade;
+        b.Text["Root"] = "TRADER - " + (trade?.TraderName ?? "");
+        b.Text["datapanel"] = trade is null ? "" : $"{trade.TraderName}: c.{Money(trade.ShopMoney)}\nYou: c.{Money(trade.PlayerMoney)}";
+        b.Properties["datapanel"] = new Dictionary<string, string> { ["TextColour"] = MyGuiColours.InkText, ["TextPadding"] = "8 6 8 6", ["WordWrap"] = "true" };
+        b.Text["CapacityText"] = trade is { BuysStolen: true } ? "Buys stolen goods" : "";
+        b.Properties["CapacityText"] = new Dictionary<string, string> { ["Static"] = "true" };
+    }
+
+    /// <summary>The stock in the trader window's grid, each with what the stack costs.</summary>
+    void AddTraderContent(List<UiControl> controls)
+    {
+        if (session.CurrentSnapshot.Trade is not { } trade || GridIn(controls) is not { } gridName) return;
+        int gridIndex = controls.FindIndex(c => c.Name == gridName);
+        var slot = controls[gridIndex];
+        int columns = Math.Max(1, trade.StockWidth), rows = Math.Max(1, trade.StockHeight);
+        controls[gridIndex] = slot with
+        {
+            Properties = new Dictionary<string, string>(slot.Properties, StringComparer.Ordinal) { ["TileSize"] = FormattableString.Invariant($"{slot.Bounds.Width / columns} {slot.Bounds.Height / rows}") },
+        };
+        var area = slot.Bounds;
+        foreach (var item in trade.Stock)
+            controls.Add(new($"trade-item-{item.Index}", "TextBox",
+                new(area.X + item.X * area.Width / columns, area.Y + item.Y * area.Height / rows, item.Width * area.Width / columns, item.Height * area.Height / rows),
+                $"{item.Name}{(item.Quantity > 1 ? $" x{item.Quantity}" : "")}\nc.{Money(item.Price)}", "", "", true,
+                new Dictionary<string, string> { ["WordWrap"] = "true", ["TextAlign"] = "Center", ["FontName"] = "Kenshi_StandardFont_Medium", ["TradeItem"] = item.Index.ToString(CultureInfo.InvariantCulture) },
+                new(0.2f, 0.2f, 0.16f, 0.6f), Pickable: true, TextScale: 0.8f, Clip: slot.Clip));
+    }
+
+    /// <summary>While trading, what one of the customer's items fetches (null: no trade, or another character's grid).</summary>
+    string? SellCaption(CharacterId owner, int index)
+    {
+        if (session.CurrentSnapshot.Trade is not { } trade || trade.Customer != owner || trade.Goods.FirstOrDefault(g => g.Index == index) is not { } goods) return null;
+        return $"c.{Money(goods.Price)}" + (goods.Stolen && !trade.BuysStolen ? " (stolen!)" : goods.Stolen ? " (stolen)" : "");
+    }
 
     void AddTradePanel(List<UiControl> controls)
     {
