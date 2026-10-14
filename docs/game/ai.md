@@ -152,6 +152,8 @@ Chain (**Verified** by reading the functions and by data counts):
 2. `inherits from` is processed first, recursively, so a parent's entries are added first. Adding goes through `FUN_140268e10`, which
    calls `FUN_14027b3a0`; that skips an entry whose task type and target hand equal one already in the list, so **the parent's
    entry wins**.
+   One base-game record has two parents (`warrior guild`: `Guard building, residents` and `Shop-24hr`, which share an ancestor; **Observed** in the data 2026-10-14); Meitou
+   loads them in the listed order and counts only a true cycle as a problem. Whether the original walks every parent is **Unknown**.
 3. Entries go into five role lists on the Blackboard (index to offset is identical in `FUN_140268e10` and the sync `FUN_14026b790`,
    and the constructor lays the lists out at that stride):
 

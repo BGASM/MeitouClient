@@ -18,7 +18,7 @@ about undocumented original behaviour. Original-file facts are in
 | Overview | All original tabs; live messages and squad names; installed map image, pan/zoom/centre, player/camera markers and right-click move orders | Original map projection/zoom equivalence, settlement discovery/markers, faction data, squad editing, research/crafting/AI data bindings |
 | Escape menu | Original layout, pause/resume, Options via Tab settings, exit confirmation, new game, original named save/load dialogs | Original options window content; menu and dialog keyboard shortcuts beyond defaults |
 | Frontend | Original title image/buttons and credits; start selection and Begin using existing spawn backend; save metadata/slot selection/name editing and overwrite confirmation; load confirmation | Splash, advanced option bindings, character creation, loading/progress, continue-slot persistence (currently newest listed slot, disabled if unreadable) |
-| Trade | Trader stock in an original inventory window beside the character's, opened and closed with the trade; drag stock onto the pocket or bag grid to buy, own items onto the stock to sell; purses in the data panel, prices in captions | The trader variant's own layout (Unknown; the generic inventory window stands in), price tooltips, stack splitting, the fencing prompt |
+| Trade | Trader stock in `Kenshi_InventoryTraderWindow` beside the character's window, opened and closed with the trade; drag stock onto the pocket or bag grid to buy, own items onto the stock to sell; purses (and whether it buys stolen goods) in the data panel, prices in captions | Which layout the trader variant loads is **Observed** by name only (the file has the `datapanel`, `backpack_content` and `ArrangeButton` the window needs), price tooltips, stack splitting, the fencing prompt |
 | Other screens | XML is readable; confirmation message boxes used by menu flows | Dialogue, building, prospecting, tutorials, import, file dialogs |
 
 ## Fidelity audit (2026-10-14)
@@ -50,7 +50,9 @@ Engine choices that remain; the original is **Unknown** for each:
 
 `FaithfulInteractionTests.EveryWidgetTheFaithfulModeFillsExistsInTheOriginalLayout` [Slow] binds the HUD and every faithful screen against the installed layouts. It
 fails on any text, action, list or progress bound to a widget the layout lacks. It also prints the absent widgets that are only hidden or styled, and the named widgets
-that keep their editor caption, which is the list of original text the mode does not fill yet. It has not been run (no install here).
+that keep their editor caption, which is the list of original text the mode does not fill yet. First run against the install on 2026-10-14: it
+found the front end, inventory, bag and limb windows sharing one set of bindings (each now binds only its own widgets) and the trader in the generic window
+(now `Kenshi_InventoryTraderWindow`); it passes, with about 50 named widgets still showing their editor caption (mostly button labels such as "ARRANGE").
 
 ## Gameplay backends tracked separately
 

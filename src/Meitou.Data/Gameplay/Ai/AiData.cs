@@ -124,8 +124,10 @@ public sealed class AiDatabase(GameDatabase db)
     void Load(GameRecord r, List<AiGoal>[] roles, HashSet<string> visiting)
     {
         if (!visiting.Add(r.StringId)) { problems++; return; }
+        // visiting is the chain being loaded, not every record seen: two parents may share an ancestor (warrior guild), whose second load adds nothing.
         foreach (var parent in r.GetReferences("inherits from"))
             if (db.Find(parent.TargetStringId) is { Type: FcsRecordType.AI_PACKAGE } p) Load(p, roles, visiting);
+        visiting.Remove(r.StringId);
         var leader = r.GetReferences("Leader AI Goals");
         var squad = r.GetReferences("Squad AI Goals");
         var squad2 = r.GetReferences("Squad2 AI Goals");

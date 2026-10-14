@@ -126,11 +126,17 @@ sealed partial class PlayerInterface
         void Paragraph(string name, string text) { b.Text[name] = text; b.Properties[name] = new Dictionary<string, string> { ["WordWrap"] = "true", ["TextAlign"] = "Left Top", ["TextColour"] = MyGuiColours.InkText, ["TextPadding"] = name == "InfoPanel" ? "8 8 8 8" : "12 10 12 10" }; }
         if (id is "title" or "menu")
         {
-            Enable("NewGameButton", "LoadGameButton", "OptionsButton", "ExitButton", "ExitGameButton", "ResumeButton", "CreditsButton");
-            if (session.World.Player.Exists) Enable("SaveGameButton");
+            Enable("NewGameButton", "LoadGameButton", "OptionsButton");
+            if (starts.Count == 0) b.Disabled.Add("NewGameButton");
+            if (id == "menu")
+            {
+                Enable("ExitGameButton", "ResumeButton");
+                if (session.World.Player.Exists) Enable("SaveGameButton");
+                return true;
+            }
+            Enable("ExitButton", "CreditsButton");
             // Continue is shown only when a save exists (docs/game/ui-screens.md section 3), not greyed out.
             if (slots.Count > 0 && slotReadable) Enable("ContinueButton"); else b.Hidden.Add("ContinueButton");
-            if (starts.Count == 0) b.Disabled.Add("NewGameButton");
             b.Properties["CreditsPanel"] = new Dictionary<string, string> { ["Visible"] = showCredits ? "true" : "false" };
             Paragraph("CreditsPanelContent", credits);
             b.Properties["CreditsPanelContent"] = new Dictionary<string, string> { ["WordWrap"] = "true", ["TextAlign"] = "HCenter Top", ["TextColour"] = "1 1 1" };

@@ -63,7 +63,7 @@ sealed partial class PlayerInterface
         faithfulScreens.SetOffset("trader", faithfulScreens.GetOffset("trader") + new Vector2(x - trader.X, inventory.Y - trader.Y));
     }
 
-    /// <summary>The grid widget of an inventory window: the bag's contents grid, a pocket grid, else the largest widget drawn with the inventory slot skin (the trader layout is not known).</summary>
+    /// <summary>The grid widget of an inventory window: the bag's contents grid, a pocket grid, else the largest widget drawn with the inventory slot skin.</summary>
     static string? GridIn(IReadOnlyList<UiControl> controls) =>
         controls.FirstOrDefault(c => c.Name == "backpack_content")?.Name ?? controls.FirstOrDefault(c => c.Name == "main")?.Name
         ?? controls.Where(c => c.Skin.Contains("InventorySlot", StringComparison.Ordinal)).OrderByDescending(c => c.Bounds.Width * c.Bounds.Height).FirstOrDefault()?.Name;
@@ -75,10 +75,8 @@ sealed partial class PlayerInterface
     {
         var trade = session.CurrentSnapshot.Trade;
         b.Text["Root"] = "TRADER - " + (trade?.TraderName ?? "");
-        b.Text["datapanel"] = trade is null ? "" : $"{trade.TraderName}: c.{Money(trade.ShopMoney)}\nYou: c.{Money(trade.PlayerMoney)}";
+        b.Text["datapanel"] = trade is null ? "" : $"{trade.TraderName}: c.{Money(trade.ShopMoney)}\nYou: c.{Money(trade.PlayerMoney)}{(trade.BuysStolen ? "\nBuys stolen goods" : "")}";
         b.Properties["datapanel"] = new Dictionary<string, string> { ["TextColour"] = MyGuiColours.InkText, ["TextPadding"] = "8 6 8 6", ["WordWrap"] = "true" };
-        b.Text["CapacityText"] = trade is { BuysStolen: true } ? "Buys stolen goods" : "";
-        b.Properties["CapacityText"] = new Dictionary<string, string> { ["Static"] = "true" };
     }
 
     /// <summary>The stock in the trader window's grid, each with what the stack costs.</summary>

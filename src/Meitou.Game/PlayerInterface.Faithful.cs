@@ -86,12 +86,22 @@ sealed partial class PlayerInterface
             b.Text["Root"] = (id == "stats" ? "CHARACTER STATS" : id == "limbs" ? "LIMBS" : id == "bag" ? "BACKPACK" : "INVENTORY") + " - " + (lead?.Name ?? "No character selected");
             if (id is "inventory" or "bag" or "limbs")
             {
-                b.Text["datapanel"] = lead?.Inventory.FirstOrDefault() ?? "Select a character";
-                b.Properties["datapanel"] = new Dictionary<string, string> { ["TextColour"] = MyGuiColours.InkText, ["TextPadding"] = "8 6 8 6" };
-                b.Text["CapacityText"] = lead?.ItemGrid is { } bagGrid ? $"{bagGrid.BagWidth} x {bagGrid.BagHeight}" : "No backpack";
-                b.Properties["CapacityText"] = new Dictionary<string, string> { ["Static"] = "true" };
-                foreach (string name in new[] { "ArrangeButton", "LimbsButton" }) { b.Disabled.Remove(name); b.Actions[name] = name; if (lead is null) b.Disabled.Add(name); }
-                if (lead?.ItemGrid is { BagWidth: > 0, BagHeight: > 0 }) { b.Disabled.Remove("OpenBagButton"); b.Actions["OpenBagButton"] = "OpenBagButton"; }
+                // Each window binds only what its own layout has: the character window the data panel and the limbs button, the generic (bag) window
+                // the capacity box; the limb window has neither.
+                if (id == "inventory")
+                {
+                    b.Text["datapanel"] = lead?.Inventory.FirstOrDefault() ?? "Select a character";
+                    b.Properties["datapanel"] = new Dictionary<string, string> { ["TextColour"] = MyGuiColours.InkText, ["TextPadding"] = "8 6 8 6" };
+                    if (lead?.ItemGrid is { BagWidth: > 0, BagHeight: > 0 }) { b.Disabled.Remove("OpenBagButton"); b.Actions["OpenBagButton"] = "OpenBagButton"; }
+                }
+                if (id == "bag")
+                {
+                    b.Text["CapacityText"] = lead?.ItemGrid is { } bagGrid ? $"{bagGrid.BagWidth} x {bagGrid.BagHeight}" : "No backpack";
+                    b.Properties["CapacityText"] = new Dictionary<string, string> { ["Static"] = "true" };
+                }
+                if (id != "limbs")
+                    foreach (string name in id == "inventory" ? new[] { "ArrangeButton", "LimbsButton" } : ["ArrangeButton"])
+                    { b.Disabled.Remove(name); b.Actions[name] = name; if (lead is null) b.Disabled.Add(name); }
             }
             else
             {
