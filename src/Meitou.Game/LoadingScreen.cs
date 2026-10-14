@@ -109,14 +109,14 @@ sealed class LoadingScreen : IDisposable
         }
         else overlay.Rect(box.X, box.Y, box.X + box.Width, box.Y + box.Height, new Vector4(0.08f, 0.07f, 0.06f, 0.85f));
 
-        // The bar along the panel's bottom, LOADING... above it on the left with the spinner after it, the running step at the right.
+        // The bar along the panel's bottom; above it LOADING... and the running step on the left, the spinner on the right.
         float pad = 16 * s, barHeight = 10 * s;
         float x0 = box.X + pad, x1 = box.X + box.Width - pad, barTop = box.Y + box.Height - pad - barHeight;
         float rowTop = box.Y + pad * 0.75f, rowHeight = barTop - pad * 0.5f - rowTop, cy = rowTop + rowHeight / 2;
         float textEnd = x0;
         if (stamp is not null)
         {
-            float scale = rowHeight * 0.8f / stamp.LineHeight, textTop = cy - stamp.LineHeight * scale / 2;
+            float scale = rowHeight * 0.52f / stamp.LineHeight, textTop = cy - stamp.LineHeight * scale / 2;
             stamp.Target = overlay.Target;
             stamp.TextScaled("LOADING...", x0 + 2, textTop + 2, new Vector4(0, 0, 0, 0.8f), scale);
             textEnd = x0 + stamp.TextScaled("LOADING...", x0, textTop, new Vector4(0.87f, 0.85f, 0.81f, 1), scale);
@@ -124,8 +124,8 @@ sealed class LoadingScreen : IDisposable
         }
         else textEnd = x0 + overlay.Text("LOADING...", x0, cy - overlay.LineHeight / 2, DebugOverlay.TextColour);
 
-        // The spinner: twelve spokes, the bright one going round once a second.
-        float outer = Math.Min(rowHeight * 0.45f, 22 * s), inner = outer * 0.45f, cx = textEnd + 14 * s + outer;
+        // The spinner at the right end: twelve spokes, the bright one going round once a second.
+        float outer = Math.Min(rowHeight * 0.45f, 22 * s), inner = outer * 0.45f, cx = x1 - outer;
         double turn = clock.Elapsed.TotalSeconds % 1;
         const int Spokes = 12;
         for (int i = 0; i < Spokes; i++)
@@ -135,8 +135,8 @@ sealed class LoadingScreen : IDisposable
             var colour = new Vector4(0.9f, 0.84f, 0.7f, 0.15f + 0.85f * (1 - behind));
             overlay.Line(cx + MathF.Sin(a) * inner, cy - MathF.Cos(a) * inner, cx + MathF.Sin(a) * outer, cy - MathF.Cos(a) * outer, Math.Max(2, 3 * s), colour);
         }
-        if (label.Length > 0 && cx + outer + 12 * s + label.Length * overlay.CharWidth <= x1)
-            overlay.Text(label, x1 - label.Length * overlay.CharWidth, cy - overlay.LineHeight / 2, new Vector4(0.62f, 0.6f, 0.52f, 1));
+        if (label.Length > 0 && textEnd + 12 * s + label.Length * overlay.CharWidth <= cx - outer - 12 * s)
+            overlay.Text(label, textEnd + 12 * s, cy - overlay.LineHeight / 2, new Vector4(0.62f, 0.6f, 0.52f, 1));
         overlay.Rect(x0 - 2, barTop - 2, x1 + 2, barTop + barHeight + 2, new Vector4(0.35f, 0.31f, 0.24f, 1));
         overlay.Rect(x0, barTop, x1, barTop + barHeight, new Vector4(0.08f, 0.07f, 0.06f, 1));
         overlay.Rect(x0, barTop, x0 + (x1 - x0) * progress, barTop + barHeight, new Vector4(0.78f, 0.66f, 0.42f, 1));

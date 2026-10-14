@@ -98,8 +98,8 @@ The interactive game never blocks its window for long while it loads (engine cho
   biomes, sky, weather, particles, water, reflections, objects, foliage, shadows, gi), and `wait` for a worker's result. The host draws a
   loading frame at each step and about 60 a second while it waits. A closed window cancels the start.
 - **Screen.** `Kenshi_LoadingScreen` (a random `loading_screen*.dds` full screen; its `LoadingPanel` with LOADING... and a tip from `data/tips.txt`).
-  Meitou moves things along the bottom: on the left a panel in the same frame (`Kenshi_FloatingPanelSkin`) with LOADING... in the stamp face, a
-  spinner after it, the running step's name and a bar under them; on the right the layout's panel made small (480 × 120 at 1080 rows) holding only
+  Meitou moves things along the bottom: on the left a panel in the same frame (`Kenshi_FloatingPanelSkin`) with LOADING... in the stamp face and
+  the running step's name, a spinner at its right end and a bar under them; on the right the layout's panel made small (480 × 120 at 1080 rows) holding only
   the tip. The bar is approximate: each step has a share by its usual time
   (`StartSteps`, measured on the development machine), and within a step it eases towards 95 % of the share by elapsed time. It never goes back.
 - **Measure.** The host prints each gap of more than 250 ms without a loading frame and, after the start, the number of frames and the longest gap.
