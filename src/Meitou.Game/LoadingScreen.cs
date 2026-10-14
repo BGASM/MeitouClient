@@ -8,7 +8,7 @@ namespace Meitou.Game;
 
 /// <summary>
 /// The loading screen drawn while the game starts and between scenes (docs/engine.md "Loading"): the original's <c>Kenshi_LoadingScreen</c> (one of its
-/// <c>loading_screen*.dds</c> pictures full screen, a panel with LOADING... and a tip from <c>data/tips.txt</c>), and Meitou's spinner in the middle with an
+/// <c>loading_screen*.dds</c> pictures full screen, its panel made small at the bottom right with a tip from <c>data/tips.txt</c>), and Meitou's panel at the bottom left: LOADING..., a spinner and an
 /// approximate progress bar under it (the original has neither: engine choice). The bar eases towards the end of the running step by the time the step usually
 /// takes, so it moves while a step runs; it never goes back.
 /// </summary>
@@ -87,48 +87,59 @@ sealed class LoadingScreen : IDisposable
         overlay.Rect(0, 0, width, height, new Vector4(0.02f, 0.02f, 0.018f, 1));
         overlay.Flush(width, height);
         float progress = Progress;
+        // Two panels along the bottom (engine choice): the loading panel on the left (LOADING..., the spinner, the bar, the step), the layout's own panel on the
+        // right, made small and holding only the tip. Sizes at 1080 rows, scaled with the height.
+        float s = height / 1080f, margin = 40 * s, panelHeight = 120 * s, top = height - margin - panelHeight;
+        float half = Math.Max(width / 2f - 1.5f * margin, 1);
+        var box = new UiRect(margin, top, Math.Min(480 * s, half), panelHeight);
+        var tipBox = new UiRect(width - margin - Math.Min(480 * s, half), top, Math.Min(480 * s, half), panelHeight);
         if (painter is not null && layout is not null && resources is not null)
         {
             var b = new UiBindings();
             if (picture is not null) b.Properties["BackgroundImage"] = new Dictionary<string, string> { ["ImageTexture"] = picture };
-            b.Text["LoadingText"] = stamp is null ? (label.Length > 0 ? $"LOADING... {label}" : "LOADING...") : "";
+            b.Positions["LoadingPanel"] = tipBox;
+            b.Positions["MessageText"] = new UiRect(tipBox.X + 8 * s, tipBox.Y + 8 * s, tipBox.Width - 16 * s, tipBox.Height - 16 * s);
+            b.Hidden.Add("LoadingText");
             b.Text["MessageText"] = tip;
             b.Properties["MessageText"] = new Dictionary<string, string> { ["Static"] = "true", ["WordWrap"] = "true", ["TextAlign"] = "Center", ["FontName"] = "Kenshi_FloaterFont_Large" };
-            var controls = MyGuiPresentation.Arrange(layout, width, height, b, resources.Layers);
+            var controls = MyGuiPresentation.Arrange(layout, width, height, b, resources.Layers).ToList();
+            // The loading panel in the tip panel's frame (Kenshi_FloatingPanelSkin, the layout's LoadingPanel skin).
+            controls.Add(new UiControl("LoadingBox", "Widget", box, "", "", "Kenshi_FloatingPanelSkin", true, new Dictionary<string, string>(), Vector4.Zero));
             painter.Draw(controls, width, height, new Vector2(-1, -1), null);
-            // LOADING... in the stamp face where the layout has it, and what is loading after it, smaller.
-            if (stamp is not null && controls.FirstOrDefault(c => c.Name == "LoadingText") is { } slot)
-            {
-                float scale = slot.Bounds.Height * 0.7f / stamp.LineHeight, x = slot.Bounds.X + 14, top = slot.Bounds.Y + (slot.Bounds.Height - stamp.LineHeight * scale) / 2;
-                stamp.Target = overlay.Target;
-                stamp.TextScaled("LOADING...", x + 2, top + 2, new Vector4(0, 0, 0, 0.8f), scale);
-                float end = x + stamp.TextScaled("LOADING...", x, top, new Vector4(0.87f, 0.85f, 0.81f, 1), scale);
-                stamp.Flush(width, height);
-                if (label.Length > 0) overlay.Text(label, end + 16, slot.Bounds.Y + (slot.Bounds.Height - overlay.LineHeight) / 2, new Vector4(0.62f, 0.6f, 0.52f, 1));
-            }
         }
-        else if (label.Length > 0)
-        {
-            overlay.Text(label, (width - label.Length * overlay.CharWidth) / 2, height / 2f + 70, DebugOverlay.TextColour);
-        }
+        else overlay.Rect(box.X, box.Y, box.X + box.Width, box.Y + box.Height, new Vector4(0.08f, 0.07f, 0.06f, 0.85f));
 
-        // The spinner: twelve spokes round the middle of the screen, the bright one going round once a second.
-        float cx = width / 2f, cy = height / 2f, inner = 16, outer = 34;
+        // The bar along the panel's bottom, LOADING... above it on the left with the spinner after it, the running step at the right.
+        float pad = 16 * s, barHeight = 10 * s;
+        float x0 = box.X + pad, x1 = box.X + box.Width - pad, barTop = box.Y + box.Height - pad - barHeight;
+        float rowTop = box.Y + pad * 0.75f, rowHeight = barTop - pad * 0.5f - rowTop, cy = rowTop + rowHeight / 2;
+        float textEnd = x0;
+        if (stamp is not null)
+        {
+            float scale = rowHeight * 0.8f / stamp.LineHeight, textTop = cy - stamp.LineHeight * scale / 2;
+            stamp.Target = overlay.Target;
+            stamp.TextScaled("LOADING...", x0 + 2, textTop + 2, new Vector4(0, 0, 0, 0.8f), scale);
+            textEnd = x0 + stamp.TextScaled("LOADING...", x0, textTop, new Vector4(0.87f, 0.85f, 0.81f, 1), scale);
+            stamp.Flush(width, height);
+        }
+        else textEnd = x0 + overlay.Text("LOADING...", x0, cy - overlay.LineHeight / 2, DebugOverlay.TextColour);
+
+        // The spinner: twelve spokes, the bright one going round once a second.
+        float outer = Math.Min(rowHeight * 0.45f, 22 * s), inner = outer * 0.45f, cx = textEnd + 14 * s + outer;
         double turn = clock.Elapsed.TotalSeconds % 1;
         const int Spokes = 12;
-        float w = MathF.Min(360, width - 32), x0 = cx - w / 2, y0 = cy + 56;
-        overlay.Rect(x0 - 14, cy - 50, x0 + w + 14, y0 + 26, new Vector4(0, 0, 0, 0.45f));   // a dark backdrop behind the spinner and the bar
         for (int i = 0; i < Spokes; i++)
         {
             float a = i * MathF.Tau / Spokes;
             float behind = (float)(((turn * Spokes - i) % Spokes + Spokes) % Spokes) / Spokes;   // 0 at the head, towards 1 behind it
             var colour = new Vector4(0.9f, 0.84f, 0.7f, 0.15f + 0.85f * (1 - behind));
-            overlay.Line(cx + MathF.Sin(a) * inner, cy - MathF.Cos(a) * inner, cx + MathF.Sin(a) * outer, cy - MathF.Cos(a) * outer, 4, colour);
+            overlay.Line(cx + MathF.Sin(a) * inner, cy - MathF.Cos(a) * inner, cx + MathF.Sin(a) * outer, cy - MathF.Cos(a) * outer, Math.Max(2, 3 * s), colour);
         }
-        // The bar under it.
-        overlay.Rect(x0 - 2, y0 - 2, x0 + w + 2, y0 + 12, new Vector4(0.35f, 0.31f, 0.24f, 1));
-        overlay.Rect(x0, y0, x0 + w, y0 + 10, new Vector4(0.08f, 0.07f, 0.06f, 1));
-        overlay.Rect(x0, y0, x0 + w * progress, y0 + 10, new Vector4(0.78f, 0.66f, 0.42f, 1));
+        if (label.Length > 0 && cx + outer + 12 * s + label.Length * overlay.CharWidth <= x1)
+            overlay.Text(label, x1 - label.Length * overlay.CharWidth, cy - overlay.LineHeight / 2, new Vector4(0.62f, 0.6f, 0.52f, 1));
+        overlay.Rect(x0 - 2, barTop - 2, x1 + 2, barTop + barHeight + 2, new Vector4(0.35f, 0.31f, 0.24f, 1));
+        overlay.Rect(x0, barTop, x1, barTop + barHeight, new Vector4(0.08f, 0.07f, 0.06f, 1));
+        overlay.Rect(x0, barTop, x0 + (x1 - x0) * progress, barTop + barHeight, new Vector4(0.78f, 0.66f, 0.42f, 1));
         overlay.Flush(width, height);
     }
 

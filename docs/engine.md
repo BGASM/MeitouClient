@@ -97,8 +97,10 @@ The interactive game never blocks its window for long while it loads (engine cho
 - **Steps.** What makes GPU resources stays on the render thread. `WorldFrame.CreateGpu` calls its `step` callback before each part (terrain,
   biomes, sky, weather, particles, water, reflections, objects, foliage, shadows, gi), and `wait` for a worker's result. The host draws a
   loading frame at each step and about 60 a second while it waits. A closed window cancels the start.
-- **Screen.** `Kenshi_LoadingScreen` (a random `loading_screen*.dds` full screen; LOADING... in the stamp face with the running step's name; a tip
-  from `data/tips.txt`). Meitou adds a spinner in the middle and a bar under it. The bar is approximate: each step has a share by its usual time
+- **Screen.** `Kenshi_LoadingScreen` (a random `loading_screen*.dds` full screen; its `LoadingPanel` with LOADING... and a tip from `data/tips.txt`).
+  Meitou moves things along the bottom: on the left a panel in the same frame (`Kenshi_FloatingPanelSkin`) with LOADING... in the stamp face, a
+  spinner after it, the running step's name and a bar under them; on the right the layout's panel made small (480 × 120 at 1080 rows) holding only
+  the tip. The bar is approximate: each step has a share by its usual time
   (`StartSteps`, measured on the development machine), and within a step it eases towards 95 % of the share by elapsed time. It never goes back.
 - **Measure.** The host prints each gap of more than 250 ms without a loading frame and, after the start, the number of frames and the longest gap.
   **Observed** 2026-10-14 (RTX 4070, The Hub, warm file cache): before, no frame for 4.0 s (biomes) and 1.8 s (water), 11 frames in all. After,
