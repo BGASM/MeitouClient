@@ -92,6 +92,9 @@ public sealed class PopulationData
     ItemFactory? items;
     /// <summary>Makes item instances and the starting inventories (loadout and the CHARACTER's <c>inventory</c> list).</summary>
     public ItemFactory Items => LazyInitializer.EnsureInitialized(ref items, () => new ItemFactory(Db, Bodies.Constants));
+    Meitou.Data.Gameplay.Ai.AiDatabase? ai;
+    /// <summary>The AI_TASK and AI_PACKAGE records with their inheritance resolved (<see cref="Ai.AiSystem"/>).</summary>
+    public Meitou.Data.Gameplay.Ai.AiDatabase Ai => LazyInitializer.EnsureInitialized(ref ai, () => new Meitou.Data.Gameplay.Ai.AiDatabase(Db));
 
     public static PopulationData Create(GameDatabase db, IEnumerable<TownPlacement> placements, IAppearanceSource? appearances = null, BodyOptions? bodyOptions = null, BiomeMap? biomes = null)
     {

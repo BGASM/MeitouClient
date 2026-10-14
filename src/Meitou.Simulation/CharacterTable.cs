@@ -120,6 +120,10 @@ public sealed class CharacterCold
     public Crime.BountyLedger? Bounties { get; set; }
     /// <summary>A crime nobody has booked yet (null: none); <see cref="Crime.CrimeSystem"/>, serial phases only. Hashed only while set.</summary>
     public Crime.PendingCrime? Pending { get; set; }
+    /// <summary>What the AI decided for it (null: a character the AI does not run: the player's, or one whose squad has no AI packages); <see cref="Ai.AiSystem"/>.</summary>
+    public Ai.AiMind? Ai { get; set; }
+    /// <summary>Held still by an interaction (a trader in an open trade, <see cref="Trading.TradeSystem"/>): the AI leaves it alone. Serial phases only.</summary>
+    public bool Engaged { get; set; }
 }
 
 /// <summary>
@@ -303,6 +307,9 @@ public sealed class CharacterTable
             // Bounties and pending crimes add to the hash only while set, so worlds without crimes hash as before.
             k.Bounties?.Hash(ref hasher);
             k.Pending?.Hash(ref hasher);
+            // The AI's decision and the trade hold add to the hash only while set, so worlds without AI packages hash as before.
+            if (k.Ai is { } mind) { hasher.Add(0x41694D64); mind.Hash(ref hasher); }
+            if (k.Engaged) hasher.Add(0x456E6761);
         }
         hasher.Add(free.Count);
         foreach (int slot in free) hasher.Add(slot);

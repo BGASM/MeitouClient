@@ -7,7 +7,7 @@ public enum SquadRole { Squad1 = 0, Squad2 = 1, Leader = 2, Slave = 4 }
 
 /// <summary>
 /// A squad in the world: the platoon of docs/game/game-loop.md "Factions and squads", reduced to what loaded squads need now (the
-/// active half; the unloaded half and the AI packages come with the AI stage). Plain object, changed only in the serial phases.
+/// active half; the unloaded half is still the roaming platoon's stand-in). Plain object, changed only in the serial phases.
 /// </summary>
 public sealed class Squad
 {
@@ -33,6 +33,8 @@ public sealed class Squad
     public long Money { get; set; }
     /// <summary>The squad's shop, when it is a trader (<see cref="Trading.TradeSystem"/>); null otherwise.</summary>
     public Trading.Shop? Shop { get; set; }
+    /// <summary>The squad's AI packages and the one running (<see cref="Ai.AiSystem"/>); null for a squad the AI does not run.</summary>
+    public Ai.Blackboard? Ai { get; set; }
 }
 
 /// <summary>The squads of a world, by id. Ids are never reused.</summary>
@@ -83,6 +85,7 @@ public sealed class SquadRegistry
                 hasher.Add(m);
             }
             s.Shop?.Hash(ref hasher);   // nothing for squads that do not trade, so the pinned hashes of worlds without shops stay
+            s.Ai?.Hash(ref hasher);     // nor for squads without AI packages
         }
     }
 }

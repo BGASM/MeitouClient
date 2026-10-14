@@ -56,6 +56,8 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     public float Scale { get; init; } = 1;
     /// <summary>The character this one carries (none when not carrying).</summary>
     public CharacterId Carrying { get; init; } = CharacterId.None;
+    /// <summary>The goal the AI is acting out, in the game's words (<c>Patrolling town</c>, <c>Shopkeeper</c>); null when the AI does not run the character now.</summary>
+    public string? Activity { get; init; }
 }
 
 /// <summary>The trained stats the HUD shows for the selection.</summary>

@@ -140,6 +140,7 @@ sealed partial class PlayerInterface
         else if (openPanel is not null) AddDetailsPanel(controls);
         if (UiMode == UiMode.Meitou) AddTradePanel(controls);
         if (UiMode == UiMode.Faithful) AddInventoryDrag(controls);
+        AddHoverLabel(controls);
         return controls;
     }
 

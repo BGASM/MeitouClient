@@ -147,12 +147,14 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
     void Hold(World world, int t)
     {
         ref var n = ref world.Characters.Next[t];
+        world.Characters.Cold(t)!.Engaged = true;   // the AI leaves it alone until the trade closes
         if (n.Task == (byte)CharacterTask.Wander) traderWandered = true;
         if (n.Task is (byte)CharacterTask.Wander or (byte)CharacterTask.Idle) MovementSystem.Stop(world.Characters, t);
     }
 
     void Close(World world)
     {
+        if (world.Characters.TryResolveNext(trader, out int held)) world.Characters.Cold(held)!.Engaged = false;
         if (traderWandered && world.Characters.TryResolveNext(trader, out int t) && world.Characters.Next[t].Task == (byte)CharacterTask.Idle)
             world.Characters.Next[t].Task = (byte)CharacterTask.Wander;
         customer = trader = CharacterId.None;

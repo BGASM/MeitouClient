@@ -30,8 +30,10 @@ public enum StandardParts
     Crime = 8192,
     /// <summary>Shops, prices and trading (<see cref="Meitou.Simulation.Trading.TradeSystem"/>).</summary>
     Trade = 16384,
+    /// <summary>The AI packages of the squads and their members' goals (<see cref="Meitou.Simulation.Ai.AiSystem"/>); runs right after the player system.</summary>
+    Ai = 32768,
     /// <summary>What the game runs.</summary>
-    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee | Carry | Crime | Trade,
+    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee | Carry | Crime | Trade | Ai,
 }
 
 /// <summary>What <see cref="StandardSystems.Build"/> builds and with which settings; the defaults are the game's.</summary>
@@ -58,6 +60,7 @@ public sealed class StandardSystemOptions
     public Meitou.Simulation.Carrying.CarrySettings? Carry { get; init; }
     public Meitou.Simulation.Crime.CrimeSettings? Crime { get; init; }
     public Meitou.Simulation.Trading.TradeSettings? Trade { get; init; }
+    public Meitou.Simulation.Ai.AiSettings? Ai { get; init; }
 }
 
 /// <summary>The built systems in tick order, with the ones the host talks to.</summary>
@@ -72,6 +75,7 @@ public sealed class StandardSystemSet
     public Meitou.Simulation.Carrying.CarrySystem? Carry { get; init; }
     public Meitou.Simulation.Crime.CrimeSystem? Crime { get; init; }
     public Meitou.Simulation.Trading.TradeSystem? Trade { get; init; }
+    public Meitou.Simulation.Ai.AiSystem? Ai { get; init; }
 }
 
 /// <summary>
@@ -82,6 +86,9 @@ public sealed class StandardSystemSet
 /// <list type="number">
 /// <item><b>Population first</b>: it takes the focus command in <c>Inputs</c> and loads, spawns and unloads in <c>SlowWorld</c>, so every system after it sees the characters it made.
 /// <b>Player before movement</b>: the player system applies <c>SelectCommand</c>/<c>StopCommand</c> in <c>Inputs</c> and the movement system's <c>MoveOrder</c> in the same step reads the selection that results.</item>
+/// <item><b>AI after the player, before pursuit and movement</b>: its <c>Think</c> (a character's goal, written into its own task and path flags) runs before the movement
+/// system's, which follows the task the same tick; its <c>SlowWorld</c> sees the squads the population made this tick and gives them their blackboards. It adds nothing
+/// to the hash until a squad has AI packages.</item>
 /// <item><b>Pursuit before movement</b>: pursuit raises <c>NeedPath</c> in its <c>Schedule</c> and the movement system answers the same tick.</item>
 /// <item><b>Body before combat</b>: the body system ticks the medical state (<c>TickMedical</c> is off in the combat system) and the combat
 /// system reads its result in the same tick; with it on, combat does that itself.</item>
@@ -113,6 +120,8 @@ public static class StandardSystems
         CombatSystem? combat = null;
         if (Has(StandardParts.Population)) systems.Add(population = new PopulationSystem(data, o.Population));
         if (Has(StandardParts.Player)) systems.Add(new PlayerSystem());
+        Meitou.Simulation.Ai.AiSystem? ai = null;
+        if (Has(StandardParts.Ai)) systems.Add(ai = new Meitou.Simulation.Ai.AiSystem(data, o.Ai));
         if (Has(StandardParts.Pursuit | StandardParts.Combat | StandardParts.Retaliation | StandardParts.Flee))
             combat = new CombatSystem(data.Combat.Techniques, data.Combat.Constants, data.Bodies.Constants, data.BodyOptions, o.AnimationLengths ?? new AnimationLengths(), o.Combat);
         if (combat is not null && Has(StandardParts.Aggro)) combat.Relations = data.Relations;
@@ -155,6 +164,6 @@ public static class StandardSystems
             systems.Add(trade = new Meitou.Simulation.Trading.TradeSystem(data, o.Trade));
             trade.Crimes = crime;
         }
-        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime, Trade = trade };
+        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime, Trade = trade, Ai = ai };
     }
 }

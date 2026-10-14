@@ -52,6 +52,8 @@ public sealed record WorldSettings
     public int PartitionsPerThread { get; init; } = 2;
     /// <summary>Fewest slots in a partition (small worlds are not cut into crumbs).</summary>
     public int MinPartitionSize { get; init; } = 16;
+    /// <summary>The game hours at tick 0 (day x 24 + hour; the default is day 1 at 13:00, the host's new game): <see cref="World.GameHours"/> starts there.</summary>
+    public double StartHours { get; init; } = 37;
 }
 
 /// <summary>
@@ -79,6 +81,7 @@ public sealed partial class World : IDisposable
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(walkability);
         Settings = settings;
+        GameHours = settings.StartHours;
         Walkability = walkability;
         this.systems = [.. systems ?? []];
         for (int k = 0; k < this.systems.Count; k++) phases.Add(new SystemPhases(this, this.systems[k], k));
@@ -109,6 +112,15 @@ public sealed partial class World : IDisposable
     public IReadOnlyList<ITickSystem> Systems => systems;
     /// <summary>The number of ticks run; during a tick, the number of the tick being run.</summary>
     public long Tick { get; private set; }
+    /// <summary>Game seconds per game hour (docs/game/game-loop.md "The clock", Verified; the engine's <c>GameClock</c> has the same).</summary>
+    public const double SecondsPerGameHour = 1200.0 / 11;
+    /// <summary>
+    /// The game hours (day x 24 + time of day): the AI's hour windows read it. It advances by one tick of game time each tick; a host with a clock sets it from
+    /// the clock before each tick (the clock can be set). An input like the commands, so not part of the state hash.
+    /// </summary>
+    public double GameHours { get; set; }
+    /// <summary>The integer hour of day, 0 to 23 (the game's sky controller hour that the AI compares windows with).</summary>
+    public int Hour => Math.Clamp((int)(((GameHours % 24) + 24) % 24), 0, 23);
     public float TickSeconds => Settings.TickSeconds;
     /// <summary>The snapshot the last tick published, and the one before it (for interpolating); <see cref="WorldSnapshot.Empty"/> before.</summary>
     public WorldSnapshot Snapshot { get; private set; } = WorldSnapshot.Empty;
@@ -173,6 +185,7 @@ public sealed partial class World : IDisposable
         table.Phase = TablePhase.Outside;
         table.EndTick();
         Tick++;
+        GameHours += TickSeconds / SecondsPerGameHour;
         if (Settings.PublishSnapshots) Publish();
     }
 

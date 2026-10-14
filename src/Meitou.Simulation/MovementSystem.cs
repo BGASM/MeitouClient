@@ -234,6 +234,7 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                 var squad = cold.SquadId >= 0 ? world.Squads.Find(cold.SquadId) : null;
                 var centre = squad is not null ? squad.HomeCentre : new Vector2(n.Position.X, n.Position.Z);
                 float radius = squad is not null ? squad.HomeRadius : 100;
+                if (cold.Ai is { WanderRadius: > 0 } mind) (centre, radius) = (mind.WanderCentre, mind.WanderRadius);   // milling about its post (Ai.AiBehaviour.Mill)
                 ulong roll = Rng.Hash(world.Seed, Rng.Key(table.IdOf(i)), RngPurpose.Wander, (ulong)world.Tick);
                 n.Goal = Rng.PointInDisc(roll, centre, radius);
                 n.Flags |= (ushort)MoveFlags.NeedPath;

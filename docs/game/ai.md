@@ -356,6 +356,9 @@ state 6 `isNoEnemiesInVicinity` is the sense object's enemy count being 0.
 
 ## Implementation outline
 
+Status (2026-10-14, [../simulation.md](../simulation.md#ai)): step 1 is built (`AiDatabase`), step 3 with the base-class package rules only, step 4 without the job and
+request lists, sticky timers and decoded crowding, and IDLE of step 5's default tasks; 22 goal types are acted out on the movement tasks. Nothing above was learned anew for it.
+
 1. Load AI_TASK / AI_PACKAGE through `GameDatabase` (`FcsRecordType.AI_TASK`, `AI_PACKAGE`), resolving `inherits from` first with
    parent-wins dedup by (taskType, target); weight = val2 x 0.01 or 1.0 (RACE `AI Goals`: val1 x 0.01, window 0..100).
 2. Model `TaskData` as a table keyed by `taskType` (from [ai-tasks.md](ai-tasks.md)); start with the 143 types that have real classes.

@@ -89,6 +89,7 @@ public sealed class WorldSession : IDisposable
     /// <summary>One simulation tick: the world runs its phases, the game clock moves by one tick of game time.</summary>
     void SimulationTick()
     {
+        World.GameHours = Clock.TotalHours;
         World.RunTick();
         Clock.Advance(Simulation.TickSeconds);
     }

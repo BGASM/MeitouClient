@@ -27,7 +27,7 @@ Each stage ends with tests and something the owner can run.
 | **6. Player** | New game from NEW_GAME_STARTOFF, selection, move orders, minimal HUD | Done ([Player](#player)); formation and queued orders included |
 | **7. Bodies** | Stats and XP, hunger, blood, body parts, KO and death | Done and wired into `World` ([Bodies](#bodies)); first aid, resting and XP on the move are in play (2026-10-13, `FirstAidSystem`); beds and the time scale are open |
 | **8. Combat** | Melee per [combat.md](game/combat.md); ranged later | Melee done and wired ([Combat](#combat)); fights start by faction hostility, the player's idle characters defend themselves, the player's assaults and killings change the relations (2026-10-13, `AggroSystem`, [Hostility](#hostility-and-relations)); crossbows done ([Ranged](#ranged)); animals fight with their natural weapons and bodies, drawn and animated with their own clips (2026-10-13, [Animals](#animals)); turrets and attack slots not built |
-| **9. AI proper** | Packages, blackboard, scoring and planner ([ai.md](game/ai.md)), off-screen squads | Not started (gate: towns run their daily routines, squads travel off screen). `PursuitSystem`, `RetaliationSystem`, `AggroSystem` (senses and target choice) and the roaming squads are engine stand-ins, not the original's AI |
+| **9. AI proper** | Packages, blackboard, scoring and planner ([ai.md](game/ai.md)), off-screen squads | Started 2026-10-14 ([AI](#ai)): the AI_PACKAGE and AI_TASK data, the blackboard's package choice by slot, the members' goal choice by tier, weight, hour window and continuity, 22 goal types acted out on the movement tasks; residents keep shop, patrol and go to bed by the clock. Not built: the package subclasses, the planner, the senses-driven goals (combat, rescue, prisoners), off-screen squads. `PursuitSystem`, `RetaliationSystem`, `AggroSystem` and the roaming squads are still engine stand-ins |
 | **10. Saves** | Read and write the world state ([save.md](formats/save.md)) | API done ([Saves](#saves)); the game host quicksaves (F5) and quickloads (F9) the player's squad into its own slot ([Quicksave and quickload](#quicksave-and-quickload)); no save menu, no loading of the original game's saves in play |
 | **11+** | Economy and trade, buildings and production, the MyGUI screens, audio | Crimes and bounties (2026-10-13, [Crimes and bounties](#crimes-and-bounties)); item prices, shops and trading (2026-10-14, [Trade](#trade)); the rest not started |
 
@@ -224,22 +224,25 @@ result (the golden hashes pin it):
 |---|---|---|---|
 | 1 | `PopulationSystem` | Inputs, SlowWorld | Zones, residents, bar and roaming squads, the wild (homeless squads and nests), the player's squad |
 | 2 | `PlayerSystem` | Inputs, SlowWorld | Selection and stop; prunes the selection |
-| 3 | `PursuitSystem` | Schedule | Paths for attackers towards their targets |
-| 4 | `MovementSystem` | Inputs, Schedule, Think, Move | Orders, paths, tasks, steering |
-| 5 | `FirstAidSystem` | Inputs, Schedule, Act, Apply, SlowWorld | First aid and resting: treat / rest / medic job orders, the walk to the patient, the bandaging, NPCs treating by themselves ([Bodies](#bodies)) |
-| 6 | `BodySystem` | Act, SlowWorld | Medical tick (resting from the `Rest` task), top speed, XP on the move, the fighter's encumbrance, down characters; removes corpses |
-| 7 | `CarrySystem` | Inputs, Schedule, SlowWorld | Pick up, carry, put down, loot, the rescue job and NPC leader rescue ([Carrying](#carrying-rescue-and-looting)) |
-| 8 | `CombatSystem` | Inputs, Schedule, Move, Act, Apply, SlowWorld | Fights, melee and crossbow (`Schedule` resyncs its slots with the table and flies the bolts, [Ranged](#ranged)) |
-| 9 | `AnimationSystem` | Act | Animation layers |
-| 10 | `FeedSystem` | SlowWorld | Eating |
-| 11 | `RetaliationSystem` | SlowWorld | Attacked characters fight back (NPCs always, the player's while idle) |
-| 12 | `AggroSystem` | Schedule, Act, Apply, SlowWorld | NPCs attack enemies of their faction they see or hear (the original's figures); the leash; back to the routine after a fight; hashes the live relation table ([Hostility](#hostility-and-relations)) |
-| 13 | `FleeSystem` | SlowWorld | NPC squads of factions with run-away ratios break and run when beaten, until safe ([Hostility](#hostility-and-relations)) |
-| 14 | `CrimeSystem` | SlowWorld | Pending crimes from the player's deeds (reported by combat and carrying), witnesses, booking by the police, bounty expiry ([Crimes and bounties](#crimes-and-bounties)) |
-| 15 | `TradeSystem` | Inputs, SlowWorld | Shops of trader squads (stock, purse, restock), the open trade, buying, selling and fencing ([Trade](#trade)) |
+| 3 | `AiSystem` | Think, SlowWorld | Blackboards and package choice of squads with AI packages, the members' goals and their act-out ([AI](#ai)) |
+| 4 | `PursuitSystem` | Schedule | Paths for attackers towards their targets |
+| 5 | `MovementSystem` | Inputs, Schedule, Think, Move | Orders, paths, tasks, steering |
+| 6 | `FirstAidSystem` | Inputs, Schedule, Act, Apply, SlowWorld | First aid and resting: treat / rest / medic job orders, the walk to the patient, the bandaging, NPCs treating by themselves ([Bodies](#bodies)) |
+| 7 | `BodySystem` | Act, SlowWorld | Medical tick (resting from the `Rest` task), top speed, XP on the move, the fighter's encumbrance, down characters; removes corpses |
+| 8 | `CarrySystem` | Inputs, Schedule, SlowWorld | Pick up, carry, put down, loot, the rescue job and NPC leader rescue ([Carrying](#carrying-rescue-and-looting)) |
+| 9 | `CombatSystem` | Inputs, Schedule, Move, Act, Apply, SlowWorld | Fights, melee and crossbow (`Schedule` resyncs its slots with the table and flies the bolts, [Ranged](#ranged)) |
+| 10 | `AnimationSystem` | Act | Animation layers |
+| 11 | `FeedSystem` | SlowWorld | Eating |
+| 12 | `RetaliationSystem` | SlowWorld | Attacked characters fight back (NPCs always, the player's while idle) |
+| 13 | `AggroSystem` | Schedule, Act, Apply, SlowWorld | NPCs attack enemies of their faction they see or hear (the original's figures); the leash; back to the routine after a fight; hashes the live relation table ([Hostility](#hostility-and-relations)) |
+| 14 | `FleeSystem` | SlowWorld | NPC squads of factions with run-away ratios break and run when beaten, until safe ([Hostility](#hostility-and-relations)) |
+| 15 | `CrimeSystem` | SlowWorld | Pending crimes from the player's deeds (reported by combat and carrying), witnesses, booking by the police, bounty expiry ([Crimes and bounties](#crimes-and-bounties)) |
+| 16 | `TradeSystem` | Inputs, SlowWorld | Shops of trader squads (stock, purse, restock), the open trade, buying, selling and fencing ([Trade](#trade)) |
 
 The rules: **population first** (it spawns in `SlowWorld`, so later systems see its characters); **player before movement** (a
-`MoveOrder` without ids reads the selection the player system just changed); **pursuit before movement** (pursuit raises `NeedPath` in
+`MoveOrder` without ids reads the selection the player system just changed); **AI after the player, before pursuit and movement** (2026-10-14: its `Think` writes a
+character's task and path flags and the movement system's `Think` follows them the same tick; its `SlowWorld` sees the squads the population made this tick; it adds nothing to
+the hash until a squad has AI packages, so inserting it moved no pin); **pursuit before movement** (pursuit raises `NeedPath` in
 `Schedule` and movement answers the same tick); **first aid after movement, before body** (2026-10-13: a move order is the movement system's and sets the task, so it replaces a treatment or a rest; the treatment is applied in the serial commit, after every `Act` of the tick including the body system's medical tick; first aid reads the patient only in its own `Act` barrier, where nothing writes it); **body before combat** (the body system ticks the medical state, combat runs with
 `TickMedical` off and reads the result); **combat before animation and retaliation** (combat swaps its read and write arrays at the end of
 its `SlowWorld`: a system after it sees the new combat state, one before it the old); **carry after body, before combat** (2026-10-13: its
@@ -312,7 +315,7 @@ positions and the cold state no other `Act` writes). The game's `CombatOptions` 
   Wild sites load and unload like towns (zone gate, 60 s grace, built on the population thread, taken in at a tick boundary); every roll is keyed by the
   world seed and the zone or nest and the squad's number, never the tick, so a reload makes the same squads (the spots of homeless squads move when the
   player stands elsewhere). Wild squads are plain `Squad`s (`Town` -1), not platoons: they do not travel between towns and are not saved.
-- **Not made:** roads for long trips (`road preference`), AI package jobs (`GoOutOnPatrol` and others), faction campaigns,
+- **Not made:** roads for long trips (`road preference`), the AI package subclasses (`GoOutOnPatrol` and others; the plain packages run, [AI](#ai)), faction campaigns,
   the island-wide homeless budget and nest respawns (6.2, 6.3), the nests' debris and loot (section 8), unique squads, the residents' unloaded half (a town is all or nothing).
 
 ## Player
@@ -983,7 +986,8 @@ Item prices, shops and trading (2026-10-14), from [game/economy.md](game/economy
   wander; the original's shopkeepers stand at their node); within 30 units (**engine choice**: the original's trading range is **Unknown**) the trade is open and `WorldSnapshot.Trade`
   publishes the stock with buy prices and the customer's main and backpack items with sell prices. `BuyItem` and `SellItem` (an `InventoryItemToken` and a count) move as many units
   as the payer can afford ("You can't afford that." / "The shopkeeper can't afford that.") and the receiver has room for ("No room for that item."), and the cats between
-  `Player.Money` and the shop's purse. Walking away, a knock-out, a fight or a hostile trader closes it; `CloseTrade` too. The trader goes back to wandering.
+  `Player.Money` and the shop's purse. Walking away, a knock-out, a fight or a hostile trader closes it; `CloseTrade` too. The trader goes back to wandering, or to what the
+  [AI](#ai) has it doing (the held trader is `CharacterCold.Engaged`, which the AI leaves alone).
 - **Stolen goods and fencing.** A loot-all that is a theft by the crime rules (`CrimeSystem.IsLootTheft`) marks what it takes as stolen from the victim's faction
   (`ItemInstance.StolenFrom`, the item's "taken from" owner of carry-loot.md 4.4 reduced to its faction); an item is stolen while its holder is of another faction. Stolen and clean
   units do not stack together (**engine choice**). Selling a stolen item to a shop without `buys stolen` is caught unless a roll is below lerp(thievery / 100, 0.4, 1.25), halved
@@ -1001,6 +1005,51 @@ Item prices, shops and trading (2026-10-14), from [game/economy.md](game/economy
   item captions (the original's tooltip is not built); the trader window is placed left of the inventory window. Meitou mode has its own panel (stock and goods lists, "1" and "ALL").
 - **Not built:** the item tooltips with prices, the stack-splitting drag, building shops and `vendor money`, `special items`, artifacts, the culture's illegal goods, smuggling,
   slaves, prisoners and animals for sale (12), bail, NPC shopping (`Task_Shopping`), picking up money items, blueprint and research costs.
+
+## AI
+
+Stage 9, begun 2026-10-14, from [game/ai.md](game/ai.md) and [game/ai-tasks.md](game/ai-tasks.md). Code: `Meitou.Data.Gameplay.Ai` (`TaskType`, `AiDatabase`, `AiPackage`,
+`AiGoal`) and `Meitou.Simulation.Ai` (`Blackboard`, `AiMind`, `TaskBehaviours`, `AiSystem`).
+
+- **Data.** `TaskType` is the game's `taskType` with its numbers (the names of ai-tasks.md's first table; 0 has no name there, 289 and 290 have none in the exe). `AiTask` reads an
+  AI_TASK's `enum`, `classification` (the tier), `targeting` and `ending`. `AiDatabase.Package` resolves an AI_PACKAGE as ai.md "Goal loading" says: `inherits from` first, an entry
+  whose type and target are already listed is skipped (the parent's wins), the Squad list from `Squad AI Goals` else `Leader AI Goals`, Squad2 from `Squad2` else Squad else Leader,
+  Slave from `Slave AI Goals` only, applied to each record of the chain (**engine reading**: the doc states the fallback for one record); an entry's hours are (val0, val1) and its
+  weight val2 x 0.01, 0 meaning 1. `Packages(template)` gives a template's `AI packages` with their slots (v0); `RaceGoals` a RACE's `AI Goals` (weight val1 x 0.01, always in
+  window). The FACTION `AI fallback` (one record uses it) is not read.
+- **Blackboards.** A squad whose template lists AI packages, and which is neither the player's nor a roaming platoon's active half, gets a `Blackboard` at the AI's first look after
+  it appears (the platoons keep their travel stand-in, [Population](#population)). Every 30 ticks it chooses the package by ai.md's slot rule: slots from the highest down; in a slot
+  the current package stays unless finished (then its `Leads to` starts), an earlier entry that can start pre-empts it, and a lone slot-0 package starts even when it cannot. Plain
+  packages (signals 0, 2, 3, 7, 8, 9, 18 and 21: the base class) can always start and never finish. **The subclasses are not built**: here they never start, except as that lone
+  slot-0 package, and never finish, so a template's higher-slot patrols and wars stay idle and its slot-0 town package runs.
+- **Choosing a goal.** Each member has an `AiMind` and thinks every 15 ticks (staggered by slot), and at once when its squad starts another package. The goals of its role list (the
+  squad leader takes the Leader list, the others by squad role: Squad, Squad2, Slave), its race's `AI Goals` and the default IDLE (fluff tier, weight 0.1, ai.md "Default tasks")
+  are scored tier by tier, urgent, then non-urgent, then fluff; the first tier with a positive score wins (ai.md's passes; the job and task-request lists do not exist yet).
+  Score = desire x weight x crowding^n, x 1.25 for the goal it is acting out already (**Observed**; near ties do not flip). A goal outside its hour window (the integer hour of
+  `World.GameHours`; start >= end wraps midnight) is skipped. **Engine choices**: the desire is 1 for a goal it can act out and 0 for the rest (the TaskData desire functions are
+  not decoded), the crowding factor is 1 (per TaskData in the original, **Unknown**), and the sticky commitment timers are not modelled.
+- **Acting out.** The original runs a `Task_*` class and a GOAP plan; towns have no buildings, beds or nodes here yet, so `TaskBehaviours` maps 22 goal types onto the movement
+  tasks. IDLE mills about the character's post (wander within 25 units). PATROL_TOWN, PATROL, WANDERER, RELAX_IN_TOWN_PACKAGE and SHOPPING roam the squad's home. The
+  stand-at-node goals (shopkeeper, guards, general), HOLD_POSITION, STAY_IN_HOME, MAN_THE_GATE and SIT_ON_THRONE walk to the post and stand. FOLLOW_SQUADLEADER, FOLLOW_SLAVEMASTER
+  and BODYGUARD follow the leader (the leader itself cannot). GO_HOME_AND_GO_TO_BED, its SECURE twin and SLEEP_ON_FLOOR walk to the post and lie down (`Rest`); SIT_AROUND sits
+  where it is. **The post** is where the character stood when the AI took it over, the stand-in for a node of its home building; three walks in a row that end elsewhere make the
+  spot it stands on its post. Every other type (combat, rescue, prisoners, slaves, machines, doors, ...) is not acted out and never chosen; combat, fleeing, rescue and first aid
+  stay with their systems.
+- **Who runs whom.** The AI gives a character a task only while nothing else holds it (`AiSystem.Holds`): not the player's, not in a fight, fleeing, down, carrying, carried or
+  trading, and its task is idle, wander, follow, or the AI's own walk, sleep or sit. A fight takes it over; the aggro's stand-down hands it back. **Known effect**: a sleeping
+  (`Rest`) NPC is skipped by the aggro's look, as a resting one always was, so it fights only when attacked.
+- **Time.** `World.GameHours` (day x 24 + hour, from `WorldSettings.StartHours`, default day 1 at 13:00) advances one tick of game time per tick; `WorldSession` sets it from its
+  `GameClock` before each tick, so the debug hour slider and a loaded save's clock reach the AI. It is an input, not hashed.
+- **Shown.** `CharacterSnapshot.Activity` is the goal's TaskData text (`Shopkeeper`, `Patrolling town`, `Going to bed`) while the AI runs the character; the host shows the name
+  and the activity beside the cursor over any other character, in both UI modes (the original's mouse-over text is its `TooltipPanel`, layout **Unknown**).
+- **Hash and saves.** Blackboards and minds are hashed with their squads and characters only when present, so worlds without AI packages hash as before (no pin moved). Nothing of
+  the AI is saved (the original's `currentPackage`, `pjobT`, `tjobT` and the rest, [save.md](formats/save.md)): residents are made again on load and choose again.
+- **Tests.** `AiTests`: the data rules (parent wins, fallbacks, weights, slots), the hour windows, the slot rule, a town whose shopkeeper keeps shop while its guards patrol at 13:00
+  and walk back and lie down at 22:30, thread-count independence; `[Slow]` the merged base game's counts from ai.md (219 packages, 124 tasks, 804/561/58/64 goal entries, no
+  unresolved link).
+- **Not built:** the package subclasses (patrols out of town, wars, contracts, bar hang-outs, prisoner shipping) and `canActivate`/`isFinished` beyond the base class; the GOAP
+  planner, TaskData conditions and desire functions; jobs and task requests; the urgent goals that need the senses (`SELF_PRESERVATION`, `PROTECT_ALLIES`, `ATTACK_ENEMIES`: the
+  aggro and flee systems stand in); homes, beds, doors and nodes; dialogue's `AI contract` and `change AI`; the unloaded modes; saving the AI state.
 
 ## Saves
 
@@ -1259,7 +1308,7 @@ for crimes ([Crimes and bounties](#crimes-and-bounties), economy.md 11): how a k
 function's squad-level kind 7 does, the faction parent `+0x38` a bounty may go to, the victim test `FUN_140436610` of an assault, whether witnesses also hear, and whether the original's
 relation changes for deeds come only through witnesses (Meitou keeps its deed-time events).
 
-**Engine gaps**: the AI (stage 9), towns and their state, the economy beyond prices, shops and trading, buildings, the UI screens, the host's use of saves, combat clips and ranged
+**Engine gaps**: most of the AI (stage 9; [AI](#ai) lists what is built), towns and their state, the economy beyond prices, shops and trading, buildings, the UI screens, the host's use of saves, combat clips and ranged
 combat, doors that open and close in play, physics.
 
 **Refactor items skipped because they would change behaviour** (each moves a golden hash or the timing of something). Done 2026-10-13: retaliation no longer
