@@ -56,11 +56,11 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
         int every = Math.Max(1, Settings.ThinkEveryTicks);
         for (int i = part.Start; i < part.End; i++)
         {
-            if (!prev[i].Alive || table.Cold(i) is not { Ai: { } mind } cold) continue;
-            if (world.Squads.Find(cold.SquadId) is not { Ai: { } board } squad) continue;
+            if (!prev[i].Alive || table.Cold(i) is not { Ai: { Squad: { Ai: { } board } squad } mind } cold) continue;
+            // Cheapest test first: most characters are not due this tick.
+            if ((world.Tick + i) % every != 0 && mind.Version == board.Version) continue;
             ref var n = ref table.Next[i];
             if (!Holds(n, cold)) continue;
-            if ((world.Tick + i) % every != 0 && mind.Version == board.Version) continue;
             var goal = Choose(world, i, cold, mind, squad, board);
             Act(table, i, mind, goal, board.Version);
         }
@@ -91,7 +91,7 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
     {
         var id = world.Characters.IdOf(slot);
         var roles = board.Roles[(int)RoleOf(squad, id, cold)];
-        var race = cold.Race is { } r ? data.Ai.RaceGoals(r.StringId) : [];
+        var race = mind.RaceGoals;
         int hour = world.Hour;
         foreach (var tier in Tiers)
         {
@@ -107,8 +107,9 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
                 if (mind.Goal is { } current && current.Task.Type == g.Task.Type && current.Task.Target == g.Task.Target) score *= Settings.Continuity;
                 if (score > bestScore) (best, bestScore) = (g, score);
             }
-            foreach (var g in roles) Consider(g);
-            foreach (var g in race) Consider(g);
+            // Index loops: a foreach over the interface would box an enumerator per list and pass.
+            for (int k = 0; k < roles.Count; k++) Consider(roles[k]);
+            for (int k = 0; k < race.Count; k++) Consider(race[k]);
             Consider(Idle);
             if (best is not null) return best;
         }
@@ -207,6 +208,7 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
                 squad.Ai.Update();
             }
             else if (packages) squad.Ai.Update();
+            else continue;   // the members and the crowding counts are looked at on the package cadence only (and when the squad appears)
             var board = squad.Ai;
             board.Crowd.Clear();
             foreach (var m in squad.Members)
@@ -216,7 +218,7 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
                 if (cold.Ai is null)
                 {
                     var p = table.Next[s].Position;
-                    cold.Ai = new AiMind { Post = new Vector2(p.X, p.Z) };
+                    cold.Ai = new AiMind { Squad = squad, Post = new Vector2(p.X, p.Z), RaceGoals = cold.Race is { } race ? data.Ai.RaceGoals(race.StringId) : [] };
                 }
                 if (cold.Ai.Goal is { } g) board.Crowd[g.Task.Type] = board.Crowd.GetValueOrDefault(g.Task.Type) + 1;
             }

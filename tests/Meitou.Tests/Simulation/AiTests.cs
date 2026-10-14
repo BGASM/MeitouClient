@@ -47,8 +47,8 @@ public class AiTests(ITestOutputHelper output)
         return [shop, patrol, bed, raid, sit, parent, child, outing];
     }
 
-    internal static GameDatabase Database() =>
-        SyntheticTown.Database(extra: Records(), changePatrol: p => p.References["AI packages"] = [Ref("111-t", 0), Ref("112-t", 1)]);
+    internal static GameDatabase Database(int residentSquads = 3) =>
+        SyntheticTown.Database(residentSquads, extra: Records(), changePatrol: p => p.References["AI packages"] = [Ref("111-t", 0), Ref("112-t", 1)]);
 
     [Fact]
     public void Task_types_carry_the_game_numbers()

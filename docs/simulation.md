@@ -1044,6 +1044,12 @@ Stage 9, begun 2026-10-14, from [game/ai.md](game/ai.md) and [game/ai-tasks.md](
   and the activity beside the cursor over any other character, in both UI modes (the original's mouse-over text is its `TooltipPanel`, layout **Unknown**).
 - **Hash and saves.** Blackboards and minds are hashed with their squads and characters only when present, so worlds without AI packages hash as before (no pin moved). Nothing of
   the AI is saved (the original's `currentPackage`, `pjobT`, `tjobT` and the rest, [save.md](formats/save.md)): residents are made again on load and choose again.
+- **Cost** (**Observed**, 2026-10-14, `AiBenchTests` in Release on the 4-core cloud container: a synthetic town of 1807 residents in 301 squads inside a 300-unit radius, 900
+  ticks with night falling halfway). One thread: the AI's think 148 us and its serial step 24 us per tick, of a 5.6 to 6.1 ms tick (3 %; the rest is mostly separation steering in that
+  crowd), about 0.1 us per character per tick. Four threads: think 155 us summed over the workers, serial 17 us, tick 3.1 ms. A character is due every 15 ticks, so about 120 choose per
+  tick; the rest cost a slot test. Made so by: the squad held on the mind (a sorted-dictionary lookup per character per tick was half the think), the race goals looked up once (the
+  lookup's lock made four threads slower than one), index loops (no boxed enumerators), and the members and crowding counts visited on the 30-tick package cadence (the per-tick
+  recount was 200 us).
 - **Tests.** `AiTests`: the data rules (parent wins, fallbacks, weights, slots), the hour windows, the slot rule, a town whose shopkeeper keeps shop while its guards patrol at 13:00
   and walk back and lie down at 22:30, thread-count independence; `[Slow]` the merged base game's counts from ai.md (219 packages, 124 tasks, 804/561/58/64 goal entries, no
   unresolved link).

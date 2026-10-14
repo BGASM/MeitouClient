@@ -31,7 +31,7 @@ public sealed class Blackboard
     public int Version { get; private set; }
     /// <summary>The current package's goals per <see cref="AiRole"/>.</summary>
     public IReadOnlyList<AiGoal>[] Roles { get; private set; } = NoRoles;
-    /// <summary>How many members act out each goal type (the crowding count of the original's <c>TaskInfo</c>), as the last serial step counted them.</summary>
+    /// <summary>How many members act out each goal type (the crowding count of the original's <c>TaskInfo</c>), as counted on the last package cadence.</summary>
     public Dictionary<TaskType, int> Crowd { get; } = [];
     /// <summary>All packages in slot order (highest first), as listed.</summary>
     public IEnumerable<SlottedPackage> Packages => slots.Reverse().SelectMany(s => s.Value.Select(p => new SlottedPackage(s.Key, p)));
@@ -117,6 +117,10 @@ public sealed class AiMind
     /// <summary>The centre and radius <see cref="MovementSystem"/>'s wander uses instead of the squad's home (radius 0: the squad's).</summary>
     public Vector2 WanderCentre { get; set; }
     public float WanderRadius { get; set; }
+    /// <summary>The squad it thinks for (fixed for the mind's life: a character does not change squads), held so the think needs no lookup. Not hashed (the squad is).</summary>
+    public required Squad Squad { get; init; }
+    /// <summary>Its race's <c>AI Goals</c>, looked up once when the mind is made (the lookup takes a lock; the think runs on every worker). Follows from the race, so not hashed.</summary>
+    public IReadOnlyList<AiGoal> RaceGoals { get; init; } = [];
     /// <summary>It was sent walking to its post and has not arrived.</summary>
     public bool Walking { get; set; }
     /// <summary>Walks to its post in a row that ended elsewhere (no way there, or interrupted); at <see cref="AiSystem.MaxFailedWalks"/> the spot it stands on becomes its post.</summary>
