@@ -77,9 +77,18 @@ Code layout (engine choices; behaviour is the game loop above):
 | `GameHost.Characters.cs` | The renderer's draw list from the two snapshots, markers, the camera focus command. |
 | `GameHost.Saving.cs` | Quicksave (F5) and quickload (F9): the requests, `SaveCapture` at a frame boundary and the file write on a worker, the new world from `SaveLoader`, the host re-hooked ([simulation.md](simulation.md#quicksave-and-quickload)). |
 | `GameHost.Duel.cs` | The `--duel` trailer scene: two Samurai fighting on rails, the lap measured headless and replayed exactly ([simulation.md](simulation.md#duel)). |
+| `GameConsole.cs` | The console (below). |
 | `KeyMap.cs` | Silk key and button to the engine's. |
 | `PlayerInterface*.cs` | Events and commands; picking (`.Picking`); the HUD (`.Hud`). The HUD formats the snapshot's numbers (`SkillSummary`) itself. |
 | `NavAdapter.cs` | The navmesh as the simulation's `IAgentWalkability`. |
+
+### Console
+
+`meitou.exe` is a windowed (GUI subsystem) program since 2026-10-14, so starting it opens no console window. Started from a terminal, it attaches
+to that terminal's console and writes there; a terminal does not wait for a GUI program, so the prompt comes back at once and the output arrives
+after it (pipe it, or `Start-Process -Wait`, to wait and to get the exit code). With no terminal the output is lost, except the question for the
+Kenshi folder (`GameInstall.LocateOrAsk`, when neither `KENSHI_PATH`, `meitou.local.json` nor Steam finds it), which opens a console of its own
+for the answer and closes it after. `meitou-viewer.exe` and `meitou-tools.exe` stay console programs.
 
 ### Loading
 

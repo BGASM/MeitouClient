@@ -8,6 +8,7 @@ static class Program
 {
     static int Main(string[] args)
     {
+        GameConsole.AttachToParent();
         RenderJobs.RaiseRenderThread();
         GameOptions game;
         string[] rest;
@@ -33,7 +34,9 @@ static class Program
             return 2;
         }
         if (world.X is null && world.Zone is null && world.Town is null) world.Town = "The Hub";
-        var install = GameInstall.LocateOrAsk();
+        var install = GameInstall.Locate();
+        if (install is null)
+            using (GameConsole.ForPrompt()) install = GameInstall.LocateOrAsk();
         if (install is null)
         {
             Console.Error.WriteLine($"Kenshi install not found: set {GameInstall.EnvironmentVariable} or create {GameInstall.LocalConfigFile}.");

@@ -3,7 +3,8 @@
   <!-- The game executable: boots into the world with the Kenshi camera (docs/engine.md). -->
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <!-- Windowed: no console window opens with the game; a terminal that starts it still gets its output (GameConsole). -->
+    <OutputType>WinExe</OutputType>
     <AssemblyName>meitou</AssemblyName>
     <ApplicationIcon>../../assets/branding/meitou.ico</ApplicationIcon>
     <RootNamespace>Meitou.Game</RootNamespace>
