@@ -501,7 +501,8 @@ Saves go to a folder of our own while testing (`%LOCALAPPDATA%\Meitou\save-test\
   keeping each read item's record keys and its id and place in the file, so an unchanged inventory is written back byte for byte: **Verified** against the five saves by
   `A_real_save_captured_again_keeps_every_record`). In the five saves every item's `base data sid` resolves on the base load order (12,946 items in `quicksave`, **Verified** by a probe);
   `main` items reach cell row 7 with a 2-high item (an 8 x 8 grid at least, **Observed**). An item made in play gets the key set of the real records (`uniform`, `color sid` empty, null
-  `ownedby` and `insideBuilding` handles, `death` false). The `ownedby` handle (a character handle on bought items, null on starting kit in the sample) is carried, not interpreted.
+  `ownedby` and `insideBuilding` handles, `death` false). The `ownedby` handle (a character handle on bought items, null on starting kit in the sample) is carried, not interpreted:
+  an item that moved to another character or platoon keeps the old one, which may then name a character the save no longer has (whether the original minds is **Unknown**).
 - **The look's seed as the handle serial** (engine choice, 2026-10-13): the save documents the serial of a character's handle (`handleS`) only as its own random number. A character Meitou writes
   that has a rolled look (`Loadout.Seed`) gets that seed as its serial (`SaveCapture`); the loader rolls the look from it only for a character saved without items (a Meitou quicksave from before
   inventories were written). **Unknown**: whether the original minds that a serial is not random (it is only compared as an id as far as the sample shows, **Unknown**).
