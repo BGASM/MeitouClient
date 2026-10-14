@@ -14,6 +14,8 @@ sealed class ZoneObjects
     public List<PlacedMesh> Items { get; } = [];
     /// <summary>Distant meshes of buildings in towns that have no baked distant town mesh (<see cref="PlacedKind.BuildingDistant"/>).</summary>
     public List<PlacedMesh> Stand { get; } = [];
+    /// <summary>The indoor volumes of the zone's buildings that have an <c>interior mask</c> (docs/formats/zones.md, "Interior view").</summary>
+    public List<InteriorVolume> Interiors { get; } = [];
 }
 
 /// <summary>
@@ -35,6 +37,7 @@ sealed class WorldObjects : IDisposable
     readonly HashSet<string> bakedTowns = new(StringComparer.Ordinal);
     readonly Dictionary<ZoneCoordinate, List<BuildingPlacement>> buildingsByZone = [];
     ThreadLocal<TerrainHeightmap>? heights;
+    InteriorCollisions? interiorCollisions;
 
     // Totals over the zones laid out so far (for the log line).
     int buildings, missing, fromState, destroyed, foliage, empty, features, stand, layouts, layoutObjects, layoutsNotFound;
@@ -67,6 +70,7 @@ sealed class WorldObjects : IDisposable
             if (!objects.buildingsByZone.TryGetValue(b.Zone, out var list)) objects.buildingsByZone[b.Zone] = list = [];
             list.Add(b);
         }
+        objects.interiorCollisions = new InteriorCollisions(install);
         objects.heights = new ThreadLocal<TerrainHeightmap>(() => TerrainHeightmap.Open(install), trackAllValues: true);
         Console.WriteLine($"objects   {objects.buildingsByZone.Values.Sum(l => l.Count)} placed buildings and {objects.Features.All().Count()} map features in {objects.PopulatedZones.Count()} zones, " +
             $"{objects.DistantTowns.Count} towns with a distant mesh, {objects.Layouts.Count} building layouts ({watch.ElapsedMilliseconds} ms)");
@@ -94,27 +98,30 @@ sealed class WorldObjects : IDisposable
                 GameRecord? townMaterial;
                 lock (Towns) townMaterial = Towns.MaterialOf(town);
                 var position = new Vector3(b.Position.X, y, b.Position.Z);
-                var parts = WorldObjectLayout.Building(db, record, b.InstanceId, position, b.Rotation, new BuildingState(isDestroyed, townMaterial));
+                var parts = WorldObjectLayout.Building(db, record, b.InstanceId, position, b.Rotation, new BuildingState(isDestroyed, townMaterial) { WithInterior = !isDestroyed });
+                // A destroyed building gets no interior view (game: the per-frame interior driver skips it).
+                if (!isDestroyed && InteriorVolume.For(db, record, b.InstanceId, position, b.Rotation, interiorCollisions!) is { } interior) result.Interiors.Add(interior);
                 // Resource buildings ("is foliage", no parts) are drawn by the foliage system as a FOLIAGE_MESH naming them as "building type".
                 if (parts.Count == 0 && record.GetBool("is foliage")) Interlocked.Increment(ref foliage);
                 else if (parts.Count == 0) Interlocked.Increment(ref empty);
                 result.Items.AddRange(parts);
                 Interlocked.Increment(ref buildings);
-                // The state's exterior layout: signs and banners placed relative to the building. Skipped for a destroyed one (Unknown).
-                if (!isDestroyed && state?.GetString("exterior layout name") is { Length: > 0 } layoutName)
+                // The state's exterior layout (signs and banners) and interior layout (furniture), placed relative to the building, each object on its
+                // layout floor. Interior furniture that is not also "is exterior furniture" shows only in the interior view. Skipped for a destroyed building (Unknown).
+                foreach (bool exterior in (ReadOnlySpan<bool>)[true, false])
                 {
-                    if (Layouts.Find(record, layoutName) is not { } layout) Interlocked.Increment(ref layoutsNotFound);
-                    else
+                    if (isDestroyed || state?.GetString(exterior ? "exterior layout name" : "interior layout name") is not { Length: > 0 } layoutName) continue;
+                    if (Layouts.Find(record, layoutName, exterior) is not { } layout) { Interlocked.Increment(ref layoutsNotFound); continue; }
+                    Interlocked.Increment(ref layouts);
+                    foreach (var item in Layouts.Items(layout))
                     {
-                        Interlocked.Increment(ref layouts);
-                        foreach (var item in Layouts.Items(layout))
-                        {
-                            var (at, rotation) = BuildingLayouts.Place(position, b.Rotation, item);
-                            var placed = WorldObjectLayout.Building(db, item.Building, $"{b.InstanceId}/{item.InstanceId}", at, rotation,
-                                new BuildingState(false, townMaterial));
-                            result.Items.AddRange(placed);
-                            if (placed.Count > 0) Interlocked.Increment(ref layoutObjects);
-                        }
+                        var (at, rotation) = BuildingLayouts.Place(position, b.Rotation, item);
+                        var placed = WorldObjectLayout.Building(db, item.Building, $"{b.InstanceId}/{item.InstanceId}", at, rotation,
+                            new BuildingState(false, townMaterial));
+                        bool insideOnly = !exterior && !item.Building.GetBool("is exterior furniture");
+                        foreach (var p in placed)
+                            result.Items.Add(p with { Floor = item.Floor, Interior = insideOnly, ParentPlacementId = b.InstanceId });
+                        if (placed.Count > 0) Interlocked.Increment(ref layoutObjects);
                     }
                 }
                 // Towns without a baked distant mesh: the building's own distant mesh stands in for it far away (what the game's

@@ -8,8 +8,9 @@ Part of the world view of `meitou-viewer` (and the game, which shares `src/Meito
   removed), rotating parts at their rolled start angle, and each part's MATERIAL_SPEC from the part, the building
   or the building's town (`BuildingTowns`; `BuildingMaterial` turns it into textures). A building whose state names an
   `exterior layout name` also gets that layout's signs and banners (`BuildingLayouts`, from `interiors.level`;
-  [formats/zones.md](formats/zones.md#building-layouts)), counted in the `objects` log line; interior layouts (furniture)
-  and nest debris are not drawn. Map features (and parts
+  [formats/zones.md](formats/zones.md#building-layouts)), and its `interior layout name` that layout's furniture, both counted in the `objects` log line. A building with a player
+  character inside is in the interior view: its parts above the viewed floor are hidden and its `interior` parts and inside-only
+  furniture shown, otherwise not drawn ([formats/zones.md](formats/zones.md#interior-view)). Nest debris is not drawn. Map features (and parts
   without a chosen material) are textured by `MaterialResolver` ([above](#how-mesh-textures-are-resolved); candidate preferred: the one
   naming the placed record). Draw distance, LOD and streaming are described below ("Object streaming, LOD and distant towns"). The log
   line `objects` counts destroyed buildings and the foliage resource buildings, which the game draws as foliage rocks (drawn by the foliage below).

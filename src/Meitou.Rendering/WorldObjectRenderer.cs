@@ -49,6 +49,8 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         public required ObjectMaterialSet Materials;
         public required int Level;
         public required bool Town;
+        /// <summary>Back faces culled: the instances are <c>interior</c> parts (docs/formats/zones.md "Interior view"; the game culls building parts' back faces, so a room's ceiling vanishes seen from above).</summary>
+        public bool BackCull;
         public bool Manual;
         /// <summary>Some instance is mid cross-fade (or a town's per-vertex fade): its draws need the program with the dither <c>discard</c>.</summary>
         public bool Fading;
@@ -197,11 +199,11 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         {
             if (ObjectStreamer.ZoneDistance(zone.X0, zone.Z0, eye) > range) continue;
             foreach (var inst in zone.Real)
-                if (inst.Gpu is not null && inst.Materials is not null && Vector3.Distance(inst.Centre, eye) - inst.Radius <= range) yield return inst;
+                if (inst.Gpu is not null && inst.Materials is not null && Vector3.Distance(inst.Centre, eye) - inst.Radius <= range && !InteriorHidden(inst.Placed)) yield return inst;
         }
         if (streamer.LandmarkZone is { } landmarks)
             foreach (var inst in landmarks.Real)
-                if (inst.Gpu is not null && inst.Materials is not null && Vector3.Distance(inst.Centre, eye) - inst.Radius <= range) yield return inst;
+                if (inst.Gpu is not null && inst.Materials is not null && Vector3.Distance(inst.Centre, eye) - inst.Radius <= range && !InteriorHidden(inst.Placed)) yield return inst;
     }
 
     /// <summary>Work in flight: zones being laid out, meshes decoding or uploading, textures decoding.</summary>
@@ -524,6 +526,40 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
     /// <summary>The water reflection's cull (set around the reflection pass's own draw): an instance (bounding sphere centre and radius) it answers false for is skipped.</summary>
     internal Func<Vector3, float, bool>? MirrorCull { get; set; }
 
+    /// <summary>
+    /// The buildings shown in the interior view (docs/formats/zones.md, "Interior view"): placement id to the viewed floor. Their parts above that floor
+    /// are hidden and their <c>interior</c> parts shown; every other building shows its outside (its interior parts hidden). Set by the game each frame.
+    /// </summary>
+    public IReadOnlyDictionary<string, int> InteriorView { get; set; } = new Dictionary<string, int>();
+
+    /// <summary>The indoor volume of a loaded building that contains <paramref name="p"/> (widened by <paramref name="margin"/>), or null.</summary>
+    public InteriorVolume? InteriorAt(Vector3 p, float margin = 0)
+    {
+        foreach (var zone in streamer.AllZones)
+        {
+            if (zone.Interiors.Count == 0 || ObjectStreamer.ZoneDistance(zone.X0, zone.Z0, p) > 200) continue;   // a building may stand over its zone's edge
+            foreach (var v in zone.Interiors)
+                if (v.Contains(p, margin)) return v;
+        }
+        return null;
+    }
+
+    /// <summary>Draw every floor of the buildings in the interior view (their interior parts stay as they are): the game does so in the water reflection.</summary>
+    internal bool AllFloors { get; set; }
+
+    /// <summary>
+    /// Whether the interior view leaves a building part out: an interior part (or inside-only furniture) of a building seen from outside, or, in the view, a
+    /// part or object above the viewed floor. Floor 0 is never hidden (game: only the floor 1..3 lists are switched).
+    /// </summary>
+    bool InteriorHidden(PlacedMesh p)
+    {
+        if (p.Kind != PlacedKind.BuildingPart) return false;
+        if (InteriorView.Count == 0 || !p.Interior && (p.Floor == 0 || AllFloors)) return p.Interior;
+        // Layout objects (signs, furniture) go with their building.
+        if (!InteriorView.TryGetValue(p.ParentPlacementId ?? p.PlacementId, out int floor)) return p.Interior;
+        return p.Floor > floor && !AllFloors;
+    }
+
     /// <summary>Draws the objects seen from <paramref name="eye"/> through <paramref name="frustum"/>.</summary>
     public void Draw(Matrix4x4 viewProjection, Vector3 eye, Vector4[] frustum, WorldRenderOptions options, Vector3 light, Vector3 fogColour, float fogDistance, TerrainRenderer terrain)
     {
@@ -629,6 +665,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
     {
         if (inst.Gpu is not { } gpu) return;
         if (!ReferenceEquals(inst.Mesh.Gpu, gpu)) { Unresolve(zone, inst); return; }
+        if (InteriorHidden(inst.Placed)) return;
         float value = Vector3.Distance(inst.Centre, eye) - inst.Radius;
         float limit = Math.Min(range, inst.Limit);
         if (value >= limit || !SphereVisible(frustum, inst.Centre, inst.Radius) || MirrorCull?.Invoke(inst.Centre, inst.Radius) == false || FogCull?.Hidden(inst.Centre, inst.Radius, FogVolumes.CullKind.Objects) == true)
@@ -671,19 +708,19 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         var m = inst.Transform;
         if (!blend.IsBlending)
         {
-            Add(gpu, inst.Materials!, blend.Lower, m, 0, weight >= 0.999f ? 2 : weight, value);
+            Add(gpu, inst.Materials!, blend.Lower, m, 0, weight >= 0.999f ? 2 : weight, value, inst.Placed.Interior);
             return;
         }
-        Add(gpu, inst.Materials!, blend.Upper, m, 0, blend.T * weight, value);
-        Add(gpu, inst.Materials!, blend.Lower, m, blend.T * weight, weight, value);
+        Add(gpu, inst.Materials!, blend.Upper, m, 0, blend.T * weight, value, inst.Placed.Interior);
+        Add(gpu, inst.Materials!, blend.Lower, m, blend.T * weight, weight, value, inst.Placed.Interior);
     }
 
-    void Add(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, Matrix4x4 m, float lo, float hi, float near)
+    void Add(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, Matrix4x4 m, float lo, float hi, float near, bool backCull = false)
     {
         var manual = gpu.Manual[level];
         // Fully visible: lo 0 and hi 2 (the shader keeps everything when hi >= 1 and lo is 0). With the early depth test off every batch is "fading": the old merging.
         bool fading = !EarlyDepth.Enabled || lo > 0 || hi < 1;
-        var batch = BatchFor(manual ?? gpu, materials, manual is null ? level : 0, fading ? BatchKind.Fading : BatchKind.Solid);
+        var batch = BatchFor(manual ?? gpu, materials, manual is null ? level : 0, (fading ? BatchKind.Fading : BatchKind.Solid) | (backCull ? BatchKind.BackCull : 0));
         batch.Manual = manual is not null;
         if (batch.Count == 0) { active.Add(batch); batch.Near = near; } else if (near < batch.Near) batch.Near = near;
         m.M14 = lo;
@@ -696,13 +733,15 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
     static class BatchKind
     {
         public const int Solid = 0, Fading = 1, Town = 2;
+        /// <summary>A flag on Solid or Fading: <see cref="Batch.BackCull"/>.</summary>
+        public const int BackCull = 4;
     }
 
     Batch BatchFor(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, int kind)
     {
         var key = (gpu, materials, level, kind);
         if (!batchMap.TryGetValue(key, out var batch))
-            batchMap[key] = batch = new Batch { Mesh = gpu, Materials = materials, Level = level, Town = kind == BatchKind.Town, Fading = kind != BatchKind.Solid };
+            batchMap[key] = batch = new Batch { Mesh = gpu, Materials = materials, Level = level, Town = kind == BatchKind.Town, Fading = (kind & ~BatchKind.BackCull) != BatchKind.Solid, BackCull = (kind & BatchKind.BackCull) != 0 };
         return batch;
     }
 
@@ -740,6 +779,8 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         public ObjectPush Push;
         /// <summary>Drawn with the program without a discard (<see cref="EarlyDepth"/>): a batch of fully visible instances, a material without a cut-out.</summary>
         public bool Solid;
+        /// <summary>Back faces culled (<see cref="Batch.BackCull"/>, not for a double-sided material).</summary>
+        public bool BackCull;
     }
 
     ObjDraw[] draws = new ObjDraw[256];
@@ -889,6 +930,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
                     // A part whose diffuse map is not resident yet is drawn plain grey (pop-in the benchmark counts).
                     if (!depthPass && options.Textures && d.Diffuse == 0 && pm.WantsDiffuse) untexturedDraws++;
                     d.Solid = !depthPass && !b.Fading && d.Push.AlphaThreshold == 0f;
+                    d.BackCull = b.BackCull && pm.Material is not { DoubleSided: true };
                 }
                 DrawCalls++;
                 DrawnTriangles += (long)gp.Count[b.Level] / 3 * b.Count;
@@ -991,6 +1033,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
                 Pipeline = n.SegA == drawSegment ? n.PipeA! : PipelineFor(ref n, drawProg, drawSegment, state, targets.Formats, label),
                 Vertices = n.Vertices, Elements = new BufferBinding(n.Elements.Buffer, n.Elements.Offset + (ulong)part.Offset[d.Level] * 4),
                 Push = pc, IndexCount = (uint)part.Count[d.Level], Instances = d.Instances, FirstInstance = d.FirstInstance,
+                Cull = d.BackCull ? Silk.NET.Vulkan.CullModeFlags.BackBit : state.Cull,
             };
         }
         job.Count = drawCount;
@@ -1009,6 +1052,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
             public BufferBinding Elements;
             public ObjectPush Push;
             public uint IndexCount, Instances, FirstInstance;
+            public Silk.NET.Vulkan.CullModeFlags Cull;
         }
 
         public WorldObjectRenderer Owner = null!;
@@ -1034,10 +1078,12 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
             var stages = Silk.NET.Vulkan.ShaderStageFlags.VertexBit | Silk.NET.Vulkan.ShaderStageFlags.FragmentBit;
             ObjectPush last = default;
             bool pushed = false;
+            var cull = state.Cull;
             for (int i = 0; i < Count; i++)
             {
                 ref readonly var d = ref Draws[i];
                 cmd.BindPipeline(d.Pipeline);
+                if (d.Cull != cull) cmd.SetRaster(cull = d.Cull, state.Front);
                 cmd.BindVertexBuffers(0, d.Vertices);
                 cmd.BindIndexBuffer(d.Elements, Silk.NET.Vulkan.IndexType.Uint32);
                 if (!pushed || !System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<ObjectPush>(in d.Push)).SequenceEqual(System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<ObjectPush>(in last))))

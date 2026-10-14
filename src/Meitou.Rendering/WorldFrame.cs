@@ -1198,7 +1198,9 @@ static class WorldFrame
                     objects.ObjectDistance = Math.Min(distance, gpu.Reflection.ObjectReach);
                     objects.LandmarkDistance = Math.Min(landmarks, gpu.Reflection.ObjectReach);   // the mirrored scene has no landmarks beyond the reflection's own object range
                     objects.MirrorCull = reflection.CullToWater ? reflection.MayShow : null;
+                    objects.AllFloors = true;   // the game shows every floor in the water reflection (docs/formats/zones.md "Interior view")
                     objects.Draw(vp, e, frustum, render, light.SunDirection, light.FogColour, light.FogDistance, gpu.Terrain);
+                    objects.AllFloors = false;
                     objects.MirrorCull = null;
                     reflection.Lap(2);
                     StageClock.Sub("refl up to objects");

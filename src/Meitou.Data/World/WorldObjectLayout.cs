@@ -20,6 +20,16 @@ public sealed record PlacedMesh(string MeshPath, Matrix4x4 Transform, GameRecord
 {
     /// <summary>For building parts: the MATERIAL_SPEC the game gives the part (collections already resolved), or null when none.</summary>
     public GameRecord? Material { get; init; }
+
+    /// <summary>For building parts: the part's <c>building floor</c>, clamped to 0..3 as the game clamps it; in the interior view a part above the
+    /// viewed floor is hidden (docs/formats/zones.md, "Interior view").</summary>
+    public int Floor { get; init; }
+
+    /// <summary>A part of the building's <c>interior</c> list (inner walls, floors, inner stairs): drawn only in the interior view.</summary>
+    public bool Interior { get; init; }
+
+    /// <summary>For an object of a building layout (sign, furniture): the placement id of the building it belongs to, whose interior view it follows.</summary>
+    public string? ParentPlacementId { get; init; }
 }
 
 /// <summary>A LIGHT instance of a placed building (docs/formats/lights.md); <see cref="WorldLights"/> turns it into a <see cref="WorldLight"/>.</summary>
@@ -35,7 +45,11 @@ public sealed record PlacedLight(GameRecord Light, GameRecord Holder, GameRecord
 /// <summary>State of a placed building that changes what is drawn (from its GAMESTATE_BUILDING and its town).</summary>
 /// <param name="Destroyed">The state's <c>destroyed</c> flag: parts switch to their <c>destroyed mesh</c>, upper floors and stairs without one go.</param>
 /// <param name="TownMaterial">The building's town's material (see <see cref="WorldObjectLayout.TownMaterial"/>), used when the building has none of its own.</param>
-public sealed record BuildingState(bool Destroyed = false, GameRecord? TownMaterial = null);
+public sealed record BuildingState(bool Destroyed = false, GameRecord? TownMaterial = null)
+{
+    /// <summary>Also lay out the building's <c>interior</c> list (flagged <see cref="PlacedMesh.Interior"/>), for a renderer that shows the interior view.</summary>
+    public bool WithInterior { get; init; }
+}
 
 /// <summary>
 /// Turns world placements into meshes with world transforms (docs/formats/zones.md, "From placements to meshes"):
@@ -98,6 +112,8 @@ public static class WorldObjectLayout
         public GameRecord? BaseMaterial;
         public BuildingRandom Random = new(0);
         public Matrix4x4 Node = Matrix4x4.Identity;
+        /// <summary>Laying out the <c>interior</c> list.</summary>
+        public bool Interior;
     }
 
     static void AddBuilding(GameDatabase db, GameRecord building, string placementId, Vector3 position, Quaternion rotation, BuildingState state,
@@ -117,20 +133,27 @@ public static class WorldObjectLayout
         // The building's scene node: position and rotation, no scale (each part node carries the scale).
         a.Node = Matrix4x4.CreateFromQuaternion(Normalized(rotation)) * Matrix4x4.CreateTranslation(position);
         AddParts(a, building, a.Node, 0);
+        // The interior parts are chosen from the "interior" list after the generator is seeded again with the same seed (zones.md).
+        if (state.WithInterior && building.GetReferences("interior").Count > 0)
+        {
+            a.Random = new BuildingRandom(BuildingRandom.Seed(position.X, position.Z));
+            a.Interior = true;
+            AddParts(a, building, a.Node, 0, "interior");
+        }
     }
 
     /// <summary>One level of the game's part creation: choose from <paramref name="holder"/>'s parts, create each, recurse, then the holder's instances.</summary>
-    static void AddParts(Assembly a, GameRecord holder, Matrix4x4 parentNode, int depth)
+    static void AddParts(Assembly a, GameRecord holder, Matrix4x4 parentNode, int depth, string list = "parts")
     {
         if (depth > 8) return;
-        foreach (var r in ChooseParts(holder.GetReferences("parts"), id => a.Db.Find(id) is not null, a.Random))
+        foreach (var r in ChooseParts(holder.GetReferences(list), id => a.Db.Find(id) is not null, a.Random))
         {
             if (a.Db.Find(r.TargetStringId) is not { Type: FcsRecordType.BUILDING_PART } part) continue;
             // Children hang under the part's node, or under the building's when the part has no entity.
             var node = AddPart(a, holder, part, parentNode);
             AddParts(a, part, node ?? a.Node, depth + 1);
         }
-        AddInstances(a, holder, parentNode);
+        if (list == "parts") AddInstances(a, holder, parentNode);   // the building's own instances once, with its parts
     }
 
     /// <summary>
@@ -174,7 +197,7 @@ public static class WorldObjectLayout
         local *= Matrix4x4.CreateTranslation(offset);
         var node = local * parentNode;
         if (!entity) return null;
-        a.Result.Add(new PlacedMesh(mesh, node, part, a.Building, a.PlacementId, PlacedKind.BuildingPart) { Material = PartMaterial(a, part) });
+        a.Result.Add(new PlacedMesh(mesh, node, part, a.Building, a.PlacementId, PlacedKind.BuildingPart) { Material = PartMaterial(a, part), Floor = Math.Clamp(part.GetInt("building floor"), 0, 3), Interior = a.Interior });
         return node;
     }
 

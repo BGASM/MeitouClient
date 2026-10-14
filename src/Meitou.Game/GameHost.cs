@@ -289,6 +289,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             weather.GameSpeed = (float)(sim.Speed > 0 ? sim.Speed : sim.LastNonZeroSpeed);
         }
         WorldFrame.Draw(gpu, scene, camera, render, width, height, (float)session.Clock.HourOfDay, (float)seconds / 600f, o.FogDistance);
+        UpdateInteriorView();
     }
 
 }

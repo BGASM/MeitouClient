@@ -101,4 +101,50 @@ public class WorldObjectLayoutTests
         var features = MapFeatureFile.Open(install!).All().Select((f, i) => WorldObjectLayout.Feature(db, f.Feature, $"{i}")).ToList();
         Assert.True(features.Count(f => f is not null) > features.Count * 0.95);
     }
+
+    [Fact]
+    public void Interior_volume_is_the_hull_footprint_and_height()
+    {
+        // A square hull given as scattered points (inner points too): the footprint is the convex outline, the test widens by the margin.
+        var v = new InteriorVolume("b", InteriorVolume.ConvexHull2([new(0, 0), new(10, 0), new(10, 10), new(0, 10), new(5, 5), new(2, 8)]), 0, 20);
+        Assert.Equal(4, v.Footprint.Length);
+        Assert.True(v.Contains(new System.Numerics.Vector3(5, 1, 5)));
+        Assert.False(v.Contains(new System.Numerics.Vector3(11, 1, 5)));
+        Assert.True(v.Contains(new System.Numerics.Vector3(11, 1, 5), margin: 2));
+        Assert.False(v.Contains(new System.Numerics.Vector3(5, 21, 5)));
+        Assert.False(v.Contains(new System.Numerics.Vector3(5, -1, 5)));
+    }
+
+    [Fact]
+    [Slow]
+    public void Hub_bar_shows_its_interior_on_floor_0()
+    {
+        var install = InstallData.Install;
+        Assert.SkipWhen(install is null, $"No Kenshi install configured ({GameInstall.EnvironmentVariable}).");
+        var db = InstallData.FullLoadOrder!;
+        var levels = WorldLevelData.Load(install!, includeInteriors: true);
+        // The Hub's bar: a Storm House with the "Bar" interior layout (docs/formats/zones.md "Interior view").
+        var b = levels.Buildings().Single(x => x.InstanceId == "4933-Newwworld-INGAME" && Math.Abs(x.Position.X + 51181) < 5);
+        var record = db.Find(b.BuildingId)!;
+        var position = new System.Numerics.Vector3(b.Position.X, b.WorldY!.Value, b.Position.Z);
+
+        var parts = WorldObjectLayout.Building(db, record, b.InstanceId, position, b.Rotation, new BuildingState { WithInterior = true });
+        Assert.Contains(parts, p => p.Source.Name == "Storm_House_01_Exterior_ROOF" && p.Floor == 1 && !p.Interior);
+        Assert.Contains(parts, p => p.Source.Name == "Storm_House_01_Interior" && p.Floor == 0 && p.Interior);
+        // Without the interior view the parts are the outside alone, chosen by the same rolls.
+        var outside = WorldObjectLayout.Building(db, record, b.InstanceId, position, b.Rotation);
+        Assert.Equal(parts.Where(p => !p.Interior).Select(p => p.Source.StringId), outside.Select(p => p.Source.StringId));
+
+        // A character standing in the bar is inside its trigger hull; one in the street outside is not.
+        var volume = InteriorVolume.For(db, record, b.InstanceId, position, b.Rotation, new InteriorCollisions(install!));
+        Assert.NotNull(volume);
+        Assert.True(volume.Contains(new System.Numerics.Vector3(-51189, 1581, 2642), 2));
+        Assert.False(volume.Contains(new System.Numerics.Vector3(-51189, 1581, 2800), 2));
+
+        // The bar's furniture: the beds stand on floor 1 (hidden at floor 0), the counter on floor 0.
+        var layout = new BuildingLayouts(db, levels.Interiors).Find(record, "Bar", exterior: false)!;
+        var items = new BuildingLayouts(db, levels.Interiors).Items(layout).ToList();
+        Assert.All(items.Where(i => i.Building.Name == "Bed"), i => Assert.Equal(1, i.Floor));
+        Assert.Equal(0, items.First(i => i.Building.Name == "Shop Counter").Floor);
+    }
 }

@@ -284,11 +284,60 @@ From the GAMESTATE_BUILDING (counts over the 11,824 zone states):
   doors. A part without an entity still rolls (rotation speed) and its children hang under the building's node.
 - `is complete` is true for all 11,824 placed states, so no placed building shows the construction shader
   (scaffolding, FUN_140557be0).
-- `interior` parts (chosen after the second `srand(seed)`) are loaded only when the player is inside; upper floors
-  are hidden by the roof logic only then. An exterior view draws the `parts` tree (Observed from fcs.def; the
-  hiding code was not traced).
+- `interior` parts (chosen after the second `srand(seed)`) are loaded only when a player character is inside, and
+  upper floors are hidden only then: see "Interior view" below.
 - `exterior layout name` (325 placed buildings): the building also gets that exterior layout's objects (signs,
   banners), see below. `interior layout name` (772): its furniture layout.
+
+### Interior view
+
+How the game shows a building's inside with its roof and upper floors taken away (2026-10-14, reverse engineered from
+kenshi_x64.exe; `PI` is the player-interface singleton). **Verified (decompiled)** unless marked.
+
+- **Which buildings.** Every frame (FUN_1407f7230, from the frame-time hook) the game walks the player's characters (a
+  list rebuilt each frame from the player faction's platoons, not the selection) and takes the building each one is in
+  (the character's building reference, resolved to the root building; a carried character counts as its carrier's).
+  Every such building that is **not destroyed** and has an interior goes into the interior view. Camera, mouse and
+  distance play no part. In interior-edit build mode only the edited building is in the view.
+- **The viewed floor** is one global number, 0..3 (`PI+0x1e4`, clamped by FUN_1407f3530): 0 at the start, saved as
+  `floor num`, stepped by PageUp / PageDown (`floor_up` / `floor_down`) and the HUD's floor arrows. Entering or leaving
+  a building does not change it; following a character with the camera (and the focus-selected-character key) sets it
+  to that character's floor, and while following it is updated when the character's floor changes (from the
+  character's own floor and a downward ray against the floor collision groups).
+- **Per building**, each town keeps a table keyed by the root building: four lists of the part entities, one per
+  `building floor` 0..3 (a part's floor is clamped to 3), and a byte, the highest visible floor (4 = all). A building
+  in the view gets the viewed floor, every other one 4. The lists of floors **1..3** are shown iff floor <= byte; the
+  floor-0 list is never hidden (FUN_14092a3b0). Hiding is Ogre `setVisible`, so a hidden part also stops casting
+  shadows (**Observed**: by Ogre's rules, not checked in the shadow pass). Collision stays; mouse picking skips hits on
+  floors above the byte, and `is unwalkable roof` parts (group 27) count as floor 4 there.
+- **The `interior` list** is laid out when the building enters the view (`read_interior_mask_n3`: the parts of the
+  BUILDING's `interior` list, the same seed as the parts) and goes into the same floor lists; it is unloaded about
+  **10 s** after the last player character left (a timer reset to 10 every frame the building is in the view). The
+  `interior mask` part is created then too, as a render-only mask entity (visibility flags 0x800, no shadows) for the
+  `rt_interiormask` clip of terrain, map features and particles; it is not the trigger.
+- **Objects of the building** (layout furniture, signs and other child buildings) have their own floor, the
+  `floornum` of their state. In the view: shown iff `floornum` <= the viewed floor. Out of the view: shown only when
+  flagged for the outside (**Observed**: the flag reads as "exterior furniture"), else hidden. Characters and items on
+  floors above 0 follow the same byte of the building they are in (or the global viewed floor outside one).
+- **The water reflection** shows every floor (all towns' bytes set to 4 around it, then restored), as does one
+  light-related pass (**Unknown** which).
+- **Back faces**: the `StaticObject` material that building parts use has no `cull_hardware` line, so Ogre's default
+  culls back faces (**Verified** in `data/materials/deferred/objects.material`; DOUBLESIDED parts set culling to none).
+  That is what makes an interior mesh's ceiling vanish when seen from above: e.g. `Storm_House_01_Interior.mesh`
+  (floor 0) spans y 4..66 including the ceiling (**Verified** by reading the mesh bounds).
+- **Data**: a single-storey house has its walls and floor on floor 0 and the outer upper walls, roof and roof extras on
+  floor 1 (Storm House: `Exterior`, `Exterior_ROOF`, `BLACKWALL_UPPER`, `Extras`, the door, all floor 1); the
+  `interior` list holds the inner walls, floor and stairs on floor 0. The Hub's bar (Storm House `4933-Newwworld-INGAME`,
+  layout `Bar`) has its counter, tables and stools at `floornum` 0 and its beds, tent and water tank on the roof at
+  `floornum` 1 (**Verified** by `Hub_bar_shows_its_interior_on_floor_0`).
+
+What Meitou does (`WorldObjects`, `WorldObjectRenderer.InteriorView`, `GameHost.UpdateInteriorView`): "inside" is the
+character's position within the building's `interior mask` collision hull (its ground footprint and height range,
+`InteriorVolume`; widened 2 units), since the simulation keeps no building reference yet; the `interior` parts and the
+interior layout's furniture are laid out with the zone and drawn only in the view (no 10 s unload, no loading); interior
+parts are drawn with back faces culled (the rest of the objects stay double-sided); the viewed floor is
+`GameHost.ViewedFloor` (0; the HUD arrows and PageUp / PageDown are not wired to it yet); characters on hidden floors
+are still drawn.
 
 ### Building layouts
 

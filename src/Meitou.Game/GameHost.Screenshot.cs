@@ -44,6 +44,12 @@ sealed partial class GameHost
         }
         SandboxFollowCamera();
         ApplyCamera(session.Camera.Current);
+        // After a walk (--move-to) the picture is of where the leader got to.
+        if (g.MoveTo is not null && session.CurrentSnapshot.Characters.FirstOrDefault(c => c.IsPlayer) is { } walker)
+        {
+            session.Camera.MovePivot(new Vector2(walker.Position.X, walker.Position.Z));
+            camera.Target = DrawnPosition(walker);
+        }
         gpu.Streamer?.Settle(camera.Eye);
         gpu.Objects?.Settle(camera.Eye);
         gpu.Foliage?.Settle(camera.Eye);

@@ -49,6 +49,8 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
         /// <summary>Unresolved parts beyond their part distance, out of <see cref="Unresolved"/> until the eye comes near (<see cref="Scan"/>), and the largest of their distances.</summary>
         public List<Instance> Parked { get; } = [];
         public float ParkedLimit;
+        /// <summary>The indoor volumes of the zone's buildings (<see cref="ZoneObjects.Interiors"/>).</summary>
+        public IReadOnlyList<InteriorVolume> Interiors = [];
     }
 
     /// <summary>Zones laid out at once.</summary>
@@ -152,7 +154,7 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
     void Add(ZoneObjects laid)
     {
         var (x0, z0) = WorldLayout.ZoneOrigin(laid.Zone);
-        var zone = new Zone { Coordinate = laid.Zone, X0 = x0, Z0 = z0 };
+        var zone = new Zone { Coordinate = laid.Zone, X0 = x0, Z0 = z0, Interiors = laid.Interiors };
         zones[laid.Zone] = zone;
         fills.Enqueue(new Fill { Zone = zone, Laid = laid });
     }
