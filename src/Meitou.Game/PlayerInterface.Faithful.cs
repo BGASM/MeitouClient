@@ -190,31 +190,6 @@ sealed partial class PlayerInterface
         }
     }
     readonly List<string> uiMessages = [];
-    void BindMedicalBars(UiBindings b, Meitou.Simulation.CharacterSnapshot? lead)
-    {
-        var parts = lead?.HealthParts.Take(7).ToArray() ?? [];
-        for (int i = 1; i <= 9; i++)
-        {
-            string name = $"LifeBar{i}";
-            b.Hidden.Add(name + "Value"); b.Hidden.Add(name + "Tooltip");
-            foreach (string layer in new[] { "Red", "Yellow", "White", "Crushed", "Robot" }) b.Hidden.Add(name + layer);
-            float fraction; string text;
-            if (i <= parts.Length)
-            {
-                var part = parts[i - 1]; float hp = part.Flesh - part.Stun + part.Rig;
-                fraction = part.Maximum > 0 ? hp / part.Maximum : 0;
-                text = $"{part.Name}  {hp:0}/{part.Maximum:0}";
-                if (part.Robotic) { b.Hidden.Remove(name + "Robot"); b.Hidden.Add(name + "Green"); b.Progress[name + "Robot"] = fraction; }
-            }
-            else if (i == parts.Length + 1 && lead?.Body is { } blood) { fraction = blood.Blood; text = $"Blood  {blood.Blood * 100:0}%"; }
-            else if (i == parts.Length + 2 && lead?.Body is { } food) { fraction = food.Hunger / 3; text = $"Hunger  {food.Hunger * 100:0}/300"; }
-            else { b.Hidden.Add(name); continue; }
-            b.Progress[name + "Green"] = fraction;
-            b.Text[name + "Datapanel"] = text;
-            b.Properties[name + "Datapanel"] = new Dictionary<string, string> { ["FontName"] = "Kenshi_StandardFont_Medium", ["TextAlign"] = "Left VCenter", ["TextColour"] = MyGuiColours.InkText, ["TextPadding"] = "4 0 4 0" };
-        }
-    }
-
     /// <summary>
     /// The orders panel's toggles by the words in their widget names (the layout names only <c>OrdersChaseButton</c>, <c>OrdersMedicButton</c> and <c>OrdersRescueButton</c>
     /// for certain, docs/game/ui-screens.md section 4; the rest are matched by the button's word, so a differently spelt name still binds). Jobs and Prospect have no backend.

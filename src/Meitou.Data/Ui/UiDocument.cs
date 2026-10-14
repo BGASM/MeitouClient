@@ -58,12 +58,16 @@ public static class MyGuiPresentation
             {
                 var pages = w.Children.Where(c => c.Type == "TabItem" && !bindings.Hidden.Contains(c.Name) && !bindings.HiddenWidgets.Contains(c)).ToArray();
                 int selected = Math.Clamp(bindings.SelectedTabs.GetValueOrDefault(w.Name), 0, Math.Max(0, pages.Length - 1));
-                float tabWidth = pages.Length == 0 ? 0 : bounds.Width / pages.Length;
                 foreach (var child in w.Children.Where(c => c.Type != "TabItem")) Visit(child, bounds, childClip, enabled);
+                // The buttons go in the skin's HeaderPlace (MyGUI's TabControl part), ButtonWidth wide unless ButtonAutoWidth.
+                var header = result.LastOrDefault(c => c.Properties.GetValueOrDefault("TemplateOwner") == w.Name && c.Properties.GetValueOrDefault("TemplatePart") == "HeaderPlace")?.Bounds
+                    ?? new UiRect(bounds.X, bounds.Y, bounds.Width, 30);
+                float tabWidth = pages.Length == 0 ? 0 : props.GetValueOrDefault("ButtonAutoWidth") == "false" && float.TryParse(props.GetValueOrDefault("ButtonWidth"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float fixedWidth)
+                    ? Math.Min(fixedWidth, header.Width / pages.Length) : header.Width / pages.Length;
                 for (int i = 0; i < pages.Length; i++)
-                    result.Add(new(w.Name + "@tab" + i, "Button", new(bounds.X + i * tabWidth, bounds.Y, tabWidth, 30),
-                        pages[i].Properties.GetValueOrDefault("Caption") ?? pages[i].Name, $"mygui:tab:{w.Name}:{i}", "Kenshi_SquadTabButton1Skin", enabled,
-                        new Dictionary<string, string> { ["State"] = i == selected ? "pushed" : "normal", ["FontName"] = "Kenshi_PaintedTextFont_Medium", ["TextAlign"] = "Center" }, default, Clip: clip));
+                    result.Add(new(w.Name + "@tab" + i, "Button", new(header.X + i * tabWidth, header.Y, tabWidth, header.Height),
+                        bindings.Text.GetValueOrDefault(w.Name + "@tab" + i) ?? pages[i].Properties.GetValueOrDefault("Caption") ?? pages[i].Name, $"mygui:tab:{w.Name}:{i}", "Kenshi_SquadTabButton1Skin", enabled,
+                        new Dictionary<string, string> { ["State"] = i == selected ? "normal_checked" : "normal", ["FontName"] = "Kenshi_PaintedTextFont_Medium", ["TextAlign"] = "Center" }, default, Clip: clip));
                 if (pages.Length > 0) Visit(pages[selected], bounds, childClip, enabled);
             }
             else foreach (var child in w.Children) Visit(child, bounds, childClip, enabled);

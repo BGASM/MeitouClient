@@ -109,8 +109,40 @@ Layer Middle, per-frame update FUN_140728d50 (**Observed**):
   MyGUI.log warning "Widget with name 'LifeBar10' not found. [Kenshi_MainPanel.layout]" (**Verified**: log line
   and `Kenshi_MainPanel.layout`, which has LifeBar1..9 only). Life-bar skins in `data/gui/skins` (**Verified**):
   `Kenshi_LifeBarSkin`, `...HurtSkin`, `...HealedSkin`, `...StunnedSkin`, `...CrushedSkin`, `...RobotSkin`,
-  `...SplintSkin`; the panel code FUN_140726a70 also references the colour words Green, Yellow, White, Crushed
-  and Robot (**Observed**; their use is not decoded).
+  `...SplintSkin`; each `LifeBarN` holds the layers `LifeBarNGrey` (Stunned skin), `...Red` (Hurt), `...Yellow` (Healed), `...White` (Splint),
+  `...Green` (current), `...Crushed`, `...Robot` (**Verified**, layout).
+- Text panels (**Verified**, decompile of the HUD update and its line-panel class "DatapanelGUI", 2026-10-14): `NameText`, `StateText`, `StatsText`
+  and `ExtendedStatsText` are empty widgets in which the code builds a list of lines, each a label (from 3 % of the width, 96 % wide) and a value (same
+  start, 93 % wide, aligned right), in `Kenshi_TextboxStandardText` (Exo2 SemiBold 20, default colour #140806, the palette's Secondary). Colours are
+  inline `#rrggbb` from `data/gui/colours/kenshi_colours.xml`: Main #afa68b, Title #492620, Bad #59231a, BadBright #bf4834, Good #a8b774, Alert #000000.
+  - Name: the character's name left and its faction's name right (the player's default faction name is "Nameless"), both Title.
+  - State lines: `State:` Dead / Locked (lvl: N) / Sleeping / Unconscious (Rebooting for skeletons) / Defensive / Normal (Bad for the bad ones);
+    `Goal:` the AI goal package's name, else Aimless; `Encumbrance:` (int)((1 - f) × 100) "%" with f the encumbrance factor in 0..1, Bad from 50 %.
+    Extended (when expanded): Athletics XP, Strength XP, Toughness XP, KO point, Run speed, Hunger Rate.
+  - Stats lines: Martial Arts when unarmed; Crossbows, Precision, Perception with a crossbow in ranged mode; else Attack and Defense; then Strength,
+    Dexterity, Toughness and (not in ranged mode) Dodge. A value is the effective number, then its change in brackets: `{1} ({2})` all Bad when lower,
+    `{1} (+{2})` all Good when higher, plain when equal. The code passes the labels in mixed case ("Martial Arts:"); the original shows them upper case in
+    a light colour (**Observed**, screenshot), from a source **Unknown**.
+  - `HealthText` words in priority: Dead, BEING EATEN ALIVE!!, Dying, Unconscious (N), Recovery coma, Playing dead..., Blood loss KO, Bleeding out,
+    Crippled, Crippled arm, Critical, Limb trauma, Staying low, Starving (hunger &lt; 1), Bleeding, disguise words; else by the overall health h:
+    Hungry (h ≥ 0.7 and hunger &lt; 2), Wounded (h &lt; 0.7), Slightly Injured (h &lt; 0.9), Normal. What h is exactly is **Unknown**; the worst part's
+    fraction matches a screenshot (a leg at 77 % and "Slightly Injured", **Observed**).
+- Medical rows (**Verified**, decompile): Blood (Oil for skeletons) first, then the body parts, Hunger last; each `LifeBarNDatapanel` gets the name centred
+  and an arrow string right-aligned in Alert; the number goes in `LifeBarNValue`. Layers are sized as width fractions from the left (Grey is a full-width
+  background). Part (H health, S a deduction, D a pending amount, Mx its maximum): Green (H − S)/Mx, Yellow (H + D − S)/Mx, Red (Mx − S)/Mx, White
+  splint % × 0.01 + green, number floor(H − S + 0.1); arrows `<<   ` below 0 and degenerating, `<<!!   ` at the KO point, `!!!   ` destroyed. Blood:
+  green blood / capacity, number floor(blood + 0.1), arrows a run of `<`, ceil(|bleed rate| / 0.05) of them (at most 100). Hunger (0..3): number
+  (int)(hunger × 100), Green hunger − 2, Yellow hunger − 1, Red hunger; arrows `>   ` recovering, `<!   ` below 2, else `<   `. The parts come in the
+  order head, stomach, chest, left arm, right arm, left leg, right leg for people (**Observed**, screenshot); Meitou reads the RACE `combat anatomy` references in another order (right leg first), so how the original orders its part list is **Unknown** and Meitou sorts by part name to match.
+- Information panel: `ExtendingPanel` starts collapsed, its bottom moved onto the panel's bottom (behind the Overlapped `StatsPanel`), and slides over
+  0.5 s to its layout place when `ExtendedStatsButton` is pressed (**Verified**). `BountyPanel` shows only for one selected character with a bounty or
+  a status line (Imprisoned, Slave, Escaped slave, Committing Crime!, Leader...; **Verified**).
+- Money panel: `MoneyLabelText` is set to "Money" (without the layout's colon; 25 % opacity when the amount would overlap it), `DayText` "Day: {1,num}", `TimeText` HH:MM (**Verified**). A "1x"
+  seen next to the clock in a player's screenshot is not written by the vanilla code (**Observed**; most likely a mod).
+- Squad tabs: one per player squad with members, captioned with the squad's name unchanged (**Verified**); the first player squad reads `Nameless_0`
+  (**Observed**; where the name is made is **Unknown**). Tab width min(header width / tabs, ButtonWidth × UI scale), in the skin's `HeaderPlace`.
+- `FloorPanel` stays as laid out and `FloorText` is "Floor {1,num}" of the viewed floor each frame; `BuildPanel` is always shown (**Verified** /
+  **Observed**).
 - Orders panel (FUN_14072b540): buttons Block, Hold, Chase (`OrdersChaseButton`), Passive, Jobs, Ranged, Taunt,
   Sneak, run-speed arrows (`SpeedArrowLeft/Right`; the layout has a symbol image `Run`, the labels Jog / Walk
   were not found), Medic, Rescue, Prospect, a behaviour slider (captions AGRESSIVE / CONFIDENT / SUBMISSIVE,
@@ -175,7 +207,7 @@ Each id is the integer at +8 of a tutorial item. The meaning of the two lists (f
 ## Unknowns
 
 - Meaning of the two id lists in `__tutorials.data`.
-- Body part to LifeBar mapping and why the code looks up ten bars while the layout has nine (`LifeBar10` is missing).
+- Why the code looks up ten life bars while the layout has nine (`LifeBar10` is missing); the medical panel's overall health h; where the stats labels' upper case and the default squad name come from.
 - Exact tab index of the AI tab and which layout widgets belong to which tab for tabs 4 to 6.
 - Trade, dialogue and research logic (other subsystems).
 - Layer of the secondary layouts without a `layer` attribute (Kenshi_OrdersPanelOrder, PortraitCharacter, SquadBox, SquadsPanel_PortraitCharacter, TutorialTooltipPanel, ItemListItem, CharacterSelectionBox): they are children of other widgets (**Observed**, not traced).

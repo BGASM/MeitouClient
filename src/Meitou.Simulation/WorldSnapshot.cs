@@ -15,6 +15,13 @@ public enum CareKind { None, Treating, Resting }
 /// </summary>
 public readonly record struct BodyStatus(float Blood, float WorstPart, float Hunger, bool Unconscious, bool Dead, bool NeedsAid = false, CareKind Care = CareKind.None, bool MedicJob = false, bool RescueJob = false);
 public sealed record HealthPartView(string Id, string Name, float Flesh, float Stun, float Bandage, float Rig, float Maximum, bool Robotic);
+/// <summary>A line of the HUD's stats panel: the label, the value the character fights with and the value it would have unhurt (docs/game/ui-screens.md section 4).</summary>
+public readonly record struct HudStatLine(string Label, float Value, float Base);
+/// <summary>
+/// What the HUD shows of a selected character besides <see cref="BodyStatus"/> (docs/game/ui-screens.md section 4): the blood in units and its capacity, the bleeding
+/// rate, the encumbrance factor (1 unburdened) and the stats panel's lines.
+/// </summary>
+public sealed record HudView(float Blood, float BloodCapacity, float Bleeding, float Encumbrance, IReadOnlyList<HudStatLine> Stats);
 public sealed record InventoryItemView(int Index, string Record, string Name, string Section, int X, int Y, int Width, int Height, int Quantity, float Weight, float Quality);
 public sealed record InventoryView(int Width, int Height, int BagWidth, int BagHeight, IReadOnlyList<InventoryItemView> Items);
 
@@ -47,6 +54,8 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     public SkillSummary? Skills { get; init; }
     public IReadOnlyList<float> AllSkills { get; init; } = [];
     public IReadOnlyList<HealthPartView> HealthParts { get; init; } = [];
+    /// <summary>The HUD's numbers for a selected character (null for the others).</summary>
+    public HudView? Hud { get; init; }
     public InventoryView? ItemGrid { get; init; }
     /// <summary>
     /// The character carrying this one (none when not carried). A carried body has its carrier's position and facing; the renderer should hang it from the carrier's

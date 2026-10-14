@@ -12,6 +12,7 @@ sealed partial class PlayerInterface
 {
     public UiMode UiMode { get; set; }
     int lastMemberClick = -1;
+    bool infoExpanded;
     long lastMemberClickAt;
     MyGuiLayout faithfulHud = null!;
     MyGuiResources uiResources = new();
@@ -85,8 +86,9 @@ sealed partial class PlayerInterface
         b.Text["TimeText"] = session.Clock.TimeText;
         // The exe's money format string is c.{1,num} (docs/game/ui-screens.md section 1): no space after the point.
         b.Text["MoneyAmountText"] = "c." + session.World.Player.Money.ToString("N0", CultureInfo.InvariantCulture);
+        // The Meitou HUD's title; the faithful name bar draws its own lines over the widget (PlayerInterface.HudText.cs).
         b.Text["NameText"] = lead?.Name ?? "No character selected";
-        b.Text["HealthText"] = lead?.Body is { } body ? body.Dead ? "Dead" : body.Unconscious ? "Unconscious" : $"Blood {body.Blood * 100:0}%  Health {body.WorstPart * 100:0}%" : "";
+        b.Properties["NameText"] = new Dictionary<string, string> { ["SkipCaption"] = "true" };
         b.Text["hunger"] = lead?.Body is { } hungry ? $"Hunger {hungry.Hunger:0.00} / 3" : "";
         b.Text["condition"] = lead?.Body is { } status ? status.Dead ? "Dead" : status.Unconscious ? "Unconscious" : status.NeedsAid ? "Needs first aid" : "Conscious" : "No character selected";
         b.Text["blood"] = lead?.Body is { } blood ? $"Blood   {blood.Blood * 100:0}%" : "Blood --";
@@ -98,11 +100,9 @@ sealed partial class PlayerInterface
         b.Text["squad.count"] = roster.Length.ToString(CultureInfo.InvariantCulture);
         for (int i = 0; i < Math.Min(8, roster.Length); i++) b.Text[$"squad.{i}.name"] = roster[i].Name;
         b.Text["members"] = $"{PlayerCharacters().Count} members | {Selected().Count} selected";
-        b.Text["StateText"] = b.Text["hunger"];
-        foreach (string name in new[] { "NameText", "StateText" }) b.Properties[name] = new Dictionary<string, string>
-            { ["TextColour"] = MyGuiColours.InkText, ["TextPadding"] = "4 2 4 2" };
-        b.Text["StatsText"] = lead?.Skills is { } s ? $"Atk {s.Attack:0} Def {s.Defence:0}" : "";
         b.Text["ExtendedStatsText"] = "";
+        // The exe sets the money label without the layout's colon (docs/game/ui-screens.md section 4).
+        b.Text["MoneyLabelText"] = "Money";
         b.Text["BountyText"] = lead is null || lead.Bounties.Count == 0 ? "" : $"Bounty c.{lead.Bounties.Sum(v => v.Amount)}";
         for (int i = 0; i < ButtonSpeeds.Length; i++) b.Actions[$"TimeSpeedButton{i + 1}"] = $"meitou:speed.{i}";
         b.Actions["ShortcutInventoryButton"] = "meitou:inventory";
@@ -111,16 +111,42 @@ sealed partial class PlayerInterface
         b.Actions["OrdersMedicButton"] = "meitou:medic";
         b.Actions["OrdersRescueButton"] = "meitou:rescue";
         BindOrders(b, lead);
-        foreach (string name in new[] { "LoadingPanel", "TownPanel", "TooltipPanel", "MessagePanel", "BiomeTextPanel", "FloorPanel", "BuildPanel", "JobsPanel" }) b.Hidden.Add(name);
+        foreach (string name in new[] { "LoadingPanel", "TownPanel", "TooltipPanel", "MessagePanel", "BiomeTextPanel", "JobsPanel" }) b.Hidden.Add(name);
+        // The floor the camera shows (the exe's "Floor {1,num}", docs/game/ui-screens.md section 4): Meitou has no building floors yet, so always the ground.
+        b.Text["FloorText"] = "Floor 0";
+        if (lead is null || lead.Bounties.Count == 0) b.Hidden.Add("BountyPanel");
+        // The information panel starts collapsed (as the original's, docs/game/ui-screens.md section 4): the extending part (name, state lines, extended stats) slid down
+        // until its bottom is the panel's, behind the stats panel, so only the name and the state lines show; the ^ button between them toggles it.
+        if (!infoExpanded && faithfulHud.Find("InformationPanel") is { } info && faithfulHud.Find("ExtendingPanel") is { } extending)
+        {
+            var infoRect = info.Position.RelativeTo(new(0, 0, Width, Height), true);
+            var rect = extending.Position.RelativeTo(infoRect, true);
+            b.Positions["ExtendingPanel"] = rect with { Y = infoRect.Y + infoRect.Height - rect.Height };
+        }
+        b.Actions["ExtendedStatsButton"] = "meitou:extendedstats";
         if (session.Simulation.Speed != 0) b.Hidden.Add("PausedPanel");
         BindMedicalBars(b, lead);
         b.Hidden.Add("JobsPanelInfo");
-        foreach (var widget in faithfulHud.Widgets.Where(w => w.Type == "TabItem")) b.HiddenWidgets.Add(widget);
+        // The squad bar has one tab per squad of the player's; Meitou has one squad, so the first page shows, captioned with its name.
+        foreach (var widget in faithfulHud.Find("SquadPanel")?.Children.Where(w => w.Type == "TabItem").Skip(1) ?? []) b.HiddenWidgets.Add(widget);
+        b.Text["SquadPanel@tab0"] = SquadTabCaption(lead);
         if (lead is null) { b.Hidden.Add("MedicalPanel"); b.Hidden.Add("InformationPanel"); }
-        foreach (var w in faithfulHud.Widgets.Where(w => w.Type == "Button" && !b.Actions.ContainsKey(w.Name))) b.Disabled.Add(w.Name);
+        // Buttons without a backend are disabled, except those the original never greys out (the build and floor buttons look live there in the open).
+        foreach (var w in faithfulHud.Widgets.Where(w => w.Type == "Button" && !b.Actions.ContainsKey(w.Name) && w.Name is not ("BuildButton" or "FloorArrowUp" or "FloorArrowDown"))) b.Disabled.Add(w.Name);
         if (Selected().Count == 0)
             foreach (string name in new[] { "OrdersMedicButton", "OrdersRescueButton", "medic", "rescue", "stop" }) b.Disabled.Add(name);
         return b;
+    }
+
+    /// <summary>
+    /// The squad tab's caption. The original captions a tab with its squad's name, which for the player's first squad reads like <c>Nameless_0</c>: the faction's
+    /// name and the squad's number (<b>Observed</b>; where the original makes it is <b>Unknown</b>). Meitou's player squad keeps its start's template name, so the
+    /// tab shows the faction's name and 0.
+    /// </summary>
+    string SquadTabCaption(Meitou.Simulation.CharacterSnapshot? lead)
+    {
+        string? faction = FactionName?.Invoke(lead?.Faction ?? session.World.Player.Faction);
+        return string.IsNullOrEmpty(faction) ? "Squad 1" : faction + "_0";
     }
 
     IReadOnlyList<UiControl> ArrangeUi()
@@ -141,6 +167,7 @@ sealed partial class PlayerInterface
         if (UiMode == UiMode.Faithful)
         {
             if (controls.FirstOrDefault(c => c.Name == "SquadPanel") is { } squadPanel) AddSquadPortraits(controls, squadPanel.Bounds);
+            AddHudText(controls);
         }
         if (UiMode == UiMode.Faithful)
             foreach (var screen in faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent)) controls.AddRange(screen.Controls);
@@ -180,6 +207,7 @@ sealed partial class PlayerInterface
             else openPanel = openPanel == action ? null : action;
         }
         else if (action == "close") openPanel = null;
+        else if (action == "extendedstats") infoExpanded = !infoExpanded;
         else if (action == "menu") MenuAction(argument);
         else if (action == "context") ContextAction(argument);
         else if (action == "squad") Select(PlayerCharacters(), false);

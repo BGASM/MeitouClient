@@ -125,6 +125,24 @@ public class FaithfulInteractionTests(ITestOutputHelper output)
         finally { ui.DisposeUi(); }
     }
 
+    /// <summary>The HUD's medical word thresholds, body part rows and stats line format (docs/game/ui-screens.md section 4).</summary>
+    [Fact]
+    public void HudTextFollowsTheOriginalsRules()
+    {
+        Assert.Equal("Normal", PlayerInterface.HealthWord(new BodyStatus(1, 0.9f, 3, false, false)).Text);
+        Assert.Equal("Slightly Injured", PlayerInterface.HealthWord(new BodyStatus(1, 0.77f, 2.2f, false, false)).Text);
+        Assert.Equal("Hungry", PlayerInterface.HealthWord(new BodyStatus(1, 1, 1.5f, false, false)).Text);
+        Assert.Equal("Wounded", PlayerInterface.HealthWord(new BodyStatus(1, 0.5f, 3, false, false)).Text);
+        Assert.Equal("Starving", PlayerInterface.HealthWord(new BodyStatus(1, 1, 0.5f, false, false)).Text);
+        // The race lists Right Leg, Left Arm, Left Leg, Head, Stomach, Right Arm, Chest; the panel shows head, torso, arms, legs, left before right.
+        string[] race = ["Right Leg", "Left Arm", "Left Leg", "Head", "Stomach", "Right Arm", "Chest"];
+        var parts = race.Select((n, i) => (Part: new HealthPartView(n, n, 100, 0, 0, 0, 100, false), Index: i));
+        Assert.Equal(["Head", "Stomach", "Chest", "Left Arm", "Right Arm", "Left Leg", "Right Leg"], parts.OrderBy(p => PlayerInterface.PartRank(p.Part, p.Index)).Select(p => p.Part.Name));
+        var lead = new CharacterSnapshot(new CharacterId(0, 0), null, Vector3.Zero, 0, [])
+            { Hud = new HudView(150, 150, 0, 1, [new("Strength:", 99.4f, 100), new("Toughness:", 100, 100), new("Dodge:", 105, 100)]) };
+        Assert.Equal(["STRENGTH: 99 (-1)", "TOUGHNESS: 100", "DODGE: 105 (+5)"], PlayerInterface.StatsLines(lead).Select(l => $"{l.Label} {l.Value}"));
+    }
+
     /// <summary>Names the HUD bindings carry for the Meitou mode's native HUD only; the faithful layout has no widget for them.</summary>
     static readonly HashSet<string> NativeOnly = ["clock", "hunger", "condition", "blood", "body", "bloodFraction", "bodyFraction", "hungerFraction", "squad.count", "members"];
 
@@ -142,7 +160,7 @@ public class FaithfulInteractionTests(ITestOutputHelper output)
             {
                 var (layout, b) = ui.FaithfulBindings(id);
                 var names = layout.Widgets.Select(w => w.Name).Where(n => n.Length > 0).ToHashSet(StringComparer.Ordinal);
-                bool Native(string n) => id == "hud" && (NativeOnly.Contains(n) || n.StartsWith("squad.", StringComparison.Ordinal));
+                bool Native(string n) => id == "hud" && (NativeOnly.Contains(n) || n.StartsWith("squad.", StringComparison.Ordinal)) || n.IndexOf("@tab", StringComparison.Ordinal) is > 0 and int at && names.Contains(n[..at]);
                 // What the screen shows or answers to must land on a real widget; hiding or styling an absent one is only reported.
                 foreach (string n in b.Text.Keys.Concat(b.Actions.Keys).Concat(b.Lists.Keys).Concat(b.Progress.Keys).Distinct())
                     if (!names.Contains(n) && !Native(n)) missing.Add($"{id}: {n}");

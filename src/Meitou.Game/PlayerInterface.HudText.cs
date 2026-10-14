@@ -1,0 +1,152 @@
+using System.Globalization;
+using System.Numerics;
+using Meitou.Data.Ui;
+using Meitou.Simulation;
+
+namespace Meitou.Game;
+
+/// <summary>
+/// The HUD's text panels as the original fills them (docs/game/ui-screens.md section 4): the name bar, the state lines, the stats lines, the medical header and
+/// rows. The original builds a list of lines inside each empty text widget, a label from 3 % of its width and a value right-aligned to 96 %, one row per line.
+/// </summary>
+sealed partial class PlayerInterface
+{
+    // The palette of data/gui/colours/kenshi_colours.xml (Verified): Main, Secondary (the text default), Title, Bad, Good, Alert.
+    internal static readonly string MainColour = Hex("afa68b"), TitleColour = Hex("492620"), BadColour = Hex("59231a"), GoodColour = Hex("a8b774"), AlertColour = Hex("000000");
+
+    static string Hex(string rgb) => string.Join(' ', Enumerable.Range(0, 3).Select(i =>
+        (int.Parse(rgb.AsSpan(i * 2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture) / 255f).ToString("0.###", CultureInfo.InvariantCulture)));
+
+    /// <summary>Resolves a faction (a position in the world's faction list) to its name; the host sets it.</summary>
+    public Func<int, string?>? FactionName { get; set; }
+
+    /// <summary>A line of a text panel: label and value, each with its colour (null: the text default).</summary>
+    internal readonly record struct HudLine(string Label, string Value, string? LabelColour = null, string? ValueColour = null);
+
+    /// <summary>The state lines (State, Goal, Encumbrance) of the selected character.</summary>
+    static HudLine[] StateLines(CharacterSnapshot lead)
+    {
+        var body = lead.Body;
+        string state = body is { Dead: true } ? "Dead" : body is { Unconscious: true } ? "Unconscious" : (lead.Orders & CharacterOrders.Block) != 0 ? "Defensive" : "Normal";
+        string? colour = body is { Dead: true } or { Unconscious: true } ? BadColour : null;
+        int encumbrance = (int)((1 - Math.Clamp(lead.Hud?.Encumbrance ?? 1, 0, 1)) * 100);
+        return [new("State:", state, ValueColour: colour), new("Goal:", lead.Activity ?? "Aimless"),
+            new("Encumbrance:", encumbrance.ToString(CultureInfo.InvariantCulture) + "%", ValueColour: encumbrance >= 50 ? BadColour : null)];
+    }
+
+    /// <summary>
+    /// The stats lines: the value the character fights with, then its change from the trained value in brackets, the whole value Bad when it is lower and Good
+    /// when higher. The labels show upper case and in Main on the panel's dark side (<b>Observed</b> in the original; where the case comes from is <b>Unknown</b>).
+    /// </summary>
+    internal static HudLine[] StatsLines(CharacterSnapshot lead) => lead.Hud is not { } hud ? [] : [.. hud.Stats.Select(s =>
+    {
+        int value = (int)s.Value, change = value - (int)s.Base;
+        string text = change == 0 ? value.ToString(CultureInfo.InvariantCulture) : change < 0 ? $"{value} ({change})" : $"{value} (+{change})";
+        return new HudLine(s.Label.ToUpperInvariant(), text, MainColour, change < 0 ? BadColour : change > 0 ? GoodColour : null);
+    })];
+
+    /// <summary>
+    /// The medical header's word (the original's list is longer; Meitou shows the states it models): Dead, Unconscious, Starving below 1 hunger, then by the worst
+    /// part h: Wounded below 0.7, Hungry below 2 hunger, Slightly Injured below 0.9, else Normal.
+    /// </summary>
+    internal static (string Text, string? Colour) HealthWord(BodyStatus body) =>
+        body.Dead ? ("Dead", (string?)BadColour) : body.Unconscious ? ("Unconscious", BadColour) : body.Hunger < 1 ? ("Starving", BadColour)
+        : body.WorstPart < 0.7f ? ("Wounded", BadColour) : body.Hunger < 2 ? ("Hungry", BadColour) : body.WorstPart < 0.9f ? ("Slightly Injured", BadColour) : ("Normal", null);
+
+    /// <summary>The row of a body part in the medical panel: the head, the torso, the left then right arm, the left then right leg (the original's order for people,
+    /// <b>Observed</b>); the race's own order inside a group.</summary>
+    internal static int PartRank(HealthPartView part, int index)
+    {
+        bool right = part.Name.StartsWith("Right", StringComparison.OrdinalIgnoreCase);
+        int group = part.Name.Contains("Head", StringComparison.OrdinalIgnoreCase) ? 0 : part.Name.Contains("Arm", StringComparison.OrdinalIgnoreCase) ? 2
+            : part.Name.Contains("Leg", StringComparison.OrdinalIgnoreCase) ? 3 : 1;
+        return group * 1000 + (group >= 2 ? (right ? 500 : 0) : 0) + index;
+    }
+
+    /// <summary>Adds a text panel's lines over the arranged widget <paramref name="panel"/>: one row per line, the label from 3 % of the width, the value right-aligned to 96 %.</summary>
+    static void AddLines(List<UiControl> controls, string panel, IReadOnlyList<HudLine> lines, float rowHeight)
+    {
+        if (controls.FirstOrDefault(c => c.Name == panel) is not { } host) return;
+        var area = host.Bounds;
+        for (int i = 0; i < lines.Count; i++)
+        {
+            var row = new UiRect(area.X + area.Width * 0.03f, area.Y + i * rowHeight, area.Width * 0.93f, rowHeight);
+            foreach (var (part, text, colour, align) in new[] { ("label", lines[i].Label, lines[i].LabelColour, "Left Top"), ("value", lines[i].Value, lines[i].ValueColour, "Right Top") })
+                if (text.Length > 0)
+                    controls.Add(new($"{panel}-{part}-{i}", "TextBox", row, text, "", "Kenshi_TextboxStandardText", true,
+                        new Dictionary<string, string> { ["TextAlign"] = align, ["TextColour"] = colour ?? MyGuiColours.InkText }, Vector4.Zero, Pickable: false, Clip: host.Clip));
+        }
+    }
+
+    /// <summary>The information panel's and the medical rows' text (Faithful HUD; called after the layout is arranged).</summary>
+    void AddHudText(List<UiControl> controls)
+    {
+        if (Selected().FirstOrDefault() is not { } lead) return;
+        float row = 20 * Height / 1080f;   // the panels' font, Exo2 SemiBold 20, at the 1080-line reference
+        string faction = FactionName?.Invoke(lead.Faction) ?? "";
+        AddLines(controls, "NameText", [new(lead.Name, faction, TitleColour, TitleColour)], row);
+        AddLines(controls, "StateText", StateLines(lead), row);
+        AddLines(controls, "StatsText", StatsLines(lead), row);
+        foreach (var (bar, name, arrows) in medicalRows)
+        {
+            if (controls.FirstOrDefault(c => c.Name == bar + "Datapanel") is not { } host) continue;
+            controls.Add(new($"{bar}-name", "TextBox", host.Bounds, name, "", "Kenshi_TextboxStandardText", true,
+                new Dictionary<string, string> { ["TextAlign"] = "Center", ["TextColour"] = MyGuiColours.InkText }, Vector4.Zero, Pickable: false, Clip: host.Clip));
+            if (arrows.Length > 0)
+                controls.Add(new($"{bar}-arrows", "TextBox", host.Bounds, arrows, "", "Kenshi_TextboxStandardText", true,
+                    new Dictionary<string, string> { ["TextAlign"] = "Right VCenter", ["TextColour"] = AlertColour }, Vector4.Zero, Pickable: false, Clip: host.Clip));
+        }
+    }
+
+    /// <summary>The medical rows bound this frame: the bar widget, the row's name and its arrows (<see cref="BindMedicalBars"/>).</summary>
+    readonly List<(string Bar, string Name, string Arrows)> medicalRows = [];
+
+    /// <summary>
+    /// The medical panel (docs/game/ui-screens.md section 4): Blood first, the body parts, Hunger last, each a name centred on its bar, arrows at its right end and
+    /// its number in the value column. A part's bar is green to its health less stun, red behind it to its maximum less stun (the lost part shows red); blood is
+    /// green to its fraction of capacity; hunger (0..3) green to h - 2, yellow to h - 1, red to h.
+    /// </summary>
+    void BindMedicalBars(UiBindings b, CharacterSnapshot? lead)
+    {
+        medicalRows.Clear();
+        var rows = new List<(string Name, float Green, float Yellow, float Red, string Value, string Arrows, bool Robot)>();
+        if (lead?.Body is { } body)
+        {
+            var hud = lead.Hud;
+            float capacity = Math.Max(hud?.BloodCapacity ?? 1, 1e-3f), blood = hud?.Blood ?? body.Blood * capacity;
+            // A run of '<', one per 0.05 of bleeding (at most 100).
+            int bleed = Math.Min(100, (int)MathF.Ceiling(Math.Abs(hud?.Bleeding ?? 0) / 0.05f));
+            rows.Add(("Blood", blood / capacity, 0, 0, ((int)MathF.Floor(blood + 0.1f)).ToString(CultureInfo.InvariantCulture), new string('<', bleed), false));
+            foreach (var part in lead.HealthParts.Select((p, i) => (p, i)).OrderBy(x => PartRank(x.p, x.i)).Select(x => x.p))
+            {
+                float max = Math.Max(part.Maximum, 1e-3f), health = part.Flesh + part.Rig - part.Stun;
+                string arrows = health < -max ? "!!!   " : health < 0 ? "<<   " : "";
+                rows.Add((part.Name, health / max, 0, (max - part.Stun) / max, ((int)MathF.Floor(health + 0.1f)).ToString(CultureInfo.InvariantCulture), arrows, part.Robotic));
+            }
+            float hunger = body.Hunger;
+            rows.Add(("Hunger", hunger - 2, hunger - 1, hunger, ((int)(hunger * 100)).ToString(CultureInfo.InvariantCulture), hunger < 2 ? "<!   " : "<   ", false));
+        }
+        for (int i = 1; i <= 9; i++)
+        {
+            string name = $"LifeBar{i}";
+            b.Hidden.Add(name + "Tooltip");
+            b.Hidden.Add(name + "White"); b.Hidden.Add(name + "Crushed");
+            if (i > rows.Count) { b.Hidden.Add(name); b.Hidden.Add(name + "Value"); continue; }
+            var r = rows[i - 1];
+            b.Progress[name + "Green"] = Math.Max(r.Green, 0);
+            b.Progress[name + "Yellow"] = Math.Max(r.Yellow, 0);
+            b.Progress[name + "Red"] = Math.Max(r.Red, 0);
+            if (r.Robot) b.Progress[name + "Robot"] = Math.Max(r.Green, 0); else b.Hidden.Add(name + "Robot");
+            b.Text[name + "Datapanel"] = "";
+            b.Text[name + "Value"] = r.Value;
+            b.Properties[name + "Value"] = new Dictionary<string, string> { ["TextAlign"] = "Center", ["TextColour"] = MyGuiColours.InkText };
+            medicalRows.Add((name, r.Name, r.Arrows));
+        }
+        if (lead?.Body is { } status)
+        {
+            var (word, colour) = HealthWord(status);
+            b.Text["HealthText"] = word;
+            b.Properties["HealthText"] = new Dictionary<string, string> { ["TextAlign"] = "Center", ["TextColour"] = colour ?? MyGuiColours.InkText };
+        }
+    }
+}

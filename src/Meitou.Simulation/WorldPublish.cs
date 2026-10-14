@@ -32,6 +32,7 @@ public sealed partial class World
                 Skills = selected && cold!.Stats is { } sk ? new SkillSummary(sk[StatsEnumerated.MeleeAttack], sk[StatsEnumerated.MeleeDefence], sk[StatsEnumerated.Dodge], sk.Toughness, sk.Strength, sk.Athletics) : null,
                 Inventory = selected && cold!.Inventory is { } carried ? Items.InventoryText.Lines(carried) : [],
                 AllSkills = selected && cold!.Stats is { } allStats ? Array.AsReadOnly(allStats.ToArray()) : [],
+                Hud = selected && cold!.Medical is { } hudMed && cold.Race is { } hudRace && cold.Stats is { } hudStats ? HudOf(cold, hudMed, hudRace, hudStats) : null,
                 HealthParts = selected && cold!.Medical is { } health && cold.Race is { } anatomy ? Array.AsReadOnly(health.Parts.Select(p => new HealthPartView(p.Template.StringId, p.Template.Name, p.Flesh, p.Stun, p.Bandage, p.Rig, p.MaxHp, p.IsRobotic(anatomy))).ToArray()) : [],
                 ItemGrid = selected && cold!.Inventory is { } grid ? new InventoryView(grid.Width, grid.Height, grid.Backpack?.Contents?.Width ?? 0, grid.Backpack?.Contents?.Height ?? 0,
                     Array.AsReadOnly(grid.All().Select((item, index) => new InventoryItemView(index, item.Record, item.Name, item.Section, item.X, item.Y, item.Width, item.Height, item.Quantity, item.Weight, item.Quality)).ToArray())) : null,
@@ -49,6 +50,28 @@ public sealed partial class World
         }
         PreviousSnapshot = Snapshot;
         Snapshot = new WorldSnapshot(Tick, list) { Projectiles = projectiles?.PublishProjectiles() ?? [], Trade = trades?.PublishTrade() };
+    }
+
+    /// <summary>
+    /// The HUD's numbers of a selected character (docs/game/ui-screens.md section 4). The stats panel lists what the character fights with: Crossbows, Precision and
+    /// Perception in ranged mode with a crossbow, else Martial Arts unarmed or Attack and Defense with a melee weapon; then Strength, Dexterity, Toughness and, but
+    /// in ranged mode, Dodge. A value is the stat times its injury multiplier (and the fighter's dexterity or dodge factor), against the trained stat; toughness is plain.
+    /// </summary>
+    static HudView HudOf(CharacterCold cold, Bodies.MedicalState med, RaceData race, Bodies.CharacterStats stats)
+    {
+        var fighter = cold.Fighter;
+        HudStatLine Line(string label, StatsEnumerated stat, float factor = 1) => new(label, stats[stat] * med.StatMultiplier(stat) * factor, stats[stat]);
+        var lines = new List<HudStatLine>(6);
+        bool ranged = (cold.Orders & CharacterOrders.Ranged) != 0 && fighter?.Crossbow is not null;
+        if (ranged) { lines.Add(Line("Crossbows:", StatsEnumerated.Crossbows)); lines.Add(Line("Precision:", StatsEnumerated.FriendlyFire)); lines.Add(Line("Perception:", StatsEnumerated.Perception)); }
+        else if (fighter is null || fighter.Unarmed) lines.Add(Line("Martial Arts:", StatsEnumerated.MartialArts));
+        else { lines.Add(Line("Attack:", StatsEnumerated.MeleeAttack)); lines.Add(Line("Defense:", StatsEnumerated.MeleeDefence)); }
+        lines.Add(Line("Strength:", StatsEnumerated.Strength));
+        lines.Add(Line("Dexterity:", StatsEnumerated.Dexterity, fighter?.DexterityMult ?? 1));
+        lines.Add(new("Toughness:", stats.Toughness, stats.Toughness));
+        if (!ranged) lines.Add(Line("Dodge:", StatsEnumerated.Dodge, fighter?.DodgeMult ?? 1));
+        return new HudView(med.Blood, Bodies.MedicalState.BloodCapacity(race, stats.Strength, med.HasStatsObject, med.ScaleK, med.ScaleZ), med.Bleeding,
+            fighter?.EncumbranceFactor ?? 1, lines.AsReadOnly());
     }
 
     static BodyStatus BodyOf(CharacterCold cold, Bodies.MedicalState med, RaceData race, byte task) => new(
