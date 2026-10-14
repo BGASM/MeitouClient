@@ -58,11 +58,13 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         if (button == MouseButton.Left)
         {
             if (UiMouseDown(p)) return true;
+            if (CloseContextMenu()) return true;   // a click beside the open menu only closes it
             if (OverHud(p)) return true;
             dragFrom = p;
             dragging = false;
             return true;
         }
+        if (button == MouseButton.Right && CloseContextMenu()) return true;
         if (button == MouseButton.Right && MapMoveOrder(p, shift)) return true;
         if (button == MouseButton.Right && !OverHud(p))
         {
@@ -75,14 +77,10 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
                 Say(new Meitou.Simulation.Carrying.PutDownOrder(carriers) { Tick = session.World.Tick });
             else if (ctrl && downed is { } lift && SelectedIds() is { Count: > 0 })
                 Say(new Meitou.Simulation.Carrying.PickUpOrder([], lift) { Tick = session.World.Tick });
-            else if (PickTrader(p) is { } trader && SelectedIds() is { Count: > 0 } customers)
-                Say(new Meitou.Simulation.Trading.OpenTrade(customers[0], trader) { Tick = session.World.Tick });
-            else if (PickTarget(p) is { } victim && SelectedIds() is { Count: > 0 } attackers)
-                Say(new Meitou.Simulation.Combat.AttackOrder(attackers, victim) { Tick = session.World.Tick });
-            else if (PickHurtAlly(p) is { } patient && SelectedIds() is { Count: > 0 } medics)
-                Say(new Meitou.Simulation.FirstAid.TreatOrder(medics, patient) { Tick = session.World.Tick });
-            else if (PickDowned(p, ownOnly: true) is { } ally && SelectedIds() is { Count: > 0 })
-                Say(new Meitou.Simulation.Carrying.PickUpOrder([], ally) { Tick = session.World.Tick });
+            // On a character: the quick order (trade with a trader, attack anyone else, treat a hurt ally, pick up a downed one of yours) is given when the button comes up
+            // before the context menu's hold time; held longer, the menu opens instead (PlayerInterface.ContextMenu.cs).
+            else if (QuickOrder(p) is var quick && ContextPress(p, quick)) { }
+            else if (quick is not null) quick();
             else if (Ray(p) is { } ray && GroundHit(ray.Origin, ray.Direction) is { } hit)
             {
                 Move(hit, shift);
@@ -91,6 +89,17 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
             return true;
         }
         return OverHud(p);
+    }
+
+    /// <summary>The order a quick right click on a character gives, or null when there is none (the ground under it is then a move).</summary>
+    Action? QuickOrder(Vector2 p)
+    {
+        if (SelectedIds() is not { Count: > 0 } selection) return null;
+        if (PickTrader(p) is { } trader) return () => Say(new Meitou.Simulation.Trading.OpenTrade(selection[0], trader) { Tick = session.World.Tick });
+        if (PickTarget(p) is { } victim) return () => Say(new Meitou.Simulation.Combat.AttackOrder(selection, victim) { Tick = session.World.Tick });
+        if (PickHurtAlly(p) is { } patient) return () => Say(new Meitou.Simulation.FirstAid.TreatOrder(selection, patient) { Tick = session.World.Tick });
+        if (PickDowned(p, ownOnly: true) is { } ally) return () => Say(new Meitou.Simulation.Carrying.PickUpOrder([], ally) { Tick = session.World.Tick });
+        return null;
     }
 
     public void MouseMove(Vector2 p)
@@ -105,6 +114,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     {
         mouse = p;
         if (button == MouseButton.Left) { InventoryPointerUp(p); faithfulScreens.PointerUp(); mapDrag = null; }
+        if (button == MouseButton.Right) ContextRelease();
         if (button == MouseButton.Right && steering)
         {
             Steer(final: true);
@@ -131,6 +141,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     /// </summary>
     public void Steer(bool final = false)
     {
+        UpdateContextMenu();
         if (!steering || OverHud(mouse)) return;
         if (!final && session.World.Tick == steerTick) return;
         if (Ray(mouse) is not { } ray || GroundHit(ray.Origin, ray.Direction) is not { } hit) return;

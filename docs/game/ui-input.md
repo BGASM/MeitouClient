@@ -204,7 +204,7 @@ Meitou's host binds the same two keys (engine choice: `InputAction.QuickSave` / 
 
 Meitou's first aid and rest bindings (2026-10-13, `PlayerInterface`, engine choices; simulation side in [simulation.md](../simulation.md#bodies)). The original's own: `medic` (NUM7, event 0x1f) and `rescue` (NUM8, 0x20) are
 orders-panel toggles forwarded to FUN_1407226e0 (the Medic and Rescue buttons of the panel, [ui-screens.md](ui-screens.md#4-hud-maingui)), i.e. job switches, not targeted orders (**Observed**); the targeted order is the context menu
-verb 25 "First Aid" (pointer mode 1 `med`, section 7). Neither exists here: the numpad belongs to the cinema camera (`Cinema`, docs/viewer.md) and there is no context menu or orders panel. So:
+verb 25 "First Aid" (pointer mode 1 `med`, section 7; Meitou's context menu has it since 2026-10-14). The numpad belongs to the cinema camera (`Cinema`, docs/viewer.md), so:
 
 | Input | Effect |
 |---|---|
@@ -275,6 +275,15 @@ Keyed by the AI taskType numbers of [ai-tasks.md](ai-tasks.md); names matched (*
 123/226/290 Smash; 124/152 Auto-Haul; 136 Corpse Disposal; 146 Man Turret; 166 Capture; 185/285 Use Tools;
 186/286 Use Strength; 201 Unlock Shackles; 207 Escape; 223 Throw out of home; 228 Stealth KO; 229 Stealth Kill;
 235 Shoot At; 246 Kidnap; 249 Splint Injuries; 251/252 Escape (skill/strength); 273 Throw out of town.
+
+Meitou's context menu (2026-10-14, `PlayerInterface.ContextMenu.cs`; both UI modes): holding the command button on a character for 0.2 s (the timer
+above) opens a menu laid out as `Kenshi_ContextMenu` (an eighth of the screen wide, the character's name on top, one `Kenshi_Button1` per verb) beside
+the cursor. Its verbs are the original's names for the orders Meitou has: Put Down (a selected character carries it), Trade (a trader), Attack Target
+(anyone not the player's and not down), First Aid (needs aid, not a selected character), Pick Up and Loot (down and not carried). A release before
+0.2 s gives the quick order as before (trade, attack, treat, pick up an own downed character; else the ground move); the release after the menu opened
+gives nothing. A left click on a verb gives it; a click beside the menu, a right click or Esc closes it. **Engine choices**: which verbs appear and their
+order (the original's tests behind each verb are not traced), the quick order acting on release rather than press (the press-versus-release timing is
+**Unknown**, see Unknowns), and Loot giving the take-all order (the original opens a loot window).
 
 ## 8. Mouse pointer modes
 

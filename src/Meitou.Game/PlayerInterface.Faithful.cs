@@ -18,6 +18,7 @@ sealed partial class PlayerInterface
     public bool UiKey(Key key, bool ctrl = false, bool shift = false)
     {
         if (!UiVisible) return false;
+        if (key == Meitou.Engine.Input.Key.Escape && CloseContextMenu()) return true;
         // The Meitou mode: Esc closes an open panel, else opens or closes the game menu (it no longer quits at once).
         if (UiMode == UiMode.Meitou)
         {

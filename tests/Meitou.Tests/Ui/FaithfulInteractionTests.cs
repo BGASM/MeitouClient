@@ -73,6 +73,34 @@ public class FaithfulInteractionTests(ITestOutputHelper output)
         finally { ui.DisposeUi(); }
     }
 
+    [Fact, Slow]
+    public void HoldingTheCommandButtonOnACharacterOpensTheContextMenuAndItsVerbGivesTheOrder()
+    {
+        using var session = new WorldSession(Vector3.Zero, (-100, -100, 100, 100), (_, _) => 0, systems: [new PlayerSystem()]);
+        var own = session.World.Characters.Spawn(new() { Position = new(-3, 0, 0) }, new() { Name = "Player", IsPlayer = true }, 0);
+        var other = session.World.Characters.Spawn(new() { Position = new(3, 0, 0) }, new() { Name = "Stranger" }, 0);
+        session.World.Player.Faction = 0; session.World.Player.Selection.Add(own); session.World.RunTick();
+        var ui = Ui(session);
+        try
+        {
+            var eye = new Vector3(0, 6, -14);
+            ui.Eye = eye;
+            ui.ViewProjection = Matrix4x4.CreateLookAt(eye, new(0, 1, 0), Vector3.UnitY) * Matrix4x4.CreatePerspectiveFieldOfView(1, 1600 / 900f, 0.1f, 1000);
+            var at = ui.Project(new Vector3(3, 1, 0))!.Value;
+            ui.MouseDown(MouseButton.Right, at, false);
+            ui.Steer(); Assert.False(ui.ContextMenuOpen);   // not held long enough yet
+            Thread.Sleep(TimeSpan.FromSeconds(PlayerInterface.ContextHoldSeconds + 0.05));
+            ui.Steer(); Assert.True(ui.ContextMenuOpen);
+            ui.MouseUp(MouseButton.Right, at, false);
+            Assert.Contains(ui.UiFrame, c => c.Name == "context-title" && c.Caption == "Stranger");
+            Assert.Equal(0, session.World.Commands.Count);   // the release after the hold gave no quick order
+            Click(ui, "context-verb-0");
+            Assert.False(ui.ContextMenuOpen);
+            Assert.Contains(session.World.Commands.TakeDue(long.MaxValue), c => c is Meitou.Simulation.Combat.AttackOrder a && a.Target == other);
+        }
+        finally { ui.DisposeUi(); }
+    }
+
     /// <summary>Names the HUD bindings carry for the Meitou mode's native HUD only; the faithful layout has no widget for them.</summary>
     static readonly HashSet<string> NativeOnly = ["clock", "hunger", "condition", "blood", "body", "bloodFraction", "bodyFraction", "hungerFraction", "squad.count", "members"];
 

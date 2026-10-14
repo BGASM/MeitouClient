@@ -42,6 +42,7 @@ sealed partial class PlayerInterface
         selectedFor = null;
         selected = [];
         Follow = null;
+        CloseContextMenu();
     }
 
     void DrawNotice(DebugOverlay o, int width)

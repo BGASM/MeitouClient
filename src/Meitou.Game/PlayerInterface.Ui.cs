@@ -155,6 +155,7 @@ sealed partial class PlayerInterface
         if (UiMode == UiMode.Meitou) AddTradePanel(controls);
         if (UiMode == UiMode.Meitou && menuOpen) AddMenuPanel(controls);
         if (UiMode == UiMode.Faithful) AddInventoryDrag(controls);
+        AddContextMenu(controls);
         AddHoverLabel(controls);
         return controls;
     }
@@ -187,6 +188,7 @@ sealed partial class PlayerInterface
         }
         else if (action == "close") openPanel = null;
         else if (action == "menu") MenuAction(argument);
+        else if (action == "context") ContextAction(argument);
         else if (action == "squad") Select(PlayerCharacters(), false);
         else if (action == "member")
         {
