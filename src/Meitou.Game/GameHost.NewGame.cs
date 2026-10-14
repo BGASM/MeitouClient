@@ -7,6 +7,31 @@ namespace Meitou.Game;
 sealed partial class GameHost
 {
     string? newGameRequested;
+    bool mainMenuRequested;
+
+    /// <summary>
+    /// Leaves the game for the main menu: a new world with the town population and no player squad (what a run without a start has behind the title), the camera where it is;
+    /// the faithful mode then shows the title screen, the Meitou mode its game menu.
+    /// </summary>
+    void HandleMainMenu()
+    {
+        if (!mainMenuRequested) return;
+        mainMenuRequested = false;
+        if (!SavesAvailable(out string why) || Busy()) { player.Notice(why.Length > 0 ? why : "Save or load still in progress", true); return; }
+        try
+        {
+            var built = BuildSystems(interactive: true);
+            session.ReplaceWorld(built.Systems);
+            population = built.Population; aggro = built.Aggro; playerSquad = null;
+            if (nav is not null) population!.ZoneGate = zone => nav.Walkability.World.Contains(zone);
+            loadedSave = null; preparedBase = null; worldEpoch++;
+            sentFocus = false; SendFocus();
+            session.World.RunTick(); indexedFor = null; previousById.Clear();
+            player.Reset(); player.CloseFrontend();
+            player.ShowMainMenu();
+        }
+        catch (Exception e) { Console.Error.WriteLine($"main menu {e}"); player.Notice($"Main menu failed: {e.Message}", true); }
+    }
     void HandleNewGame()
     {
         if (newGameRequested is not { } id) return;

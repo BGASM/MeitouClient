@@ -29,7 +29,7 @@ sealed partial class PlayerInterface
         {
             if (faithfulScreens.IsOpen("title") && faithfulScreens.OpenScreens.Count == 1) return true;
             // Esc presses the last button of the top message box (Return the first, docs/game/ui-input.md section 5).
-            if (faithfulScreens.IsOpen("message")) HandleFrontendAction(new("message", "ButtonB", "ButtonB"));
+            if (faithfulScreens.IsOpen("message")) HandleFrontendAction(new("message", CancelButton, CancelButton));
             else if (!faithfulScreens.Escape()) faithfulScreens.Open("menu");
             UpdateMenuPause();
             return true;

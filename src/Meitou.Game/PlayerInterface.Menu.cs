@@ -60,6 +60,11 @@ sealed partial class PlayerInterface
                 CloseMenu();
                 break;
             case "options": CloseMenu(); ScreenAction?.Invoke(new("menu", "OptionsButton", "options")); break;
+            case "main-menu" when session.World.Player.Exists:
+                if (armed != argument) { menuArmed = argument; return; }
+                CloseMenu();
+                ScreenAction?.Invoke(new("menu", "MainMenuButton", "main-menu"));
+                break;
             case "exit":
                 if (armed != argument) { menuArmed = argument; return; }
                 ScreenAction?.Invoke(new("menu", "ExitGameButton", "exit"));
@@ -96,6 +101,7 @@ sealed partial class PlayerInterface
             ("overwrite", menuArmed == "overwrite" ? "CONFIRM SAVE" : "SAVE OVER", haveGame && selectedSlot is { Writable: true }),
             ("load", menuArmed == "load" ? "CONFIRM LOAD" : "LOAD", selectedSlot is not null && slotReadable),
             ("options", "OPTIONS", true),
+            ("main-menu", menuArmed == "main-menu" ? "CONFIRM" : "MAIN MENU", haveGame),
             ("exit", menuArmed == "exit" ? "CONFIRM EXIT" : "EXIT", true),
         };
         for (int i = 0; i < commands.Length; i++)
@@ -133,6 +139,7 @@ sealed partial class PlayerInterface
             "load" => "Press CONFIRM LOAD to load the chosen save. Unsaved progress will be lost.",
             "overwrite" => $"Press CONFIRM SAVE to replace '{selectedSlot?.Name}'.",
             "exit" => "Press CONFIRM EXIT to quit. Unsaved progress will be lost.",
+            "main-menu" => "Press CONFIRM to leave this game for the main menu. Unsaved progress will be lost.",
             _ => "Kenshi's saves load here but are never written: saving makes a Meitou save.",
         };
         Add("menu-footer", new(x + 24, y + h - 34, w - 48, 22), footer, colour: menuArmed is null ? muted : null, scale: 0.85f);

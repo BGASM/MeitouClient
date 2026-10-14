@@ -171,6 +171,7 @@ sealed partial class GameHost
             if (e.Action == "save") saveRequestedFolder = Meitou.Data.Save.SaveCatalog.Folder(Meitou.Simulation.Saving.QuickSave.DefaultRoot, e.Text);
             else if (e.Action == "load") loadRequestedFolder = e.Text;
             else if (e.Action == "new-game") newGameRequested = e.Text;
+            else if (e.Action == "main-menu") mainMenuRequested = true;
             else if (e.Widget == "OptionsButton" && panel is not null) panel.Visible = true;
             else if (e.Widget == "ExitGameButton") quit = true;
         };
@@ -230,6 +231,7 @@ sealed partial class GameHost
             WorldNews();
             HandleSaves();   // a quicksave or quickload asked for by a key: between ticks, none in flight
             HandleNewGame();
+            HandleMainMenu();
             animSeconds += frameDt;
             animClock = true;
             UpdateNav();

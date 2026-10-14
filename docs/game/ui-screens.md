@@ -72,7 +72,9 @@ SpeechPanel (Dialog), MessagePanel (Popup), MessageBox (Info), CharacterEditor (
 ## 3. Main menu and new game flow
 
 - Continue is shown only when a save exists (FUN_14036b680) and the continue name is non-empty (**Observed**).
-  Credits are read from `data/credits.txt`. Exit asks "Are you sure you want to exit?" (FUN_140914600).
+  Credits are read from `data/credits.txt`. Exit asks "Are you sure you want to exit?" (FUN_140914600). Meitou's in-game Esc menu Exit
+  (engine choice, 2026-10-14; the original's in-game Exit dialog is **Unknown**) uses the three-button message box: MAIN MENU (a world without a
+  player squad behind the title), QUIT and CANCEL (Esc).
 - New game: left and right arrows cycle NEW_GAME_STARTOFF records (read by FUN_140916620). Fields: ints `money`,
   `start pos X`, `start pos Z`; bool `force start pos`; strings `description`, `difficulty`, `style`; references
   to squad, town, faction relations, research, `force race` (the squads, towns and relations behind them: [factions-squads-towns.md](factions-squads-towns.md#3-relations)).

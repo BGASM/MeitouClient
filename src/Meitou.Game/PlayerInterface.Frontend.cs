@@ -18,7 +18,9 @@ sealed partial class PlayerInterface
     string slotDetails = "", credits = "";
     bool showCredits;
     bool slotReadable;
-    (string Title, string Text, Action Confirm)? confirmation;
+    /// <summary>The open message box: ButtonA confirms (captioned <c>Yes</c>), an optional middle choice (ButtonB), and the last button cancels (Esc presses it).</summary>
+    sealed record Confirmation(string Title, string Text, Action Confirm, string Yes = "YES", (string Caption, Action Act)? Middle = null);
+    Confirmation? confirmation;
     public void ConfigureFrontend(GameDatabase? database, Func<IReadOnlyList<SaveSlot>> enumerate, string creditsText)
     {
         starts = database is null ? [] : NewGameStart.LoadAll(database);
@@ -26,15 +28,19 @@ sealed partial class PlayerInterface
         saveSlots = enumerate; credits = creditsText;
     }
     public void ShowTitle() { faithfulScreens.Open("title"); RefreshSlots(); UpdateMenuPause(); }
+    /// <summary>After leaving a game: the title screen in the faithful mode, the game menu in the Meitou mode (it has no title screen).</summary>
+    public void ShowMainMenu() { if (UiMode == UiMode.Faithful) ShowTitle(); else if (!menuOpen) ToggleMenu(); }
     public void CloseFrontend()
     {
         foreach (string id in new[] { "title", "menu", "new-game", "advanced", "save", "load", "message" }) faithfulScreens.Close(id);
         confirmation = null; menuOpen = false; menuArmed = null; UpdateMenuPause();
     }
-    void Confirm(string title, string text, Action action)
+    void Confirm(string title, string text, Action action, string yes = "YES", (string Caption, Action Act)? middle = null)
     {
-        confirmation = (title, text, action); faithfulScreens.Open("message");
+        confirmation = new(title, text, action, yes, middle); faithfulScreens.Open("message");
     }
+    /// <summary>The cancel button of the open message box: ButtonC when it has a middle choice, else ButtonB.</summary>
+    string CancelButton => confirmation?.Middle is null ? "ButtonB" : "ButtonC";
     void RefreshSlots()
     {
         try { slots = saveSlots(); selectedSlot = slots.FirstOrDefault(); ReadSlotDetails(); }
@@ -72,7 +78,12 @@ sealed partial class PlayerInterface
                 case "OptionsButton": ScreenAction?.Invoke(e); break;
                 case "CreditsButton": showCredits = !showCredits; break;
                 case "ContinueButton": if (slots.FirstOrDefault() is { } last) ScreenAction?.Invoke(new("load", "LoadButton", "load", last.Folder)); break;
-                case "ExitButton": case "ExitGameButton": Confirm("EXIT", "Are you sure you want to exit?", () => ScreenAction?.Invoke(new("menu", "ExitGameButton", "exit"))); break;
+                case "ExitButton": Confirm("EXIT", "Are you sure you want to exit?", () => ScreenAction?.Invoke(new("menu", "ExitGameButton", "exit"))); break;
+                // In play the Esc menu's Exit offers the main menu as well (engine choice: the original's in-game Exit dialog is not traced).
+                case "ExitGameButton":
+                    Confirm("EXIT", session.World.Player.Exists ? "Return to the main menu or quit the game? Unsaved progress will be lost." : "Return to the main menu or quit the game?",
+                        () => ScreenAction?.Invoke(new("menu", "MainMenuButton", "main-menu")), "MAIN MENU", ("QUIT", () => ScreenAction?.Invoke(new("menu", "ExitGameButton", "exit"))));
+                    break;
             }
             return true;
         }
@@ -80,6 +91,7 @@ sealed partial class PlayerInterface
         {
             var confirm = confirmation; confirmation = null; faithfulScreens.Close("message");
             if (e.Widget == "ButtonA") confirm?.Confirm();
+            else if (e.Widget == "ButtonB" && confirm?.Middle is { } middle) middle.Act();
             return true;
         }
         if (e.Screen == "new-game")
@@ -164,9 +176,10 @@ sealed partial class PlayerInterface
         }
         else if (id == "message")
         {
-            Enable("ButtonA", "ButtonB"); b.Hidden.Add("ButtonC");
             b.Text["Root"] = confirmation?.Title ?? ""; b.Text["MessageText"] = confirmation?.Text ?? "";
-            b.Text["ButtonA"] = "YES"; b.Text["ButtonB"] = "CANCEL";
+            b.Text["ButtonA"] = confirmation?.Yes ?? "YES";
+            if (confirmation?.Middle is { } middle) { Enable("ButtonA", "ButtonB", "ButtonC"); b.Text["ButtonB"] = middle.Caption; b.Text["ButtonC"] = "CANCEL"; }
+            else { Enable("ButtonA", "ButtonB"); b.Hidden.Add("ButtonC"); b.Text["ButtonB"] = "CANCEL"; }
             b.Properties["MessageText"] = new Dictionary<string, string> { ["Static"] = "true", ["WordWrap"] = "true" };
             b.Properties["ButtonA"] = new Dictionary<string, string> { ["DefaultAction"] = "true" };
         }

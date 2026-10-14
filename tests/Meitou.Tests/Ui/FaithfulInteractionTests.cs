@@ -42,6 +42,9 @@ public class FaithfulInteractionTests(ITestOutputHelper output)
             Click(ui, "ButtonB"); Assert.Equal("new-game", request.Action);
             Click(ui, "ExitButton"); Click(ui, "ButtonA"); Assert.Equal("exit", request.Action);
             ui.CloseFrontend(); Assert.False(session.Simulation.RequestedPause);
+            // In play the Esc menu's Exit offers the main menu, quit and cancel.
+            ui.UiKey(Key.Escape); Click(ui, "ExitGameButton"); Assert.Contains(ui.UiFrame, c => c.Name == "ButtonC" && c.Enabled);
+            Click(ui, "ButtonA"); Assert.Equal("main-menu", request.Action);
         }
         finally { ui.DisposeUi(); }
     }
