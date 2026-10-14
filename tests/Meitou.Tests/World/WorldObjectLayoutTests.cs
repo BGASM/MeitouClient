@@ -140,6 +140,9 @@ public class WorldObjectLayoutTests
         Assert.NotNull(volume);
         Assert.True(volume.Contains(new System.Numerics.Vector3(-51189, 1581, 2642), 2));
         Assert.False(volume.Contains(new System.Numerics.Vector3(-51189, 1581, 2800), 2));
+        // The floor under a character: the bar room is floor 0, the roof terrace (where the beds stand) floor 1.
+        Assert.Equal(0, volume.FloorAt(new System.Numerics.Vector3(-51189, position.Y + 4, 2642)));
+        Assert.Equal(1, volume.FloorAt(new System.Numerics.Vector3(-51210, position.Y + 71, 2619)));
 
         // The bar's furniture: the beds stand on floor 1 (hidden at floor 0), the counter on floor 0.
         var layout = new BuildingLayouts(db, levels.Interiors).Find(record, "Bar", exterior: false)!;

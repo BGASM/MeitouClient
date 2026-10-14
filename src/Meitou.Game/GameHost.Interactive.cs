@@ -108,7 +108,7 @@ sealed partial class GameHost
             Cinema.GameFile, lensKeysAlways: false);
         bool cinemaHolds = false, interfaceHidden = false;
         cinema.Moved = () => cinemaHolds = true;
-        // PageUp/PageDown zoom only the strategy camera: in the free camera and on a camera the cinema holds they set the lens (Home puts it back).
+        // PageUp/PageDown step the floor in the strategy camera: in the free camera and on a camera the cinema holds they set the lens (Home puts it back).
         cinema.LensKeys = () => session.Camera.IsFree || cinemaHolds;
         cinema.Load();
 
@@ -220,6 +220,8 @@ sealed partial class GameHost
             if (actions.Pressed(InputAction.ToggleFps)) fpsVisible = !fpsVisible;
             if (actions.Pressed(InputAction.QuickSave)) quickSaveRequested = true;
             if (actions.Pressed(InputAction.QuickLoad)) quickLoadRequested = true;
+            // PageUp / PageDown step the viewed floor, except while they set the cinema's lens (its editor, the free camera, a camera it holds).
+            if (!cinema.LensKeysLive) { if (actions.Pressed(InputAction.FloorUp)) StepFloor(1); if (actions.Pressed(InputAction.FloorDown)) StepFloor(-1); }
             if (actions.Pressed(InputAction.CycleProfiler) && profiler is not null) profiler.Showing = (FrameProfiler.Mode)(((int)profiler.Showing + 1) % 3);
             // The camera the cinema left (a cut, a scrub, the end of a flight) goes back to the rig at the first camera input: the free camera at
             // that eye (only it can stand anywhere), or with ; the strategy camera where the view meets the ground. A flight in progress keeps it.

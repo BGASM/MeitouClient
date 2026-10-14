@@ -118,7 +118,7 @@ sealed partial class GameHost
                         }
                 poses[i] = new CharacterPose(layer.Name, time, weight);
             }
-            list.Add(new CharacterInstance(DrawKey(c.Id), c.Appearance, position, yaw, poses) { WeaponDrawn = c.WeaponDrawn, Scale = c.Scale });
+            list.Add(new CharacterInstance(DrawKey(c.Id), c.Appearance, position, yaw, poses) { WeaponDrawn = c.WeaponDrawn, Scale = c.Scale, Hidden = aboveFloor.Contains(c.Id) });
         }
     }
 

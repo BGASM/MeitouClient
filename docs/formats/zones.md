@@ -336,9 +336,16 @@ What Meitou does (`WorldObjects`, `WorldObjectRenderer.InteriorView`, `GameHost.
 character's position within the building's `interior mask` collision hull (its ground footprint and height range,
 `InteriorVolume`; widened 2 units), since the simulation keeps no building reference yet; the `interior` parts and the
 interior layout's furniture are laid out with the zone and drawn only in the view (no 10 s unload, no loading); interior
-parts are drawn with back faces culled (the rest of the objects stay double-sided); the viewed floor is
-`GameHost.ViewedFloor` (0; the HUD arrows and PageUp / PageDown are not wired to it yet); characters on hidden floors
-are still drawn.
+parts are drawn with back faces culled (the rest of the objects stay double-sided). The viewed floor is
+`GameHost.ViewedFloor`: 0 at the start, PageUp / PageDown and the HUD's floor arrows step it (keyboard zoom moved to Home / End,
+the game's own zoom keys), and a followed character sets it to its floor when the follow starts and when its floor changes. A
+character's floor (`InteriorVolume.FloorAt`, `FloorSurfaces`) is the game's downward ray from 10 units above the feet against the
+building's ordinary parts (their `building floor`) and stairs (their floor + 1 in the top 30 % of the stairs, else their own; the
+game keeps the character's previous floor there, which Meitou does not track), leaving out doors, `passable`, roof, furniture and
+IGNORE parts; nothing hit is floor 0 (**Verified** for the Hub bar's room, 0, and roof terrace, 1). Characters in a building of
+the view standing above the viewed floor are not drawn and cast no shadow (their squad-bar portrait still is); characters outside
+every building of the view are always drawn (the game compares an outside character's floor with the global viewed floor; Meitou has
+no floor for them). The saved `floor num` is not read or written yet.
 
 ### Building layouts
 

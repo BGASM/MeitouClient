@@ -22,6 +22,9 @@ sealed partial class PlayerInterface
     string? openPanel;
     MyGuiScreenHost faithfulScreens = null!;
     public event Action<MyGuiEvent>? ScreenAction;
+
+    /// <summary>The viewed floor of the interior view (the host's): read for the HUD's floor text, stepped by its arrows.</summary>
+    public (Func<int> Get, Action<int> Step)? Floor { get; set; }
     public bool UiVisible { get; set; } = true;
     internal IReadOnlyList<UiControl> UiFrame => ArrangeUi();
 
@@ -112,8 +115,10 @@ sealed partial class PlayerInterface
         b.Actions["OrdersRescueButton"] = "meitou:rescue";
         BindOrders(b, lead);
         foreach (string name in new[] { "LoadingPanel", "TownPanel", "TooltipPanel", "MessagePanel", "BiomeTextPanel", "JobsPanel" }) b.Hidden.Add(name);
-        // The floor the camera shows (the exe's "Floor {1,num}", docs/game/ui-screens.md section 4): Meitou has no building floors yet, so always the ground.
-        b.Text["FloorText"] = "Floor 0";
+        // The viewed floor (the exe's "Floor {1,num}", docs/game/ui-screens.md section 4; docs/formats/zones.md "Interior view"); the arrows step it as PageUp / PageDown do.
+        b.Text["FloorText"] = $"Floor {Floor?.Get() ?? 0}";
+        b.Actions["FloorArrowUp"] = "meitou:floor-up";
+        b.Actions["FloorArrowDown"] = "meitou:floor-down";
         if (lead is null || lead.Bounties.Count == 0) b.Hidden.Add("BountyPanel");
         // The information panel starts collapsed (as the original's, docs/game/ui-screens.md section 4): the extending part (name, state lines, extended stats) slid down
         // until its bottom is the panel's, behind the stats panel, so only the name and the state lines show; the ^ button between them toggles it.
@@ -208,6 +213,7 @@ sealed partial class PlayerInterface
         }
         else if (action == "close") openPanel = null;
         else if (action == "extendedstats") infoExpanded = !infoExpanded;
+        else if (action is "floor-up" or "floor-down") Floor?.Step(action == "floor-up" ? 1 : -1);
         else if (action == "menu") MenuAction(argument);
         else if (action == "context") ContextAction(argument);
         else if (action == "squad") Select(PlayerCharacters(), false);

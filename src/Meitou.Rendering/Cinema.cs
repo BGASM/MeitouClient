@@ -26,7 +26,7 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
     /// <summary>The game's other times for the lens keys besides the open editor: its free camera and a camera the cinema holds, where PageUp/PageDown zoom nothing.</summary>
     public Func<bool>? LensKeys { get; set; }
 
-    bool LensKeysLive => lensKeysAlways || EditorVisible || LensKeys?.Invoke() == true;
+    public bool LensKeysLive => lensKeysAlways || EditorVisible || LensKeys?.Invoke() == true;
 
     /// <summary>The viewer's keys file.</summary>
     public static string ViewerFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Meitou", "viewer-shots.json");

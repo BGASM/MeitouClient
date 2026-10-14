@@ -30,7 +30,7 @@ public class CameraTests
         Func<float, float, float> hills = (x, z) => 200 * MathF.Sin(x * 0.003f) * MathF.Cos(z * 0.002f);
         var rig = new CameraRig(hills);
         var rng = new Random(3);
-        var keys = new[] { Key.W, Key.A, Key.S, Key.D, Key.Q, Key.E, Key.PageUp, Key.PageDown, Key.Up, Key.Down };
+        var keys = new[] { Key.W, Key.A, Key.S, Key.D, Key.Q, Key.E, Key.Home, Key.End, Key.Up, Key.Down };
         for (int i = 0; i < 3000; i++)
         {
             if (rng.Next(8) == 0) input.SetKey(keys[rng.Next(keys.Length)], rng.Next(2) == 0);

@@ -145,7 +145,7 @@ pixel; the pivot follows the terrain only (the game also stands it on buildings;
 `toggle_fps_camera`) flies with a smoothed velocity at 1.5 × the height above the ground; leaving it puts the pivot where the
 view meets the ground.
 
-Default keys: `W A S D` move, `Q`/`E` or `Left`/`Right` rotate, `Up`/`Down` pitch, wheel or `PageUp`/`PageDown` zoom,
+Default keys: `W A S D` move, `Q`/`E` or `Left`/`Right` rotate, `Up`/`Down` pitch, wheel or `Home`/`End` zoom, `PageUp`/`PageDown` the viewed floor of the buildings a player character is in,
 middle drag orbit (right click is the move command, see [simulation.md](simulation.md#player)), left click or drag selects, `1`..`9`, `` ` ``, `R`; `;` free camera (`R`/`F` up/down in it), `Space` pause, `F2`/`F3`/`F4` speed 1x/2x/5x (`.`/`,` step through them), `Tab` settings panel, `F8` or
 `PrintScreen` screenshot (C:\Temp; Kenshi's own keys), `F5` quicksave and `F9` quickload (the game's own keys, [simulation.md](simulation.md#quicksave-and-quickload)), `Ctrl+F9` fps counter (it was `F9`; a saved `ToggleFps` binding of `F9` is dropped at start), `F10` key list, `F11` frame statistics, `F12` profiler chart (gpu, cpu, off),
 `Alt+Enter` full screen, `F6` cinematic camera editor and `F7` hide the interface ([viewer.md](viewer.md#cinematic-camera), "In the game"), `Esc` quit. The debug overlays are the viewer's, and as there they are left out of screenshots; in the game they start

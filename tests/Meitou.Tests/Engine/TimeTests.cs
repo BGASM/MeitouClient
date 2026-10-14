@@ -33,7 +33,7 @@ public class TimeTests
             {
                 input.SetKey(Key.W, tick % 40 < 25);
                 input.SetKey(Key.Q, tick % 17 < 6);
-                input.SetKey(Key.PageUp, tick % 50 > 40);
+                input.SetKey(Key.Home, tick % 50 > 40);
                 input.SetKey(Key.Down, tick % 23 < 3);
                 input.SetKey(Key.Semicolon, tick % 45 == 30);
                 input.SetKey(Key.Space, tick % 60 == 10);

@@ -17,6 +17,8 @@ public readonly record struct CharacterInstance(long Key, CharacterAppearance Ap
     public bool WeaponDrawn { get; init; }
     /// <summary>Uniform size the body is drawn at (an animal's age-dependent size; 1 for people).</summary>
     public float Scale { get; init; } = 1;
+    /// <summary>Not drawn in the world (still posed for its portrait): on a floor of a building that the interior view hides (docs/formats/zones.md "Interior view").</summary>
+    public bool Hidden { get; init; }
 }
 
 /// <summary>

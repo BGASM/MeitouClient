@@ -69,7 +69,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public CharState State;
         public bool Repose, WeaponDrawn;
         public long Key;
-        /// <summary>Beyond <see cref="DrawDistance"/> but posed for its portrait (<see cref="PortraitRequests"/>): not drawn in the world.</summary>
+        /// <summary>Beyond <see cref="DrawDistance"/> (or <see cref="CharacterInstance.Hidden"/>) but posed for its portrait (<see cref="PortraitRequests"/>): not drawn in the world.</summary>
         public bool PortraitOnly;
     }
 
@@ -181,7 +181,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             if (asset is null) continue;
             float scale = inst.Scale > 0 ? inst.Scale : 1;
             var centre = inst.Position + new Vector3(0, asset.Height * 0.5f * scale, 0);
-            bool far = Vector3.Distance(eye, centre) - asset.Radius * scale > DrawDistance;
+            bool far = inst.Hidden || Vector3.Distance(eye, centre) - asset.Radius * scale > DrawDistance;
             if (far && !portraitKeys.Contains(inst.Key)) continue;
             if (liveCount == live.Length) Array.Resize(ref live, liveCount * 2);
             ref var l = ref live[liveCount++];

@@ -23,6 +23,8 @@ public enum InputAction
     ToggleFps,
     /// <summary>The game's quicksave and quickload (F5 and F9, docs/game/ui-input.md): the host saves to and loads from its own "quicksave" slot.</summary>
     QuickSave, QuickLoad,
+    /// <summary>The game's <c>floor_up</c> / <c>floor_down</c>: the viewed floor of the buildings with a player character inside (docs/formats/zones.md "Interior view").</summary>
+    FloorUp, FloorDown,
     Quit,
 }
 
@@ -85,8 +87,10 @@ public sealed class InputBindings
         Set(InputAction.RotateRight, Key.E, Key.Right);
         Set(InputAction.PitchUp, Key.Up);
         Set(InputAction.PitchDown, Key.Down);
-        Set(InputAction.ZoomIn, Key.PageUp);
-        Set(InputAction.ZoomOut, Key.PageDown);
+        Set(InputAction.ZoomIn, Key.Home);   // the game's camera_zoom_in / out and floor_up / down keys (docs/game/ui-input.md)
+        Set(InputAction.ZoomOut, Key.End);
+        Set(InputAction.FloorUp, Key.PageUp);
+        Set(InputAction.FloorDown, Key.PageDown);
         Set(InputAction.Orbit, MouseButton.Middle);   // right is the command button (move order)
         Set(InputAction.ToggleFreeCamera, Key.Semicolon);
         Set(InputAction.Pause, Key.Space);

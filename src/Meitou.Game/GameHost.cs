@@ -171,6 +171,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         LoadingStep("interface");
         player = new PlayerInterface(session, heights.HeightAt, DrawnPosition);
         player.LoadUi(g.UiMode ?? config.UiMode, assets.Find);
+        player.Floor = (() => viewedFloor, StepFloor);
         player.FactionName = faction => popData is { } d && faction >= 0 && faction < d.Factions.Count ? d.Factions[faction].Name : null;
         if (IsSandbox) player.ReservedKeys.UnionWith([Meitou.Engine.Input.Key.Z, Meitou.Engine.Input.Key.X, Meitou.Engine.Input.Key.C, Meitou.Engine.Input.Key.Y, Meitou.Engine.Input.Key.P, Meitou.Engine.Input.Key.G]);
         player.ConfigureFrontend(scene.Database,
@@ -289,8 +290,8 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             weather.Paused = sim.IsPaused;
             weather.GameSpeed = (float)(sim.Speed > 0 ? sim.Speed : sim.LastNonZeroSpeed);
         }
-        WorldFrame.Draw(gpu, scene, camera, render, width, height, (float)session.Clock.HourOfDay, (float)seconds / 600f, o.FogDistance);
         UpdateInteriorView();
+        WorldFrame.Draw(gpu, scene, camera, render, width, height, (float)session.Clock.HourOfDay, (float)seconds / 600f, o.FogDistance);
     }
 
 }
