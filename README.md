@@ -8,7 +8,8 @@ installation.
 
 ## Status
 
-Early, and renderer-first. What works today:
+Early. The renderer is far along and the game is a playable slice of Kenshi's moment-to-moment play, not yet a
+game you can sink hours into. What works today:
 
 - **World viewer**: the whole map streamed around a free-flying camera, on Vulkan 1.3: terrain, buildings and
   towns, foliage and grass, water with reflections, the game's sky, haze and weather effects, and cascaded
@@ -18,10 +19,19 @@ Early, and renderer-first. What works today:
   the horizon, SSAO, temporal anti-aliasing with DLSS or FSR upscaling.
 - **Data**: `.mod` / `.base` files read and written byte-exactly, the load order merged like the game does, Ogre
   meshes, skeletons, materials and animations, DDS textures, the heightmap and zone files.
-- **Characters**: races, heads and body shapes built from game data, with animations.
+- **Characters**: races, heads, body shapes, clothing and weapons built from game data, with animations; animals
+  with their own meshes, fur and clips.
+- **The game** (`meitou --new-game`): pick a start, select your squad and give orders (move, queue, attack, stop)
+  on a navmesh that runs through building doors and interiors. Towns fill with residents, bar patrons and roaming
+  squads, and the wild with each biome's squads and nests. Characters have stats and XP, blood, body parts,
+  hunger, knockouts and death; first aid, resting and medic and rescue jobs; inventories and eating. Melee and
+  crossbow combat, fights started by faction relations, sight and hearing, fleeing, carrying and looting bodies,
+  crimes with witnesses, police and bounties. A HUD with inventory and map panels, and F5 / F9 quicksave and
+  quickload into Meitou's own slot.
 
-Not there yet: the game itself. AI, combat, the UI, saves and the rest of the simulation are still ahead; see
-[ROADMAP.md](ROADMAP.md).
+Not there yet: the original's AI (NPCs run on simpler stand-ins), trade and the economy, building and research,
+dialogue and recruiting, audio, a save menu and loading the original game's saves. See [ROADMAP.md](ROADMAP.md)
+and [docs/simulation.md](docs/simulation.md).
 
 ## Download
 
@@ -76,6 +86,7 @@ Other entry points:
 
 ```
 dotnet run -c Release --project src/Meitou.Game                  # the game executable: boots into The Hub with the Kenshi camera
+dotnet run -c Release --project src/Meitou.Game -- --new-game     # a new game from the Wanderer start (--list-starts lists the others)
 dotnet run -c Release --project tools/Meitou.ModelViewer -- --impostor-preview <FOLIAGE_MESH>   # bake one impostor and render preview pictures (docs/impostors.md)
 dotnet run -c Release --project tools/Meitou.Tools                # data inspection commands
 ```
