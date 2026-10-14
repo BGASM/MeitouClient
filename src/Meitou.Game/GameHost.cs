@@ -28,6 +28,11 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
 {
     /// <summary>The save the run starts in (<c>--load</c>), loaded at the end of <see cref="Boot"/> through the menu's load path; null for a new world.</summary>
     public Meitou.Data.Save.SaveGame? StartSave { get; init; }
+    /// <summary>Reads the world in the interactive run, on a worker behind the loading screen (the host owns the scene then); null: the scene was given.</summary>
+    public Func<WorldScene?>? LoadScene { get; init; }
+    WorldScene? ownedScene;
+    /// <summary>The native splash shown since the program started; closed when the game window first shows.</summary>
+    public IDisposable? Splash { get; init; }
     WorldSession session = null!;   // disposed with the host (Run)
     Meitou.Simulation.PopulationSystem? population;
     /// <summary>The fights started by faction hostility (printed to the log); null in the sandbox and without the population.</summary>
@@ -64,7 +69,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
     public int Run()
     {
         try { return o.Screenshot is not null ? Screenshot() : Interactive(); }
-        finally { session?.Dispose(); nav?.Dispose(); }
+        finally { session?.Dispose(); nav?.Dispose(); ownedScene?.Dispose(); }
     }
 
     void Boot(VulkanDisplay display, bool interactive)
@@ -74,12 +79,35 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         // --crowd in the game: simulated characters (SpawnCrowd), not the viewer's posed harness, which would take the renderer's place.
         crowd = o.Crowd;
         o.Crowd = 0;
-        gpu = WorldFrame.CreateGpu(context, install, scene, assets, o, interactive);
+        // The simulation's data (the navmesh system, the towns' homes, the population's data and systems) is read on a worker while the renderer is made here,
+        // a step at a time with a loading frame between the steps (docs/engine.md "Loading").
+        var simulation = Task.Run(() =>
+        {
+            var grid = new Meitou.Data.World.GroundHeights(scene.Window, scene.Coarse, scene.CoarseSize, WorldFrame.CoarseStep);
+            return (Grid: grid, Parts: BootSimulation(grid, interactive));
+        });
+        gpu = WorldFrame.CreateGpu(context, install, scene, assets, o, interactive, LoadingStep, AwaitLoading);
         if (gpu.Post is { } vendorPost) vendorPost.UpscalerFactory = Meitou.Rendering.Upscalers.VendorUpscalers.Factory(display.Context, streamline);
         (camera, render) = WorldFrame.Setup(scene, o);
         render.Grid = IsSandbox;
+        LoadingStep("people");
+        var (heights, (walkability, systems, constants)) = AwaitLoading(simulation);
+        LoadingStep("world");
+        session = new WorldSession(scene.Focus, (scene.X0, scene.Z0, scene.X1, scene.Z1), gpu.Terrain.HeightAt, o.Hour, config.TickRate,
+            clock: GameClockFor(constants ??= scene.Database is { } clockDb ? Meitou.Data.Gameplay.GameConstants.FromDatabase(clockDb) : null, o.Hour, o.Day ?? GameClock.DefaultStartDay),
+            simulation: worldSettings = new Meitou.Simulation.WorldSettings { Seed = g.Seed, MinPartitionSize = 128, Threads = Math.Max(1, config.SimThreads ?? Math.Clamp(Environment.ProcessorCount / 2, 1, 8)) },
+            systems: systems, walkability: walkability);
+        BootPlayer(display, heights, interactive);
+    }
+
+    /// <summary>
+    /// The simulation's side of <see cref="Boot"/>, on a worker (it reads the game data and the scene's level data and makes no GPU resource): the navmesh system, the
+    /// population's data and its systems. Returns the walkability, the systems and the game constants for the session.
+    /// </summary>
+    (Meitou.Simulation.IWalkability Walkability, IReadOnlyList<Meitou.Simulation.ITickSystem> Systems, Meitou.Data.Gameplay.GameConstants? Constants) BootSimulation(
+        Meitou.Data.World.GroundHeights heights, bool interactive)
+    {
         // The simulation samples the CPU heightmap (immutable, any thread), not the renderer's terrain.
-        var heights = new Meitou.Data.World.GroundHeights(scene.Window, scene.Coarse, scene.CoarseSize, WorldFrame.CoarseStep);
         Meitou.Simulation.IWalkability walkability = new Meitou.Simulation.OpenGroundWalkability(heights.HeightAt);
         IReadOnlyList<Meitou.Simulation.ITickSystem> systems = [];
         Meitou.Data.Gameplay.GameConstants? constants = null;   // parsed once: the body factory's, else for the clock alone
@@ -99,7 +127,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             Meitou.Data.Gameplay.BiomeMap? biomes = null;
             if (levels is not null)
             {
-                try { biomes = Meitou.Data.Gameplay.BiomeMap.Create(gameDb, gpu.WeatherAreas ?? Meitou.Data.World.WeatherAreas.Load(install)); }
+                try { biomes = Meitou.Data.Gameplay.BiomeMap.Create(gameDb, Meitou.Data.World.WeatherAreas.Load(install)); }
                 catch (Exception e) when (e is IOException or FormatException) { Console.Error.WriteLine($"population no areas map ({e.Message}): no wild squads"); }
             }
             // The towns' buildings with their beds and nodes: the AI's homes (docs/simulation.md "AI").
@@ -125,10 +153,13 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             systems = built.Systems;
             constants = data.Bodies.Constants;
         }
-        session = new WorldSession(scene.Focus, (scene.X0, scene.Z0, scene.X1, scene.Z1), gpu.Terrain.HeightAt, o.Hour, config.TickRate,
-            clock: GameClockFor(constants ??= scene.Database is { } clockDb ? Meitou.Data.Gameplay.GameConstants.FromDatabase(clockDb) : null, o.Hour, o.Day ?? GameClock.DefaultStartDay),
-            simulation: worldSettings = new Meitou.Simulation.WorldSettings { Seed = g.Seed, MinPartitionSize = 128, Threads = Math.Max(1, config.SimThreads ?? Math.Clamp(Environment.ProcessorCount / 2, 1, 8)) },
-            systems: systems, walkability: walkability);
+        return (walkability, systems, constants);
+    }
+
+    /// <summary>The rest of <see cref="Boot"/> once the session exists: bindings, the player's interface, the start (a new game's squad, the sandbox, the duel), the camera, a <c>--load</c> save.</summary>
+    void BootPlayer(VulkanDisplay display, Meitou.Data.World.GroundHeights heights, bool interactive)
+    {
+        var context = display.Context;
         var target = camera.Target;
         foreach (var problem in session.Bindings.Apply(config.Bindings)) Console.Error.WriteLine($"config    binding skipped: {problem}");
         // Right is the command button now; older saved configs bound it to orbit.
@@ -137,6 +168,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         if (session.Bindings.Get(InputAction.Screenshot).SequenceEqual([Binding.Of(EngineKey.F12)])) session.Bindings.Set(InputAction.Screenshot, EngineKey.F8, EngineKey.PrintScreen);
         // F9 is the game's quickload now (F5 quicksave); older saved configs took F9 for the fps counter, which is on Ctrl+F9 and unbound here.
         if (session.Bindings.Get(InputAction.ToggleFps).SequenceEqual([Binding.Of(EngineKey.F9)])) session.Bindings.Set(InputAction.ToggleFps);
+        LoadingStep("interface");
         player = new PlayerInterface(session, heights.HeightAt, DrawnPosition);
         player.LoadUi(g.UiMode ?? config.UiMode, assets.Find);
         if (IsSandbox) player.ReservedKeys.UnionWith([Meitou.Engine.Input.Key.Z, Meitou.Engine.Input.Key.X, Meitou.Engine.Input.Key.C, Meitou.Engine.Input.Key.Y, Meitou.Engine.Input.Key.P, Meitou.Engine.Input.Key.G]);
@@ -150,7 +182,8 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             // The squad is placed on the mesh, and a still has its town at once: wait for the zones round the start (a cold build is about 2 s, then cached).
             var watch = Stopwatch.StartNew();
             var zones = Meitou.Simulation.ZoneActivation.ZonesAround(scene.Focus, 0);
-            Task.WaitAll([.. zones.Select(z => (Task)nav.LoadZone(z))]);
+            LoadingStep("navmesh");
+            AwaitLoading(Task.WhenAll(zones.Select(z => (Task)nav.LoadZone(z))));
             foreach (var z in zones) navZones[z] = Stopwatch.GetTimestamp();
             Console.WriteLine($"navmesh   {zones.Count} zone(s) round the start ready in {watch.ElapsedMilliseconds} ms");
         }
@@ -164,6 +197,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         if (IsSandbox && population is not null) target = SandboxSpawn();
         if (IsDuel && population is not null) target = DuelStart();
         if (!IsSandbox && crowd > 0 && population is not null) SpawnCrowd(target, crowd);
+        LoadingStep("characters");
         if (scene.Database is { } characterDb && !g.NoPopulation && gpu.Characters is null)
             gpu.Characters = new CharacterRenderer(context, install, characterDb, assets) { Source = FillDrawList, Guard = gpu.Guard };
         var rig = session.Camera;
@@ -176,7 +210,12 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             readingFolder = folder;
             if (!FinishQuickLoad(Task.FromResult(save), interactive)) throw new InvalidDataException($"--load {folder}: the save did not load (see above)");
         }
-        if (interactive) WorldFrame.FinishLoading(context);
+        if (interactive)
+        {
+            LoadingStep("finishing");
+            WorldFrame.FinishLoading(context);
+            ReportLoading("start");
+        }
     }
 
     /// <summary>The game clock with sunrise, sunset and days per year from the CONSTANTS record (defaults without data).</summary>

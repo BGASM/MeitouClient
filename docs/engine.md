@@ -81,6 +81,29 @@ Code layout (engine choices; behaviour is the game loop above):
 | `PlayerInterface*.cs` | Events and commands; picking (`.Picking`); the HUD (`.Hud`). The HUD formats the snapshot's numbers (`SkillSummary`) itself. |
 | `NavAdapter.cs` | The navmesh as the simulation's `IAgentWalkability`. |
 
+### Loading
+
+The interactive game never blocks its window for long while it loads (engine choices, 2026-10-14; `GameHost.Loading.cs`, `LoadingScreen.cs`,
+`SplashWindow.cs`):
+
+- **Splash.** `Program` shows a native Win32 window painted with GDI on its own thread (`SplashWindow`) before anything else: one of the original's
+  `data/gui/gfx/loading_screen*.dds` pictures, LOADING... in the original's stamp face (`MailartRubberstamp-Regular.ttf`, its `Kenshi_UI_Messages`
+  font) and a spinner. Nothing can be drawn with Vulkan before the device exists (about 1.3 s, Streamline included), so the game window is made
+  hidden and shown only when the loading screen is ready to draw; the splash closes then. Not for `--screenshot` or `--list-starts`.
+- **Workers.** The world's files (`WorldFrame.Load`, about 2.5 s) are read on a worker from before the device is made. `Boot` reads the
+  simulation's side (height grid, navmesh system, homes, population data and systems: `BootSimulation`) on a worker while the renderer is made.
+  The terrain textures' and the water's files and bakes (`TerrainTextures.Prepare`, `WaterRenderer.Prepare`, about 2.5 s and 1.5 s) start on
+  workers when `WorldFrame.CreateGpu` begins.
+- **Steps.** What makes GPU resources stays on the render thread. `WorldFrame.CreateGpu` calls its `step` callback before each part (terrain,
+  biomes, sky, weather, particles, water, reflections, objects, foliage, shadows, gi), and `wait` for a worker's result. The host draws a
+  loading frame at each step and about 60 a second while it waits. A closed window cancels the start.
+- **Screen.** `Kenshi_LoadingScreen` (a random `loading_screen*.dds` full screen; LOADING... in the stamp face with the running step's name; a tip
+  from `data/tips.txt`). Meitou adds a spinner in the middle and a bar under it. The bar is approximate: each step has a share by its usual time
+  (`StartSteps`, measured on the development machine), and within a step it eases towards 95 % of the share by elapsed time. It never goes back.
+- **Measure.** The host prints each gap of more than 250 ms without a loading frame and, after the start, the number of frames and the longest gap.
+  **Observed** 2026-10-14 (RTX 4070, The Hub, warm file cache): before, no frame for 4.0 s (biomes) and 1.8 s (water), 11 frames in all. After,
+  about 180 frames, the longest gap 0.3 to 0.4 s (one renderer part: objects or foliage).
+
 - **System order**: the host does not list systems; it calls `StandardSystems.Build` (`src/Meitou.Simulation/StandardSystems.cs`), which
   holds the order and the reasons for it. Tests that mean the game's wiring ask it for the parts they need (`SyntheticTown.Standard`).
 - **Tick length**: `WorldSession` refuses a `WorldSettings.TickSeconds` that differs from the simulation clock's tick (the game clock

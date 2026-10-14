@@ -39,6 +39,8 @@ static class Program
             Console.Error.WriteLine($"Kenshi install not found: set {GameInstall.EnvironmentVariable} or create {GameInstall.LocalConfigFile}.");
             return 1;
         }
+        // A native splash at once, until the game window draws (docs/engine.md "Loading"); not for pictures or a listing.
+        using var splash = world.Screenshot is null && !game.ListStarts ? SplashWindow.Show(install.DataDirectory) : null;
         var config = UserConfig.Load();
         Meitou.Data.GameDatabase? db = null;
         Meitou.Data.Gameplay.NewGameStart? start = null;
@@ -55,7 +57,7 @@ static class Program
             world.Pitch ??= 22;
             world.Yaw ??= 35;
             using var flat = WorldFrame.LoadFlat(world, db);
-            return new GameHost(install, flat, new AssetLocator(install), world, game, config, null).Run();
+            return new GameHost(install, flat, new AssetLocator(install), world, game, config, null) { Splash = splash }.Run();
         }
         if (game.Duel)
         {
@@ -125,6 +127,9 @@ static class Program
             var at = save.Camera.Position;
             (world.X, world.Z, world.Town, world.Zone) = (at.X, at.Z, null, null);
         }
+        // Interactive: the host reads the world behind its loading screen (docs/engine.md "Loading"); a picture reads it first.
+        if (world.Screenshot is null)
+            return new GameHost(install, null!, new AssetLocator(install), world, game, config, start) { StartSave = save, Splash = splash, LoadScene = () => WorldFrame.Load(install, world, db) }.Run();
         using var scene = WorldFrame.Load(install, world, db);
         if (scene is null) return 1;
         return new GameHost(install, scene, new AssetLocator(install), world, game, config, start) { StartSave = save }.Run();

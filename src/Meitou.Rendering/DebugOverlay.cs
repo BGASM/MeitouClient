@@ -15,8 +15,10 @@ namespace Meitou.Rendering;
 /// </summary>
 public sealed unsafe class DebugOverlay : IDisposable
 {
-    const int FirstChar = 32, CharCount = 95, AtlasSize = 512;
-    const float PixelHeight = 16;
+    const int FirstChar = 32, CharCount = 95;
+    // The size the glyphs are baked at (16 px; a display face is baked larger so it stays sharp drawn big) and the atlas side that holds them.
+    readonly float PixelHeight = 16;
+    readonly int AtlasSize = 512;
 
     static readonly string[] FontCandidates =
     [
@@ -77,9 +79,10 @@ public sealed unsafe class DebugOverlay : IDisposable
     /// <summary>What <see cref="Flush"/> draws into: the frame's final picture (the window's backbuffer, or an offscreen texture). Set by the host.</summary>
     public Texture? Target { get; set; }
 
-    DebugOverlay(GpuContext gpu, byte[] font)
+    DebugOverlay(GpuContext gpu, byte[] font, float pixelHeight = 16)
     {
         Gpu = gpu;
+        (PixelHeight, AtlasSize) = (pixelHeight, pixelHeight > 32 ? 2048 : 512);
         var pixels = new byte[AtlasSize * AtlasSize];
         fixed (byte* f = font)
         fixed (byte* p = pixels)
@@ -92,7 +95,7 @@ public sealed unsafe class DebugOverlay : IDisposable
         using (var upload = gpu.Uploads.Begin())
         {
             atlas = upload.Create(new TextureDesc(Format.R8Unorm, AtlasSize, AtlasSize, Use: TextureUse.Sampled | TextureUse.TransferDst, Name: "debug overlay font"));
-            upload.Write(atlas, 0, 0, new Rect2D(default, new Extent2D(AtlasSize, AtlasSize)), pixels);
+            upload.Write(atlas, 0, 0, new Rect2D(default, new Extent2D((uint)AtlasSize, (uint)AtlasSize)), pixels);
         }
         atlasSampled = new SampledTexture(gpu.Samplers.Get(SamplerDesc.FromGl(TextureMinFilter.Linear, TextureMagFilter.Linear, TextureWrapMode.Repeat,
             TextureWrapMode.Repeat, TextureWrapMode.Repeat, false, DepthFunction.Lequal, false, 1, false, 0)), atlas.View(), atlas.Image);
@@ -110,7 +113,8 @@ public sealed unsafe class DebugOverlay : IDisposable
         return path is null ? null : new DebugOverlay(gpu, File.ReadAllBytes(path));
     }
 
-    public static DebugOverlay FromFont(GpuContext gpu, string path) => new(gpu, File.ReadAllBytes(path));
+    /// <param name="pixelHeight">The size the glyphs are baked at: about the size the face is drawn at keeps it sharp.</param>
+    public static DebugOverlay FromFont(GpuContext gpu, string path, float pixelHeight = 16) => new(gpu, File.ReadAllBytes(path), pixelHeight);
 
     public float MeasureText(string text, float scale = 1)
     {

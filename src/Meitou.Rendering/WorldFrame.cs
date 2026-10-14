@@ -697,7 +697,9 @@ static class WorldFrame
         return gpu.Particles = ParticleRenderer.Create(context, install);
     }
 
-    public static Gpu CreateGpu(GpuContext context, GameInstall install, WorldScene scene, AssetLocator assets, WorldOptions o, bool interactive)
+    /// <summary>The renderer for <paramref name="scene"/>. <paramref name="step"/> is called before each of its steps (terrain, biomes, sky, water, objects, foliage, shadows) with the step's name: the game draws a loading frame there.</summary>
+    /// <paramref name="wait"/> waits for the CPU work started on workers at the beginning (the terrain textures' and the water's files and bakes); the game draws loading frames while it waits.
+    public static Gpu CreateGpu(GpuContext context, GameInstall install, WorldScene scene, AssetLocator assets, WorldOptions o, bool interactive, Action<string>? step = null, Action<Task>? wait = null)
     {
         var watch = Stopwatch.StartNew();
         context.Samplers.MaxAnisotropy = o.Anisotropy;
@@ -706,16 +708,23 @@ static class WorldFrame
         Meitou.Data.Textures.TextureQuality.Level = o.TextureQuality;
         int layerSize = Math.Max(2048 >> Meitou.Data.Textures.TextureQuality.LevelsToDrop("terrain.dds", "Landscape"), 16);
         if (layerSize != 2048) Console.WriteLine($"textures  quality {o.TextureQuality} ({Meitou.Data.Textures.TextureQuality.Labels[o.TextureQuality]}): terrain layers {layerSize}² instead of 2048²");
+        // The files the terrain textures and the water read and bake (seconds of CPU work) are read on workers while the steps before them run.
+        var terrainSource = !o.NoTextures && scene.Database is { } textureDb ? Task.Run(() => TerrainTextures.Prepare(install, textureDb)) : null;
+        var waterSource = !o.NoWater && scene.Database is { } waterDb ? Task.Run(() => WaterRenderer.Prepare(install, waterDb, assets, scene.Coarse)) : null;
+        T Ready<T>(Task<T> work) { if (wait is not null) wait(work); return work.GetAwaiter().GetResult(); }
+        step?.Invoke("terrain");
         var terrain = new TerrainRenderer(context, scene.Coarse, scene.CoarseSize, scene.Window);
         Console.WriteLine($"uploaded  terrain heights: {terrain.LevelCount} LOD levels, finest {terrain.FinestSpacing:0.#} units ({watch.ElapsedMilliseconds} ms)");
         TerrainTextures? textures = null;
         if (!o.NoTextures && scene.Database is not null)
         {
-            textures = TerrainTextures.Create(context, install, scene.Database, assets, layerSize);
+            step?.Invoke("biomes");
+            textures = TerrainTextures.Create(context, install, scene.Database, assets, layerSize, source: Ready(terrainSource!));
             foreach (var m in textures.Messages.Take(20)) Console.WriteLine($"warning   {m}");
             Console.WriteLine($"biomes    {textures.TotalBiomes} in the world, {textures.TotalPairs} texture pairs, {textures.Capacity} slots of {layerSize}² BC3+BC1, {textures.ArrayBytes / 1048576} MB ({watch.ElapsedMilliseconds} ms)");
             terrain.SetTextures(textures);
         }
+        step?.Invoke("sky");
         var gpu = new Gpu { Terrain = terrain, Sky = new SkyRenderer(context, assets) { CloudCoverage = o.Clouds }, Post = new PostProcess(context, o.Post) };
         gpu.Post.LoadHeatHaze(assets);
         // The placed fog volumes (docs/formats/fogfeatures.md): the swamp's fog and the like, part of the game's look.
@@ -729,6 +738,7 @@ static class WorldFrame
         gpu.Sky.MeitouStars = o.MeitouStars;
         gpu.Sky.LitClouds = o.MeitouClouds;
         gpu.Sky.CloudShadows = o.CloudShadows;
+        step?.Invoke("weather");
         if (scene.Database is { } skyDb)
         {
             gpu.Sky.LoadWorld(install, skyDb);   // the ambient map and the CONSTANTS exposure band (docs/formats/lighting.md)
@@ -747,6 +757,7 @@ static class WorldFrame
         }
         // The weather's particle effects (rain, ash...) follow the weather state (UpdateParticles); the map's effect placers are always on
         // (docs/formats/weather.md "Effect placers on the map"), so the particle renderer exists from the start whatever the weather.
+        step?.Invoke("particles");
         if (!o.NoParticles && scene.Database is { } effectsDb)
         {
             var particleWatch = Stopwatch.StartNew();
@@ -775,8 +786,10 @@ static class WorldFrame
         if (!o.NoWater && scene.Database is not null)
         {
             var messages = new List<string>();
-            gpu.Water = WaterRenderer.Create(context, install, scene.Database, assets, gpu.Sky, messages, scene.Coarse, o.WaterGrid, o.WaterOcean);
+            step?.Invoke("water");
+            gpu.Water = WaterRenderer.Create(context, install, scene.Database, assets, gpu.Sky, messages, scene.Coarse, o.WaterGrid, o.WaterOcean, Ready(waterSource!));
             gpu.Water.Meitou = o.MeitouWater;
+            step?.Invoke("reflections");
             gpu.Reflection = new ReflectionPass(context) { Level = o.WaterReflection, Range = ReflectionRange };
             foreach (var m in messages) Console.WriteLine($"warning   {m}");
             Console.WriteLine($"water     at height {WorldWater.Height} ({watch.ElapsedMilliseconds} ms)");
@@ -784,12 +797,14 @@ static class WorldFrame
         if (scene.Objects is not null)
         {
             // Landmarks (huge objects, drawn to their own distance) are kept apart from the zones only when the viewer starts with them (Meitou reach, distance above 0).
+            step?.Invoke("objects");
             gpu.Objects = new WorldObjectRenderer(context, assets, scene.Objects, landmarks: o.LandmarkDistanceFor(o.MeitouReach) > 0)
             { ObjectDistance = o.ObjectDistanceFor(o.MeitouReach), LandmarkDistance = o.LandmarkDistanceFor(o.MeitouReach), DistantRange = o.DistantZones * WorldLayout.ZoneSize, NoDistant = o.DistantZones <= 0, LoadBudget = interactive ? 8 : 0, SortNearestFirst = o.MeitouReach, LodBias = 1 / o.ObjectLod };
             Console.WriteLine($"objects   GPU ready ({watch.ElapsedMilliseconds} ms)");
         }
         if (!o.NoFoliage && scene.Database is not null)
         {
+            step?.Invoke("foliage");
             gpu.Foliage = new FoliageRenderer(context, install, scene.Database, scene.Objects?.Levels ?? WorldLevelData.Load(install), assets);
             if (!interactive) gpu.Foliage.SwaySeconds = 0;   // offscreen pictures and benchmarks: the grass holds still, so a picture repeats exactly
             var f = gpu.Foliage;
@@ -808,12 +823,14 @@ static class WorldFrame
             Console.WriteLine($"foliage   catalog and shaders ready ({gpu.Foliage.LoadMs:0} ms)");
         }
         // The game's CSM mode (docs/formats/shadows.md): four cascades in one atlas of the `shadow quality` side, out to `Shadow Range`.
+        step?.Invoke("shadows");
         gpu.Shadow = new ShadowPass(context, assets) { Settings = new ShadowSettings(KenshiShadows.MapSize(o.ShadowQuality), o.ShadowRangeFor(o.MeitouShadows)), Meitou = o.MeitouShadows, FilterQuality = o.ShadowFilter, Enabled = !o.ShadowsOff };
         if (!gpu.Shadow.HasNoise) Console.WriteLine($"warning   shadows: {KenshiShadows.NoiseTexture} not found, the receiver's jitter is a hash");
         gpu.Shadow.SetTerrain(scene.Coarse, scene.CoarseSize);   // the Meitou shadows' terrain shadow beyond the range
         Console.WriteLine($"shadows   {gpu.Shadow.Settings.MapSize}² atlas, {gpu.Shadow.CascadeCount} cascades of {gpu.Shadow.Settings.TileSize}² ({(gpu.Shadow.Meitou ? "Meitou: a layer each" : "Faithful: tiles of one layer")}), range {gpu.Shadow.Settings.Range:0}");
         if (o.Crowd > 0 && scene.Database is not null) gpu.Characters = Characters.CrowdHarness.Create(context, install, scene, assets, o, interactive);
         gpu.DebugShadows = o.DebugShadows;
+        step?.Invoke("gi");
         if (o.GiDebug > 0 || o.Gi)
         {
             if (!context.Device.HasRayQuery) Console.WriteLine("gi        off: the device has no ray queries (VK_KHR_ray_query)");

@@ -955,19 +955,31 @@ public sealed unsafe class WaterRenderer : IDisposable
     /// <summary>Out to this radius the Meitou grid is fine enough for the waves; beyond it the water is flat.</summary>
     public const float GridDetailRadius = 6000;
 
-    /// <param name="sky">Unused since phase 8 stage 2: the atmosphere comes through the frame globals.</param>
-    public static WaterRenderer Create(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets, SkyRenderer? sky, List<string> messages, ushort[]? coarseHeights = null,
-        int gridSegments = DefaultGridSegments, int oceanSize = OceanWaves.DefaultSize)
+    /// <summary>
+    /// What <see cref="Create"/> reads and works out on the CPU (about 1.5 s at a cold start): the colour, flow, normal and rain maps, the biome water parameters
+    /// baked per blend-map pixel, the open sea, the river flow map baked from the world's heights and the foam. Made by <see cref="Prepare"/> on any thread.
+    /// </summary>
+    public sealed class Source
     {
-        _ = sky;
-        var colour = Load(install, WorldWater.ColourMap);
-        var flow = Load(install, WorldWater.FlowMap);
+        internal RgbaImage? Colour, Flow, Normal, Rain;
+        internal Vector4[] A = [], B = [];
+        internal int BlendWidth, BlendHeight, RiverSize;
+        internal (Vector4 A, Vector4 B, Vector3 Colour) Sea;
+        internal byte[]? River;
+        internal byte[] Foam = [];
+        internal readonly List<string> Messages = [];
+    }
+
+    /// <summary>The CPU part of <see cref="Create"/>, on any thread (it makes no GPU resource).</summary>
+    public static Source Prepare(GameInstall install, GameDatabase db, AssetLocator assets, ushort[]? coarseHeights = null)
+    {
+        var s = new Source { Colour = Load(install, WorldWater.ColourMap), Flow = Load(install, WorldWater.FlowMap) };
         var normalPath = assets.Find("water.png");
-        var normal = normalPath is not null ? TextureLoader.LoadFile(normalPath, allMips: false).Levels[0] : null;
+        s.Normal = normalPath is not null ? TextureLoader.LoadFile(normalPath, allMips: false).Levels[0] : null;
         var rainPath = assets.Find("rain-ripples.png");
-        var rain = rainPath is not null ? TextureLoader.LoadFile(rainPath, allMips: false).Levels[0] : null;
-        if (normal is null) messages.Add("water.png not found: flat water");
-        if (rain is null) messages.Add("rain-ripples.png not found: no rain ripples");
+        s.Rain = rainPath is not null ? TextureLoader.LoadFile(rainPath, allMips: false).Levels[0] : null;
+        if (s.Normal is null) s.Messages.Add("water.png not found: flat water");
+        if (s.Rain is null) s.Messages.Add("rain-ripples.png not found: no rain ripples");
 
         // Biome water parameters blended per blend-map pixel.
         var info = BlendInfoFile.Open(install);
@@ -976,30 +988,47 @@ public sealed unsafe class WaterRenderer : IDisposable
         var fallback = BiomeWater.FromRecord(db.OfType(global::Meitou.Data.Fcs.FcsRecordType.BIOMES).First());
         Vector4 A(BiomeWater w) => new(w.Scale.X, w.Scale.Y, w.InvStrength, w.InvOpacity);
         Vector4 B(BiomeWater w) => new(w.Gloss, w.Glow, w.Distortion.X, 0);
-        var a = BiomeField.Bake(info, blend.Width, blend.Height, blend.Pixels, c => water.TryGetValue(c, out var w) ? A(w) : null, A(fallback));
-        var b = BiomeField.Bake(info, blend.Width, blend.Height, blend.Pixels, c => water.TryGetValue(c, out var w) ? B(w) : null, B(fallback));
+        (s.BlendWidth, s.BlendHeight) = (blend.Width, blend.Height);
+        s.A = BiomeField.Bake(info, blend.Width, blend.Height, blend.Pixels, c => water.TryGetValue(c, out var w) ? A(w) : null, A(fallback));
+        s.B = BiomeField.Bake(info, blend.Width, blend.Height, blend.Pixels, c => water.TryGetValue(c, out var w) ? B(w) : null, B(fallback));
 
-        var sea = OpenSea(a, b, blend.Width, blend.Height, colour);
-        Console.WriteLine($"sea       open-sea water: scale {sea.A.X * 5000:0.#}, {sea.A.Y * 5000:0.#}, gloss {sea.B.X:0.##}, colour {sea.Colour.X:0.##} {sea.Colour.Y:0.##} {sea.Colour.Z:0.##}");
+        s.Sea = OpenSea(s.A, s.B, blend.Width, blend.Height, s.Colour);
+        Console.WriteLine($"sea       open-sea water: scale {s.Sea.A.X * 5000:0.#}, {s.Sea.A.Y * 5000:0.#}, gloss {s.Sea.B.X:0.##}, colour {s.Sea.Colour.X:0.##} {s.Sea.Colour.Y:0.##} {s.Sea.Colour.Z:0.##}");
+        // The river map: baked from the whole-world heights at the flow map's size (the game's flow map does not follow the rivers); none without them.
+        var riverWatch = System.Diagnostics.Stopwatch.StartNew();
+        int riverSize = s.Flow?.Width ?? 0;
+        if (coarseHeights is not null && riverSize > 0 && coarseHeights.Length == (riverSize + 1) * (riverSize + 1))
+        {
+            s.River = RiverFlowBake.Bake(coarseHeights, riverSize, (ushort)Math.Ceiling(WorldWater.Height * ushort.MaxValue / WorldLayout.MaxHeight));
+            s.RiverSize = riverSize;
+            Console.WriteLine($"rivers    flow map baked at {riverSize}² ({riverWatch.ElapsedMilliseconds} ms)");
+        }
+        s.Foam = WaterFoam.Bake();
+        return s;
+    }
+
+    /// <param name="sky">Unused since phase 8 stage 2: the atmosphere comes through the frame globals.</param>
+    /// <param name="source">What <see cref="Prepare"/> made (made here when null).</param>
+    public static WaterRenderer Create(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets, SkyRenderer? sky, List<string> messages, ushort[]? coarseHeights = null,
+        int gridSegments = DefaultGridSegments, int oceanSize = OceanWaves.DefaultSize, Source? source = null)
+    {
+        _ = sky;
+        var s = source ?? Prepare(install, db, assets, coarseHeights);
+        messages.AddRange(s.Messages);
         // As the GL textures were made (WorldGl.Texture2D): a found map has mips only where it repeats; the 1 × 1 stand-in for a missing one
         // always had its (single-level) chain and a trilinear filter.
         SampledImage Rgba(RgbaImage? img, bool repeat, byte[] flat, string name) =>
             img is null ? SampledImage.Rgba8(gpu, 1, 1, flat, repeat, mipmaps: true, name) : SampledImage.Rgba8(gpu, img, repeat, mipmaps: repeat, name);
-        // The river map: baked from the whole-world heights at the flow map's size (the game's flow map does not follow the rivers); none without them.
-        var riverWatch = System.Diagnostics.Stopwatch.StartNew();
-        int riverSize = flow?.Width ?? 0;
-        bool rivers = coarseHeights is not null && riverSize > 0 && coarseHeights.Length == (riverSize + 1) * (riverSize + 1);
-        SampledImage riverMap = rivers
-            ? SampledImage.Rgba8(gpu, riverSize, riverSize, RiverFlowBake.Bake(coarseHeights!, riverSize, (ushort)Math.Ceiling(WorldWater.Height * ushort.MaxValue / WorldLayout.MaxHeight)), repeat: false, mipmaps: false, "water river map")
+        SampledImage riverMap = s.River is { } river
+            ? SampledImage.Rgba8(gpu, s.RiverSize, s.RiverSize, river, repeat: false, mipmaps: false, "water river map")
             : SampledImage.Rgba8(gpu, 1, 1, [128, 128, 0, 0], repeat: false, mipmaps: false, "water river map");
-        if (rivers) Console.WriteLine($"rivers    flow map baked at {riverSize}² ({riverWatch.ElapsedMilliseconds} ms)");
         return new WaterRenderer(gpu,
-            [Rgba(colour, false, [0, 32, 64, 255], "water colour map"), Rgba(flow, false, [128, 128, 0, 255], "water flow map"),
-             Rgba(normal, true, [128, 255, 128, 255], "water normal map"),
-             SampledImage.Rgba32F(gpu, a, blend.Width, blend.Height, "water parameters a"), SampledImage.Rgba32F(gpu, b, blend.Width, blend.Height, "water parameters b"),
-             Rgba(rain, true, [0, 0, 0, 0], "water rain ripples"),
-             SampledImage.Rgba8(gpu, WaterFoam.Size, WaterFoam.Size, WaterFoam.Bake(), repeat: true, mipmaps: true, "water foam"), riverMap],
-            sea.A, sea.B, sea.Colour, gridSegments, oceanSize);
+            [Rgba(s.Colour, false, [0, 32, 64, 255], "water colour map"), Rgba(s.Flow, false, [128, 128, 0, 255], "water flow map"),
+             Rgba(s.Normal, true, [128, 255, 128, 255], "water normal map"),
+             SampledImage.Rgba32F(gpu, s.A, s.BlendWidth, s.BlendHeight, "water parameters a"), SampledImage.Rgba32F(gpu, s.B, s.BlendWidth, s.BlendHeight, "water parameters b"),
+             Rgba(s.Rain, true, [0, 0, 0, 0], "water rain ripples"),
+             SampledImage.Rgba8(gpu, WaterFoam.Size, WaterFoam.Size, s.Foam, repeat: true, mipmaps: true, "water foam"), riverMap],
+            s.Sea.A, s.Sea.B, s.Sea.Colour, gridSegments, oceanSize);
     }
 
     /// <summary>

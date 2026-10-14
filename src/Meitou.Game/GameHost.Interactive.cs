@@ -27,20 +27,42 @@ sealed partial class GameHost
         bool vsync = g.VSync ?? config.VSync;
         int fpsLimit = g.FpsLimit ?? config.FpsLimit;
         VulkanDisplay.RayTracing = o.WantsRayTracing;
+        // The world's files are read on a worker from here on: while the window and the device are made, then behind the loading screen.
+        var sceneLoad = LoadScene is { } readScene ? Task.Run(readScene) : null;
         using var display = new VulkanDisplay(WindowOptions.Default with
         {
             Size = new Vector2D<int>(o.Width, o.Height),
             Title = "Meitou",
-            WindowState = WindowState.Maximized,
+            // Hidden while the device is made (a second or two in which nothing can be drawn), shown maximised with the first loading frame.
+            IsVisible = false,
             FramesPerSecond = 0,
             UpdatesPerSecond = 0,
         }, vsync, streamline: WantsDlss());
         streamline = display.Streamline;
         var window = display.Window!;
+        BeginLoadingScreen(display);   // its textures and fonts are made before the window shows
+        Splash?.Dispose();
+        window.IsVisible = true;
+        window.WindowState = WindowState.Maximized;
         // Borderless full screen as the viewer starts (Alt+Enter and the Tab panel switch it); --windowed keeps the window for this run.
         bool fullScreen = config.FullScreen && !o.Windowed;
         if (fullScreen) BorderlessFullScreen.Toggle(window);
-        Boot(display, interactive: true);
+        try
+        {
+            if (sceneLoad is not null)
+            {
+                LoadingStep("scene");
+                if (AwaitLoading(sceneLoad) is not { } loaded) return 1;
+                scene = ownedScene = loaded;
+            }
+            Boot(display, interactive: true);
+        }
+        catch (LoadingCancelledException)
+        {
+            Console.WriteLine("loading   cancelled: the window was closed");
+            EndLoadingScreen();
+            return 0;
+        }
         var overlay = DebugOverlay.TryCreate(display.Context);
         if (overlay is not null) player.CreateUiPainter(overlay, assets.Find);
         // The viewer's debug overlays (docs/engine.md): F10 the key list, F11 the frame statistics, F12 the profiler chart.
@@ -342,6 +364,7 @@ sealed partial class GameHost
         config.UiMode = player.UiMode;
         config.Save();
         player.DisposeUi();
+        EndLoadingScreen();
         overlay?.Dispose();
         gpu.Dispose();
         silkInput.Dispose();
