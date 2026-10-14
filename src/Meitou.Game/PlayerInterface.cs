@@ -75,6 +75,8 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
                 Say(new Meitou.Simulation.Carrying.PutDownOrder(carriers) { Tick = session.World.Tick });
             else if (ctrl && downed is { } lift && SelectedIds() is { Count: > 0 })
                 Say(new Meitou.Simulation.Carrying.PickUpOrder([], lift) { Tick = session.World.Tick });
+            else if (PickTrader(p) is { } trader && SelectedIds() is { Count: > 0 } customers)
+                Say(new Meitou.Simulation.Trading.OpenTrade(customers[0], trader) { Tick = session.World.Tick });
             else if (PickTarget(p) is { } victim && SelectedIds() is { Count: > 0 } attackers)
                 Say(new Meitou.Simulation.Combat.AttackOrder(attackers, victim) { Tick = session.World.Tick });
             else if (PickHurtAlly(p) is { } patient && SelectedIds() is { Count: > 0 } medics)

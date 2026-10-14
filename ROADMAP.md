@@ -69,7 +69,8 @@ Status as of 2026-10-05. Details and open questions live in the linked docs.
    residents, bar and roaming squads, zones), 3 movement, 4 characters drawn, 5 navmesh (own builder, interiors, doors,
    cache), 6 player (new game, selection, orders, HUD), 7 bodies, 8 melee combat: done and wired into the game.
    10 saves: the world mapping to and from save folders is done and the game quicksaves (F5) and quickloads (F9) the player's squad. 9 AI proper
-   (packages, tasks, off-screen squads), ranged combat, dialogue (`Dialogue.mod`), economy and towns: not started. Research (2026-10-05, from
+   (packages, tasks, off-screen squads), dialogue (`Dialogue.mod`) and towns: not started. Economy (11): item prices, shops of trader squads and the trade window
+   done (2026-10-14, [Trade](docs/simulation.md#trade)); building shops, production and research not. Research (2026-10-05, from
    the full decompile): [game-loop.md](docs/game/game-loop.md), [character-stats.md](docs/game/character-stats.md),
    [combat.md](docs/game/combat.md), [ai.md](docs/game/ai.md), [factions-squads-towns.md](docs/game/factions-squads-towns.md),
    [economy.md](docs/game/economy.md), [buildings-production.md](docs/game/buildings-production.md); each ends

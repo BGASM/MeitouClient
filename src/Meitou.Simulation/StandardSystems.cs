@@ -28,8 +28,10 @@ public enum StandardParts
     Carry = 4096,
     /// <summary>Crimes and bounties (<see cref="Meitou.Simulation.Crime.CrimeSystem"/>): pending crimes from the player's deeds, witnesses, the police; with <c>Aggro</c> the police attack wanted characters.</summary>
     Crime = 8192,
+    /// <summary>Shops, prices and trading (<see cref="Meitou.Simulation.Trading.TradeSystem"/>).</summary>
+    Trade = 16384,
     /// <summary>What the game runs.</summary>
-    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee | Carry | Crime,
+    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee | Carry | Crime | Trade,
 }
 
 /// <summary>What <see cref="StandardSystems.Build"/> builds and with which settings; the defaults are the game's.</summary>
@@ -55,6 +57,7 @@ public sealed class StandardSystemOptions
     public AggroSettings? Aggro { get; init; }
     public Meitou.Simulation.Carrying.CarrySettings? Carry { get; init; }
     public Meitou.Simulation.Crime.CrimeSettings? Crime { get; init; }
+    public Meitou.Simulation.Trading.TradeSettings? Trade { get; init; }
 }
 
 /// <summary>The built systems in tick order, with the ones the host talks to.</summary>
@@ -68,6 +71,7 @@ public sealed class StandardSystemSet
     public AggroSystem? Aggro { get; init; }
     public Meitou.Simulation.Carrying.CarrySystem? Carry { get; init; }
     public Meitou.Simulation.Crime.CrimeSystem? Crime { get; init; }
+    public Meitou.Simulation.Trading.TradeSystem? Trade { get; init; }
 }
 
 /// <summary>
@@ -92,6 +96,8 @@ public sealed class StandardSystemSet
 /// <b>Flee after aggro</b>: a squad that breaks sends its runners off after every fight of the tick was ordered, and its stop orders are deferred like theirs.</item>
 /// <item><b>Crime last</b>: its witness sweep (<c>SlowWorld</c>) sees the positions, carry links and pending crimes every other system left this tick; the deeds are reported to it by
 /// combat (<c>Inputs</c>, commit, the bolt flight in <c>Schedule</c>) and carrying (<c>SlowWorld</c>), all serial. It adds nothing to the hash until a crime is pending.</item>
+/// <item><b>Trade after crime</b>: a caught fence is reported to the crime system from the trade's <c>Inputs</c>, and the shops are opened and restocked in <c>SlowWorld</c> after the
+/// population made the tick's squads. It adds nothing to the hash until a squad has a shop.</item>
 /// </list>
 /// An extra system a test wants (a probe, a poke) goes after these.
 /// </summary>
@@ -143,6 +149,12 @@ public static class StandardSystems
             if (carry is not null) carry.Crimes = crime;
             if (aggro is not null) aggro.Crimes = crime;
         }
-        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime };
+        Meitou.Simulation.Trading.TradeSystem? trade = null;
+        if (Has(StandardParts.Trade))
+        {
+            systems.Add(trade = new Meitou.Simulation.Trading.TradeSystem(data, o.Trade));
+            trade.Crimes = crime;
+        }
+        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime, Trade = trade };
     }
 }

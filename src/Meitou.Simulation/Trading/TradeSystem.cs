@@ -1,0 +1,335 @@
+using Meitou.Data.Gameplay;
+using Meitou.Data.Gameplay.Bodies;
+using Meitou.Simulation.Items;
+
+namespace Meitou.Simulation.Trading;
+
+/// <summary>The player opens a trade between one of their characters and a trader: the customer walks up to the trader and the trade window opens in reach.</summary>
+public sealed record OpenTrade(CharacterId Customer, CharacterId Trader) : SimCommand;
+/// <summary>Closes the open trade.</summary>
+public sealed record CloseTrade : SimCommand;
+/// <summary>Buys <see cref="Quantity"/> units of the stock item <see cref="Item"/> (its index in the shop's stock) into the customer's inventory.</summary>
+public sealed record BuyItem(InventoryItemToken Item, int Quantity) : SimCommand;
+/// <summary>Sells <see cref="Quantity"/> units of the customer's item <see cref="Item"/> (its index in the customer's inventory) to the shop.</summary>
+public sealed record SellItem(InventoryItemToken Item, int Quantity) : SimCommand;
+
+/// <summary>One item of a trade window, with what it costs (stock) or fetches (the customer's goods) as a whole stack.</summary>
+public sealed record TradeItemView(int Index, string Record, string Name, string Section, int X, int Y, int Width, int Height, int Quantity, float Quality, long Price, long UnitPrice, bool Stolen)
+{
+    public InventoryItemToken Token => new(Index, Record, Section, X, Y, Quantity, Quality);
+}
+
+/// <summary>The open trade as the UI shows it (published with the snapshot).</summary>
+public sealed record TradeView(CharacterId Customer, CharacterId Trader, string TraderName, long ShopMoney, long PlayerMoney, int StockWidth, int StockHeight,
+    IReadOnlyList<TradeItemView> Stock, IReadOnlyList<TradeItemView> Goods, bool BuysStolen);
+
+/// <summary>A system that has an open trade to publish (the trade system).</summary>
+public interface ITradeSource
+{
+    TradeView? PublishTrade();
+}
+
+public sealed class TradeSettings
+{
+    /// <summary>How close the customer must stand to the trader (the original's "Out of trading range." distance is <b>Unknown</b>; engine choice).</summary>
+    public float Range { get; init; } = 30;
+    /// <summary>Ticks between looks at the squads for new shops and due restocks (engine choice: half a game second).</summary>
+    public int CheckEveryTicks { get; init; } = 15;
+    /// <summary>Game seconds the customer has to reach the trader before the opening is dropped (engine choice).</summary>
+    public float ApproachSeconds { get; init; } = 60;
+}
+
+/// <summary>
+/// The economy in play (docs/simulation.md "Trade", docs/game/economy.md sections 8 and 9):
+/// <list type="bullet">
+/// <item><b>Shops</b>: a squad made from a template with <c>is trader</c> and vendor lists gets a <see cref="Shop"/> when it appears (the game's first fill at squad creation), filled by
+/// <see cref="ShopFiller"/>, with the purse in <see cref="Squad.Money"/>; it restocks every <c>vendors refresh time</c> game hours (9.3). Squads of the player's faction never get one.</item>
+/// <item><b>Trading</b> (the trade window <c>FUN_140715560</c>, <b>Observed</b>): a purchase is priced by <see cref="Market.StackPrice"/> without the sell flag, a sale with it; when the payer
+/// cannot afford the stack the number of units it can afford moves instead, none: "You can't afford that." (3) or "The shopkeeper can't afford that." (4). What does not fit: "No room for
+/// that item." (2). The cats move between the player's purse and the shop's.</item>
+/// <item><b>Fencing</b> (8.4, <b>Observed</b>): a stolen item sold to a shop that is not a knowing fence (<c>buys stolen</c>) is caught unless a roll is below
+/// lerp(thievery / 100, 0.4, 1.25), halved when the item was stolen from the shop's own faction; caught: "Got caught selling stolen item." (9), the sale is refused and the seller gets a
+/// pending Fencing crime against the shop's faction, booked at once with the shopkeeper as the witness. The prompt that shows the chance is the UI's. The smuggling rules (8.5) are not
+/// decoded and not built.</item>
+/// </list>
+/// The shops' stock and restock times are in the state hash (through the squads); the open trade is not (it only decides what is published).
+/// </summary>
+public sealed class TradeSystem : ITickSystem, ITradeSource
+{
+    readonly PopulationData data;
+    readonly Dictionary<string, SquadTemplate?> templates = new(StringComparer.Ordinal);
+    Market? market;
+    CharacterId customer = CharacterId.None, trader = CharacterId.None;
+    bool open, traderWandered;
+    long approachUntil;
+    TradeView? view;
+
+    public TradeSystem(PopulationData data, TradeSettings? settings = null)
+    {
+        this.data = data;
+        Settings = settings ?? new TradeSettings();
+    }
+
+    public TradeSettings Settings { get; }
+    /// <summary>The crime system a caught fence is reported to (null: no crimes).</summary>
+    public Crime.CrimeSystem? Crimes { get; set; }
+    /// <summary>The prices of this world (made at the first tick, from the world's seed).</summary>
+    public Market Market(World world) => market ??= new Market(data, world.Seed);
+
+    public void Inputs(World world, IReadOnlyList<SimCommand> commands)
+    {
+        foreach (var command in commands)
+        {
+            switch (command)
+            {
+                case OpenTrade o:
+                    Close(world);
+                    customer = o.Customer;
+                    trader = o.Trader;
+                    approachUntil = world.Tick + (long)(Settings.ApproachSeconds / world.TickSeconds);
+                    if (!Resolve(world, out int c, out int t, out _))
+                    {
+                        // A right click on an enemy is still an attack (the UI sends the trade for any trader; only the world knows who is hostile).
+                        if (world.Characters.TryResolveNext(trader, out int who) && world.Characters.Cold(who) is { } tc && AggroSystem.IsEnemy(data.Relations, world.Player.Faction, tc.Faction))
+                            world.Defer(new Combat.AttackOrder([customer], trader) { Tick = world.Tick + 1 });
+                        Close(world);
+                        break;
+                    }
+                    Hold(world, t);
+                    if (!InReach(world, c, t)) world.Defer(new MoveOrder([customer], world.Characters.Next[t].Position) { Tick = world.Tick + 1 });
+                    break;
+                case CloseTrade:
+                    Close(world);
+                    break;
+                case BuyItem buy when open:
+                    Buy(world, buy);
+                    break;
+                case SellItem sell when open:
+                    Sell(world, sell);
+                    break;
+            }
+        }
+    }
+
+    public void SlowWorld(World world)
+    {
+        if (world.Tick % Settings.CheckEveryTicks == 0) Stock(world);
+        if (!customer.IsNone)
+        {
+            if (!Resolve(world, out int c, out int t, out _)) Close(world);
+            else if (InReach(world, c, t))
+            {
+                open = true;
+                Hold(world, t);
+            }
+            else if (open || world.Tick >= approachUntil) Close(world);   // walked away, or never arrived
+            else Hold(world, t);
+        }
+        view = open && Resolve(world, out int ci, out int ti, out var shop) ? Publish(world, ci, ti, shop!) : null;
+    }
+
+    public TradeView? PublishTrade() => view;
+
+    /// <summary>Keeps the trader standing while the customer comes and trades (residents wander; the original's shopkeepers stand at their node). Its wander resumes on close.</summary>
+    void Hold(World world, int t)
+    {
+        ref var n = ref world.Characters.Next[t];
+        if (n.Task == (byte)CharacterTask.Wander) traderWandered = true;
+        if (n.Task is (byte)CharacterTask.Wander or (byte)CharacterTask.Idle) MovementSystem.Stop(world.Characters, t);
+    }
+
+    void Close(World world)
+    {
+        if (traderWandered && world.Characters.TryResolveNext(trader, out int t) && world.Characters.Next[t].Task == (byte)CharacterTask.Idle)
+            world.Characters.Next[t].Task = (byte)CharacterTask.Wander;
+        customer = trader = CharacterId.None;
+        open = traderWandered = false;
+        view = null;
+    }
+
+    // ------------------------------------------------------------------ shops
+
+    SquadTemplate? TemplateOf(string id)
+    {
+        if (!templates.TryGetValue(id, out var t))
+            templates[id] = t = data.Db.Find(id) is { } r && SquadFactory.IsTemplate(r) && SquadTemplate.From(r) is { HasShop: true } shop ? shop : null;
+        return t;
+    }
+
+    void Stock(World world)
+    {
+        foreach (var squad in world.Squads.All)
+        {
+            if (squad.Faction >= 0 && (squad.Faction == world.Player.Faction || squad.Faction == data.PlayerFaction)) continue;
+            if (squad.Shop is { } shop)
+            {
+                if (world.Tick < shop.NextRestockTick || TemplateOf(squad.TemplateId) is not { } again) continue;
+                Refill(world, squad, shop, again);
+            }
+            else if (TemplateOf(squad.TemplateId) is { } template)
+            {
+                squad.Shop = new Shop { Terms = new Trader(squad.Town, squad.Faction, template.BuyMult, template.BuysStolen, template.BuysIllegal) };
+                Refill(world, squad, squad.Shop, template);
+            }
+        }
+    }
+
+    void Refill(World world, Squad squad, Shop shop, SquadTemplate template)
+    {
+        squad.Money = ShopFiller.Fill(shop, template, Market(world), data, world.Seed, (ulong)squad.Id);
+        shop.NextRestockTick = world.Tick + (long)(template.VendorsRefreshTime / BodySystem.HoursPerTick);
+    }
+
+    /// <summary>The shop a character trades for: its squad's (null: not a trader).</summary>
+    public static Shop? ShopOf(World world, CharacterCold cold) => cold.SquadId >= 0 ? world.Squads.Find(cold.SquadId)?.Shop : null;
+
+    // ------------------------------------------------------------------ trading
+
+    bool Resolve(World world, out int c, out int t, out Shop? shop)
+    {
+        var table = world.Characters;
+        shop = null;
+        t = -1;
+        if (!table.TryResolveNext(customer, out c) || !table.TryResolveNext(trader, out t)) return false;
+        var cc = table.Cold(c)!;
+        var tc = table.Cold(t)!;
+        if (!cc.IsPlayer || cc.Medical is { Incapacitated: true } || tc.Medical is { Incapacitated: true } || tc.InCombat || cc.Inventory is null) return false;
+        if (AggroSystem.IsEnemy(data.Relations, cc.Faction, tc.Faction)) return false;
+        shop = ShopOf(world, tc);
+        return shop is not null;
+    }
+
+    bool InReach(World world, int c, int t)
+    {
+        var a = world.Characters.Next[c].Position;
+        var b = world.Characters.Next[t].Position;
+        float dx = a.X - b.X, dz = a.Z - b.Z;
+        return dx * dx + dz * dz <= Settings.Range * Settings.Range;
+    }
+
+    static ItemInstance? Find(Inventory inventory, InventoryItemToken token)
+    {
+        var item = inventory.All().ElementAtOrDefault(token.Index);
+        return item is not null && item.Record == token.Record && item.Section == token.Section && item.X == token.X && item.Y == token.Y && item.Quantity == token.Quantity
+            && item.Quality == token.Quality && item.Contents is null ? item : null;
+    }
+
+    void Buy(World world, BuyItem buy)
+    {
+        if (!Resolve(world, out int c, out int t, out var shop)) return;
+        var cold = world.Characters.Cold(c)!;
+        var squad = world.Squads.Find(world.Characters.Cold(t)!.SquadId)!;
+        if (Find(shop!.Stock, buy.Item) is not { } item) return;
+        var m = Market(world);
+        int units = Affordable(m, item, Math.Clamp(buy.Quantity, 1, item.Quantity), false, shop.Terms, squad.Faction, world.Player.Money);
+        if (units == 0)
+        {
+            world.Post("You can't afford that.");
+            return;
+        }
+        var bought = item.WithQuantity(units);
+        long price = m.StackPrice(bought, false, shop.Terms, squad.Faction);
+        int placed = Place(cold.Inventory!, bought, units);
+        if (placed == 0)
+        {
+            world.Post("No room for that item.");
+            return;
+        }
+        if (placed < units) price = m.StackPrice(item.WithQuantity(placed), false, shop.Terms, squad.Faction);
+        Take(shop.Stock, item, placed);
+        world.Player.Money -= price;
+        squad.Money += price;
+        world.Post($"{cold.Name} bought {Units(placed, item.Name)} for c.{price}");
+    }
+
+    void Sell(World world, SellItem sell)
+    {
+        if (!Resolve(world, out int c, out int t, out var shop)) return;
+        var cold = world.Characters.Cold(c)!;
+        var tc = world.Characters.Cold(t)!;
+        var squad = world.Squads.Find(tc.SquadId)!;
+        if (Find(cold.Inventory!, sell.Item) is not { } item || item.Section is not ("main" or "backpack_content")) return;
+        var m = Market(world);
+        int units = Affordable(m, item, Math.Clamp(sell.Quantity, 1, item.Quantity), true, shop!.Terms, cold.Faction, squad.Money);
+        if (units == 0)
+        {
+            world.Post("The shopkeeper can't afford that.");
+            return;
+        }
+        if (item.IsStolenFor(cold.Faction) && !shop.Terms.BuysStolen && Caught(world, c, item, squad))
+        {
+            world.Post("Got caught selling stolen item.");
+            if (Crimes is { } crimes && crimes.SetPending(world, c, Crime.CrimeCode.Fencing, squad.Faction, trader, Crime.CrimeSystem.MinTimer))
+                crimes.Book(world, c, squad.Faction, trader);
+            return;
+        }
+        var sold = item.WithQuantity(units);
+        long price = m.StackPrice(sold, true, shop.Terms, cold.Faction);
+        int placed = Place(shop.Stock, sold, units);
+        if (placed == 0)
+        {
+            world.Post("No room for that item.");
+            return;
+        }
+        if (placed < units) price = m.StackPrice(item.WithQuantity(placed), true, shop.Terms, cold.Faction);
+        Take(cold.Inventory!, item, placed);
+        squad.Money -= price;
+        world.Player.Money += price;
+        world.Post($"{cold.Name} sold {Units(placed, item.Name)} for c.{price}");
+    }
+
+    /// <summary>
+    /// The chance a shop that is no fence lets a stolen item through (8.4, <c>FUN_140793490</c>): lerp(thievery / 100, 0.4, 1.25) of the seller, halved when the item was stolen from the
+    /// shop's faction; 1 or more never gets caught. The roll is the seller's and the tick's.
+    /// </summary>
+    public static float FenceChance(float thievery, bool stolenFromShopFaction)
+    {
+        float p = 0.4f + (1.25f - 0.4f) * (thievery / 100f);
+        return stolenFromShopFaction ? p * 0.5f : p;
+    }
+
+    bool Caught(World world, int seller, ItemInstance item, Squad shopSquad)
+    {
+        var cold = world.Characters.Cold(seller)!;
+        float p = FenceChance(cold.Stats?[StatsEnumerated.Thieving] ?? 0, item.StolenFrom == shopSquad.Faction);
+        if (p >= 1) return false;
+        return Rng.Float(Rng.Hash(world.Seed, Rng.Key(world.Characters.IdOf(seller)), RngPurpose.Trade, (ulong)world.Tick)) >= p;
+    }
+
+    /// <summary>How many of <paramref name="wanted"/> units the payer's <paramref name="money"/> covers (the trade window splits the stack to what is affordable).</summary>
+    static int Affordable(Market m, ItemInstance item, int wanted, bool sell, Trader terms, int holderFaction, long money)
+    {
+        for (int n = wanted; n > 0; n--)
+            if (m.StackPrice(n == item.Quantity ? item : item.WithQuantity(n), sell, terms, holderFaction) <= money) return n;
+        return 0;
+    }
+
+    /// <summary>Puts <paramref name="units"/> of an item into an inventory; returns how many went in.</summary>
+    static int Place(Inventory into, ItemInstance copy, int units)
+    {
+        copy.Section = "main";
+        return into.Add(copy) ? units : units - copy.Quantity;
+    }
+
+    /// <summary>Takes <paramref name="units"/> off an item's stack, removing it when none are left.</summary>
+    static void Take(Inventory from, ItemInstance item, int units)
+    {
+        if (units >= item.Quantity) from.Remove(item);
+        else item.Quantity -= units;
+    }
+
+    static string Units(int n, string name) => n == 1 ? name : $"{n} x {name}";
+
+    TradeView Publish(World world, int c, int t, Shop shop)
+    {
+        var m = Market(world);
+        var cold = world.Characters.Cold(c)!;
+        var squad = world.Squads.Find(world.Characters.Cold(t)!.SquadId)!;
+        TradeItemView View(ItemInstance item, int index, bool sell, int holder) => new(index, item.Record, item.Name, item.Section, item.X, item.Y, item.Width, item.Height, item.Quantity,
+            item.Quality, m.StackPrice(item, sell, shop.Terms, holder), m.UnitPrice(item.Quantity == 1 ? item : item.WithQuantity(1), sell, shop.Terms, holder), item.IsStolenFor(holder));
+        var stock = shop.Stock.All().Select((item, index) => View(item, index, false, squad.Faction)).ToArray();
+        var goods = cold.Inventory!.All().Select((item, index) => (item, index)).Where(p => p.item.Section is "main" or "backpack_content")
+            .Select(p => View(p.item, p.index, true, cold.Faction)).ToArray();
+        return new TradeView(customer, trader, world.Characters.Cold(t)!.Name, squad.Money, world.Player.Money, shop.Stock.Width, shop.Stock.Height, stock, goods, shop.Terms.BuysStolen);
+    }
+}

@@ -19,6 +19,8 @@ public enum RngPurpose : uint
     Sense = 9,
     /// <summary>Crossbow shots: the deviation cone, the damage roll and the friendly-fire pass (docs/simulation.md "Combat", ranged).</summary>
     Ranged = 10,
+    /// <summary>The economy: town market factors, shop stock, shop purses, fencing (docs/simulation.md "Trade").</summary>
+    Trade = 11,
 }
 
 /// <summary>

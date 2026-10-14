@@ -26,10 +26,11 @@ game you can sink hours into. What works today:
   squads, and the wild with each biome's squads and nests. Characters have stats and XP, blood, body parts,
   hunger, knockouts and death; first aid, resting and medic and rescue jobs; inventories and eating. Melee and
   crossbow combat, fights started by faction relations, sight and hearing, fleeing, carrying and looting bodies,
-  crimes with witnesses, police and bounties. A HUD with inventory and map panels, and F5 / F9 quicksave and
-  quickload into Meitou's own slot.
+  crimes with witnesses, police and bounties. Shops: traders stock and restock their wares at the game's prices,
+  and a right click on one opens a trade window to buy and sell (stolen goods risk getting caught unless the trader
+  is a fence). A HUD with inventory and map panels, and F5 / F9 quicksave and quickload into Meitou's own slot.
 
-Not there yet: the original's AI (NPCs run on simpler stand-ins), trade and the economy, building and research,
+Not there yet: the original's AI (NPCs run on simpler stand-ins), building shops and the rest of the economy, building and research,
 dialogue and recruiting, audio, a save menu and loading the original game's saves. See [ROADMAP.md](ROADMAP.md)
 and [docs/simulation.md](docs/simulation.md).
 

@@ -72,6 +72,7 @@ public sealed partial class World : IDisposable
     readonly List<string> messages = [];
     IAnimationSource? animations;
     IProjectileSource? projectiles;
+    Trading.ITradeSource? trades;
 
     public World(WorldSettings settings, IWalkability walkability, IEnumerable<ITickSystem>? systems = null, CharacterTable? characters = null)
     {
@@ -83,6 +84,7 @@ public sealed partial class World : IDisposable
         for (int k = 0; k < this.systems.Count; k++) phases.Add(new SystemPhases(this, this.systems[k], k));
         animations = this.systems.OfType<IAnimationSource>().FirstOrDefault();
         projectiles = this.systems.OfType<IProjectileSource>().FirstOrDefault();
+        trades = this.systems.OfType<Trading.ITradeSource>().FirstOrDefault();
         Characters = characters ?? new CharacterTable();
         Grid = new SpatialGrid(settings.GridCellSize);
         pool = new WorkerPool(settings.Threads);
@@ -120,6 +122,7 @@ public sealed partial class World : IDisposable
         phases.Add(new SystemPhases(this, system, systems.Count - 1));
         animations ??= system as IAnimationSource;
         projectiles ??= system as IProjectileSource;
+        trades ??= system as Trading.ITradeSource;
     }
 
     /// <summary>Runs one simulation tick.</summary>

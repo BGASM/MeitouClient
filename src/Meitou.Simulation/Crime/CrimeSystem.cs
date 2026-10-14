@@ -114,11 +114,18 @@ public sealed class CrimeSystem(FactionRelations relations, CrimeSettings? setti
     public void Loot(World world, int looter, int victim)
     {
         var table = world.Characters;
-        if (table.Cold(looter) is not { IsPlayer: true } l || table.Cold(victim) is not { IsPlayer: false } v) return;
-        if (v.NpcClass is FundamentalType.Slave or FundamentalType.Bandit || v.Bounties is { Any: true }) return;
-        if (l.NpcClass is FundamentalType.LawEnforcement or FundamentalType.Military or FundamentalType.Diplomat) return;
+        if (table.Cold(looter) is not { } l || table.Cold(victim) is not { } v || !IsLootTheft(l, v)) return;
         SetPending(world, looter, CrimeCode.Looting, v.Faction, table.IdOf(victim), MinTimer);
     }
+
+    /// <summary>
+    /// Whether the player's taking from a downed character is a theft: the permission test of <see cref="Loot"/> (<c>FUN_140793940</c>, <b>Observed</b>). The carry system marks what such a
+    /// loot takes as stolen from the victim's faction (<see cref="Items.ItemInstance.StolenFrom"/>).
+    /// </summary>
+    public static bool IsLootTheft(CharacterCold looter, CharacterCold victim) =>
+        looter.IsPlayer && !victim.IsPlayer
+        && victim.NpcClass is not (FundamentalType.Slave or FundamentalType.Bandit) && victim.Bounties is not { Any: true }
+        && looter.NpcClass is not (FundamentalType.LawEnforcement or FundamentalType.Military or FundamentalType.Diplomat);
 
     /// <summary>
     /// A landed hit between <paramref name="attacker"/> and <paramref name="defender"/> (the game's hit outcome <c>FUN_140665fa0</c>, <b>Observed</b>): when exactly one of them is

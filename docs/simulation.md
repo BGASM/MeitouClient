@@ -29,7 +29,7 @@ Each stage ends with tests and something the owner can run.
 | **8. Combat** | Melee per [combat.md](game/combat.md); ranged later | Melee done and wired ([Combat](#combat)); fights start by faction hostility, the player's idle characters defend themselves, the player's assaults and killings change the relations (2026-10-13, `AggroSystem`, [Hostility](#hostility-and-relations)); crossbows done ([Ranged](#ranged)); animals fight with their natural weapons and bodies, drawn and animated with their own clips (2026-10-13, [Animals](#animals)); turrets and attack slots not built |
 | **9. AI proper** | Packages, blackboard, scoring and planner ([ai.md](game/ai.md)), off-screen squads | Not started (gate: towns run their daily routines, squads travel off screen). `PursuitSystem`, `RetaliationSystem`, `AggroSystem` (senses and target choice) and the roaming squads are engine stand-ins, not the original's AI |
 | **10. Saves** | Read and write the world state ([save.md](formats/save.md)) | API done ([Saves](#saves)); the game host quicksaves (F5) and quickloads (F9) the player's squad into its own slot ([Quicksave and quickload](#quicksave-and-quickload)); no save menu, no loading of the original game's saves in play |
-| **11+** | Economy and trade, buildings and production, the MyGUI screens, audio | Not started, except crimes and bounties (2026-10-13, [Crimes and bounties](#crimes-and-bounties)) |
+| **11+** | Economy and trade, buildings and production, the MyGUI screens, audio | Crimes and bounties (2026-10-13, [Crimes and bounties](#crimes-and-bounties)); item prices, shops and trading (2026-10-14, [Trade](#trade)); the rest not started |
 
 ## Principles
 
@@ -236,6 +236,7 @@ result (the golden hashes pin it):
 | 12 | `AggroSystem` | Schedule, Act, Apply, SlowWorld | NPCs attack enemies of their faction they see or hear (the original's figures); the leash; back to the routine after a fight; hashes the live relation table ([Hostility](#hostility-and-relations)) |
 | 13 | `FleeSystem` | SlowWorld | NPC squads of factions with run-away ratios break and run when beaten, until safe ([Hostility](#hostility-and-relations)) |
 | 14 | `CrimeSystem` | SlowWorld | Pending crimes from the player's deeds (reported by combat and carrying), witnesses, booking by the police, bounty expiry ([Crimes and bounties](#crimes-and-bounties)) |
+| 15 | `TradeSystem` | Inputs, SlowWorld | Shops of trader squads (stock, purse, restock), the open trade, buying, selling and fencing ([Trade](#trade)) |
 
 The rules: **population first** (it spawns in `SlowWorld`, so later systems see its characters); **player before movement** (a
 `MoveOrder` without ids reads the selection the player system just changed); **pursuit before movement** (pursuit raises `NeedPath` in
@@ -246,7 +247,7 @@ its `SlowWorld`: a system after it sees the new combat state, one before it the 
 combat's, so a carrier ordered to attack lets go first; everything it does is serial); **feed after body**; **retaliation, then aggro, last** (both defer
 orders for the next tick after combat swapped; the aggro's leash sweep sees the tasks every other system left this tick, and its look in `Act` reads only the last tick's
 positions and the cold state no other `Act` writes). The game's `CombatOptions` are `SelfApproach = false, TickMedical = false`. The sandbox builds `All` without `Aggro`
-(its hostile foe stands 30 units from the hero and must not start a fight by itself). **Crime last** (2026-10-13): its witness sweep sees the positions, carry links and pending crimes every other system left this tick; the deeds come in from combat (`Inputs`, the commit, the bolt flight in `Schedule`) and carrying (`SlowWorld`), all serial.
+(its hostile foe stands 30 units from the hero and must not start a fight by itself). **Crime last** (2026-10-13): its witness sweep sees the positions, carry links and pending crimes every other system left this tick; the deeds come in from combat (`Inputs`, the commit, the bolt flight in `Schedule`) and carrying (`SlowWorld`), all serial. **Trade after crime** (2026-10-14): a caught fence is reported to the crime system from the trade's `Inputs`; shops are opened and restocked in `SlowWorld`, after the population made the tick's squads. It adds nothing to the hash until a squad has a shop.
 
 ## Population
 
@@ -353,6 +354,7 @@ positions and the cold state no other `Act` writes). The game's `CombatOptions` 
 | Alt + right click on a knocked-out or dead character | the nearest selected character takes everything that fits (`LootOrder`, [Carrying](#carrying-rescue-and-looting)); the original opens a loot window instead (not built) |
 | `J` | switches the rescue job on or off for the selection (`RescueJobCommand`; the original's `rescue` key is NUM8, which the cinema camera owns here); the HUD shows `rescue job (J)` |
 | `K` | the selected carriers put their bodies down (`PutDownOrder`); the HUD shows `carrying (K puts down)` |
+| right click on a living trader (`CharacterSnapshot.IsTrader`) | the first selected character walks up to it and the trade window opens (`OpenTrade`, [Trade](#trade)); a trader of a hostile faction is attacked instead, as any other character. The original's right click on a neutral talks (dialogue, not built); engine choice |
 
 Right mouse is the command button, so **orbit is the middle button only**; saved configs that bound `Mouse:Right` to orbit lose that entry on
 load. The HUD (top left, `DebugOverlay` text and quads): game clock and day, money, clickable speed buttons (pause, 1x, 2x, 5x, the active one
@@ -949,10 +951,50 @@ kidnapping). Code: `src/Meitou.Simulation/Crime/` (`CrimeSystem`, `CrimeTypes.cs
   through `World.Post` to the HUD notice and the log.
 - **Saves.** The player's characters' ledgers: `BountySave` writes and reads the GAMESTATE_CHARACTER keys of [save.md](formats/save.md) (`bountyfac<k>` the FACTION string id,
   `bountyexp<k>` the game hour of the last raise as day x 24 + hour, **Observed**, `amount<k>`, `crimes<k>`, `claim<k>`). Pending crimes are not saved (no key known).
-- **Not built:** claiming bounties (turning a captive in, the 11.4 reward), bail, cages and sentences, escaping prison, the stolen flag on items and fencing, theft from a conscious owner
+- **Not built:** claiming bounties (turning a captive in, the 11.4 reward), bail, cages and sentences, escaping prison (the stolen flag and fencing are in [Trade](#trade)), theft from a conscious owner
   (no pickpocketing), trespassing and burglary (no buildings), spawn bounties (CHARACTER `bounty chance` / `amount` / `fuzz`, so NPCs are never wanted), NPC crimes, the dialogue
   reactions, the squad-level kind 7 tag, the police chasing an unseen culprit, witnesses hearing.
 - **Cost.** Nothing until a crime is pending; then one pass over the slots per pending culprit every 15 ticks (a sight test per NPC), and the aggro's extra test per look.
+
+## Trade
+
+Item prices, shops and trading (2026-10-14), from [game/economy.md](game/economy.md) sections 3 to 9 and 13. Code: `Meitou.Data.Gameplay.Economy` (`PriceConstants`, `ItemValue`,
+`TradeCulture`, `VendorList`) and `Meitou.Simulation.Trading` (`Market`, `Shop`, `ShopFiller`, `TradeSystem`); the window is `src/Meitou.Game/PlayerInterface.Trade.cs`.
+
+- **Prices.** `ItemValue` is the original's base value in 32-bit float with its truncations (the worked examples of economy.md 4.6 are its tests: a Katana at quality 50 is 43750 raw
+  and 17500 with `sword price mult`, Edgewalkers 61250 / 24500, Samurai Armour 15450 / 9270, Chainmail 20587 / 12352). `Market.UnitPrice` and `StackPrice` are the item classes' slots
+  81 and 82: weapons and armour from the base value with `loot price mult GEAR` when sold, the generic items with the town's market factor, `loot price mult` when sold unless an
+  unstolen `trade item`, and the charge fraction; then the trader factor T = `buy mult` x culture price (the town's ITEMS_CULTURE before the faction's), halved for an item stolen from
+  the player's faction (as read). A weapon's quality is its model level (`ItemInstance.Level`), armour's its `Quality`.
+- **Engine readings where the original is Unknown.** The money item is the ITEM named `Cats` (priced at its `value`; which records make a `MoneyItem` is not decoded). Crossbows are
+  priced like weapons. Maps and blueprints use their record `value` (the original's stored prices come from places not traced). The player-made sell rows and the armour's hard-coded
+  0.3 never apply (no crafting; the condition is not decoded).
+- **Market factors** (`MarketFactors`, economy.md 7.2): for every placed town except nests, nest markers, points of interest and null towns, each item of `all trade goods` gets a
+  factor uniform in [0.7, 1.3) (`trade profit margins` 0.3), clamped to within d / 1,000,000 x 3 of every town set up before it (in site order; the original's list and order are
+  **Unknown**). Rolled from the world seed (`RngPurpose.Trade`), so every load of a world has the same factors; the original saves them per town (`trade goods`), not done here.
+- **Shops.** A squad whose template has `is trader` and vendor lists gets a `Shop` at the trade system's first look after it appears (every 15 ticks; squads of the player's faction
+  never): `ShopFiller` rolls round(U(0.8, 1.2) x `vendors fill total amount`) units shared among the lists by weight, picked by weight from each list (a weight of 0 counts as 100,
+  `forbidden items` of the town and faction cultures skipped; armour gets a grade from the faction's `armors 0..5` chances, a weapon a manufacturer and model from the list), merged
+  into stacks and placed dearest first into the shop's 12 x 20 stock grid (what does not fit is destroyed). The purse (`Squad.Money`) is clamp(0.25 x the stock's value, 3000, 25000)
+  plus the lists' money rolls (which the original adds as a stack of cats; **engine choice**). The stock is replaced and the purse refilled every `vendors refresh time` game hours.
+  **Engine choice**: the stock is held by the squad (the original's squad stock goes to inventory sections not decoded; a building shop's to its containers, and buildings have no
+  state here). A roaming trader that unloads loses its shop and gets a new one when it loads again (its inventories are rolled again in the same way).
+- **Trading.** `OpenTrade(customer, trader)` (a right click, [Player](#player)) walks the customer to the trader (60 game seconds to get there) and holds the trader still (residents
+  wander; the original's shopkeepers stand at their node); within 30 units (**engine choice**: the original's trading range is **Unknown**) the trade is open and `WorldSnapshot.Trade`
+  publishes the stock with buy prices and the customer's main and backpack items with sell prices. `BuyItem` and `SellItem` (an `InventoryItemToken` and a count) move as many units
+  as the payer can afford ("You can't afford that." / "The shopkeeper can't afford that.") and the receiver has room for ("No room for that item."), and the cats between
+  `Player.Money` and the shop's purse. Walking away, a knock-out, a fight or a hostile trader closes it; `CloseTrade` too. The trader goes back to wandering.
+- **Stolen goods and fencing.** A loot-all that is a theft by the crime rules (`CrimeSystem.IsLootTheft`) marks what it takes as stolen from the victim's faction
+  (`ItemInstance.StolenFrom`, the item's "taken from" owner of carry-loot.md 4.4 reduced to its faction); an item is stolen while its holder is of another faction. Stolen and clean
+  units do not stack together (**engine choice**). Selling a stolen item to a shop without `buys stolen` is caught unless a roll is below lerp(thievery / 100, 0.4, 1.25), halved
+  when the item was stolen from the shop's own faction (economy.md 8.4): "Got caught selling stolen item.", no sale, a pending Fencing against the shop's faction booked at once
+  with the shopkeeper as the witness. The window marks the risky items; the original's prompt with the percentage is not built. Smuggling (`buys illegal`, illegal goods) is not
+  decoded and not built.
+- **Hash and saves.** The shops (stock, restock tick, fill count) are hashed with their squads, so a world without shops hashes as before; the open trade is not world state. The
+  stolen mark is **not hashed yet** (adding it moves the `carry` and `crime` golden hashes; [Open questions](#open-questions-and-known-gaps)). Nothing of the economy is saved beyond
+  the player's money: shops are rolled again for the squads a load makes; inventories are not saved anyway.
+- **Not built:** the original's drag-and-drop trade window (Kenshi_TradeWindow), building shops and `vendor money`, `special items`, artifacts, the culture's illegal goods, smuggling,
+  slaves, prisoners and animals for sale (12), bail, NPC shopping (`Task_Shopping`), picking up money items, blueprint and research costs.
 
 ## Saves
 
@@ -1211,7 +1253,7 @@ for crimes ([Crimes and bounties](#crimes-and-bounties), economy.md 11): how a k
 function's squad-level kind 7 does, the faction parent `+0x38` a bounty may go to, the victim test `FUN_140436610` of an assault, whether witnesses also hear, and whether the original's
 relation changes for deeds come only through witnesses (Meitou keeps its deed-time events).
 
-**Engine gaps**: the AI (stage 9), towns and their state, the economy, buildings, the UI screens, the host's use of saves, combat clips and ranged
+**Engine gaps**: the AI (stage 9), towns and their state, the economy beyond prices, shops and trading, buildings, the UI screens, the host's use of saves, combat clips and ranged
 combat, doors that open and close in play, physics.
 
 **Refactor items skipped because they would change behaviour** (each moves a golden hash or the timing of something). Done 2026-10-13: retaliation no longer
@@ -1222,6 +1264,8 @@ enqueues into the host's `CommandQueue` from inside the tick; it and the aggro u
   `Fighter.EncumbranceFactor`, 2026-10-13) and seed, and differ in `BodyTimeScale` (combat's is 1) and `Resting` (combat's is false). So they are equivalent only at time scale 1 and for a
   character that is not resting; with the game's `TickMedical = false` the combat one only serves hits, where neither matters.
 - Combat ticks are `int` (`CombatSlot.ReadyTick`, `StunUntil`) while the world's tick is `long`.
+- `ItemInstance.StolenFrom` (2026-10-14) is not in the inventory hash: hashing it moves the `carry` and `crime` pins (behaviour is unchanged; only the theft marks would enter
+  the hash). Re-pin on the owner's machine when it is added: the pins are platform-specific (a Linux run gives other numbers for every scenario, even before the change).
 - `BodyHash` does not cover the private `starveGrace` and `starvationKo` of `MedicalState` (nor every flag such as `BloodKo`), so a divergence
   there shows in the hash only later.
 - `CharacterHot.Animation`/`AnimationTime` (the old movement layers) and the name length are still hashed; removing them moves every hash.

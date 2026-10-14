@@ -31,6 +31,8 @@ public sealed class Squad
     public CharacterId Leader { get; set; } = CharacterId.None;
     /// <summary>The squad's purse in cats (save key <c>money</c> of the platoon; a roaming squad carries it over its unloading). The economy stage spends it.</summary>
     public long Money { get; set; }
+    /// <summary>The squad's shop, when it is a trader (<see cref="Trading.TradeSystem"/>); null otherwise.</summary>
+    public Trading.Shop? Shop { get; set; }
 }
 
 /// <summary>The squads of a world, by id. Ids are never reused.</summary>
@@ -80,6 +82,7 @@ public sealed class SquadRegistry
             {
                 hasher.Add(m);
             }
+            s.Shop?.Hash(ref hasher);   // nothing for squads that do not trade, so the pinned hashes of worlds without shops stay
         }
     }
 }

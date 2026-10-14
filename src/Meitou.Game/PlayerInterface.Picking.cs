@@ -81,6 +81,9 @@ sealed partial class PlayerInterface
     /// <summary>A living character of anyone else's under the pixel: what a right click attacks (hostility is not checked yet).</summary>
     public CharacterId? PickTarget(Vector2 pixel) => PickWhere(pixel, c => !c.IsPlayer && c.Body is { Dead: false, Unconscious: false });
 
+    /// <summary>A living trader under the pixel (a member of a squad with a shop): a right click trades with it, or attacks it when its faction is hostile (the world decides).</summary>
+    public CharacterId? PickTrader(Vector2 pixel) => PickWhere(pixel, c => c.IsTrader && c.Body is not { Dead: true } and not { Unconscious: true });
+
     /// <summary>A knocked-out or dead character under the pixel that nobody carries (what a pick-up or a loot is for); <paramref name="ownOnly"/> takes only the player's.</summary>
     public CharacterId? PickDowned(Vector2 pixel, bool ownOnly = false) =>
         PickWhere(pixel, c => c.Body is { } b && (b.Unconscious || b.Dead) && c.CarriedBy.IsNone && (!ownOnly || c.IsPlayer)) ?? (ownOnly ? null : PickWhere(pixel, c => !c.CarriedBy.IsNone));

@@ -36,6 +36,11 @@ public sealed class ItemInstance
     /// <summary>How many units one cell holds (<see cref="ItemInfo.StackLimit"/>; 1: it does not stack). Inside a backpack the bag's bonus applies (<see cref="Inventory.LimitOf"/>).</summary>
     public int StackLimit { get; init; } = 1;
     public bool IsFood { get; init; }
+    /// <summary>
+    /// The faction the item was stolen from (-1: none), the item's "taken from" owner of docs/game/carry-loot.md 4.4 reduced to its faction: set when the player's looting is a theft
+    /// (<see cref="Carrying.CarrySystem"/>). The item counts as stolen while its holder is of another faction (<see cref="IsStolenFor"/>).
+    /// </summary>
+    public int StolenFrom { get; set; } = -1;
     /// <summary>A worn backpack's contents (null for other items).</summary>
     public Inventory? Contents { get; init; }
     /// <summary>The factor of the contents' weight (a bag's <c>encumbrance effect</c>).</summary>
@@ -46,8 +51,11 @@ public sealed class ItemInstance
     {
         Record = Record, Name = Name, Type = Type, MaterialId = MaterialId, CompanyId = CompanyId, Section = Section, X = X, Y = Y, Quantity = quantity, Level = Level,
         ItemFunction = ItemFunction, Quality = Quality, Charges = Charges, MaxCharges = MaxCharges, Width = Width, Height = Height, UnitWeight = UnitWeight, StackLimit = StackLimit,
-        IsFood = IsFood, ContentsFactor = ContentsFactor,
+        IsFood = IsFood, ContentsFactor = ContentsFactor, StolenFrom = StolenFrom,
     };
+
+    /// <summary>Whether the item is stolen while held by a character of <paramref name="holderFaction"/> (carry-loot.md 4.4: the from-owner is set and of another faction).</summary>
+    public bool IsStolenFor(int holderFaction) => StolenFrom >= 0 && StolenFrom != holderFaction;
 
     /// <summary>The weight this item and what is in it add to the load.</summary>
     public float Weight => UnitWeight * Quantity + (Contents?.ContentWeight() ?? 0) * ContentsFactor;

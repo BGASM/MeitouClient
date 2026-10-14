@@ -137,6 +137,7 @@ sealed partial class PlayerInterface
         if (UiMode == UiMode.Faithful)
             foreach (var screen in faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent)) controls.AddRange(screen.Controls);
         else if (openPanel is not null) AddDetailsPanel(controls);
+        AddTradePanel(controls);
         if (UiMode == UiMode.Faithful) AddInventoryDrag(controls);
         return controls;
     }
@@ -178,6 +179,7 @@ sealed partial class PlayerInterface
         else if (action == "stop") Say(new StopCommand(SelectedIds()) { Tick = session.World.Tick });
         else if (action == "medic") Say(new Meitou.Simulation.FirstAid.MedicJobCommand(SelectedIds()) { Tick = session.World.Tick });
         else if (action == "rescue") Say(new Meitou.Simulation.Carrying.RescueJobCommand(SelectedIds()) { Tick = session.World.Tick });
+        else if (action is "buy" or "sell" or "trade.close" or "trade.page") TradeAction(action, argument);
     }
 
     void DrawGameUi(DebugOverlay overlay, int width, int height) =>

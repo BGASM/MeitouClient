@@ -1,0 +1,170 @@
+using Meitou.Data;
+using Meitou.Data.Characters;
+using Meitou.Data.Fcs;
+using Meitou.Data.Gameplay;
+using Meitou.Data.Gameplay.Economy;
+using Meitou.Simulation.Items;
+
+namespace Meitou.Simulation.Trading;
+
+/// <summary>
+/// A trader squad's shop: the stock it sells, its trade terms and when it restocks (docs/game/economy.md section 9). The purse is the squad's <see cref="Squad.Money"/>, the game's
+/// <c>Platoon+0x88</c>. <b>Engine choice</b>: the stock is one inventory of <see cref="Width"/> x <see cref="Height"/> cells held by the squad; in the original a squad shop's stock is
+/// offered to "the inventory sections" (not decoded) and a building shop's lies in the shop building's containers, and buildings have no world state here yet.
+/// </summary>
+public sealed class Shop
+{
+    public const int Width = 12, Height = 20;
+
+    public Inventory Stock { get; } = new(Width, Height);
+    public required Trader Terms { get; init; }
+    /// <summary>The world tick at which the stock is next replaced (<c>Platoon+0x1f8</c>, saved as <c>inventory refresh time</c> in game hours).</summary>
+    public long NextRestockTick { get; set; }
+    /// <summary>How many times the stock was filled: the key of the next fill's rolls.</summary>
+    public int Fills { get; set; }
+
+    internal void Hash(ref StateHasher h)
+    {
+        h.Add(NextRestockTick);
+        h.Add(Fills);
+        Stock.Hash(ref h);
+    }
+}
+
+/// <summary>
+/// Fills a shop as the squad filler <c>FUN_14095ab10</c> does (docs/game/economy.md 9.2, <b>Observed</b>; the constants <b>Verified</b>):
+/// <list type="number">
+/// <item>n = round(U(0.8, 1.2) x <c>vendors fill total amount</c> x wealth), half away from zero; wealth is 1 (the game's faction wealth function is a stub returning 1).</item>
+/// <item>The vendor lists share n by their weights (v0; 0 counts as 100, engine reading), round(n x w / sum), the last taking what the rounding left.</item>
+/// <item>Each unit is a weighted pick from its list (<see cref="VendorList"/>), skipping the <c>forbidden items</c> of the trader's town and faction cultures. Armour gets a grade from the
+/// faction's armour chances and the grade's quality (5 / 20 / 40 / 60 / 80 / 95); a weapon a manufacturer from the list and a model from the manufacturer (how the original rolls a shop
+/// weapon's quality is <b>Unknown</b>; this is the character generator's rule).</item>
+/// <item>The units are merged into stacks up to their stack limit, sorted by unit price (dearest first: the sort key is the price, its direction <b>Unknown</b>) and put into the stock;
+/// what does not fit is destroyed.</item>
+/// <item>The purse is trunc(clamp(0.25 x the stock's value at full price, 3000, 25000) x wealth); the template's <c>vendor money</c> is a building shop's and is not read.</item>
+/// <item>Each list's money roll (<c>money item prob</c> against U(0, 1), so 1 or more always pays) adds U[min, max] cats. The game adds them as a stack of the money item; here they go
+/// straight to the purse (<b>engine choice</b>: a shop selling its own cats would be a no-op trade).</item>
+/// </list>
+/// </summary>
+public static class ShopFiller
+{
+    /// <summary>The armour grade chances when a faction has none (the editor's defaults, economy.md 9.2).</summary>
+    static readonly int[] DefaultGradeChances = [50, 100, 50, 2, 0, 0];
+
+    /// <summary>Replaces the shop's stock and returns the new purse.</summary>
+    public static long Fill(Shop shop, SquadTemplate template, Market market, PopulationData data, ulong seed, ulong key)
+    {
+        var rng = new RandomStream(seed, Rng.Mix(key ^ ((ulong)shop.Fills << 40)), RngPurpose.Trade);
+        shop.Fills++;
+        shop.Stock.Items.Clear();
+        int n = (int)MathF.Round((0.8f + 0.4f * rng.NextFloat()) * template.VendorsFillTotalAmount, MidpointRounding.AwayFromZero);
+
+        var lists = new List<(VendorList List, int Weight)>();
+        foreach (var link in template.Vendors)
+            if (data.Db.Find(link.Id) is { Type: FcsRecordType.VENDOR_LIST } record) lists.Add((VendorList.From(data.Db, record), link.V0 == 0 ? 100 : link.V0));
+        long totalWeight = lists.Sum(l => (long)l.Weight);
+        var town = market.SiteCulture(shop.Terms.Site);
+        var own = market.FactionCulture(shop.Terms.Faction);
+        var faction = (uint)shop.Terms.Faction < (uint)data.Factions.Count ? data.Db.Find(data.Factions[shop.Terms.Faction].Id) : null;
+
+        var units = new List<ItemInstance>();
+        long cats = 0;
+        int assigned = 0;
+        for (int l = 0; l < lists.Count && totalWeight > 0; l++)
+        {
+            var (list, weight) = lists[l];
+            int count = l == lists.Count - 1 ? Math.Max(n - assigned, 0) : (int)MathF.Round((float)n * weight / totalWeight, MidpointRounding.AwayFromZero);
+            assigned += count;
+            var entries = list.Entries.Where(e => town?.Forbidden.Contains(e.Id) != true && own?.Forbidden.Contains(e.Id) != true).ToList();
+            for (int k = 0; k < count && entries.Count > 0; k++)
+                if (Make(Pick(entries, ref rng), list, faction, market, data.Db, ref rng) is { } item) Merge(units, item);
+            if (list.MoneyItemProb > 0 && rng.NextFloat() <= list.MoneyItemProb && list.MoneyItemMax >= list.MoneyItemMin)
+                cats += list.MoneyItemMin + rng.NextInt(list.MoneyItemMax - list.MoneyItemMin + 1);
+        }
+
+        // Dearest first, ties by record id so the order never depends on anything but the data.
+        foreach (var item in units.OrderByDescending(u => market.UnitPrice(u, false, shop.Terms, shop.Terms.Faction)).ThenBy(u => u.Record, StringComparer.Ordinal))
+            shop.Stock.Add(item);
+        long value = shop.Stock.All().Sum(i => market.StackPrice(i, false, shop.Terms, shop.Terms.Faction));
+        return (long)Math.Clamp(0.25f * value, 3000, 25000) + cats;
+    }
+
+    static VendorEntry Pick(List<VendorEntry> entries, ref RandomStream rng)
+    {
+        long total = entries.Sum(e => (long)Math.Max(e.Weight, 0));
+        if (total <= 0) return entries[0];
+        long roll = (long)(rng.NextFloat() * total);
+        foreach (var e in entries)
+        {
+            if (roll < e.Weight) return e;
+            roll -= Math.Max(e.Weight, 0);
+        }
+        return entries[^1];
+    }
+
+    /// <summary>Puts one unit into the list: onto a stack of the same record and quality with room, else as a new item.</summary>
+    static void Merge(List<ItemInstance> units, ItemInstance item)
+    {
+        foreach (var u in units)
+            if (u.Record == item.Record && u.Quality == item.Quality && u.Level == item.Level && u.CompanyId == item.CompanyId && u.Quantity < u.StackLimit)
+            {
+                u.Quantity++;
+                return;
+            }
+        units.Add(item);
+    }
+
+    static ItemInstance? Make(VendorEntry entry, VendorList list, GameRecord? faction, Market market, GameDatabase db, ref RandomStream rng)
+    {
+        float quality = entry.Type == FcsRecordType.ARMOUR ? CharacterGenerator.QualityOfGrade(Grade(faction, ref rng)) : 0;
+        if (market.Items.Create(entry.Id, 1, quality) is not { } item) return null;
+        if (entry.Type is FcsRecordType.WEAPON or FcsRecordType.CROSSBOW && Maker(list, db, ref rng) is { } made)
+        {
+            item.CompanyId = made.Maker.StringId;
+            item.MaterialId = made.Model ?? "";
+            item.Level = made.Level;
+        }
+        return item;
+    }
+
+    /// <summary>A grade 0..5 by the faction's <c>armors 0</c> .. <c>armors 5</c> chances (the field names as the doc gives them; the spelling in the data is <b>Unknown</b>).</summary>
+    static int Grade(GameRecord? faction, ref RandomStream rng)
+    {
+        Span<int> w = stackalloc int[6];
+        int total = 0;
+        for (int g = 0; g < 6; g++) total += w[g] = Math.Max(faction?.GetInt($"armors {g}", DefaultGradeChances[g]) ?? DefaultGradeChances[g], 0);
+        if (total <= 0) return 1;
+        int roll = rng.NextInt(total);
+        for (int g = 0; g < 6; g++)
+        {
+            if (roll < w[g]) return g;
+            roll -= w[g];
+        }
+        return 5;
+    }
+
+    /// <summary>A manufacturer from the list (v0, 0 counting as 100), then a model from its <c>weapon models</c> (v1, 0 counting as 100) whose v0 is the level.</summary>
+    static (GameRecord Maker, string? Model, int Level)? Maker(VendorList list, GameDatabase db, ref RandomStream rng)
+    {
+        var makers = list.Manufacturers.Select(m => (Record: db.Find(m.Id), Weight: m.V0 == 0 ? 100 : m.V0)).Where(m => m.Record is not null && m.Weight > 0).ToList();
+        if (makers.Count == 0) return null;
+        int roll = rng.NextInt(makers.Sum(m => m.Weight));
+        var maker = makers[^1].Record!;
+        foreach (var m in makers)
+        {
+            if (roll < m.Weight) { maker = m.Record!; break; }
+            roll -= m.Weight;
+        }
+        var models = maker.GetReferences("weapon models").Where(r => db.Find(r.TargetStringId) is not null).ToList();
+        if (models.Count == 0) return (maker, null, 0);
+        int total = models.Sum(r => r.Values.Value1 == 0 ? 100 : Math.Max(r.Values.Value1, 0));
+        int pick = rng.NextInt(Math.Max(total, 1));
+        foreach (var r in models)
+        {
+            int w = r.Values.Value1 == 0 ? 100 : Math.Max(r.Values.Value1, 0);
+            if (pick < w) return (maker, r.TargetStringId, r.Values.Value0);
+            pick -= w;
+        }
+        return (maker, models[^1].TargetStringId, models[^1].Values.Value0);
+    }
+}

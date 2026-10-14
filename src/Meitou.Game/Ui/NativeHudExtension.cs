@@ -33,7 +33,7 @@ sealed class NativeHudExtension(Action<string, string> command) : IUiExtension
             int index = i;
             r.RegisterAction($"speed.{i}", _ => command($"speed:{index}", ""));
         }
-        foreach (string name in new[] { "inventory", "stats", "close", "squad", "stop", "medic", "rescue", "member" })
+        foreach (string name in new[] { "inventory", "stats", "close", "squad", "stop", "medic", "rescue", "member", "buy", "sell", "trade.close", "trade.page" })
             r.RegisterAction(name, c => command(name, c.Argument));
 
         UiNode Text(string id, string value, UiPlacement at, string? style = null) => new(r.Key(id), UiNodeKind.Label) { Style = style ?? label, Placement = at, Text = value };

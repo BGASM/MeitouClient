@@ -26,6 +26,8 @@ public sealed record ItemInfo(string Id, string Name, FcsRecordType Type)
     /// <summary>The record's <c>charges</c> (default 1).</summary>
     public float Charges { get; init; } = 1;
     public int Value { get; init; }
+    /// <summary><c>trade item</c>: sells for its full price unless stolen (docs/game/economy.md section 5).</summary>
+    public bool TradeItem { get; init; }
     /// <summary>
     /// The record's <c>quality</c> (1 to 100). For a first aid kit this is the quality that caps the medic's skill in the bandaging rate (character-stats.md "First aid, medkits and robot
     /// repair"). It is read from the record when needed and is not copied to <see cref="ItemInstance.Quality"/>, which is the clothing grade.
@@ -57,6 +59,7 @@ public sealed record ItemInfo(string Id, string Name, FcsRecordType Type)
         Function = r.GetInt("item function"),
         Charges = r.GetFloat("charges", 1),
         Value = r.GetInt("value"),
+        TradeItem = r.GetBool("trade item"),
         Quality = r.GetFloat("quality"),
         StorageWidth = r.GetInt("storage size width"),
         StorageHeight = r.GetInt("storage size height"),

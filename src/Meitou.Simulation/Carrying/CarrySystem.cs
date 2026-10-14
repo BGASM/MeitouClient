@@ -384,7 +384,7 @@ public sealed class CarrySystem(GameConstants constants, BodyOptions options, fl
             End(table, i);
             return;
         }
-        var (taken, left) = TakeAll(bag, victim.Inventory!);
+        var (taken, left) = TakeAll(bag, victim.Inventory!, Crime.CrimeSystem.IsLootTheft(cold, victim) ? victim.Faction : -1);
         bool seen = false;
         if (taken > 0 && cold.IsPlayer && !victim.IsPlayer && cold.Faction != victim.Faction && Witnessed(table, i, t))
         {
@@ -404,9 +404,10 @@ public sealed class CarrySystem(GameConstants constants, BodyOptions options, fl
     /// <summary>
     /// "Take all": every item of <paramref name="from"/>'s main inventory and of its worn backpack, in order, goes into <paramref name="into"/> where it fits (a stack joins a stack,
     /// else the first free cell of the main grid, then of the backpack: <see cref="Inventory.Add"/>); what does not fit stays. Worn clothing, armour, weapons and the backpack itself stay
-    /// (engine choice: the fighter's gear is fixed at spawn). Returns the items moved and the ones left.
+    /// (engine choice: the fighter's gear is fixed at spawn). Returns the items moved and the ones left. With <paramref name="stolenFrom"/> at 0 or above (a theft) what moves is marked
+    /// stolen from that faction; what stays keeps its mark.
     /// </summary>
-    public static (int Taken, int Left) TakeAll(Inventory into, Inventory from)
+    public static (int Taken, int Left) TakeAll(Inventory into, Inventory from, int stolenFrom = -1)
     {
         var items = new List<ItemInstance>();
         foreach (var item in from.Items)
@@ -417,12 +418,18 @@ public sealed class CarrySystem(GameConstants constants, BodyOptions options, fl
         int taken = 0, left = 0;
         foreach (var item in items)
         {
+            int mark = item.StolenFrom;
+            if (stolenFrom >= 0) item.StolenFrom = stolenFrom;
             if (into.Add(item))
             {
                 from.Remove(item);
                 taken++;
             }
-            else left++;
+            else
+            {
+                item.StolenFrom = mark;
+                left++;
+            }
         }
         return (taken, left);
     }

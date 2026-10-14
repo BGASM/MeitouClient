@@ -29,6 +29,8 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     public int SquadId { get; init; } = -1;
     /// <summary>One of the player's characters, and whether it is selected.</summary>
     public bool IsPlayer { get; init; }
+    /// <summary>A member of a squad with a shop (right click trades).</summary>
+    public bool IsTrader { get; init; }
     public bool Selected { get; init; }
     /// <summary>The path being followed from the next waypoint, for selected characters only (the host draws it).</summary>
     public IReadOnlyList<Vector3> Path { get; init; } = [];
@@ -69,6 +71,8 @@ public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> C
 
     /// <summary>Crossbow bolts in flight and stuck in the ground (the renderer may draw them; empty when there are none).</summary>
     public IReadOnlyList<ProjectileSnapshot> Projectiles { get; init; } = [];
+    /// <summary>The open trade (null: none).</summary>
+    public Trading.TradeView? Trade { get; init; }
 }
 
 /// <summary>

@@ -674,8 +674,20 @@ RACE `buy value` is 100 for most races (27 of 53 records); other values in the d
   ends it.
 - **Research cost** beyond the formula of section 10, crafting costs, building purchase price, bed cost.
 - **The purpose of `FUN_1405d4260`** (the crime-in-progress tooltip function; the decompile timed out and was not analysed).
+- **Which item records make a `MoneyItem`** (priced at their `value` alone, section 2): `Cats`, and probably `String of Cats` and the other value-only items, but the constructor's
+  choice of class was not traced; Meitou tests the name `Cats` (found 2026-10-14 while building the trade).
+- **The names of the VENDOR_LIST reference lists** (`items`, `weapons`, `clothing`, ... in section 9.2) and the reading of a v0 of 0 in them: Meitou reads every list and keeps
+  each entry by its target's record type, with 0 counting as 100 (engine choices, [../simulation.md "Trade"](../simulation.md#trade)).
+- **The FACTION field names of the armour vendor quality chances** (`armors 0..5` in section 9.2): read as the ints `armors 0` .. `armors 5`, falling back to the editor defaults; not
+  checked against the data.
+- **The trading range** ("Out of trading range.", section 8): Meitou opens the trade within 30 units.
 
 ## Implementation outline
+
+**As built (2026-10-14)**: steps 1 to 7 and 9 as far as [../simulation.md "Trade"](../simulation.md#trade) lists (prices, cultures, market factors, squad shops with stock, purse and
+restock, buying, selling and fencing; step 8 was built with the crimes). Not built: building shops and `vendor money`, the saved `trade goods` factors and `inventory refresh time`,
+the smuggling rules, section 12. The worked examples of 4.6 pass as unit tests (`EconomyTests`), and an install test checks the Katana, the Samurai Armour, the CONSTANTS price block
+and the 75 trade goods against the base data (`EconomyInstallTests`, not yet run on an install).
 
 Order of work for the new engine (the data side is already in `Meitou.Data`: `GameDatabase`, `GameRecord` with `Ints`,
 `Floats`, `Bools`, `GetReferences`; the quality roll for NPC gear is in the characters.md rolling code):
