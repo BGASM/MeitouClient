@@ -204,6 +204,7 @@ public static class SaveCapture
                     g.Strings["name"] = cold.Name;
                     g.Bools["is leader"] = squad.Leader == id;
                     BountySave.Write(g, cold.Bounties, data.Relations, clock, world.Tick, world.TickSeconds);
+                    Orders.Write(g, cold);
                 }
 
                 // Body: stats and medical state, from the host, else the loaded ones, else (for a new character) defaults.

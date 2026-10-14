@@ -99,7 +99,7 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                     cold.OrderQueue.Add(target);   // after the order in hand (shift + right click)
                     continue;
                 }
-                GoTo(table, slot, target, SpeedMode.Free);
+                GoTo(table, slot, target, cold.RunSpeed);
             }
         }
     }
@@ -285,6 +285,7 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                     // A carrier in walk mode is raised to run mode (the original's speed selector, Observed; docs/game/carry-loot.md "Speed and weight").
                     if (mode == SpeedMode.Walk && !cold.Carrying.IsNone) mode = SpeedMode.Run;
                     desired = cold.SpeedOverride > 0 ? cold.SpeedOverride : MathF.Min(n.MaxSpeed, SpeedMode.Cap(mode, n.WalkSpeed));
+                    if ((cold.Orders & CharacterOrders.Sneak) != 0 && cold.SpeedOverride <= 0) desired = MathF.Min(desired, Orders.SneakSpeed(desired, Orders.Stealth(cold)));
                 }
             }
             else if (((MoveFlags)n.Flags & MoveFlags.HasPath) != 0)

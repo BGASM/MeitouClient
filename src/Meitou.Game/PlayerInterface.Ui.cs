@@ -107,6 +107,7 @@ sealed partial class PlayerInterface
         foreach (string name in new[] { "ShortcutMapButton", "ShortcutTechButton", "ShortcutSquadButton" }) b.Actions[name] = "faithful:" + name;
         b.Actions["OrdersMedicButton"] = "meitou:medic";
         b.Actions["OrdersRescueButton"] = "meitou:rescue";
+        BindOrders(b, lead);
         foreach (string name in new[] { "LoadingPanel", "TownPanel", "TooltipPanel", "MessagePanel", "BiomeTextPanel", "FloorPanel", "BuildPanel", "JobsPanel" }) b.Hidden.Add(name);
         if (session.Simulation.Speed != 0) b.Hidden.Add("PausedPanel");
         BindMedicalBars(b, lead);
@@ -192,6 +193,14 @@ sealed partial class PlayerInterface
         else if (action == "medic") Say(new Meitou.Simulation.FirstAid.MedicJobCommand(SelectedIds()) { Tick = session.World.Tick });
         else if (action == "rescue") Say(new Meitou.Simulation.Carrying.RescueJobCommand(SelectedIds()) { Tick = session.World.Tick });
         else if (action is "buy" or "sell" or "trade.close" or "trade.page") TradeAction(action, argument);
+        else if (action.StartsWith("order.", StringComparison.Ordinal) && Enum.TryParse(action[6..], out CharacterOrders order))
+            Say(new OrdersCommand(SelectedIds(), order) { Tick = session.World.Tick });
+        else if (action.StartsWith("runspeed.", StringComparison.Ordinal))
+        {
+            int step = int.Parse(action[9..], CultureInfo.InvariantCulture);
+            Say(new RunSpeedCommand(SelectedIds(), step) { Tick = session.World.Tick });
+            if (Selected().FirstOrDefault() is { } lead) Notice("Move speed: " + RunSpeedName((byte)((((lead.RunSpeed + step) % 3) + 3) % 3)));
+        }
     }
 
     void DrawGameUi(DebugOverlay overlay, int width, int height) =>

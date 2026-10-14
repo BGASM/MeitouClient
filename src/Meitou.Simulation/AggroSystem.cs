@@ -70,6 +70,17 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         return v > MinVisibility && dist <= range * v ? v : 0;
     }
 
+    /// <summary>The sight test for a sneaking target: the view factor v of <see cref="Visibility"/>'s cone, scaled by <see cref="Orders.SneakView"/>, must reach the distance (d at most R x v').</summary>
+    public static bool SeenSneaking(Vector3 eye, float yaw, Vector3 target, float range, float stealth)
+    {
+        var d = target - eye;
+        float dist = d.Length();
+        if (dist < 1e-3f) return true;
+        if (dist > range) return false;
+        float v = Orders.SneakView(((MathF.Sin(yaw) * d.X + MathF.Cos(yaw) * d.Z) / dist - ConeEdge) / (1 - ConeEdge), stealth);
+        return v > MinVisibility && dist <= range * v;
+    }
+
     /// <summary>The noise a moving character makes reaches lerp(speed / max speed, 350, 600) units (<c>FUN_140851d10</c>, Verified constants; clear weather, not sneaking).</summary>
     public const float NoiseNear = 350, NoiseFar = 600;
     /// <summary>The chance per check that a character within the noise range is heard when it is not sneaking (<c>FUN_140857500</c>, Verified constant).</summary>
@@ -244,9 +255,14 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
             if (s.Stance == Ai.AiStance.Defensive && !c.InCombat) return;
             if (s.Stance == Ai.AiStance.Territorial && Vector2.DistanceSquared(new Vector2(other.Position.X, other.Position.Z), s.Home) > s.HomeR2) return;
         }
-        if (Visibility(s.Eye, s.Yaw, other.Position, s.Range) <= 0)
+        // A sneaking target is harder to see and to hear (the Sneak order; docs/game/perception.md sections 3 and 5).
+        float stealth = (c.Orders & CharacterOrders.Sneak) != 0 ? Orders.Stealth(c) : -1;
+        if (stealth >= 0 ? !SeenSneaking(s.Eye, s.Yaw, other.Position, s.Range, stealth) : Visibility(s.Eye, s.Yaw, other.Position, s.Range) <= 0)
         {
-            float p = HearChance(MathF.Sqrt(d2), NoiseRange(new Vector2(other.Velocity.X, other.Velocity.Z).Length(), other.MaxSpeed));
+            float speed = new Vector2(other.Velocity.X, other.Velocity.Z).Length();
+            float p = stealth >= 0
+                ? speed > 0.01f ? Orders.SneakHearChance(MathF.Sqrt(d2), Orders.SneakNoise(stealth), stealth) : 0
+                : HearChance(MathF.Sqrt(d2), NoiseRange(speed, other.MaxSpeed));
             if (!(p > 0) || Rng.Float(Rng.Hash(s.Seed, s.Key, RngPurpose.Sense, (s.Tick << 20) ^ (ulong)(uint)slot)) >= p) return;
         }
         s.Best = slot;

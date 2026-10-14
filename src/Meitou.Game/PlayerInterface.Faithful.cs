@@ -3,6 +3,7 @@ using System.Numerics;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Data.Ui;
 using Meitou.Engine.Input;
+using Meitou.Simulation;
 using Meitou.Ui;
 
 namespace Meitou.Game;
@@ -195,4 +196,36 @@ sealed partial class PlayerInterface
             b.Properties[name + "Datapanel"] = new Dictionary<string, string> { ["FontName"] = "Kenshi_StandardFont_Medium", ["TextAlign"] = "Left VCenter", ["TextColour"] = MyGuiColours.InkText, ["TextPadding"] = "4 0 4 0" };
         }
     }
+
+    /// <summary>
+    /// The orders panel's toggles by the words in their widget names (the layout names only <c>OrdersChaseButton</c>, <c>OrdersMedicButton</c> and <c>OrdersRescueButton</c>
+    /// for certain, docs/game/ui-screens.md section 4; the rest are matched by the button's word, so a differently spelt name still binds). Jobs and Prospect have no backend.
+    /// </summary>
+    static readonly (string Word, CharacterOrders Order)[] OrderWords =
+    [
+        ("Block", CharacterOrders.Block), ("Hold", CharacterOrders.Hold), ("Chase", CharacterOrders.Chase), ("Passive", CharacterOrders.Passive),
+        ("Ranged", CharacterOrders.Ranged), ("Taunt", CharacterOrders.Taunt), ("Sneak", CharacterOrders.Sneak), ("Stealth", CharacterOrders.Sneak),
+    ];
+
+    /// <summary>Binds the order toggles (checked while the lead selected character has the order) and the speed arrows of the HUD.</summary>
+    void BindOrders(UiBindings b, Meitou.Simulation.CharacterSnapshot? lead)
+    {
+        foreach (var w in faithfulHud.Widgets)
+        {
+            if (w.Type != "Button" || !w.Name.StartsWith("Orders", StringComparison.Ordinal)) continue;
+            foreach (var (word, order) in OrderWords)
+            {
+                if (!w.Name.Contains(word, StringComparison.Ordinal)) continue;
+                b.Actions[w.Name] = $"meitou:order.{order}";
+                if (lead is null) b.Disabled.Add(w.Name);
+                if (lead is not null && (lead.Orders & order) != 0) b.Properties[w.Name] = new Dictionary<string, string> { ["Checked"] = "true" };
+                break;
+            }
+        }
+        b.Actions["SpeedArrowLeft"] = "meitou:runspeed.-1";
+        b.Actions["SpeedArrowRight"] = "meitou:runspeed.1";
+    }
+
+    /// <summary>The move speed modes' names (the original's <c>cycle_run_speed</c> strings are speed_1..speed_3; these words are Meitou's).</summary>
+    static string RunSpeedName(byte mode) => mode switch { SpeedMode.Walk => "walk", SpeedMode.Run => "run", _ => "full speed" };
 }

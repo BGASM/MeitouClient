@@ -62,10 +62,12 @@ public sealed class UiPainter : IDisposable
             }
             if (resources.Skins.TryGetValue(c.Skin, out var skin) && textures.TryGetValue(skin.Texture, out var atlas))
             {
-                string state = widgetState;
+                // A toggled button (Checked) uses MyGUI's *_checked states, else looks pushed.
+                bool on = c.Properties.GetValueOrDefault("Checked") == "true";
+                string state = on ? widgetState + "_checked" : widgetState;
                 foreach (var part in skin.Parts.Where(p => p.Type is "SubSkin" or "MainSkin" or "TileRect"))
                 {
-                    if (!part.States.TryGetValue(state, out var source) && !part.States.TryGetValue("normal", out source)) continue;
+                    if (!part.States.TryGetValue(state, out var source) && !(on && part.States.TryGetValue("pushed", out source)) && !part.States.TryGetValue("normal", out source)) continue;
                     var dest = part.Offset.AlignTo(b, skin.Width, skin.Height, part.Align);
                     var tint = Colour(c.Properties.GetValueOrDefault("Colour"), Vector4.One) * new Vector4(1, 1, 1, Alpha(c.Properties));
                     if (part.Type == "TileRect")

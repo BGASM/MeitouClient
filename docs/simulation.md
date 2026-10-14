@@ -223,7 +223,7 @@ result (the golden hashes pin it):
 | # | System | Phases it implements | Job |
 |---|---|---|---|
 | 1 | `PopulationSystem` | Inputs, SlowWorld | Zones, residents, bar and roaming squads, the wild (homeless squads and nests), the player's squad |
-| 2 | `PlayerSystem` | Inputs, SlowWorld | Selection and stop; prunes the selection |
+| 2 | `PlayerSystem` | Inputs, SlowWorld | Selection, stop and the order toggles; prunes the selection |
 | 3 | `AiSystem` | Inputs, Think, SlowWorld | Contracts; blackboards, homes and package choice of squads with AI packages, the members' goals, stances and their act-out ([AI](#ai)) |
 | 4 | `PursuitSystem` | Schedule | Paths for attackers towards their targets |
 | 5 | `MovementSystem` | Inputs, Schedule, Think, Move | Orders, paths, tasks, steering |
@@ -233,7 +233,7 @@ result (the golden hashes pin it):
 | 9 | `CombatSystem` | Inputs, Schedule, Move, Act, Apply, SlowWorld | Fights, melee and crossbow (`Schedule` resyncs its slots with the table and flies the bolts, [Ranged](#ranged)) |
 | 10 | `AnimationSystem` | Act | Animation layers |
 | 11 | `FeedSystem` | SlowWorld | Eating |
-| 12 | `RetaliationSystem` | SlowWorld | Attacked characters fight back (NPCs always, the player's while idle) |
+| 12 | `RetaliationSystem` | SlowWorld | Attacked characters fight back (NPCs always, the player's while idle and not Passive; Hold only within reach) |
 | 13 | `AggroSystem` | Schedule, Act, Apply, SlowWorld | NPCs attack enemies of their faction they see or hear (the original's figures); the leash; back to the routine after a fight; hashes the live relation table ([Hostility](#hostility-and-relations)) |
 | 14 | `FleeSystem` | SlowWorld | NPC squads of factions with run-away ratios break and run when beaten, until safe ([Hostility](#hostility-and-relations)) |
 | 15 | `CrimeSystem` | SlowWorld | Pending crimes from the player's deeds (reported by combat and carrying), witnesses, booking by the police, bounty expiry ([Crimes and bounties](#crimes-and-bounties)) |
@@ -358,6 +358,28 @@ positions and the cold state no other `Act` writes). The game's `CombatOptions` 
 | `J` | switches the rescue job on or off for the selection (`RescueJobCommand`; the original's `rescue` key is NUM8, which the cinema camera owns here); the HUD shows `rescue job (J)` |
 | `K` | the selected carriers put their bodies down (`PutDownOrder`); the HUD shows `carrying (K puts down)` |
 | right click on a living trader (`CharacterSnapshot.IsTrader`) | the first selected character walks up to it and the trade window opens (`OpenTrade`, [Trade](#trade)); a trader of a hostile faction is attacked instead, as any other character. The original's right click on a neutral talks (dialogue, not built); engine choice |
+
+### Order toggles
+
+The HUD's orders panel ([ui-screens.md](game/ui-screens.md#4-hud-mainbargui)) sets `CharacterCold.Orders` (`CharacterOrders` flags) and `RunSpeed` on the player's characters through
+`OrdersCommand` (on, off or flip; an empty list means the selection) and `RunSpeedCommand` (steps walk, run, no cap, wrapping; everyone takes the first character's new mode),
+both applied by `PlayerSystem` (`src/Meitou.Simulation/Orders.cs`). They join the state hash only while set, so worlds without them hash as before (the golden hashes are unchanged).
+
+| Order | What it does here | Source |
+|---|---|---|
+| Block | the combat code's guarding state (+20 melee defence in the block chance, block speed and play rate) and no attack started, melee or crossbow | tooltip text in the exe (**Verified**) and the +20 of [combat.md](game/combat.md); that the button sets this very state is **Unknown** |
+| Passive | does not answer attacks by itself (retaliation skips it); an ordered attack still goes | "non-combat mode" tooltip (**Observed**); the exact rule is an **engine choice** |
+| Hold | answers an attacker only within `Orders.HoldReach` (40 units) and never walks after a target | **engine choice**: the original's rule is not traced |
+| Sneak | move speed X = min(X, lerp(12, X, clamp((s - 0.1) / 0.8))) on X = speed - 11, then + 11, at least 11; seen when d <= R x v', v' = v x (0.75 if v >= 0.5 else 0.5) x lerp(s, 1, 0.6); heard within lerp(s, 450, 80) with chance 0.1 x (1 - s) x (1 - d^2/N^2) | [pathfinding.md](game/pathfinding.md) (Observed), [perception.md](game/perception.md) sections 3 and 5 (Verified constants) |
+| Chase, Ranged, Taunt | kept and saved, no effect yet | |
+| move speed | the speed mode of the character's move orders: walk (race walk speed), run (55), no cap (the default) | the saved `speed mode` (pathfinding.md "Speed mode") |
+
+Stealth s = the stealth skill (with the limb multiplier) x 0.75 while carrying, x 0.01, clamped; the original's encumbrance, armour, race and injury factors and its stealth
+detection that builds up over several checks are not modelled (a sneaker that passes the sight test is seen at once), nor is a sneaking animation. Saves: `Orders.Write`
+puts the six stance bools (`defensive mode` Block, `non combat mode` Passive, `passive mode` Hold, the last by elimination and **Unknown**, `chase mode`, `ranged mode`,
+`taunt mode`), the `stealth` bool and `speed mode` into the player characters' GAMESTATE_CHARACTER; the loader reads them back. In the faithful HUD the buttons are found by
+the words in their widget names (only `OrdersChaseButton` is a known name) and drawn in their checked state while the lead selected character has the order;
+`SpeedArrowLeft` / `SpeedArrowRight` step the move speed. The Meitou HUD has no order buttons yet, and no keys are bound (the original's NUM0..NUM6 belong to the cinema camera).
 
 Right mouse is the command button, so **orbit is the middle button only**; saved configs that bound `Mouse:Right` to orbit lose that entry on
 load. The HUD (top left, `DebugOverlay` text and quads): game clock and day, money, clickable speed buttons (pause, 1x, 2x, 5x, the active one

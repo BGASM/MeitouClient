@@ -11,6 +11,9 @@ public sealed partial class CombatSystem
     // ------------------------------------------------------------------ act
 
     /// <summary>A stat as the combat formulas read it: times the injury and hunger multiplier and the stats' read-time scale (an animal's age, docs/game/animals.md).</summary>
+    /// <summary>The guarding state: the fighter's own, or the Block order (its tooltip's +20 melee defence; docs/game/combat.md).</summary>
+    static bool Guarding(CharacterCold c) => c.Fighter!.Guarding || Orders.Has(c, CharacterOrders.Block);
+
     static float Eff(CharacterCold c, StatsEnumerated stat) => c.Stats![stat] * c.Stats.Scale * c.Medical!.StatMultiplier(stat);
 
     int PauseTicks(World world, int slot, int counter)
@@ -45,7 +48,7 @@ public sealed partial class CombatSystem
         float dex = Eff(cold, StatsEnumerated.Dexterity) * fighter.DexterityMult;
         float skill = attack
             ? fighter.Unarmed ? Eff(cold, StatsEnumerated.MartialArts) : Eff(cold, StatsEnumerated.MeleeAttack) + fighter.Weapon!.Stats.AttackMod
-            : Eff(cold, StatsEnumerated.MeleeDefence) + fighter.DefenceBonus + (fighter.Weapon?.Stats.DefenceMod ?? 0) + (fighter.Guarding ? 20 : 0);
+            : Eff(cold, StatsEnumerated.MeleeDefence) + fighter.DefenceBonus + (fighter.Weapon?.Stats.DefenceMod ?? 0) + (Guarding(cold) ? 20 : 0);
         float t = 0.01f * (0.6f * dex + 0.4f * skill);
         return attack ? MathF.Min(1.2f, WeaponStats.Lerp(t, 0.8f, 1.2f) * g) : MathF.Min(4f, WeaponStats.Lerp(t, 0.6f, 4f) * g);
     }
@@ -147,7 +150,7 @@ public sealed partial class CombatSystem
         var prev = table.Previous;
         int t = s.TargetSlot;
         var fighter = cold.Fighter!;
-        if (!fighter.CanAttack) return;
+        if (!fighter.CanAttack || Orders.Has(cold, CharacterOrders.Block)) return;   // the Block order: defends, starts no attack
         var tc = table.Cold(t)!;
         float gap = Vector2.Distance(new(prev[i].Position.X, prev[i].Position.Z), new(prev[t].Position.X, prev[t].Position.Z)) - CombatTuning.Footprint(cold) - CombatTuning.Footprint(tc);
         bool moving = new Vector2(prev[t].Velocity.X, prev[t].Velocity.Z).Length() >= 1;
@@ -209,13 +212,13 @@ public sealed partial class CombatSystem
         float block, dodge = 0;
         if (fighter.CanBlock)
         {
-            float d = DefenceFormulas.Defence(meleeDefence, fighter.Weapon!.Stats.DefenceMod, true, fighter.DefenceBonus, fighter.Guarding);
+            float d = DefenceFormulas.Defence(meleeDefence, fighter.Weapon!.Stats.DefenceMod, true, fighter.DefenceBonus, Guarding(cold));
             block = DefenceFormulas.BlockChance(d, attack.AttackSkill, combat);
         }
         else
         {
             block = 0;
-            float effective = DefenceFormulas.EffectiveDefence(Eff(cold, StatsEnumerated.MartialArts), fighter.EncumbranceFactor, Speed.LegFactor(cold.Medical!), fighter.DefenceBonus, fighter.Guarding);
+            float effective = DefenceFormulas.EffectiveDefence(Eff(cold, StatsEnumerated.MartialArts), fighter.EncumbranceFactor, Speed.LegFactor(cold.Medical!), fighter.DefenceBonus, Guarding(cold));
             dodge = DefenceFormulas.BlockChance(effective, attack.AttackSkill, combat, 0, 95);
         }
         int pick = TechniqueChooser.ChooseReaction(techniques, fighter.Kind, fighter.TechniqueCategory, false, fighter.CanBlock, direction, block, dodge, chanceRoll, pickRoll);

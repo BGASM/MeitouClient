@@ -35,6 +35,8 @@ sealed class NativeHudExtension(Action<string, string> command) : IUiExtension
         }
         foreach (string name in new[] { "inventory", "stats", "close", "squad", "stop", "medic", "rescue", "member", "buy", "sell", "trade.close", "trade.page" })
             r.RegisterAction(name, c => command(name, c.Argument));
+        foreach (string name in Enum.GetNames<Meitou.Simulation.CharacterOrders>().Where(n => n != "None").Select(n => "order." + n).Concat(["runspeed.-1", "runspeed.1"]))
+            r.RegisterAction(name, c => command(name, c.Argument));
 
         UiNode Text(string id, string value, UiPlacement at, string? style = null) => new(r.Key(id), UiNodeKind.Label) { Style = style ?? label, Placement = at, Text = value };
         UiNode Button(string id, string caption, string action, UiPlacement at, bool enabled = true, string argument = "") => new(r.Key(id), UiNodeKind.Button)

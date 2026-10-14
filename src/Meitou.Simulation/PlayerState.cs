@@ -60,6 +60,9 @@ public sealed class PlayerSystem : ITickSystem
                     if (table.TryResolveNext(move.Character, out int owner) && table.Cold(owner) is { IsPlayer: true, Inventory: { } inventory } &&
                         !Items.InventoryCommands.Move(inventory, move.Item, move.Section, move.X, move.Y)) world.Post("Cannot move that item: the slot is occupied or the inventory changed.");
                     break;
+                case OrdersCommand or RunSpeedCommand:
+                    Orders.Apply(world, command);
+                    break;
                 case Items.ArrangeInventory arrange:
                     if (table.TryResolveNext(arrange.Character, out int character) && table.Cold(character) is { IsPlayer: true, Inventory: { } carried } &&
                         !Items.InventoryCommands.Arrange(carried)) world.Post("Cannot arrange inventory: the items do not fit.");

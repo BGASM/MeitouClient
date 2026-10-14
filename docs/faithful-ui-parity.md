@@ -12,7 +12,7 @@ about undocumented original behaviour. Original-file facts are in
 | --- | --- | --- |
 | MyGUI resources | Layout/resource lists, skin atlas pieces including tiled slots, text colours and text client insets, ResourceLayout expansion, ImageTexture and first-frame image sets | Animated image sets, pointer resources, complete font sizing/Unicode, localisation, exact resize rounding |
 | Window/input | Original frames, caption, close, pin, drag, modality, tab selection, editable caret/selection, Tab between edit fields, Enter default action, dynamic lists with scrolling and clipping | Resize, clipboard, button focus traversal, list columns, scrollbars, sliders, combo boxes, tooltips, sounds |
-| HUD | Clock, money, speed/pause, selection, live squad name buttons, medic/rescue, inventory/stats/map/tech/squad shortcuts; live HP/blood/hunger rows | Portraits, original medical row order and injury-layer correspondence, town/biome/floor/build information, jobs list, original context menu |
+| HUD | Clock, money, speed/pause, selection, live squad name buttons, medic/rescue, order toggles (Block, Hold, Chase, Passive, Ranged, Taunt, Sneak; checked state) and move speed arrows, inventory/stats/map/tech/squad shortcuts; live HP/blood/hunger rows | Jobs and Prospect buttons, the behaviour slider, a move speed caption, portraits, original medical row order and injury-layer correspondence, town/biome/floor/build information, jobs list, original context menu |
 | Inventory | Original equipment/pocket, bag and limb windows; live names/quantities/footprints; pocket/bag drag and Arrange commands | Icons, tooltip details, stacking/splitting, equipment changes and constraints; original bag resizing |
 | Stats | Original window/panels; all record stats; selecting a stat shows its current level | Original descriptions, XP/race modifiers, all derived stats, exact stat grouping and row skins |
 | Overview | All original tabs; live messages and squad names; installed map image, pan/zoom/centre, player/camera markers and right-click move orders | Original map projection/zoom equivalence, settlement discovery/markers, faction data, squad editing, research/crafting/AI data bindings |
@@ -61,7 +61,7 @@ that keep their editor caption, which is the list of original text the mode does
 | Research and crafting | No complete research queue, benches or production queue backend |
 | Construction/prospecting | No complete placement/construction or prospecting backend |
 | Squad editing/faction identity | Selection exists; splitting/merging/dismissal and faction naming commands need implementation |
-| Orders/AI policy | Medic/rescue/stop exist; stance, chase/hold/passive/ranged/taunt/sneak/run mode and editable jobs need commands |
+| Orders/AI policy | Medic/rescue/stop, Block, Passive, Hold, Sneak and the move speed act ([Order toggles](simulation.md#order-toggles)); Chase, Ranged and Taunt are stored only; editable jobs need commands |
 | Inventory mutations | Storage and validated move/arrange commands exist; stack/split/equip/transfer commands and render appearance refresh remain |
 | Advanced new-game options | Start records/spawning exist; per-session option overrides need integration |
 | Character creation | Race/appearance data exist; player editor changes need validated commands |

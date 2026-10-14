@@ -30,9 +30,10 @@ public sealed class PursuitSystem(CombatSystem combat) : ITickSystem
             n.TaskTime -= dt;
             // A crossbowman walks only while closing in (out of range or the line of fire blocked); aiming and reloading it stands.
             bool shooting = st.Ranged && st.RangedState != (byte)RangedStates.Closing;
-            if (st.Down || st.AttackTech >= 0 || st.ReactTech >= 0 || shooting || !st.Ranged && gap <= CombatTuning.CloseInGap)
+            bool holding = Orders.Has(table.Cold(i), CharacterOrders.Hold);
+            if (st.Down || st.AttackTech >= 0 || st.ReactTech >= 0 || shooting || !st.Ranged && gap <= CombatTuning.CloseInGap || holding)
             {
-                // In reach or mid-swing: stand and fight.
+                // In reach or mid-swing, or holding position: stand and fight.
                 if ((n.Flags & Path) != 0)
                 {
                     n.Flags = (ushort)(n.Flags & ~Path);
@@ -83,6 +84,11 @@ public sealed class RetaliationSystem(CombatSystem combat) : ITickSystem
             var defenders = new List<CharacterId> { new(t, next[t].Generation) };
             taken.Add(t);
             JoinMates(world, table, t, defenders, taken, CanFight);
+            // The Hold order answers only an attacker within reach (Orders.HoldReach).
+            var from = next[a].Position;
+            for (int k = defenders.Count - 1; k >= 0; k--)
+                if (Orders.Has(table.Cold(defenders[k].Slot), CharacterOrders.Hold) && !Orders.InHoldReach(next[defenders[k].Slot].Position, from)) defenders.RemoveAt(k);
+            if (defenders.Count == 0) continue;
             world.Defer(new AttackOrder(defenders, attacker) { Tick = world.Tick + 1, Defensive = true });
         }
     }
@@ -112,6 +118,7 @@ public sealed class RetaliationSystem(CombatSystem combat) : ITickSystem
         byte task = table.Next[slot].Task;
         if (task == (byte)CharacterTask.Attack) return false;
         if (table.Cold(slot) is not { Fighter.CanAttack: true, Fleeing: false, Medical.Incapacitated: false, Carrying.IsNone: true } cold) return false;   // a carrier does not answer (the original's engagement weight is 0 while carrying)
-        return !cold.IsPlayer || task == (byte)CharacterTask.Idle;
+        // The Passive order (non-combat mode) does not answer attacks by itself.
+        return !cold.IsPlayer || task == (byte)CharacterTask.Idle && (cold.Orders & CharacterOrders.Passive) == 0;
     }
 }

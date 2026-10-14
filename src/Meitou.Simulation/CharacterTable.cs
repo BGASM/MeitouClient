@@ -111,6 +111,10 @@ public sealed class CharacterCold
     public float LiftTime { get; set; } = -1;
     /// <summary>The rescue job (the original's <c>rescue</c> toggle, NUM8): an idle character picks up a downed member of its faction by itself.</summary>
     public bool RescueJob { get; set; }
+    /// <summary>The orders panel's toggles (<see cref="Simulation.Orders"/>); the player's characters only.</summary>
+    public CharacterOrders Orders { get; set; }
+    /// <summary>The speed mode the character's move orders use (the original's saved <c>speed mode</c>: walk, run or no cap); no cap by default.</summary>
+    public byte RunSpeed { get; set; } = SpeedMode.Free;
     /// <summary>
     /// CHARACTER <c>NPC class</c> (the editor's CharacterTypeEnum; <c>fcs.def</c>'s default is MILITARY), set from the record at spawn; <c>None</c> for a character without a record
     /// (hand-made in tests). The crime rules read it (who is police, who may loot, who can be booked); not hashed, it follows from the record.
@@ -304,6 +308,9 @@ public sealed class CharacterTable
             if (!k.CarriedBy.IsNone) { hasher.Add(0x42726E65); hasher.Add(k.CarriedBy); }
             if (c.Task is (byte)CharacterTask.PickUp or (byte)CharacterTask.PutDown or (byte)CharacterTask.Loot) { hasher.Add(k.CarryTarget); hasher.Add(k.LiftTime); hasher.Add((int)k.ResumeTask); }
             if (k.RescueJob) hasher.Add(0x52657363);
+            // Orders add to the hash only while set, so worlds without them hash as before.
+            if (k.Orders != CharacterOrders.None) { hasher.Add(0x4F726473); hasher.Add((int)k.Orders); }
+            if (k.RunSpeed != SpeedMode.Free) { hasher.Add(0x52756E53); hasher.Add((int)k.RunSpeed); }
             // Bounties and pending crimes add to the hash only while set, so worlds without crimes hash as before.
             k.Bounties?.Hash(ref hasher);
             k.Pending?.Hash(ref hasher);

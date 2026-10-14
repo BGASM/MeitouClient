@@ -287,7 +287,7 @@ public sealed partial class CombatSystem : IProjectileSource
         bool can = s.Loaded > 0 || hasAmmo;
         if (s.Dry == can) s.Dry = !can;
         bool want;
-        if (!can || MeleeThreat(world, i)) want = false;
+        if (!can || MeleeThreat(world, i) || Orders.Has(cold, CharacterOrders.Block)) want = false;   // the Block order shoots no bolts either
         else
         {
             float gap = Gap(world.Characters.Previous, world.Characters, i, s.TargetSlot);

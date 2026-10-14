@@ -41,6 +41,8 @@ public sealed partial class World
                 CarriedBy = cold?.CarriedBy ?? CharacterId.None,
                 AttachBone = cold is { CarriedBy.IsNone: false } ? Carrying.CarrySystem.AttachBone : null,
                 Carrying = cold?.Carrying ?? CharacterId.None,
+                Orders = cold?.Orders ?? CharacterOrders.None,
+                RunSpeed = cold?.RunSpeed ?? SpeedMode.Free,
                 Scale = cold is { Fighter.IsAnimal: true, Medical: { } size } ? size.ScaleK : 1,
                 Activity = cold is { Ai.Goal: { } goal } && Ai.AiSystem.Holds(state[i], cold) ? Ai.TaskBehaviours.Text(goal.Task.Type) : null,
             });
