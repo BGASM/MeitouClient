@@ -178,6 +178,9 @@ sealed partial class GameHost
         session.Ticked += actions =>
         {
             if (actions.Pressed(InputAction.Quit)) quit = true;
+            // Panning (or leaving for the free camera) lets go of the character the camera follows; turning and zooming keep it.
+            if (actions.Held(InputAction.MoveForward) || actions.Held(InputAction.MoveBack) || actions.Held(InputAction.MoveLeft) || actions.Held(InputAction.MoveRight) ||
+                actions.Pressed(InputAction.ToggleFreeCamera)) player.Follow = null;
             if (actions.Pressed(InputAction.ToggleSettings) && panel is not null) panel.Visible = !panel.Visible;
             if (actions.Pressed(InputAction.Screenshot)) screenshotRequested = true;
             if (actions.Pressed(InputAction.ToggleKeys) && overlay is not null) overlay.Visible = !overlay.Visible;
@@ -235,6 +238,7 @@ sealed partial class GameHost
             string? takeFile = cinema.TakeFrame();
             SendFocus(cinemaHolds ? camera.Target : null);
             if (!cinemaHolds) SandboxFollowCamera();
+            if (!cinemaHolds) FollowCamera();
             var size = window.FramebufferSize;
             UpdateView(size.X, size.Y);
             if (display.BeginFrame(size.X, size.Y))

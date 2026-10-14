@@ -139,14 +139,41 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         (steerTarget, steerTick) = (hit, session.World.Tick);
     }
 
+    /// <summary>The character the strategy camera follows (a double tap of its number key, F, or a double click on its squad button); panning the camera lets go.</summary>
+    public CharacterId? Follow { get; set; }
+    // The last number key and when it was pressed: the same key again within DoubleTapSeconds centres on the character (docs/game/ui-input.md, events 100..120).
+    Key lastSelectKey;
+    long lastSelectAt;
+    const double DoubleTapSeconds = 0.5;
+
+    /// <summary>Selects the squad's <paramref name="index"/>th member (<paramref name="shift"/> adds); the second press within half a second centres the camera on it and follows.</summary>
+    void SelectMember(int index, bool shift, bool doubleTap)
+    {
+        var members = PlayerCharacters();
+        if (index < 0 || index >= members.Count) return;
+        Select([members[index]], shift);
+        if (doubleTap) CentreOn(members[index]);
+    }
+
+    void CentreOn(CharacterId id)
+    {
+        if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is not { } c) return;
+        var view = session.Camera.Current;
+        session.Camera.Place(new Vector2(c.Position.X, c.Position.Z), view.Yaw, view.Pitch, view.Distance);
+        Follow = id;
+    }
+
     public void Key(Key key, bool shift)
     {
         if (key >= Meitou.Engine.Input.Key.D1 && key <= Meitou.Engine.Input.Key.D9)
         {
-            var members = PlayerCharacters();
-            int n = key - Meitou.Engine.Input.Key.D1;
-            if (n < members.Count) Select([members[n]], shift);
+            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+            bool doubleTap = key == lastSelectKey && System.Diagnostics.Stopwatch.GetElapsedTime(lastSelectAt, now).TotalSeconds <= DoubleTapSeconds;
+            (lastSelectKey, lastSelectAt) = (doubleTap ? default : key, now);
+            SelectMember(key - Meitou.Engine.Input.Key.D1, shift, doubleTap);
         }
+        // focus_char (F): centre on the lead selected character and follow it (the free camera's F is its down key).
+        else if (key == Meitou.Engine.Input.Key.F && !session.Camera.IsFree && Selected().FirstOrDefault() is { } lead) CentreOn(lead.Id);
         else if (key == Meitou.Engine.Input.Key.Grave) Select(PlayerCharacters(), shift);
         else if (key == Meitou.Engine.Input.Key.R && !session.Camera.IsFree) Say(new StopCommand(SelectedIds()) { Tick = session.World.Tick });
         else if (key == Meitou.Engine.Input.Key.H && !session.Camera.IsFree) Say(new Meitou.Simulation.FirstAid.MedicJobCommand(SelectedIds()) { Tick = session.World.Tick });

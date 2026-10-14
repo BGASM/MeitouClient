@@ -11,6 +11,8 @@ namespace Meitou.Game;
 sealed partial class PlayerInterface
 {
     public UiMode UiMode { get; set; }
+    int lastMemberClick = -1;
+    long lastMemberClickAt;
     MyGuiLayout faithfulHud = null!;
     MyGuiResources uiResources = new();
     readonly UiHost uiHost = new();
@@ -188,9 +190,12 @@ sealed partial class PlayerInterface
         else if (action == "squad") Select(PlayerCharacters(), false);
         else if (action == "member")
         {
+            // A portrait click selects, a double click centres and follows (docs/game/ui-input.md section 7).
             int index = int.Parse(argument, CultureInfo.InvariantCulture);
-            var members = PlayerCharacters();
-            if (index >= 0 && index < members.Count) Select([members[index]], false);
+            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+            bool doubleClick = index == lastMemberClick && System.Diagnostics.Stopwatch.GetElapsedTime(lastMemberClickAt, now).TotalSeconds <= DoubleTapSeconds;
+            (lastMemberClick, lastMemberClickAt) = (doubleClick ? -1 : index, now);
+            SelectMember(index, false, doubleClick);
         }
         else if (action == "stop") Say(new StopCommand(SelectedIds()) { Tick = session.World.Tick });
         else if (action == "medic") Say(new Meitou.Simulation.FirstAid.MedicJobCommand(SelectedIds()) { Tick = session.World.Tick });

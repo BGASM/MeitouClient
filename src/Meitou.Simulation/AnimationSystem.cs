@@ -334,7 +334,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             a.Idle = -1;
         }
 
-        return Settle(a, wanted, legs, lift, liftTime, technique, fight, speed, dt, Lengths, 1);
+        return Settle(a, wanted, legs, lift, liftTime, technique, fight, speed, dt, Lengths, 1, seed, key, tick);
     }
 
     /// <summary>
@@ -342,10 +342,13 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     /// the clip lengths of <paramref name="lengths"/>; returns the root motion of the relocating clips times <paramref name="rootScale"/>.
     /// </summary>
     Vector2 Settle(CharacterAnimation a, List<(int Index, float Weight)> wanted, int legs, int lift, float liftTime, int technique, in CombatView fight, float speed, float dt,
-        AnimationLengths lengths, float rootScale)
+        AnimationLengths lengths, float rootScale, ulong seed, ulong key, long tick)
     {
         // Targets: what is wanted fades in, everything else out. The first clips a character ever plays start at full weight (no fade from the binding pose).
         bool first = a.Count == 0;
+        // A looping clip that starts on a character joins at its own point of the loop, and a character's first steps at its own phase, so a squad or herd made on one
+        // tick does not idle, graze and walk in lockstep (engine choice: docs/simulation.md "Animation"). One-shot clips (actions, techniques, a lift) start at their beginning.
+        if (first) a.Phase = Rng.Float(Rng.Hash(seed, key, RngPurpose.Animation, (ulong)tick ^ 0x5048415345UL));
         for (int k = 0; k < a.Count; k++) a.Layers[k].Target = 0;
         foreach (var (index, weight) in wanted)
         {
@@ -354,7 +357,10 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             {
                 k = a.Count < CharacterAnimation.MaxLayers ? a.Count++ : Evict(a);
                 if (k < 0) continue;
-                a.Layers[k] = new CharacterAnimation.Layer { Definition = index, Weight = first ? weight : 0 };
+                var d = Library.Definitions[index];
+                float start = d.Loop && !d.IsAction && !d.Technique && index != a.Action && index != lift
+                    ? Rng.Float(Rng.Hash(seed, key, RngPurpose.Animation, (ulong)tick ^ ((ulong)index << 32) ^ 0x4C4F4F50UL)) * lengths.Of(d.Clip) : 0;
+                a.Layers[k] = new CharacterAnimation.Layer { Definition = index, Weight = first ? weight : 0, Time = start };
             }
             a.Layers[k].Target = weight;
         }
@@ -462,7 +468,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             }
             else a.Idle = -1;
         }
-        return Settle(a, wanted, 0, -1, 0, technique, fight, v, dt, plan.Lengths, size);
+        return Settle(a, wanted, 0, -1, 0, technique, fight, v, dt, plan.Lengths, size, seed, key, tick);
     }
 
     /// <summary>

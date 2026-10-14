@@ -176,6 +176,15 @@ sealed partial class GameHost
 
     /// <summary>Keeps the camera on the hero (the middle of the pair while there is a foe), when following. Only the pivot moves: a cut every frame
     /// (<see cref="CameraRig.Place"/>) would draw the rotation and zoom at the tick rate instead of interpolated.</summary>
+    /// <summary>The strategy camera on the character the player follows (<see cref="PlayerInterface.Follow"/>), as the sandbox's follow does; a gone character is let go.</summary>
+    void FollowCamera()
+    {
+        if (player.Follow is not { } id || session.Camera.IsFree) return;
+        if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is not { } followed) { player.Follow = null; return; }
+        session.Camera.MovePivot(new Vector2(followed.Position.X, followed.Position.Z));
+        camera.Target = DrawnPosition(followed);
+    }
+
     void SandboxFollowCamera()
     {
         if (!IsSandbox || !sandboxFollow || session.Camera.IsFree) return;

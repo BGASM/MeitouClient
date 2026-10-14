@@ -490,7 +490,10 @@ The original's rules (decompilation) are in [animation.md](animation.md#run-time
 
 - **Layers.** Up to 8 weighted clips per character (`CharacterAnimation.MaxLayers`). Each tick the system picks what should play, fades the
   weights linearly at the CONSTANTS `animation blend rate` (4 per second, the same for every clip: engine choice), advances the times; the
-  first clips a character plays start at full weight. `Publish` normalises as Kenshi's layers do: the upper body (upper and whole-body clips)
+  first clips a character plays start at full weight. A looping clip (not an action or technique) that a character starts begins at a random
+  point of its loop, and a character's synched phase starts at a random point, both rolled from the character's key and the tick (engine choice,
+  2026-10-14: every clip used to start at frame 0, so a herd or squad made on one tick idled and walked in lockstep). The original's start
+  time for a clip is **Unknown**. `Publish` normalises as Kenshi's layers do: the upper body (upper and whole-body clips)
   to at most 1, the lower body to at most 1 minus the whole-body clips (`all` clips and actions; a block keeps the legs' clips); overlays alone.
   The renderer blends **cumulatively** (Kenshi sets it on every character's skeleton; the posture libraries add on top at weight 1).
 - **Movement** (**Verified**). Every movement clip of a body half that fits the stance plays, weighted by the sigmoid of its speed ramp

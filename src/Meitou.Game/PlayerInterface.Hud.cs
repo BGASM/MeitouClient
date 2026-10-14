@@ -41,6 +41,7 @@ sealed partial class PlayerInterface
         inventoryDrag = null;
         selectedFor = null;
         selected = [];
+        Follow = null;
     }
 
     void DrawNotice(DebugOverlay o, int width)
