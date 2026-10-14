@@ -19,12 +19,12 @@ sealed partial class GameHost
         ("scene", "the world", 0.5), ("terrain", "terrain", 0.3), ("biomes", "terrain textures", 2.0), ("sky", "sky", 0.25), ("weather", "weather", 0.15),
         ("particles", "weather effects", 0.2), ("water", "water", 0.6), ("reflections", "water", 0.1), ("objects", "buildings", 0.4), ("foliage", "foliage", 0.35),
         ("shadows", "lighting", 0.3), ("gi", "lighting", 0.15), ("people", "people", 0.3), ("world", "the world", 0.1), ("interface", "the interface", 0.3),
-        ("navmesh", "paths", 0.5), ("characters", "characters", 0.2), ("finishing", "finishing", 0.4),
+        ("navmesh", "paths", 0.5), ("characters", "characters", 0.2), ("finishing", "finishing", 0.4), ("view", "the view", 1.2),
     ];
     // The steps of a load between scenes (GameHost.Transition.cs).
     static readonly (string Step, string Label, double Seconds)[] SceneSteps =
     [
-        ("read", "the save", 0.6), ("build", "the world", 1.0), ("navmesh", "paths", 1.5), ("finishing", "finishing", 0.3),
+        ("read", "the save", 0.6), ("build", "the world", 0.5), ("people", "people", 0.3), ("finishing", "finishing", 0.2), ("view", "the view", 1.2),
     ];
     (string Step, string Label, double Seconds)[] loadingSteps = StartSteps;
 
@@ -41,12 +41,19 @@ sealed partial class GameHost
     void LoadingStep(string step)
     {
         if (loading is null) return;
+        SetLoadingStep(step);
+        if (!LoadingFrame()) throw new LoadingCancelledException();
+    }
+
+    /// <summary>The bar moves to the step's share (no frame is drawn: the game loop draws the next one).</summary>
+    void SetLoadingStep(string step)
+    {
+        if (loading is null) return;
         int i = Array.FindIndex(loadingSteps, s => s.Step == step);
         if (i < 0) return;
         double total = loadingSteps.Sum(s => s.Seconds), start = loadingSteps.Take(i).Sum(s => s.Seconds) / total;
         loading.Step(loadingSteps[i].Label, start, start + loadingSteps[i].Seconds / total, loadingSteps[i].Seconds);
         currentStep = step;
-        if (!LoadingFrame()) throw new LoadingCancelledException();
     }
 
     long lastLoadingFrame;

@@ -19,7 +19,7 @@ sealed partial class GameHost
     bool quickSaveRequested, quickLoadRequested;
     string? saveRequestedFolder, loadRequestedFolder, readingFolder;
     Task? saveWrite;
-    Task<SaveGame>? saveRead;
+
     // What the world was loaded from: the next capture carries the save's records the world does not model through (null for a world that started new).
     LoadedSave? loadedSave;
     // Counts the worlds the host has had: part of a character's key in the draw list, so a new world's characters never take over the renderer's per-character state of the old one's.
@@ -64,7 +64,7 @@ sealed partial class GameHost
         if (quickLoadRequested) { quickLoadRequested = false; BeginQuickLoad(); }
         if (saveRequestedFolder is { } to) { saveRequestedFolder = null; QuickSaveNow(to); }
         if (loadRequestedFolder is { } sourceFolder) { loadRequestedFolder = null; BeginQuickLoad(sourceFolder); }
-        if (saveRead is { IsCompleted: true } read) { saveRead = null; FinishQuickLoad(read); }
+
         if (preparedBase is null && SavesAvailable(out _) && session.World.Player.Exists)
         {
             var (data, from, options) = (popData!, loadedSave, CaptureOptions());
@@ -79,7 +79,7 @@ sealed partial class GameHost
         return reason.Length == 0;
     }
 
-    bool Busy() => saveWrite is { IsCompleted: false } || saveRead is not null;
+    bool Busy() => saveWrite is { IsCompleted: false } || sceneLoad is not null;
 
     void QuickSaveNow(string? destination = null)
     {
@@ -122,6 +122,7 @@ sealed partial class GameHost
         });
     }
 
+    /// <summary>Starts loading a save under the loading screen (GameHost.Transition.cs): the files are read on a worker, the new world is made, the navmesh round the player waits.</summary>
     void BeginQuickLoad(string? source = null)
     {
         if (!SavesAvailable(out string reason)) { player.Notice(reason, true); return; }
@@ -129,18 +130,25 @@ sealed partial class GameHost
         string folder = source ?? QuickSave.Folder();
         if (!File.Exists(Path.Combine(folder, SaveFolder.QuickSaveName))) { player.Notice(source is null ? "No quicksave yet (F5 saves)" : "Save is no longer available", true); return; }
         readingFolder = folder;
-        saveRead = Task.Run(() => SaveGame.Load(folder));
+        Task<SaveGame>? read = null;
+        string summary = "";
+        StartSceneLoad(
+            Stage("read", () => read = Task.Run(() => SaveGame.Load(folder))),
+            Stage("build", () => SwapInSave(read!, interactive: true, out summary)),
+            Stage("finishing", () => { SettleNewWorld(); FinishLoadNotice(summary); return null; }));
     }
 
-    /// <summary>Swaps in a world made from the save (at a tick boundary, the frame loop's) and hooks the host to it: the game clock, the camera on the player's squad, the draw list, the mouse state.</summary>
-    bool FinishQuickLoad(Task<SaveGame> read, bool interactive = true)
+    /// <summary>
+    /// Swaps in a world made from the save (at a tick boundary, the frame loop's) and hooks the host to it: the game clock, the camera on the player's squad. Returns the
+    /// navmesh of the zones round the player to wait for before the first tick (<see cref="SettleNewWorld"/>); throws <see cref="SceneLoadFailed"/> when the save does
+    /// not load (the old world stays).
+    /// </summary>
+    Task SwapInSave(Task<SaveGame> read, bool interactive, out string summary)
     {
         if (read.IsFaulted || read.IsCanceled)
         {
-            string why = read.Exception?.GetBaseException().Message ?? "cancelled";
             Console.Error.WriteLine($"load      read failed: {read.Exception?.GetBaseException()}");
-            player.Notice($"Load failed: {why}", true);
-            return false;
+            throw new SceneLoadFailed($"Load failed: {read.Exception?.GetBaseException().Message ?? "cancelled"}");
         }
         var watch = Stopwatch.StartNew();
         LoadedSave? loaded = null;
@@ -152,11 +160,10 @@ sealed partial class GameHost
             // A world that fails to load leaves the old one running (ReplaceWorld drops the half-made one).
             session.ReplaceWorld(built.Systems, world => loaded = SaveLoader.Load(world, read.Result, data, new SaveLoadOptions { Appearances = data.Appearances }));
         }
-        catch (Exception e)
+        catch (Exception e) when (e is not SceneLoadFailed)
         {
             Console.Error.WriteLine($"load      failed: {e}");
-            player.Notice($"Load failed: {e.Message}", true);
-            return false;
+            throw new SceneLoadFailed($"Load failed: {e.Message}");
         }
         population = built.Population;
         aggro = built.Aggro;
@@ -170,30 +177,31 @@ sealed partial class GameHost
         foreach (var note in loaded.Notes) Console.WriteLine($"load      {note}");
 
         // The camera on the leader, keeping the view's heading, pitch and boom; the zones round it get their navmesh before the first tick (like a new game's start).
+        Task navmesh = Task.CompletedTask;
         if (playerSquad is { } squad && !squad.Leader.IsNone)
         {
             var at = world.Characters.Previous[squad.Leader.Slot].Position;
             var view = session.Camera.Current;
             session.Camera.Place(new Vector2(at.X, at.Z), view.Yaw, view.Pitch, view.Distance);
-            WaitForNavmesh(at);
+            navmesh = NavmeshAround(at);
         }
-        sentFocus = false;
-        SendFocus();
-        // The first tick publishes the snapshot (a paused game would draw nothing until it ran) and takes the first look at the zones round the player.
-        world.RunTick();
-        indexedFor = null;
-        previousById.Clear();
-        player.Reset();
-        player.CloseFrontend();
-        Console.WriteLine($"load      {readingFolder}: {loaded.PlayerPlatoons.Sum(p => p.Squad.Members.Count)} player character(s), {loaded.RoamingPlatoons.Count} roaming platoon(s), {loaded.TownBoundPlatoons} town platoon(s) left to the towns, day {loaded.Clock.Day} {loaded.Clock.Hour:00}:{loaded.Clock.Minute:00}, in {watch.ElapsedMilliseconds} ms");
-        player.Notice(loaded.MissingMods.Count == 0 ? "Loaded" : $"Loaded; the save was made with mods not loaded now: {string.Join(", ", loaded.MissingMods)}", loaded.MissingMods.Count > 0);
-        return true;
+        summary = $"{readingFolder}: {loaded.PlayerPlatoons.Sum(p => p.Squad.Members.Count)} player character(s), {loaded.RoamingPlatoons.Count} roaming platoon(s), {loaded.TownBoundPlatoons} town platoon(s) left to the towns, day {loaded.Clock.Day} {loaded.Clock.Hour:00}:{loaded.Clock.Minute:00}, made in {watch.ElapsedMilliseconds} ms";
+        return navmesh;
     }
 
-    /// <summary>Waits (at most 15 s) for the navmesh of the zones round <paramref name="at"/>; the ones already loaded cost nothing.</summary>
-    void WaitForNavmesh(Vector3 at)
+    void FinishLoadNotice(string summary)
     {
-        if (nav is null) return;
+        Console.WriteLine($"load      {summary}");
+        var missing = loadedSave?.MissingMods ?? [];
+        player.Notice(missing.Count == 0 ? "Loaded" : $"Loaded; the save was made with mods not loaded now: {string.Join(", ", missing)}", missing.Count > 0);
+    }
+
+    /// <summary>
+    /// The navmesh of the zones round <paramref name="at"/> (the ones already loaded cost nothing): done when they are, or after 15 s (loading goes on without them).
+    /// </summary>
+    Task NavmeshAround(Vector3 at)
+    {
+        if (nav is null) return Task.CompletedTask;
         long now = Stopwatch.GetTimestamp();
         var pending = new List<Task>();
         foreach (var z in ZoneActivation.ZonesAround(at, 0))
@@ -201,6 +209,11 @@ sealed partial class GameHost
             if (!navZones.ContainsKey(z)) pending.Add(nav.LoadZone(z));
             navZones[z] = now;
         }
-        if (pending.Count > 0 && !Task.WaitAll([.. pending], TimeSpan.FromSeconds(15))) Console.Error.WriteLine("load      the navmesh round the player was not ready after 15 s; loading goes on");
+        if (pending.Count == 0) return Task.CompletedTask;
+        var all = Task.WhenAll(pending);
+        return Task.WhenAny(all, Task.Delay(TimeSpan.FromSeconds(15))).ContinueWith(t =>
+        {
+            if (t.Result != all) Console.Error.WriteLine("load      the navmesh round the player was not ready after 15 s; loading goes on");
+        }, TaskScheduler.Default);
     }
 }

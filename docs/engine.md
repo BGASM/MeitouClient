@@ -103,6 +103,15 @@ The interactive game never blocks its window for long while it loads (engine cho
 - **Measure.** The host prints each gap of more than 250 ms without a loading frame and, after the start, the number of frames and the longest gap.
   **Observed** 2026-10-14 (RTX 4070, The Hub, warm file cache): before, no frame for 4.0 s (biomes) and 1.8 s (water), 11 frames in all. After,
   about 180 frames, the longest gap 0.3 to 0.4 s (one renderer part: objects or foliage).
+- **Between scenes** (`GameHost.Transition.cs`): a new game, a loaded save (F9, the Load screen) and the main menu are lists of stages run by the
+  game loop, one per frame and each after a frame of the loading screen was drawn, so the window keeps drawing between them. A stage may hand back a
+  task (the save read on a worker, the navmesh round the start); the loop draws the loading screen until it ends. The world does not advance and
+  takes no input meanwhile. A stage that fails shows its message and leaves the world as it was. `--load` at the start runs the same steps inside `Boot`.
+- **Warm-up.** After the start and after every scene load the world is drawn (and advances) under the loading screen until its frames have run
+  smoothly (each under 40 ms) for 0.5 s, or for 5 s at most: the first frames of a new place load its characters and stream its terrain and objects.
+  The UI is drawn under the cover too, so the game and its interface appear together. **Observed** 2026-10-14 (The Hub, new game, quickload,
+  main menu): each scene's stages took 0.1 to 0.3 s; the warm-ups 0.5 to 4.7 s, held by frames of up to 0.9 s spent building character models
+  (`CharacterRenderer.Update`, four new appearances a frame).
 
 - **System order**: the host does not list systems; it calls `StandardSystems.Build` (`src/Meitou.Simulation/StandardSystems.cs`), which
   holds the order and the reasons for it. Tests that mean the game's wiring ask it for the parts they need (`SyntheticTown.Standard`).

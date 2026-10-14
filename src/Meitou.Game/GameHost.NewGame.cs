@@ -11,55 +11,59 @@ sealed partial class GameHost
 
     /// <summary>
     /// Leaves the game for the main menu: a new world with the town population and no player squad (what a run without a start has behind the title), the camera where it is;
-    /// the faithful mode then shows the title screen, the Meitou mode its game menu.
+    /// the faithful mode then shows the title screen, the Meitou mode its game menu. Under the loading screen (GameHost.Transition.cs).
     /// </summary>
     void HandleMainMenu()
     {
         if (!mainMenuRequested) return;
         mainMenuRequested = false;
         if (!SavesAvailable(out string why) || Busy()) { player.Notice(why.Length > 0 ? why : "Save or load still in progress", true); return; }
-        try
+        StartSceneLoad(Stage("build", () =>
         {
             var built = BuildSystems(interactive: true);
             session.ReplaceWorld(built.Systems);
             population = built.Population; aggro = built.Aggro; playerSquad = null;
             if (nav is not null) population!.ZoneGate = zone => nav.Walkability.World.Contains(zone);
             loadedSave = null; preparedBase = null; worldEpoch++;
-            sentFocus = false; SendFocus();
-            session.World.RunTick(); indexedFor = null; previousById.Clear();
-            player.Reset(); player.CloseFrontend();
+            SettleNewWorld();
             player.ShowMainMenu();
-        }
-        catch (Exception e) { Console.Error.WriteLine($"main menu {e}"); player.Notice($"Main menu failed: {e.Message}", true); }
+            return null;
+        }));
     }
+
+    /// <summary>A new game of the chosen start, under the loading screen: the systems and the navmesh round the start first, then the world with the player's squad.</summary>
     void HandleNewGame()
     {
         if (newGameRequested is not { } id) return;
         newGameRequested = null;
         if (!SavesAvailable(out string why) || Busy()) { player.Notice(why.Length > 0 ? why : "Save or load still in progress", true); return; }
         if (scene.Database is not { } database || NewGameStart.Find(NewGameStart.LoadAll(database), id) is not { } chosen) return;
-        try
-        {
-            var built = BuildSystems(interactive: true);
-            var at = chosen.StartPosition;
-            if (!chosen.ForceStartPos)
-                foreach (var link in chosen.Towns)
-                    if (popData!.Sites.FirstOrDefault(s => s.Town.Id == link.Id) is { } site) { at = new(site.Position.X, site.Position.Z); break; }
-            WaitForNavmesh(new(at.X, 0, at.Y));
-            Squad? spawned = null;
-            session.ReplaceWorld(built.Systems, world => spawned = built.Population!.StartPlayer(world, chosen));
-            population = built.Population; aggro = built.Aggro; playerSquad = spawned;
-            if (nav is not null) population!.ZoneGate = zone => nav.Walkability.World.Contains(zone);
-            loadedSave = null; preparedBase = null; worldEpoch++;
-            session.Clock.SetTime(1, 13);
-            var lead = session.World.Characters.Previous[spawned!.Leader.Slot].Position;
-            var view = session.Camera.Current;
-            session.Camera.Place(new Vector2(lead.X, lead.Z), view.Yaw, view.Pitch, view.Distance);
-            sentFocus = false; SendFocus();
-            session.World.RunTick(); indexedFor = null; previousById.Clear();
-            player.Reset(); player.CloseFrontend();
-            player.Notice($"Started {chosen.Name}");
-        }
-        catch (Exception e) { Console.Error.WriteLine($"new game  {e}"); player.Notice($"New game failed: {e.Message}", true); }
+        StandardSystemSet? built = null;
+        StartSceneLoad(
+            Stage("build", () =>
+            {
+                built = BuildSystems(interactive: true);
+                var at = chosen.StartPosition;
+                if (!chosen.ForceStartPos)
+                    foreach (var link in chosen.Towns)
+                        if (popData!.Sites.FirstOrDefault(s => s.Town.Id == link.Id) is { } site) { at = new(site.Position.X, site.Position.Z); break; }
+                return NavmeshAround(new(at.X, 0, at.Y));
+            }),
+            Stage("people", () =>
+            {
+                Squad? spawned = null;
+                try { session.ReplaceWorld(built!.Systems, world => spawned = built.Population!.StartPlayer(world, chosen)); }
+                catch (Exception e) { Console.Error.WriteLine($"new game  {e}"); throw new SceneLoadFailed($"New game failed: {e.Message}"); }
+                population = built.Population; aggro = built.Aggro; playerSquad = spawned;
+                if (nav is not null) population!.ZoneGate = zone => nav.Walkability.World.Contains(zone);
+                loadedSave = null; preparedBase = null; worldEpoch++;
+                session.Clock.SetTime(1, 13);
+                var lead = session.World.Characters.Previous[spawned!.Leader.Slot].Position;
+                var view = session.Camera.Current;
+                session.Camera.Place(new Vector2(lead.X, lead.Z), view.Yaw, view.Pitch, view.Distance);
+                SettleNewWorld();
+                player.Notice($"Started {chosen.Name}");
+                return null;
+            }));
     }
 }

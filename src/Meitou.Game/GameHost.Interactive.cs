@@ -28,7 +28,7 @@ sealed partial class GameHost
         int fpsLimit = g.FpsLimit ?? config.FpsLimit;
         VulkanDisplay.RayTracing = o.WantsRayTracing;
         // The world's files are read on a worker from here on: while the window and the device are made, then behind the loading screen.
-        var sceneLoad = LoadScene is { } readScene ? Task.Run(readScene) : null;
+        var sceneRead = LoadScene is { } readScene ? Task.Run(readScene) : null;
         using var display = new VulkanDisplay(WindowOptions.Default with
         {
             Size = new Vector2D<int>(o.Width, o.Height),
@@ -49,13 +49,14 @@ sealed partial class GameHost
         if (fullScreen) BorderlessFullScreen.Toggle(window);
         try
         {
-            if (sceneLoad is not null)
+            if (sceneRead is not null)
             {
                 LoadingStep("scene");
-                if (AwaitLoading(sceneLoad) is not { } loaded) return 1;
+                if (AwaitLoading(sceneRead) is not { } loaded) return 1;
                 scene = ownedScene = loaded;
             }
             Boot(display, interactive: true);
+            BeginWarm();
         }
         catch (LoadingCancelledException)
         {
@@ -118,6 +119,7 @@ sealed partial class GameHost
             {
                 if (k is SilkKey.ShiftLeft or SilkKey.ShiftRight) shiftDown = true;
                 if (k == SilkKey.Enter && (keyboard.IsKeyPressed(SilkKey.AltLeft) || keyboard.IsKeyPressed(SilkKey.AltRight))) { BorderlessFullScreen.Toggle(window); return; }
+                if (Covered) return;   // under the loading screen only the window's own keys
                 // F7 hides the game's interface; F6 and the numpad are the cinema's (Space, Delete and the lens keys too while its editor is open).
                 if (k == SilkKey.F7) { interfaceHidden = !interfaceHidden; Console.WriteLine(interfaceHidden ? "interface hidden (F7 shows it)" : "interface shown"); return; }
                 player.UiVisible = PanelLive() && !g.NoPopulation;
@@ -146,6 +148,7 @@ sealed partial class GameHost
         {
             mouse.MouseDown += (m, b) =>
             {
+                if (Covered) return;
                 player.UiVisible = PanelLive() && !g.NoPopulation;
                 var at = Pixels(m.Position);
                 if (b == SilkButton.Left && PanelLive() && panel?.MouseDown(at) == true) { panelDrag = true; return; }
@@ -172,6 +175,7 @@ sealed partial class GameHost
             mouse.MouseMove += (_, p) =>
             {
                 session.Input.SetMousePosition(p.X, p.Y);
+                if (Covered) { lastMouse = p; return; }
                 if (cinema.MouseMove(Pixels(p))) { lastMouse = p; return; }
                 player.MouseMove(Pixels(p));
                 if (player.UiCapturesPointer) { lastMouse = p; return; }
@@ -179,7 +183,7 @@ sealed partial class GameHost
                 if (lastMouse is { } last) session.Input.AddMouseDelta(p.X - last.X, p.Y - last.Y);
                 lastMouse = p;
             };
-            mouse.Scroll += (m, wheel) => { if (!(PanelLive() && panel?.Contains(Pixels(m.Position)) == true) && !cinema.Contains(Pixels(m.Position)) && !player.UiScroll(Pixels(m.Position), wheel.Y) && !(PanelLive() && player.ContainsUi(Pixels(m.Position)))) session.Input.AddWheel(wheel.Y); };
+            mouse.Scroll += (m, wheel) => { if (!Covered &&!(PanelLive() && panel?.Contains(Pixels(m.Position)) == true) && !cinema.Contains(Pixels(m.Position)) && !player.UiScroll(Pixels(m.Position), wheel.Y) && !(PanelLive() && player.ContainsUi(Pixels(m.Position)))) session.Input.AddWheel(wheel.Y); };
         }
         Console.WriteLine(GameOptions.Usage[GameOptions.Usage.IndexOf("Keys:", StringComparison.Ordinal)..]);
         Console.WriteLine($"display   vsync {(vsync ? "on" : "off")}, frame limit {(vsync || fpsLimit <= 0 ? "none" : fpsLimit + " fps")}, control tick {session.Ticks.TickRate:0} Hz, world tick {SimulationClock.TickRate:0} per game second; settings in {config.Path}");
@@ -231,6 +235,8 @@ sealed partial class GameHost
             if (window.IsClosing) break;
             double now = frame.Elapsed.TotalSeconds, dt = now - last;
             last = now;
+            // The last frame was drawn under the loading screen: a scene load's next stage may run, the warm-up counts it.
+            if (Covered) CoveredFrame(dt);
             // The counter: the mean over the last tenth of a second, so a single late frame doesn't read as a drop.
             fpsWindow += dt;
             fpsWindowFrames++;
@@ -247,13 +253,14 @@ sealed partial class GameHost
             DuelFrame(cinema.Playing && !cinemaWasPlaying || cinema.Recording && !cinemaWasRecording);
             (cinemaWasPlaying, cinemaWasRecording) = (cinema.Playing, cinema.Recording);
             long a0 = Stopwatch.GetTimestamp();
-            session.Advance(frameDt);
+            if (sceneLoad is null) session.Advance(frameDt);   // the world waits while a scene loads
             DuelHoldClock();
             advanceTotal += Stopwatch.GetElapsedTime(a0).TotalMilliseconds;
             WorldNews();
             HandleSaves();   // a quicksave or quickload asked for by a key: between ticks, none in flight
             HandleNewGame();
             HandleMainMenu();
+            StepSceneLoad();
             animSeconds += frameDt;
             animClock = true;
             UpdateNav();
@@ -273,17 +280,19 @@ sealed partial class GameHost
                 gpu.Post!.Target = backbuffer;
                 if (overlay is not null) overlay.Target = backbuffer;
                 profiler?.BeginFrame();
-                DrawWorld(size.X, size.Y);
+                // A scene load draws only the loading screen; the warm-up draws whole frames under it (the first frames of a new place build what it needs).
+                bool covered = Covered, sceneLoading = sceneLoad is not null;
+                if (sceneLoad is null) DrawWorld(size.X, size.Y);
                 cpuSum += Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
                 drawTotal += Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
                 bool shot = screenshotRequested, take = takeFile is not null;
                 // The game's interface (markers, HUD, panels, debug overlays): hidden by F7, the cinema's clean picture and in recorded frames.
-                bool ui = !interfaceHidden && !cinema.Clean && !take;
+                bool ui = !interfaceHidden && !cinema.Clean && !take && !sceneLoading;
                 player.UiVisible = ui && !g.NoPopulation;
                 screenshotRequested = false;
                 if (ui && overlay is not null && !g.NoPopulation) DrawMarkers(overlay, size.X, size.Y);
                 if (ui && overlay is not null && IsSandbox) DrawSandbox(overlay, size.X, size.Y);
-                if (!g.NoPopulation) player.Steer();
+                if (!g.NoPopulation && !sceneLoading) player.Steer();
                 if (ui && overlay is not null && !g.NoPopulation) player.Draw(overlay, size.X, size.Y);
                 // The debug overlays are left out of saved pictures: the statistics at the top left, the key list below them, the profiler.
                 if (ui && overlay is not null && !shot)
@@ -309,7 +318,13 @@ sealed partial class GameHost
                 }
                 if (ui) panel?.Draw(size.X, size.Y);
                 // Over everything: the letterbox, and the cinema's editor (F6, also with F7) or its status line (not with F7).
-                if (overlay is not null) cinema.Draw(overlay, size.X, size.Y, shot || take || (interfaceHidden && !cinema.EditorVisible));
+                if (overlay is not null && !sceneLoading) cinema.Draw(overlay, size.X, size.Y, shot || take || (interfaceHidden && !cinema.EditorVisible));
+                // The loading screen over the whole frame while a scene loads or the world warms up.
+                if (covered && loading is not null && loadingOverlay is not null)
+                {
+                    loadingOverlay.Target = backbuffer;
+                    loading.Draw(size.X, size.Y);
+                }
                 display.Present();
                 profiler?.EndFrame();
                 if (display.Context.GpuFrameMs > 0) { gpuSum += display.Context.GpuFrameMs; gpuSamples++; }

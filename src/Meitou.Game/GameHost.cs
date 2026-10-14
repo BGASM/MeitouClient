@@ -208,7 +208,14 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         if (StartSave is { } save && g.Load is { } folder)
         {
             readingFolder = folder;
-            if (!FinishQuickLoad(Task.FromResult(save), interactive)) throw new InvalidDataException($"--load {folder}: the save did not load (see above)");
+            Task navmesh;
+            string summary;
+            try { navmesh = SwapInSave(Task.FromResult(save), interactive, out summary); }
+            catch (SceneLoadFailed e) { throw new InvalidDataException($"--load {folder}: {e.Message}"); }
+            LoadingStep("navmesh");
+            AwaitLoading(navmesh);
+            SettleNewWorld();
+            FinishLoadNotice(summary);
         }
         if (interactive)
         {
