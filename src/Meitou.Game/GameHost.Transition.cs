@@ -12,7 +12,7 @@ sealed partial class GameHost
 {
     sealed class SceneLoad
     {
-        public readonly Queue<(string Step, Func<Task?> Run)> Stages = new();
+        public readonly Queue<(string Step, Func<Task?> Run, bool DuringAscent)> Stages = new();
         public Task? Waiting;
         /// <summary>A covered frame was drawn since the last stage ran: the next one may run (it may hold the thread).</summary>
         public bool Shown;
@@ -23,6 +23,8 @@ sealed partial class GameHost
     sealed class SceneLoadFailed(string message) : Exception(message);
 
     SceneLoad? sceneLoad;
+    SkyArrival? skyArrival;
+    float? presentationHour;
     bool warming;
     double smoothSeconds;
     double warmSeconds;
@@ -30,14 +32,16 @@ sealed partial class GameHost
     const double SmoothFrame = 0.04, SmoothRun = 0.5, WarmLimit = 5;
 
     /// <summary>The loading screen covers the world: a scene load runs, or the world warms up under it.</summary>
-    bool Covered => sceneLoad is not null || warming;
+    bool Covered => sceneLoad is not null || warming || skyArrival is not null;
 
-    static (string Step, Func<Task?> Run) Stage(string step, Func<Task?> run) => (step, run);
+    static (string Step, Func<Task?> Run, bool DuringAscent) Stage(string step, Func<Task?> run, bool duringAscent = false) => (step, run, duringAscent || step == "read");
 
-    void StartSceneLoad(params (string Step, Func<Task?> Run)[] stages)
+    void StartSceneLoad(params (string Step, Func<Task?> Run, bool DuringAscent)[] stages)
     {
         if (sceneLoad is not null) return;
         sceneLoad = new();
+        if (player.UiMode == Meitou.Data.Ui.UiMode.Meitou)
+            skyArrival = new(camera, presentationHour ?? (TitleVisible ? TitleHour : (float)session.Clock.HourOfDay));
         foreach (var stage in stages) sceneLoad.Stages.Enqueue(stage);
         loading?.Restart();
         loadingSteps = SceneSteps;
@@ -48,6 +52,8 @@ sealed partial class GameHost
     void StepSceneLoad()
     {
         if (sceneLoad is not { } load || !load.Shown || load.Waiting is { IsCompleted: false }) return;
+        // Reading a save can overlap the ascent; world mutations wait until the ground is out of view.
+        if (skyArrival is { AtStars: false } && load.Stages.TryPeek(out var next) && !next.DuringAscent) return;
         try
         {
             if (load.Waiting is { IsFaulted: true } failed) throw failed.Exception!.GetBaseException();
@@ -65,6 +71,8 @@ sealed partial class GameHost
         catch (Exception e)
         {
             sceneLoad = null;
+            skyArrival = null;
+            presentationHour = null;
             if (e is not SceneLoadFailed) Console.Error.WriteLine($"scene     load failed: {e}");
             player.Notice(e is SceneLoadFailed ? e.Message : $"Load failed: {e.Message}", true);
         }
@@ -73,7 +81,7 @@ sealed partial class GameHost
     /// <summary>The world is drawn under the loading screen until its frames run smoothly.</summary>
     void BeginWarm()
     {
-        if (loading is null) return;
+        if (loading is null) { skyArrival?.Arrive(); return; }
         (warming, smoothSeconds, warmSeconds) = (true, 0, 0);
         SetLoadingStep("view");
     }
@@ -88,9 +96,25 @@ sealed partial class GameHost
         if (!warming) return;
         warmSeconds += seconds;
         smoothSeconds = seconds < SmoothFrame ? smoothSeconds + seconds : 0;
+        if (TitleVisible && titleFrame is { } title && (title.Objects?.Pending > 0 || title.Characters?.Assets == 0) && warmSeconds < WarmLimit) return;
         if (smoothSeconds < SmoothRun && warmSeconds < WarmLimit) return;
         warming = false;
+        skyArrival?.Arrive();
         ReportLoading($"the view warmed up in {warmSeconds:0.0} s");
+    }
+
+    void AdvanceSkyArrival(double seconds)
+    {
+        if (skyArrival is not { } arrival) return;
+        arrival.Advance(seconds);
+        if (!arrival.Finished) return;
+        skyArrival = null;
+        presentationHour = null;
+    }
+
+    void ApplySkyArrival()
+    {
+        presentationHour = skyArrival?.Apply(camera, TitleVisible ? TitleHour : (float)session.Clock.HourOfDay, warming);
     }
 
     /// <summary>The host's side of a new world: the camera focus sent again, the first tick (it publishes the snapshot), the draw list and the mouse state dropped, the menus closed.</summary>

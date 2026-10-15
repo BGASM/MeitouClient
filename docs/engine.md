@@ -624,3 +624,24 @@ the `detail` lines at the end of a benchmark log give the instances and calls of
   interval between frames).
 - `meitou --screenshot out.png --ticks n`: boots the game offscreen, runs n ticks, saves the picture; `meitou --quit-after 20`
   runs the real window for 20 s and prints the frame rate; `--load <save folder>` starts either of them in a save.
+
+## Cinematic title and scene transitions
+
+Meitou UI mode presents title controls over a live preview of the dummy world; Faithful retains
+the original title image and loading screen. Scene loads in Meitou use `SkyArrival`: 2.4s ascent
+about a fixed eye, a midnight sky hold, then 2.8s descent at the destination. Quintic easing brings
+angular velocity and acceleration to zero at both ends of each flight. Save reads and
+new-game system preparation overlap the ascent; world replacement waits until terrain is outside
+the view. Escape/Space skips the flight, never pending load work. Progress appears after 2s.
+Camera/hour overrides belong to presentation; simulation does not advance during the flight,
+and weather scheduling uses the actual game hour. Sky-only frames avoid world callbacks while
+loading; warm-up renders the destination before descent. Errors drop the flight and restore UI.
+`TitleComposition` stages a separate shallow desert surface, a lone equipped wanderer, a damaged
+Watchtower, rock spires and distant ridges. Its framing follows the poster with the game's fixed
+moons at the left. This is an authored interpretation, not a claim to locate the depicted place.
+The scene has its own object/character/terrain resources and borrows the host's terrain textures,
+sky, shadows and post chain. No actor or placement enters simulation or save data. Each world
+draw activates its terrain globals; the normal camera lens is restored when leaving the title.
+Warm-up waits for the staged content before exposing the menu (subject to the normal 5s limit).
+`--title-preview --screenshot <path>` captures it for visual QA. Save arrival still uses the
+loader's leader-focused camera contract; saved camera pose restoration remains unimplemented.

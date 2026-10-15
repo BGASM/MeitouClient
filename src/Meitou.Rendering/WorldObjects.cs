@@ -36,6 +36,7 @@ sealed class WorldObjects : IDisposable
 
     readonly HashSet<string> bakedTowns = new(StringComparer.Ordinal);
     readonly Dictionary<ZoneCoordinate, List<BuildingPlacement>> buildingsByZone = [];
+    Dictionary<ZoneCoordinate, ZoneObjects>? staged;
     ThreadLocal<TerrainHeightmap>? heights;
     InteriorCollisions? interiorCollisions;
 
@@ -43,8 +44,26 @@ sealed class WorldObjects : IDisposable
     int buildings, missing, fromState, destroyed, foliage, empty, features, stand, layouts, layoutObjects, layoutsNotFound;
 
     /// <summary>Zones that have placed buildings or features.</summary>
-    public IEnumerable<ZoneCoordinate> PopulatedZones => buildingsByZone.Keys.Concat(
+    public IEnumerable<ZoneCoordinate> PopulatedZones => staged?.Keys ?? buildingsByZone.Keys.Concat(
         Features.Zones.Select((l, i) => (l, i)).Where(t => t.l.Count > 0).Select(t => MapFeatureFile.ZoneOf(t.i))).Distinct();
+
+    /// <summary>Renderer-only placements, with no changes to the world's records or simulation.</summary>
+    public static WorldObjects Stage(GameInstall install, GameDatabase database, IEnumerable<PlacedMesh> meshes)
+    {
+        var levels = new WorldLevelData();
+        var result = new WorldObjects
+        {
+            Install = install, Database = database, Levels = levels, Towns = new(database, levels),
+            Features = new(), Layouts = new(database, null), DistantTowns = [], staged = [],
+        };
+        foreach (var mesh in meshes)
+        {
+            var zone = WorldLayout.ZoneOf(mesh.Transform.M41, mesh.Transform.M43);
+            if (!result.staged.TryGetValue(zone, out var group)) result.staged[zone] = group = new() { Zone = zone };
+            group.Items.Add(mesh);
+        }
+        return result;
+    }
 
     /// <summary>
     /// Reads the world's placement data once. The region arguments are not used: objects are laid out per zone around the camera
@@ -80,6 +99,7 @@ sealed class WorldObjects : IDisposable
     /// <summary>Lays out one zone's buildings and map features as the game builds them (docs/formats/zones.md).</summary>
     public ZoneObjects BuildZone(ZoneCoordinate zone)
     {
+        if (staged is not null) return staged.GetValueOrDefault(zone) ?? new() { Zone = zone };
         var result = new ZoneObjects { Zone = zone };
         var map = heights!.Value!;
         var db = Database;

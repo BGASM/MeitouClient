@@ -28,6 +28,11 @@ sealed partial class GameHost
         using var display = new VulkanDisplay(null, vsync: false, streamline: WantsDlss());
         streamline = display.Streamline;
         Boot(display, interactive: false);
+        if (g.TitlePreview)
+        {
+            ApplyTitleCamera();
+            titleFrame?.Objects?.Settle(camera.Eye);
+        }
         if (g.UiShowcase && playerSquad is not null) player.Select([playerSquad.Leader], additive: false);
         if (playerSquad is not null && g.MoveTo is { } to)
         {
@@ -44,6 +49,7 @@ sealed partial class GameHost
         }
         SandboxFollowCamera();
         ApplyCamera(session.Camera.Current);
+        if (g.TitlePreview) ApplyTitleCamera();
         // After a walk (--move-to) the picture is of where the leader got to.
         if (g.MoveTo is not null && session.CurrentSnapshot.Characters.FirstOrDefault(c => c.IsPlayer) is { } walker)
         {
@@ -51,9 +57,17 @@ sealed partial class GameHost
             camera.Target = DrawnPosition(walker);
         }
         gpu.Streamer?.Settle(camera.Eye);
-        gpu.Objects?.Settle(camera.Eye);
-        gpu.Foliage?.Settle(camera.Eye);
-        gpu.Characters?.Settle(camera.Eye);
+        if (g.TitlePreview)
+        {
+            titleFrame?.Objects?.Settle(camera.Eye);
+            titleFrame?.Characters?.Settle(camera.Eye);
+        }
+        else
+        {
+            gpu.Objects?.Settle(camera.Eye);
+            gpu.Foliage?.Settle(camera.Eye);
+            gpu.Characters?.Settle(camera.Eye);
+        }
         WorldFrame.FinishLoading(display.Context);
         var context = display.Context;
         int w = o.Width, h = o.Height;
@@ -64,7 +78,7 @@ sealed partial class GameHost
         for (int i = 0; i < gpu.Post.WarmupFrames; i++) { DrawWorld(w, h); display.EndFrame(); }   // a temporal upscaler converges first
         DrawWorld(w, h);
         display.EndFrame();
-        using var overlay = playerSquad is not null || player.UiMode == Meitou.Data.Ui.UiMode.Faithful ? DebugOverlay.TryCreate(context) : null;
+        using var overlay = g.TitlePreview || playerSquad is not null || player.UiMode == Meitou.Data.Ui.UiMode.Faithful ? DebugOverlay.TryCreate(context) : null;
         if (overlay is not null) { player.CreateUiPainter(overlay, assets.Find); ConnectItemIcons(); }
         if (gpu.Characters is { } portraits) { var (atlas, sampled) = portraits.PortraitAtlas; player.SetUiTexture(PlayerInterface.PortraitTexture, atlas, sampled); }
         string?[] panels = g.UiShowcase ? player.UiMode == Meitou.Data.Ui.UiMode.Faithful
@@ -78,7 +92,7 @@ sealed partial class GameHost
                 DrawWorld(w, h);
                 overlay.Target = target;
                 UpdateView(w, h);
-                player.ShowUiPanel(panelName);
+                if (g.TitlePreview) player.ShowTitle(); else player.ShowUiPanel(panelName);
                 player.Draw(overlay, w, h);
                 display.EndFrame();
                 Thread.Sleep(5);
@@ -88,7 +102,7 @@ sealed partial class GameHost
             {
                 overlay.Target = target;
                 UpdateView(w, h);
-                player.ShowUiPanel(panelName);
+                if (g.TitlePreview) player.ShowTitle(); else player.ShowUiPanel(panelName);
                 if (IsSandbox && !g.UiShowcase) DrawSandbox(overlay, w, h);
                 player.Draw(overlay, w, h);
                 if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.IsPlayer) is { } me && player.Project(DrawnPosition(me) + new Vector3(0, 1, 0)) is { } px)
@@ -109,6 +123,7 @@ sealed partial class GameHost
         var s = session.Camera.Current;
         Console.WriteLine($"camera    {(session.Camera.IsFree ? "free" : "strategy")}: pivot {s.Target.X:0}, {s.Target.Y:0}, {s.Target.Z:0}, eye {s.Eye.X:0}, {s.Eye.Y:0}, {s.Eye.Z:0}, " +
             $"yaw {s.Yaw * 180 / MathF.PI:0.#}, pitch {s.Pitch * 180 / MathF.PI:0.#}, boom {s.Distance:0.#}; {session.Ticks.TotalTicks} control ticks, {session.Simulation.TotalTicks} simulation ticks, game time {session.Clock.TimeText} ({session.Clock.DayText})");
+        DisposeTitleScene();
         gpu.Dispose();
         return 0;
     }

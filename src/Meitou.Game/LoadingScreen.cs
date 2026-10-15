@@ -82,10 +82,13 @@ sealed class LoadingScreen : IDisposable
     /// <summary>Starts the bar again (a new load between scenes).</summary>
     public void Restart() { shown = 0; from = to = 0; }
 
-    public void Draw(int width, int height)
+    public void Draw(int width, int height, bool background = true)
     {
-        overlay.Rect(0, 0, width, height, new Vector4(0.02f, 0.02f, 0.018f, 1));
-        overlay.Flush(width, height);
+        if (background)
+        {
+            overlay.Rect(0, 0, width, height, new Vector4(0.02f, 0.02f, 0.018f, 1));
+            overlay.Flush(width, height);
+        }
         float progress = Progress;
         // Two panels along the bottom (engine choice): the loading panel on the left (LOADING..., the spinner, the bar, the step), the layout's own panel on the
         // right, made small and holding only the tip. Sizes at 1080 rows, scaled with the height.
@@ -96,6 +99,7 @@ sealed class LoadingScreen : IDisposable
         if (painter is not null && layout is not null && resources is not null)
         {
             var b = new UiBindings();
+            if (!background) b.Hidden.Add("BackgroundImage");
             if (picture is not null) b.Properties["BackgroundImage"] = new Dictionary<string, string> { ["ImageTexture"] = picture };
             b.Positions["LoadingPanel"] = tipBox;
             b.Positions["MessageText"] = new UiRect(tipBox.X + 8 * s, tipBox.Y + 8 * s, tipBox.Width - 16 * s, tipBox.Height - 16 * s);

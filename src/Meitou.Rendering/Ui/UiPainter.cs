@@ -12,7 +12,7 @@ public sealed class UiPainter : IDisposable
     readonly DebugOverlay overlay;
     readonly MyGuiResources resources;
     readonly Func<string, string?> resolve;
-    DebugOverlay? standardFont, paintedFont;
+    DebugOverlay? standardFont, paintedFont, titleFont;
     readonly Dictionary<string, (Texture Texture, SampledTexture Sampled)> textures = new(StringComparer.Ordinal);
     /// <summary>Textures the host draws at run time (the squad portraits), shown by an ImageBox's <c>ImageTexture</c> under their name; not owned.</summary>
     readonly Dictionary<string, (Texture Texture, SampledTexture Sampled)> external = new(StringComparer.Ordinal);
@@ -29,7 +29,11 @@ public sealed class UiPainter : IDisposable
         try
         {
             if (resolve("Exo2-SemiBold.ttf") is { } standard) standardFont = DebugOverlay.FromFont(overlay.Gpu, standard);
-            if (resolve("Sentencia_1.ttf") is { } painted) paintedFont = DebugOverlay.FromFont(overlay.Gpu, painted);
+            if (resolve("Sentencia_1.ttf") is { } painted)
+            {
+                paintedFont = DebugOverlay.FromFont(overlay.Gpu, painted);
+                titleFont = DebugOverlay.FromFont(overlay.Gpu, painted, 144);
+            }
             foreach (string name in resources.Skins.Values.Select(s => s.Texture).Where(s => s.Length > 0).Distinct())
             {
                 LoadTexture(name);
@@ -121,7 +125,8 @@ public sealed class UiPainter : IDisposable
             if (textArea.Width <= 0 || textArea.Height <= 0) continue;
             var textClip = clip.Intersect(textArea);
             string fontName = c.Properties.GetValueOrDefault("FontName") ?? "";
-            var font = fontName.Contains("Painted", StringComparison.Ordinal) || fontName.Contains("Banner", StringComparison.Ordinal) ? paintedFont ?? standardFont ?? overlay : standardFont ?? overlay;
+            var font = fontName == "Meitou_TitleFont" ? titleFont ?? paintedFont ?? overlay :
+                fontName.Contains("Painted", StringComparison.Ordinal) || fontName.Contains("Banner", StringComparison.Ordinal) ? paintedFont ?? standardFont ?? overlay : standardFont ?? overlay;
             var textColour = MyGuiColours.Text(resources, c, widgetState, c.Enabled ? DebugOverlay.TextColour : new(0.45f, 0.43f, 0.38f, 1));
             font.Target = overlay.Target;
             float scale = c.TextScale ?? (c.Skin.Length > 0 ? Math.Clamp(height / 1080f, 0.5f, 1.5f) : 1);
@@ -238,7 +243,7 @@ public sealed class UiPainter : IDisposable
     {
         foreach (var t in textures.Values) t.Texture.Dispose();
         textures.Clear();
-        standardFont?.Dispose(); paintedFont?.Dispose();
-        standardFont = null; paintedFont = null;
+        standardFont?.Dispose(); paintedFont?.Dispose(); titleFont?.Dispose();
+        standardFont = null; paintedFont = null; titleFont = null;
     }
 }

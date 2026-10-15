@@ -1085,8 +1085,44 @@ static class WorldFrame
     public static bool DetailedStats;
     static readonly string[] CascadeLabels = [.. Enumerable.Range(0, ShadowSettings.MaxCascades).Select(i => $"shadow c{i}")];
 
-    public static void Draw(Gpu gpu, WorldScene scene, WorldCamera camera, WorldRenderOptions render, int width, int height, float hour, float time, float fogDistance)
+    /// <summary>Sky-only loading frames, with the existing sky and post chain and without touching world streaming or character content.</summary>
+    public static void DrawLoadingSky(Gpu gpu, WorldScene scene, WorldCamera camera, int width, int height, float hour, float seconds, float fogDistance)
     {
+        gpu.Terrain.Activate();
+        var post = gpu.Post ?? throw new InvalidOperationException("the sky frame needs the post-processing chain");
+        post.GiResolve = 0;
+        post.Begin(width, height);
+        float aspect = width / (float)Math.Max(height, 1);
+        var eye = camera.Eye;
+        var view = camera.View;
+        var rotation = view with { M41 = 0, M42 = 0, M43 = 0 };
+        var vp = rotation * Jitter.Apply(camera.Projection(aspect, 1, 1000), post.JitterPixels, post.RenderWidth, post.RenderHeight);
+        gpu.Sky.SetEye(eye, gpu.Terrain.HeightAt, float.NegativeInfinity);
+        gpu.Sky.Eye = eye;
+        gpu.Sky.Clock = scene.Clock;
+        gpu.Sky.Hour = hour;
+        gpu.Sky.StarSeconds = seconds;
+        var (colours, _) = gpu.Sky.Prepare(scene.Clock.SunDirection(hour), eye.Y, fogDistance);
+        post.AutoExposure = (gpu.Sky.MinLuminance, gpu.Sky.MaxLuminance);
+        post.SetCamera(eye, view, camera.FieldOfView, aspect);
+        post.BeginNearSlice(1, 1000);
+        post.SetNearSlice(1, 1000, camera.FieldOfView, aspect);
+        var host = gpu.Scene ??= new SceneHost(post.Gpu);
+        host.Open(5, post.SceneTargets, new Vk.ClearColorValue(0, 0, 0, 0), clearDepth: true);
+        gpu.Sky.Draw(vp, colours);
+        host.Close();
+        // Motion and particle callbacks belong to the world that is being replaced.
+        var motion = post.ObjectMotion;
+        var particles = post.Particles;
+        post.ObjectMotion = null;
+        post.Particles = null;
+        try { post.End(); }
+        finally { post.ObjectMotion = motion; post.Particles = particles; }
+    }
+
+    public static void Draw(Gpu gpu, WorldScene scene, WorldCamera camera, WorldRenderOptions render, int width, int height, float hour, float time, float fogDistance, float? weatherHour = null)
+    {
+        gpu.Terrain.Activate();
         if (gpu.Surfaces is { } surfaces) surfaces.GameTime = time;
         // Everything is drawn into the post-processing chain's HDR framebuffer (before the reflection pass, which restores whatever is bound).
         // The GI resolve while the probes light the world: the scene targets carry the albedo target, the lit fragments write it.
@@ -1125,7 +1161,12 @@ static class WorldFrame
         var sun = scene.Clock.SunDirection(hour);
         // The weather at the camera (before the sky's tables are prepared: the colour multiplier feeds them). A held frame (a screenshot) has dt 0, the first frame snaps.
         bool held = gpu.Post?.InstantAdaptation ?? true;
-        if (gpu.Weather is { } weather) { weather.Update(eye, hour, sun.Y, held); weather.Apply(gpu.Sky); }
+        if (gpu.Weather is { } weather)
+        {
+            float scheduleHour = weatherHour ?? hour;
+            weather.Update(eye, scheduleHour, scene.Clock.SunDirection(scheduleHour).Y, held);
+            weather.Apply(gpu.Sky);
+        }
         gpu.Surfaces?.Apply(gpu.WeatherState);
         // The night sky's clocks: the starfield shifts with the game hours since the load, the planets turn with the day and hour.
         gpu.Sky.StarHours = gpu.GameHours ?? gpu.HeatHazeHours;

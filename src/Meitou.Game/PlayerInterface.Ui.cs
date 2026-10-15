@@ -65,7 +65,7 @@ sealed partial class PlayerInterface
     {
         if (!UiVisible) return false;
         var controls = ArrangeUi();
-        return UiMode == UiMode.Faithful && faithfulScreens.Contains(p) || MyGuiPresentation.HitTest(controls, p.X, p.Y) is not null;
+        return UseScreenInput && faithfulScreens.Contains(p) || MyGuiPresentation.HitTest(controls, p.X, p.Y) is not null;
     }
 
     public void SetUiMode(UiMode mode)
@@ -167,15 +167,26 @@ sealed partial class PlayerInterface
             [UiSlots.Selection] = UiMode == UiMode.Meitou ? new(16, Math.Max(16, Height - 260), Math.Max(0, Math.Min(324, Width - 32)), 244) : FaithfulSlot("InformationPanel"),
             [UiSlots.Squad] = UiMode == UiMode.Meitou ? new(352, Math.Max(16, Height - 158), Math.Max(0, Width - 724), 142) : FaithfulSlot("SquadPanel"),
         };
-        controls.AddRange(uiHost.Arrange(UiMode, Width, Height, b, slots));
+        if (!TitleOpen) controls.AddRange(uiHost.Arrange(UiMode, Width, Height, b, slots));
         var centreText = new Dictionary<string, string> { ["TextAlign"] = "Center" };
         if (UiMode == UiMode.Faithful)
         {
             if (controls.FirstOrDefault(c => c.Name == "SquadPanel") is { } squadPanel) AddSquadPortraits(controls, squadPanel.Bounds);
             AddHudText(controls);
         }
-        if (UiMode == UiMode.Faithful)
-            foreach (var screen in faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent)) controls.AddRange(screen.Controls);
+        if (UseScreenInput)
+        {
+            foreach (var screen in faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent))
+            {
+                controls.AddRange(screen.Controls.Where(c => UiMode == UiMode.Faithful ||
+                    !c.Properties.TryGetValue("ImageResource", out var resource) || resource != "Kenshi_TitleScreen")
+                    .Select(c => screen.Id == "title" && UiMode == UiMode.Meitou && c.Type == "Button" ? c with { TextScale = 1.8f } : c));
+                if (screen.Id == "title" && UiMode == UiMode.Meitou && !showCredits)
+                    controls.Add(new("MeitouTitle", "TextBox", new(Width * 0.55f, Height * 0.68f, Width * 0.42f, Height * 0.18f), "KENSHI", "", "", true,
+                        new Dictionary<string, string> { ["FontName"] = "Meitou_TitleFont", ["TextAlign"] = "Right VCenter" },
+                        Vector4.Zero, new Vector4(0.89f, 0.84f, 0.71f, 1), TextScale: Height / 720f));
+            }
+        }
         else if (openPanel is not null) AddDetailsPanel(controls);
         if (UiMode == UiMode.Meitou) AddTradePanel(controls);
         if (UiMode == UiMode.Meitou && menuOpen) AddMenuPanel(controls);
@@ -191,7 +202,7 @@ sealed partial class PlayerInterface
         var controls = ArrangeUi();
         if (InventoryPointerDown(p)) return true;
         if (MapPointerDown(p)) return true;
-        if (UiMode == UiMode.Faithful && faithfulScreens.PointerDown(p)) { UpdateMenuPause(); return true; }
+        if (UseScreenInput && faithfulScreens.PointerDown(p)) { UpdateMenuPause(); return true; }
         if (MyGuiPresentation.HitTest(controls, p.X, p.Y) is not { } c) return false;
         if (c.Action.StartsWith("faithful:", StringComparison.Ordinal))
         {

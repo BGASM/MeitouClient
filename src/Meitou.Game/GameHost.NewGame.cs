@@ -48,7 +48,7 @@ sealed partial class GameHost
                     foreach (var link in chosen.Towns)
                         if (popData!.Sites.FirstOrDefault(s => s.Town.Id == link.Id) is { } site) { at = new(site.Position.X, site.Position.Z); break; }
                 return NavmeshAround(new(at.X, 0, at.Y));
-            }),
+            }, duringAscent: true),
             Stage("people", () =>
             {
                 Squad? spawned = null;

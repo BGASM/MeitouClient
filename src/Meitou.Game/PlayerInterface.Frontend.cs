@@ -28,8 +28,11 @@ sealed partial class PlayerInterface
         saveSlots = enumerate; credits = creditsText;
     }
     public void ShowTitle() { faithfulScreens.Open("title"); RefreshSlots(); UpdateMenuPause(); }
-    /// <summary>After leaving a game: the title screen in the faithful mode, the game menu in the Meitou mode (it has no title screen).</summary>
-    public void ShowMainMenu() { if (UiMode == UiMode.Faithful) ShowTitle(); else if (!menuOpen) ToggleMenu(); }
+    public bool TitleOpen => faithfulScreens.IsOpen("title");
+    bool FrontendActive => TitleOpen || faithfulScreens.IsOpen("new-game") || faithfulScreens.IsOpen("load") || faithfulScreens.IsOpen("message");
+    bool UseScreenInput => UiMode == UiMode.Faithful || FrontendActive;
+    /// <summary>After leaving a game: title controls over the original image or the live world, according to UI mode.</summary>
+    public void ShowMainMenu() => ShowTitle();
     public void CloseFrontend()
     {
         foreach (string id in new[] { "title", "menu", "new-game", "advanced", "save", "load", "message" }) faithfulScreens.Close(id);
@@ -147,12 +150,19 @@ sealed partial class PlayerInterface
                 return true;
             }
             Enable("ExitButton", "CreditsButton");
+            if (UiMode == UiMode.Meitou)
+            {
+                b.Hidden.Add("ImportGameButton");
+                string[] buttons = ["ContinueButton", "NewGameButton", "LoadGameButton", "OptionsButton", "CreditsButton", "ExitButton"];
+                for (int i = 0; i < buttons.Length; i++)
+                    b.Positions[buttons[i]] = new(Width * 0.045f, Height * (0.47f + i * 0.073f), Width * 0.19f, Height * 0.055f);
+            }
             // Continue is shown only when a save exists (docs/game/ui-screens.md section 3), not greyed out.
             if (slots.Count > 0 && slotReadable) Enable("ContinueButton"); else b.Hidden.Add("ContinueButton");
             b.Properties["CreditsPanel"] = new Dictionary<string, string> { ["Visible"] = showCredits ? "true" : "false" };
             Paragraph("CreditsPanelContent", credits);
             b.Properties["CreditsPanelContent"] = new Dictionary<string, string> { ["WordWrap"] = "true", ["TextAlign"] = "HCenter Top", ["TextColour"] = "1 1 1" };
-            b.Text["VersionText"] = "Meitou - Faithful UI";
+            b.Text["VersionText"] = UiMode == UiMode.Meitou ? "Meitou" : "Meitou - Faithful UI";
         }
         else if (id == "new-game")
         {

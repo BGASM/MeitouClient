@@ -5,6 +5,7 @@ namespace Meitou.Game;
 /// <summary>Game-only options; everything else is the world options shared with the viewer (<see cref="WorldOptions"/>).</summary>
 sealed class GameOptions
 {
+    public bool TitlePreview;
     public int? FpsLimit;
     public ulong Seed;
     public bool? VSync;
@@ -38,6 +39,7 @@ sealed class GameOptions
           --seed <n>                 the world seed (default 0)
           --ui <faithful|meitou>      UI mode, independent of graphics; also available in Tab settings (default faithful)
           --ui-showcase              with --screenshot: capture HUD and UI windows (Faithful includes map and menus)
+          --title-preview            with --screenshot: capture the staged Meitou title scene
           --no-population            no town residents or movement (an empty world)
           --new-game [start]         a new game as the NEW_GAME_STARTOFF start (default Wanderer): the player squad at its town, camera on it
           --list-starts              print the available starts and exit
@@ -81,6 +83,7 @@ sealed class GameOptions
                 case "--no-vsync": g.VSync = false; break;
                 case "--ticks": g.Ticks = int.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--no-population": g.NoPopulation = true; break;
+                case "--title-preview": g.TitlePreview = true; g.UiMode = Meitou.Data.Ui.UiMode.Meitou; break;
                 case "--new-game":
                     g.NewGame = true;
                     if (i + 1 < args.Length && !args[i + 1].StartsWith('-')) g.NewGameName = args[++i];

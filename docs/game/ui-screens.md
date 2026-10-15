@@ -268,3 +268,18 @@ separately in [the parity ledger](../faithful-ui-parity.md).
 3. Use gettext `.po` files for text (msgid = English string).
 4. Map projection from the 8192-pixel map and the 36 units/pixel formula; read saves per [save.md](../formats/save.md).
 5. Tutorials: reproduce the `__tutorials.data` header and lists as opaque until their meaning is known.
+
+## Title artwork and location
+
+**Unknown:** an exact playable-world location matching the cover/poster composition (wanderer,
+flared ruined tower, moons). [Lo-Fi's wallpaper page](https://lofigames.com/kenshi-desktop-wallpapers/)
+publishes the image without a location. **Observed:** [community discussion](https://www.reddit.com/r/Kenshi/comments/znnfwj)
+describes it as artwork and suggests several different towers; this is not developer confirmation
+that the scene is absent from the map.
+
+**Verified against the installed base placement layers using `WorldLevelData.Buildings()` and
+the merged building database:** the Watchtower record `4104-D-TwoStorey.mod` has placements
+`2-rebirth-INGAME` in zone 19.13 at approximately X=-57608, Z=-86364 (nearest town: Burn's Tower)
+and `2-Newwworld-INGAME` in zone 24.31 at X=-36274, Z=-707 (nearest town: Dust King Tower).
+These are inspection candidates, not verified poster matches. Searching tower names/mesh paths
+and their placements does not establish that every differently named ruin has been checked.

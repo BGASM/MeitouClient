@@ -69,7 +69,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
     public int Run()
     {
         try { return o.Screenshot is not null ? Screenshot() : Interactive(); }
-        finally { session?.Dispose(); nav?.Dispose(); ownedScene?.Dispose(); }
+        finally { DisposeTitleScene(); session?.Dispose(); nav?.Dispose(); ownedScene?.Dispose(); }
     }
 
     void Boot(VulkanDisplay display, bool interactive)
@@ -178,7 +178,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             () => Meitou.Data.Save.SaveCatalog.Scan(Meitou.Simulation.Saving.QuickSave.DefaultRoot, install.SaveDirectory,
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "kenshi", "save")),
             assets.Find("credits.txt") is { } creditsFile ? File.ReadAllText(creditsFile) : "");
-        if (interactive && start is null && StartSave is null && !IsSandbox && !IsDuel && !g.NoPopulation && player.UiMode == Meitou.Data.Ui.UiMode.Faithful) player.ShowTitle();
+        if (g.TitlePreview || interactive && start is null && StartSave is null && !IsSandbox && !IsDuel && !g.NoPopulation) player.ShowTitle();
         if (nav is not null && (start is not null || !interactive))
         {
             // The squad is placed on the mesh, and a still has its town at once: wait for the zones round the start (a cold build is about 2 s, then cached).
@@ -277,6 +277,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
 
     void DrawWorld(int width, int height)
     {
+        if (TitleVisible) { DrawTitleWorld(width, height); return; }
         double seconds = animClock ? animSeconds : realTime.Elapsed.TotalSeconds;
         if (gpu.Foliage is { } foliage && o.Screenshot is null) foliage.SwaySeconds = seconds;
         // The heat haze's gameTime: game hours since the start (it stops while paused, as in the game).
@@ -287,11 +288,12 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         {
             var sim = session.Simulation;
             weather.Day = (int)session.Clock.Day;
-            weather.Paused = sim.IsPaused;
+            weather.Paused = sim.IsPaused || skyArrival is not null;
             weather.GameSpeed = (float)(sim.Speed > 0 ? sim.Speed : sim.LastNonZeroSpeed);
         }
         UpdateInteriorView();
-        WorldFrame.Draw(gpu, scene, camera, render, width, height, (float)session.Clock.HourOfDay, (float)seconds / 600f, o.FogDistance);
+        WorldFrame.Draw(gpu, scene, camera, render, width, height, presentationHour ?? (float)session.Clock.HourOfDay, (float)seconds / 600f, o.FogDistance,
+            weatherHour: (float)session.Clock.HourOfDay);
     }
 
 }

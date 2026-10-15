@@ -124,7 +124,11 @@ sealed partial class GameHost
             {
                 if (k is SilkKey.ShiftLeft or SilkKey.ShiftRight) shiftDown = true;
                 if (k == SilkKey.Enter && (keyboard.IsKeyPressed(SilkKey.AltLeft) || keyboard.IsKeyPressed(SilkKey.AltRight))) { BorderlessFullScreen.Toggle(window); return; }
-                if (Covered) return;   // under the loading screen only the window's own keys
+                if (Covered)
+                {
+                    if (k is SilkKey.Escape or SilkKey.Space) skyArrival?.Skip();
+                    return;
+                }
                 // F7 hides the game's interface; F6 and the numpad are the cinema's (Space, Delete and the lens keys too while its editor is open).
                 if (k == SilkKey.F7) { interfaceHidden = !interfaceHidden; Console.WriteLine(interfaceHidden ? "interface hidden (F7 shows it)" : "interface shown"); return; }
                 player.UiVisible = PanelLive() && !g.NoPopulation;
@@ -147,7 +151,7 @@ sealed partial class GameHost
                 if (k is SilkKey.ShiftLeft or SilkKey.ShiftRight) shiftDown = false;
                 if (KeyMap.Map(k) is { } key) session.Input.SetKey(key, false);
             };
-            kb.KeyChar += (_, value) => player.UiText(value);
+            kb.KeyChar += (_, value) => { if (!Covered) player.UiText(value); };
         }
         foreach (var mouse in silkInput.Mice)
         {
@@ -172,7 +176,7 @@ sealed partial class GameHost
             mouse.MouseUp += (m, b) =>
             {
                 bool cinemaDrag = cinema.MouseUp();
-                if (!cinemaDrag && KeyMap.Map(b) is { } released) player.MouseUp(released, Pixels(m.Position), shiftDown);
+                if (!Covered && !cinemaDrag && KeyMap.Map(b) is { } released) player.MouseUp(released, Pixels(m.Position), shiftDown);
                 panel?.MouseUp();
                 panelDrag = false;
                 if (KeyMap.Map(b) is { } button) session.Input.SetMouseButton(button, false);
@@ -244,6 +248,7 @@ sealed partial class GameHost
             last = now;
             // The last frame was drawn under the loading screen: a scene load's next stage may run, the warm-up counts it.
             if (Covered) CoveredFrame(dt);
+            AdvanceSkyArrival(dt);
             // The counter: the mean over the last tenth of a second, so a single late frame doesn't read as a drop.
             fpsWindow += dt;
             fpsWindowFrames++;
@@ -260,7 +265,7 @@ sealed partial class GameHost
             DuelFrame(cinema.Playing && !cinemaWasPlaying || cinema.Recording && !cinemaWasRecording);
             (cinemaWasPlaying, cinemaWasRecording) = (cinema.Playing, cinema.Recording);
             long a0 = Stopwatch.GetTimestamp();
-            if (sceneLoad is null) session.Advance(frameDt);   // the world waits while a scene loads
+            if (sceneLoad is null && skyArrival is null) session.Advance(frameDt);   // arrival preserves the loaded world's exact time
             DuelHoldClock();
             advanceTotal += Stopwatch.GetElapsedTime(a0).TotalMilliseconds;
             WorldNews();
@@ -277,6 +282,13 @@ sealed partial class GameHost
             SendFocus(cinemaHolds ? camera.Target : null);
             if (!cinemaHolds) SandboxFollowCamera();
             if (!cinemaHolds) FollowCamera();
+            if (!cinemaHolds) ApplyTitleCamera();
+            if (skyArrival is not null)
+            {
+                ApplyCamera(session.Camera.Current);
+                ApplyTitleCamera();
+                ApplySkyArrival();
+            }
             var size = window.FramebufferSize;
             UpdateView(size.X, size.Y);
             if (display.BeginFrame(size.X, size.Y))
@@ -289,17 +301,19 @@ sealed partial class GameHost
                 profiler?.BeginFrame();
                 // A scene load draws only the loading screen; the warm-up draws whole frames under it (the first frames of a new place build what it needs).
                 bool covered = Covered, sceneLoading = sceneLoad is not null;
-                if (sceneLoad is null) DrawWorld(size.X, size.Y);
+                if (sceneLoading && skyArrival is { AtStars: true })
+                    WorldFrame.DrawLoadingSky(gpu, scene, camera, size.X, size.Y, presentationHour ?? 0, (float)animSeconds, o.FogDistance);
+                else if (!sceneLoading || skyArrival is not null) DrawWorld(size.X, size.Y);
                 cpuSum += Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
                 drawTotal += Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
                 bool shot = screenshotRequested, take = takeFile is not null;
                 // The game's interface (markers, HUD, panels, debug overlays): hidden by F7, the cinema's clean picture and in recorded frames.
-                bool ui = !interfaceHidden && !cinema.Clean && !take && !sceneLoading;
+                bool ui = !interfaceHidden && !cinema.Clean && !take && !covered;
                 player.UiVisible = ui && !g.NoPopulation;
                 screenshotRequested = false;
                 if (ui && overlay is not null && !g.NoPopulation) DrawMarkers(overlay, size.X, size.Y);
                 if (ui && overlay is not null && IsSandbox) DrawSandbox(overlay, size.X, size.Y);
-                if (!g.NoPopulation && !sceneLoading) player.Steer();
+                if (!g.NoPopulation && !covered) player.Steer();
                 if (ui && overlay is not null && !g.NoPopulation) player.Draw(overlay, size.X, size.Y);
                 // The debug overlays are left out of saved pictures: the statistics at the top left, the key list below them, the profiler.
                 if (ui && overlay is not null && !shot)
@@ -325,12 +339,14 @@ sealed partial class GameHost
                 }
                 if (ui) panel?.Draw(size.X, size.Y);
                 // Over everything: the letterbox, and the cinema's editor (F6, also with F7) or its status line (not with F7).
-                if (overlay is not null && !sceneLoading) cinema.Draw(overlay, size.X, size.Y, shot || take || (interfaceHidden && !cinema.EditorVisible));
+                if (overlay is not null && !covered) cinema.Draw(overlay, size.X, size.Y, shot || take || (interfaceHidden && !cinema.EditorVisible));
                 // The loading screen over the whole frame while a scene loads or the world warms up.
                 if (covered && loading is not null && loadingOverlay is not null)
                 {
                     loadingOverlay.Target = backbuffer;
-                    loading.Draw(size.X, size.Y);
+                    if (skyArrival is null) loading.Draw(size.X, size.Y);
+                    else if (!skyArrival.Arriving && sceneLoad?.Clock.Elapsed.TotalSeconds >= 2)
+                        loading.Draw(size.X, size.Y, background: false);
                 }
                 display.Present();
                 profiler?.EndFrame();
@@ -388,6 +404,7 @@ sealed partial class GameHost
         player.DisposeUi();
         EndLoadingScreen();
         overlay?.Dispose();
+        DisposeTitleScene();
         gpu.Dispose();
         silkInput.Dispose();
         return 0;

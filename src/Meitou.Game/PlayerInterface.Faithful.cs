@@ -11,16 +11,16 @@ namespace Meitou.Game;
 sealed partial class PlayerInterface
 {
     string selectedStat = "";
-    public bool UiCapturesPointer => UiVisible && UiMode == UiMode.Faithful && (faithfulScreens.CapturesPointer || mapDrag is not null || inventoryDrag is not null || tradeDrag is not null);
+    public bool UiCapturesPointer => UiVisible && UseScreenInput && (faithfulScreens.CapturesPointer || mapDrag is not null || inventoryDrag is not null || tradeDrag is not null);
     /// <summary>Keys the host keeps for itself (the sandbox's letters), so the faithful window shortcuts leave them alone.</summary>
     public HashSet<Key> ReservedKeys { get; } = [];
-    void UpdateMenuPause() => session.Simulation.RequestedPause = UiMode == UiMode.Faithful ? faithfulScreens.HasModal : menuOpen;
+    void UpdateMenuPause() => session.Simulation.RequestedPause = menuOpen || (UseScreenInput && faithfulScreens.HasModal);
     public bool UiKey(Key key, bool ctrl = false, bool shift = false)
     {
         if (!UiVisible) return false;
         if (key == Meitou.Engine.Input.Key.Escape && CloseContextMenu()) return true;
         // The Meitou mode: Esc closes an open panel, else opens or closes the game menu (it no longer quits at once).
-        if (UiMode == UiMode.Meitou)
+        if (UiMode == UiMode.Meitou && !FrontendActive)
         {
             if (key != Meitou.Engine.Input.Key.Escape) return false;
             if (openPanel is not null && !menuOpen) openPanel = null; else ToggleMenu();
@@ -61,10 +61,10 @@ sealed partial class PlayerInterface
         }
         return false;
     }
-    public void UiText(char value) { if (UiVisible && UiMode == UiMode.Faithful) faithfulScreens.TextInput(value); }
+    public void UiText(char value) { if (UiVisible && UseScreenInput) faithfulScreens.TextInput(value); }
     public bool UiScroll(Vector2 p, float steps)
     {
-        if (!UiVisible || UiMode != UiMode.Faithful) return false;
+        if (!UiVisible || !UseScreenInput) return false;
         ArrangeUi();
         if (MapWheel(p, steps)) return true;
         return faithfulScreens.Wheel(p, steps);

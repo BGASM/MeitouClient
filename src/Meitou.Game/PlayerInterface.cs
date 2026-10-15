@@ -106,7 +106,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     {
         mouse = p;
         if (MapPointerMove(p)) return;
-        if (UiVisible && UiMode == Meitou.Data.Ui.UiMode.Faithful && faithfulScreens.PointerMove(p)) return;
+        if (UiVisible && UseScreenInput && faithfulScreens.PointerMove(p)) return;
         if (dragFrom is { } from && !dragging && Vector2.Distance(from, p) >= DragThreshold) dragging = true;
     }
 

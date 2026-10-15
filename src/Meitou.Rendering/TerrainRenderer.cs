@@ -74,6 +74,8 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     readonly TerrainQuadtree spare;   // the reflection's own tree (its own, smaller picture), so the two passes do not reset each other's ranges every frame
     TerrainQuadtree current = null!;   // the tree the running Draw selects with
     TerrainTextures? textures;
+    bool ownsTextures = true;
+    internal TerrainTextures? TextureSet => textures;
     Frame frame;
 
     const int GridCells = 64;
@@ -115,7 +117,7 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
             coarseTexture = HeightTexture(batch, coarse, coarseSize, coarseSize);
             fineTexture = HeightTexture(batch, fine.Raw, fine.Columns, fine.Rows);
         }
-        PublishGlobals();
+        Activate();
 
         // The patch grid and its index ranges: the whole grid, then the four quarters.
         var grid = new float[(GridCells + 1) * (GridCells + 1) * 2];
@@ -180,7 +182,7 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     readonly List<(TerrainTexture Texture, int Frame)> retired = [];
 
     /// <summary>Uses biome textures and land maps from now on (null: untextured).</summary>
-    public void SetTextures(TerrainTextures? t) => textures = t;
+    public void SetTextures(TerrainTextures? t, bool owns = true) { textures = t; ownsTextures = owns; }
 
     /// <summary>The textures the TERRAIN-mode meshes' biome rows come from (null: none, every row -1): a caller keeping
     /// <see cref="FeatureBiomeRowAny"/> per placement computes it again when this object changes.</summary>
@@ -701,6 +703,17 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     /// The heights as frame globals (docs/renderer-native.md 4.3): the two textures (native, with the linear, clamped sampler their GL versions
     /// had) and the <see cref="TerrainShaders.HeightFunctions"/> uniforms, read when a consumer draws or applies its globals.
     /// </summary>
+    sealed class ActiveTerrain { public TerrainRenderer? Owner; }
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<GpuContext, ActiveTerrain> activeTerrain = new();
+
+    internal void Activate()
+    {
+        var binding = activeTerrain.GetValue(gpu, static _ => new());
+        if (ReferenceEquals(binding.Owner, this)) return;
+        binding.Owner = this;
+        PublishGlobals();
+    }
+
     void PublishGlobals()
     {
         var g = gpu.Globals;
@@ -1096,7 +1109,7 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
         coarseTexture.Dispose();
         fineTexture.Dispose();
         foreach (var r in retired) r.Texture.Dispose();
-        textures?.Dispose();
+        if (ownsTextures) textures?.Dispose();
         foreach (var p in new[] { patchColour, patchDepth, patchPrepass, meshColour, meshSolid, meshDepth }) p.Dispose();
         rockBake?.Dispose();
         gpu.Bindless.Free(BindlessKind.Texture2D, standIn2D);

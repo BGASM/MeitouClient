@@ -3,6 +3,16 @@
 What changed in each release, newest first. The release workflow copies the section of the version it builds into the GitHub release
 notes and refuses to release a version without one: add a `## vX.Y.Z` section with one `- ` line per change before running it.
 
+## v0.10.0
+
+- Meitou UI mode has a live, poster-inspired title scene with a wanderer, damaged tower, rock formations and both moons; Faithful keeps the original title screen
+- New games, Continue and loading saves use a slower, skippable camera transition through the stars, with lighting animated independently of simulation time
+- Startup and scene loading keep the window responsive, show progress and tips, and warm the new view before play
+- Load original Kenshi saves from the menu or command line, choose new-game starts, and return to the main menu without restarting
+- Faithful HUD improvements: character portraits, inventory and trader item icons, floor controls and visibility, and squad selection/follow shortcuts
+- Right-click character actions include trade, first aid, carrying, rescue and looting
+- Known issue: an existing save-schema test reports an extra `campaign` field when comparing against some original saves
+
 ## v0.9.0
 
 - Cinematic camera in the game: numpad shots and the timeline editor, now on F6 (F2..F4 are the game speeds), with keys saved apart from the viewer's; recording steps the whole game at a fixed 60 fps

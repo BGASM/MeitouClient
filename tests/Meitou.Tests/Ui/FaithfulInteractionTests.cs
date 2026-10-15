@@ -28,6 +28,30 @@ public class FaithfulInteractionTests(ITestOutputHelper output)
     static void Click(PlayerInterface ui, string name) => ui.MouseDown(MouseButton.Left, Centre(ui.UiFrame.Last(c => c.Name == name)), false);
 
     [Fact, Slow]
+    public void MeitouTitleUsesTheWorldAndKeepsNewGameDialogsAndModeSwitchingFunctional()
+    {
+        using var session = new WorldSession(Vector3.Zero, (-100, -100, 100, 100), (_, _) => 0);
+        var ui = Ui(session);
+        try
+        {
+            ui.SetUiMode(UiMode.Meitou);
+            ui.ShowTitle();
+            Assert.True(session.Simulation.RequestedPause);
+            Assert.Contains(ui.UiFrame, c => c.Name == "MeitouTitle");
+            Assert.DoesNotContain(ui.UiFrame, c => c.Properties.GetValueOrDefault("ImageResource") == "Kenshi_TitleScreen");
+            Click(ui, "NewGameButton");
+            Assert.Contains(ui.UiFrame, c => c.Name == "BeginButton" && c.Enabled);
+            Assert.True(ui.UiKey(Key.Escape));
+            Assert.DoesNotContain(ui.UiFrame, c => c.Name == "BeginButton");
+            ui.SetUiMode(UiMode.Faithful);
+            Assert.Contains(ui.UiFrame, c => c.Properties.GetValueOrDefault("ImageResource") == "Kenshi_TitleScreen");
+            ui.CloseFrontend();
+            Assert.False(session.Simulation.RequestedPause);
+        }
+        finally { ui.DisposeUi(); }
+    }
+
+    [Fact, Slow]
     public void OriginalTitleNewGameAndExitConfirmationProduceHostRequestsAndPauseTheWorld()
     {
         using var session = new WorldSession(Vector3.Zero, (-100, -100, 100, 100), (_, _) => 0);

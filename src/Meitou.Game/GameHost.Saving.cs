@@ -79,7 +79,7 @@ sealed partial class GameHost
         return reason.Length == 0;
     }
 
-    bool Busy() => saveWrite is { IsCompleted: false } || sceneLoad is not null;
+    bool Busy() => saveWrite is { IsCompleted: false } || Covered;
 
     void QuickSaveNow(string? destination = null)
     {
