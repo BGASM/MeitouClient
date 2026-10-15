@@ -26,7 +26,7 @@ foreach ($project in @("src\Meitou.Game\Meitou.Game.csproj", "tools\Meitou.Model
         -p:DebugType=embedded -p:Version=$numeric -p:InformationalVersion=$Version -o $stage
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish $project failed" }
 }
-# The viewer loads Streamline only when started with DLSS chosen (the game keeps the choice in meitou.user.json instead).
+# The viewer loads Streamline only when started with DLSS chosen (the game loads it on every startup).
 Set-Content -Path (Join-Path $stage "meitou-viewer-dlss.bat") -Encoding ASCII -Value "@`"%~dp0meitou-viewer.exe`" --world --town `"The Hub`" --upscaler dlss %*`r`n@if errorlevel 1 pause"
 
 function Get-Archive([string] $url) {
@@ -87,7 +87,7 @@ Start
    - Otherwise the console asks for your Kenshi folder (the one with kenshi_x64.exe and the data folder) once and keeps it in
      meitou.local.json next to the exe. You can also edit that file, or set the KENSHI_PATH environment variable.
 3. Tab opens the settings (draw distances, anti-aliasing: FXAA, TAA, FSR or DLSS). F10 lists the keys.
-   DLSS (NVIDIA RTX cards): in the game, pick it on the Tab panel's anti-aliasing slider and restart once (the choice is kept in
+   DLSS (NVIDIA RTX cards): in the game, pick it on the Tab panel's anti-aliasing slider, with no restart needed (the choice is kept in
    meitou.user.json); in the viewer, start meitou-viewer-dlss.bat (or add --upscaler dlss).
 
 Requirements: Windows 10/11 x64, a Vulkan 1.3 GPU with a current driver.

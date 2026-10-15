@@ -77,6 +77,9 @@ public sealed record FocusCommand(Vector3 Position) : SimCommand;
 /// <summary>Selects characters (the player's own only; others are ignored). Not additive replaces the selection; additive (shift) adds to it.</summary>
 public sealed record SelectCommand(IReadOnlyList<CharacterId> Characters, bool Additive = false) : SimCommand;
 
+/// <summary>Shows another faction's character in the HUD's information and medical panels without selecting it (a left click on it; <see cref="CharacterId.None"/> clears).</summary>
+public sealed record InspectCommand(CharacterId Target) : SimCommand;
+
 /// <summary>Stop: the characters (the selection when the list is empty) drop their orders and stand.</summary>
 public sealed record StopCommand(IReadOnlyList<CharacterId> Characters) : SimCommand;
 

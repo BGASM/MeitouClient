@@ -6,12 +6,12 @@ using Meitou.Data.Gameplay;
 namespace Meitou.Simulation.Items;
 
 /// <summary>
-/// A character's inventory: its items in sections, with their grid cells. The main section is a grid of <see cref="MainWidth"/> x <see cref="MainHeight"/> cells (an engine
-/// choice: the size of a character's own pockets is <b>Unknown</b>); a backpack's contents are an inventory of the CONTAINER's storage size. Only serial phases change it.
+/// A character's inventory: its items in sections, with their grid cells. The main section is a grid of <see cref="MainWidth"/> x <see cref="MainHeight"/> cells (the
+/// size observed in the vanilla inventory screenshot, docs/game/ui-screens.md); a backpack's contents are an inventory of the CONTAINER's storage size. Only serial phases change it.
 /// </summary>
 public sealed class Inventory(int width, int height)
 {
-    public const int MainWidth = 8, MainHeight = 6;
+    public const int MainWidth = 8, MainHeight = 10;
 
     public Inventory() : this(MainWidth, MainHeight) { }
 

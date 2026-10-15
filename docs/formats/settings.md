@@ -1,73 +1,32 @@
-# Settings: `settings.cfg`, `kenshi.cfg` and the options screen
+# Settings
 
-Every key the game reads from or writes to `settings.cfg`, and what it touches in `kenshi.cfg` (Ogre's own config file): type,
-range, the default when the key is missing, the options-screen label, what the engine does with it, whether it needs a restart,
-and whether the Meitou viewer honours it.
+Reference for settings.cfg, kenshi.cfg and options-screen bindings. **Verified** where original
+exe loader/writer/UI/schema and install values agree; Observed/Unknown entries retain their
+scopes. Complete key/type/default/clamp/effect/restart tables below are authoritative.
+[Input](../game/ui-input.md), [camera](camera.md), [rendering](../viewer.md).
 
-Sources (read for facts only; nothing decompiled is in the repo): in `kenshi_x64.exe` (1.0.68) the settings loader FUN_1403e84f0,
-the settings writer FUN_1403eca90 (the naming pass calls it `Foliage_WriteSettings`; it writes every key, not only foliage), the
-options screen FUN_1403f0260 (tab builder) and FUN_1403ee820 (close), the startup set-up FUN_1408149a0, the language set-up
-FUN_140175a90, the compositor set-up FUN_1403ea7b0, and the consumers named per key below (found through `data_xrefs.tsv` of the
-global each value is stored in); `Plugin_Terrain_x64.dll` (decompiled in full for this doc: `Terrain::setDetailThreshold`,
-`setPatchSize` and the quadtree LOD test); the install's `settings.cfg` (67 lines), `kenshi.cfg`,
-`data/materials/compositors/compositors.cfg`, `data/materials/forward/water.hlsl` and `locale/en_GB/LC_MESSAGES/main.pot` (the
-options labels, all from `options.cpp`). The labels below are the game's English strings; tooltips are paraphrased.
+## Loading and applying
 
-Related docs that go deeper on some keys: [shadows.md](shadows.md#settings-verified-exe-settings-loader-writer-and-options-screen-settingscfg),
-[foliage.md](foliage.md#distances), [post-processing.md](post-processing.md) (FXAA, HeatHaze), [sky.md](sky.md) and
-[camera.md](camera.md) (`view distance`), [zones.md](zones.md#draw-distance-and-distant-towns), [terrain.md](terrain.md),
-[save.md](save.md), [game/ui-input.md](../game/ui-input.md#10-settingscfg-and-the-options-window),
-[game/game-loop.md](../game/game-loop.md), [game/factions-squads-towns.md](../game/factions-squads-towns.md),
-[game/combat.md](../game/combat.md), [game/character-stats.md](../game/character-stats.md).
+Keep distinction between missing-key default, persisted value, loader clamp and UI slider range.
+Not every UI option applies immediately; restart requirements are per key. Do not silently
+interpret an unknown field from its label. settings.cfg user options and kenshi.cfg engine
+terrain/chunk configuration are separate stores. meitou.user.json is the engine's own config;
+its graphics/bindings must not be confused with original files.
 
-## The file and how it is read (Verified: FUN_1403e84f0 and its helpers)
+Terrain detail/chunk size/LOD test, texture quality (mip skipping), water reflection level/range,
+shadows, decals, distance controls, audio and gameplay keys drive different subsystems. A lower
+texture quality changes loaded mips, not anisotropic filtering or screen resolution. Reflection
+levels determine included classes, not just target size. Shadow mode and quality choose different
+pipelines/map dimensions. Meitou honors documented keys where implemented; unsupported settings
+remain unsupported rather than guessed from UI wording.
 
-- Plain text, one `key=value` per line, in the install folder (next to `kenshi_x64.exe`). Keys are case-sensitive and contain
-  spaces (`view distance`, `Shadow Range`); a line matches when it starts with exactly `key=` (no spaces around `=`).
-- The loader runs once at start. Every value is stored in one settings block at `0x142133490` (field offsets below as `+0x..`);
-  consumers read those globals directly. (**Verified** that this is the block's base: `Blood` lands at +0xE4 = `0x142133574`,
-  `view distance` at +0x18 = `0x1421334A8`, and the options sliders, the writer and the consumers all use these addresses.)
-- Parsers: integers with `atoi`, floats with `atof` (so `1.5` in an integer key reads as 1). **Booleans are false only when the
-  value is exactly `0`** (or empty); anything else, including `false`, `No` or `0.0`, reads as true (FUN_140404250 and the
-  hand-written scans compare the first character with `0` and the length with 1).
-- A key that is missing gets the default in the tables below; that default is **not** written back until the options window
-  closes. **Clamps** the loader applies are listed per key (e.g. `view distance` below 500 becomes 6000).
-- The writer FUN_1403eca90 rewrites all keys it knows (everything in the main loader plus `skip stencil tricks` and one line per
-  compositor node). It loads the file, sets each key and saves it, so lines it does not know presumably survive (**Observed**: the
-  load / set / save calls, not tested with a foreign line). It runs when the options window
-  closes after the options were shown (FUN_1403ee820). On that close it also applies: audio volumes and music frequency
-  (FUN_1403e7290), the main camera's far clip from `view distance` (FUN_1406ae960), the shadow mode and map size
-  (`setShadowMode`, [shadows.md](shadows.md)), the decal textures' size (FUN_1408de890, when decals exist), and the window settings
-  into Ogre's config, saved to `kenshi.cfg` (`Full Screen`, `Border`, `Video Mode`; see [kenshi.cfg](#kenshicfg-ogres-config)).
-- Other writers: the language set-up writes `language` / `steam_language`; every save writes `continue`; the autosave writes
-  `autosaveindex`; the startup set-up appends three defaults (`mouse speed vertical/horizontal`, `terrain hi-res distance`) when
-  `mouse speed vertical` is missing; the level editor writes `editor`.
-- Every function that names `settings.cfg` (Verified: the exe's string references) is covered here: the loader, the writer, the
-  start-up set-up, the two language functions (FUN_140175a90, FUN_1401753e0), the compositor set-up, the save code
-  (FUN_14047be70, FUN_14047c310), the level editor (FUN_140777ce0, FUN_14077be90), the crash-dump packer (FUN_140744900, which
-  only adds the file to the dump), and the CONSTANTS loader FUN_14086b2b0, which opens `settings.cfg` but reads nothing from it
-  (its `production speed` and `build speed` come from the CONSTANTS record; **Verified**).
-
-**Options-screen controls** (Verified, FUN_1403f0260 and the combo helpers): sliders are given a min and max and bound to the
-global; combo boxes store each item's **data value** (FUN_1406f6f10 attaches an `int` to the item, FUN_1406fc2a0 selects the
-item whose data equals the global and writes the data back), so the number in the file is the item's data, not its position.
-Labels marked "(need restart)" are the game's own words. Live application: the **View Distance** and **Terrain Detail** sliders
-call FUN_1403e7490 on every change (far clip, reflection far clip, terrain thresholds); the compositor checkboxes rebuild the
-`Kenshi_Main` and `Kenshi_Character_Editor` workspaces (FUN_1403e7640); **Font Size** has its own handler (FUN_1403e84d0). Other
-values are read by their consumers when they run, so whether a change shows at once depends on the consumer (noted per key).
-
-## Graphics: view and window
+### Graphics: view and window
 
 | Key | Type, range | Missing → | Options label | What it does | Restart |
 | --- | --- | --- | --- | --- | --- |
 | `view distance` | float; slider 1500 … 12000 | 5000; **< 500 → 6000** | View Distance | D = value × 10 is the main camera's far clip, the atmosphere haze distances and the water reflection's far clip base; see [sky.md](sky.md), [camera.md](camera.md). Also Ogre's (unused) `setFog` at 0.8 D / 0.96 D (FUN_140815b40) | No (slider applies live) |
 
-The `+0x18` field. The install's file had 5000 when the earlier docs were written and has 12000 on 2026-10-06 (**Observed**).
-
-Window and video settings are not in `settings.cfg`: the options' "Resolution (need restart)", "Full screen (need restart)" and
-"Borderless (need restart)" read and write Ogre's render-system options in `kenshi.cfg` (below).
-
-## Graphics: terrain
+### Graphics: terrain
 
 | Key | Type, range | Missing → | Options label | What it does | Restart |
 | --- | --- | --- | --- | --- | --- |
@@ -77,72 +36,13 @@ Window and video settings are not in `settings.cfg`: the options' "Resolution (n
 | `terrain patch size` | int 0 / 1 | 1 | Terrain Chunk Size (need restart): Small = 0, Large = 1 | Terrain patch grid 16 (0) or 64 (1) quads per side | **Yes** |
 | `terrain hi-res distance` | int | not read | none | **Never read**: only the startup defaults writer appends `terrain hi-res distance=400` (Verified: the only reference to the string is that literal) | — |
 
-**How the three detail values act** (**Verified**: FUN_140815b40 and FUN_1403e7490 call `Terrain::setDetailThreshold(T_near,
-T_far, D_t)`; the plugin's code read in full):
-
-- At start the terrain is created (FUN_140874930) with the plugin defaults `(8, 8, 0)` and immediately overwritten from the
-  settings (FUN_140815b40), so the settings apply from the start. The View Distance and Terrain Detail sliders re-apply all three.
-- The plugin stores T<sub>near</sub>, the ratio T<sub>near</sub> / T<sub>far</sub> and D<sub>t</sub>. For each quadtree node it computes a metric
-  `K × nodeError / max(distance, 1)` (distance from the eye to the node's box). If the ratio is below 1 (far coarser than near), the metric is
-  multiplied by `1 − t + t × ratio` with `t = clamp((distance − D_t) / D_t, 0, 1)`: the effective threshold is T<sub>near</sub> up to
-  D<sub>t</sub> and ramps linearly to T<sub>far</sub> at 2 D<sub>t</sub>. A node is split while the metric exceeds T<sub>near</sub>. With
-  `terrain distant` ≥ `terrain detail` (ratio ≥ 1) there is no ramp and T<sub>near</sub> applies everywhere.
-- **K is the viewport's height in pixels** (**Verified**, 2026-10-06: the plugin's per-camera LOD context set-up stores
-  `Viewport::getActualHeight()` of the camera's last viewport, as a float, at +0x14; the metric function reads it from there). There
-  is no field-of-view term, so the thresholds are "pixels" only approximately: with Kenshi's camera (vertical field of view about 50°,
-  [camera.md](camera.md)) the true projection scale is height / (2 tan 25°) ≈ 1.07 × height, so the game's 5 and 35 are about 4.7 and
-  33 real pixels of height error. The resolution matters: at 1440p the same settings give finer terrain than at 1080p.
-- **The node error is a height in world units** (**Verified**, the plugin's patch build and its tree update): the largest vertical
-  distance any vertex of the node's patch moves when it slides onto the next coarser grid (`|mean of its two neighbours along the odd
-  axis, or the diagonal pair − its height|`), at least 0.1 × the patch's vertex spacing, and at least each child's error (children's
-  errors are carried up to all ancestors).
-- **The eye's height is moved 40% of the way towards the node box's centre height** before the box distance is taken (**Verified**:
-  `eye.y + 0.4 × (centre.y − eye.y)`), so the vertical part of the distance counts 60%: a high camera gets finer terrain below it than
-  the plain distance would give.
-- Each drawn patch's morph factor is set on the CPU from its metric and its parent's (`(T − parent) / (own − parent)`, the parent's
-  taken as 1.001 × its own when not larger) (**Observed**: which way round the vertex shader uses it was not traced).
-- Nodes shallower than depth 4 are always split; nodes at the maximum depth never are (below). Children unused for 500 frames are
-  freed (**Observed**, the frame counter test).
-
-**Chunk size** (**Verified**: FUN_140874930 calls `setPatchSize(value ? 64 : 16)`; the plugin's `setPatchSize`): each patch is
-`size + 1` vertices per side and the quadtree's maximum depth is `15 − (bits of size)`: **10 for Small, 8 for Large**
-(Verified). Taking the depth as counted from 0 at the root (**Observed**: the depth field's origin was not traced, but the result
-matches the heightmap's full sample spacing in [terrain.md](terrain.md)), with the terrain scale 294912 the leaf is 288 units
-(Small) or 1152 units (Large), and in both cases the finest grid step is 18 units: Large
-draws 16 × fewer, 16 × bigger patches over two fewer quadtree levels, which matches the tooltip (faster at long range, more video
-memory per patch). Other plugin parameters are fixed: `setTerrainScale(294912, 9800)`, `setMaterialDistance(30000)` (stored
-squared), `setOgreBuildLimits(250, 100)` ([terrain.md](terrain.md#terrain-lod)).
-
-## Graphics: textures
+### Graphics: textures
 
 | Key | Type, range | Missing → | Options label | What it does | Restart |
 | --- | --- | --- | --- | --- | --- |
 | `texture resolution gimping` | int 0 … 4 | 1 | Texture Quality (need restart): Maximum = 0, High = 1, Medium = 2, Low = 3, Fugly = 4 | Drops top mip levels of DDS textures as they are loaded; sets the texture memory budget | **Yes** (applied at resource load) |
 
-**Mip skipping** (**Verified**: the resource-loading listener FUN_14082ddc0 and the DDS rewriter FUN_14082d840; strings read
-from the exe):
-
-- Applies to resources whose name contains `dds` in any resource group except `Overlaymaps`, `GUI`, `PLSM2` and an empty group
-  name. Levels to drop N = the setting, then:
-  - a name containing `_LO.` drops one fewer;
-  - if N is still above 0, a name **without** `_HI.` outside the group `Landscape` drops one fewer.
-  So at High (1) ordinary textures keep full size and only `_HI.` textures and `Landscape`-group textures lose one level; at
-  Medium (2) ordinary textures lose one, `_HI.` / Landscape two; and so on. Maximum (0) touches nothing.
-- The DDS is rewritten in memory: only block-compressed files whose FourCC is `DXT*` (so DXT1 to DXT5; `DX10` headers and
-  uncompressed formats are left alone), not cube maps (caps2 bit 0x200) and not volumes (bit 0x200000). Per dropped level the top
-  mip's bytes are skipped (w × h bytes, half for DXT1), width and height halve and the mip count drops by one; it stops early
-  when, before a drop, fewer than 2 mips remain or a side is already below 5.
-- The decal system compensates when it reads texture sizes back (FUN_1408dfaf0 shifts the reported size of `.dds` decal sources
-  left by N after the `_LO.` / `_HI.` adjustments, without the `Landscape` group test), so decal atlases keep their layout
-  (**Observed**: the purpose is inferred).
-- **Memory budget** (**Verified**, FUN_140816d90; slot checked against OgreMain's RTTI): every resource manager gets
-  `setMemoryBudget(1 GiB)`, then the TextureManager gets **2 GiB at 0** and **1.5 GiB at 1**; 2 to 4 keep 1 GiB.
-- Label note (**Observed**): `main.pot` lists "Mega-high (danger!)" at `options.cpp:521`, but the exe's first item is
-  "Maximum"; the tooltip recommends more than 4 GB of video memory for the top setting.
-
-Default texture filtering is anisotropic ×16 for every material, not a setting ([post-processing.md](post-processing.md)).
-
-## Graphics: water reflection
+### Graphics: water reflection
 
 | Key | Type, range | Missing → | Options label | What it does | Restart |
 | --- | --- | --- | --- | --- | --- |
@@ -163,33 +63,7 @@ i.e. everything).
 | 3 Buildings | + 20 | buildings |
 | 4 Everything | no list | the listener returns before setting "include", so the exclude mode with an empty list draws every queue |
 
-- At levels 3 and 4 the listener also switches every loaded town to display state 4 for the reflection render and restores each
-  town's previous state afterwards (FUN_1407f60d0; what state 4 is was not traced: **Unknown**, presumably the full town).
-- **The pass only runs when water is visible** (**Observed**, `WaterOcclusionListener` FUN_1409d9f30): with the setting above 0
-  an occlusion query on the water decides it, and the reflection is enabled when more than 100 water pixels passed; at 0 it is
-  disabled.
-- **Level 0 changes the water shaders** (**Verified**: FUN_1402d7280 builds `WaterFP`, `WaterFPBlend` and `WaterFPDistant` with
-  the preprocessor define `NO_REFLECTION,` when the setting is 0; `water.hlsl` then uses a reflection factor of 1, i.e. the
-  environment-cube specular unattenuated). When those programs are rebuilt after a change is **Unknown**.
-- **Reflection range** (**Verified**, FUN_1403e7490): sets the reflection camera's far clip to `view distance × 10 × value`
-  (30000 with the defaults 5000 and 0.6). That function runs only from the View Distance and Terrain Detail sliders; the
-  reflection camera's creation (FUN_1409d8c30) sets only its near clip (5), orientation, FOV and aspect, so until one of those
-  sliders moves in a session the far clip is Ogre's camera default (**Observed**; Ogre's default far distance is 100000, not
-  checked in this OgreMain build). The target size (512 × 512) is fixed in `main.compositor`, not a setting.
-
-## Graphics: shadows
-
-`shadow mode` (0 Disabled, 1 CSM, 2 RTWSM; missing → 0), `shadow quality` (0, 1, 2 → map side 1024, 2048, 4096; missing → 0),
-`Shadow Range` (int, slider 1000 … 9000; missing → 5000; **≤ 10 → 10000**): see
-[shadows.md](shadows.md#settings-verified-exe-settings-loader-writer-and-options-screen-settingscfg). Applied when the options close
-(`setShadowMode(mode, table[quality])`); the range is read by the shadow code every frame (FUN_140864d80, FUN_140865150,
-FUN_140866510). No restart.
-
-**Shadow quality labels are swapped** (**Verified**, the combo helpers above): the list shows "1024 (poor)" with data 1,
-"2048 (nice)" with data 0 and "4096 (some video cards may freak out)" with data 2, and the data indexes {1024, 2048, 4096}. So
-choosing "1024 (poor)" gives a **2048²** map and "2048 (nice)" a **1024²** map.
-
-## Graphics: decals and effects
+### Graphics: decals and effects
 
 | Key | Type, range | Missing → | Options label | What it does | Restart |
 | --- | --- | --- | --- | --- | --- |
@@ -199,38 +73,20 @@ choosing "1024 (poor)" gives a **2048²** map and "2048 (nice)" a **1024²** map
 | `harpoonLimit` | int (stored as float); slider 10 … 500 | 60 | Harpoon limit | Most harpoons / arrows left stuck in the world; adding one beyond it removes one (FUN_14043acf0) | No |
 | `skip stencil tricks` | bool | forced 0 | none | **Not read from the file**: the loader always sets 0 (the 16-bit store at +0x40 writes 0 here and 1 into the next byte); the writer writes the in-memory value. When 0, buildings with an `interior mask` mesh use it (FUN_140561d10) | — |
 
-Labels "Blood" and the decal tooltip ("the quality of blood splats on the terrain", paraphrased) are from `options.cpp:560–568`.
-The terrain plugin adds the blood patches to the render queue one above the terrain's (26) and only for the camera it was given
-as the main one, so reflections never show them (**Verified**, `Terrain::_updateRenderQueue`). **Unknown**: how many decal
-textures exist (a count kept by the decal manager) and their pixel format.
-
-## Post-processing (compositor nodes)
-
-Every node listed in `data/materials/compositors/compositors.cfg` (and in mods' copies) is a `settings.cfg` key of its own name:
-**`FXAA`** and **`HeatHaze`** in the base game (`#SSAO` and `#RTWDebug` are commented out). Bool; **missing → on**. The options
-screen adds one checkbox per node, labelled with the node name ("FXAA", "HeatHaze"); toggling rebuilds the workspaces at once. The
-loader is FUN_1403ea7b0, the writer loops over the node list. Details: [post-processing.md](post-processing.md#heat-haze-verified).
-Bloom, exposure and SSAO have no setting.
-
-## Foliage and distances
+### Foliage and distances
 
 | Key | Type, range | Missing → | Options label | What it does | Restart |
 | --- | --- | --- | --- | --- | --- |
-| `grass range` | float; slider 0 … 3 | 1 | Grass View Range | Grass page range multiplier ([foliage.md](foliage.md#distances)); read by the per-zone set-up FUN_1406d3e30 | Zones loaded afterwards |
+| `grass range` | float; slider 0 … 3 | 1 | Grass View Range | Grass page range multiplier ([foliage.md](foliage.md#materials-sizes-and-grass)); read by the per-zone set-up FUN_1406d3e30 | Zones loaded afterwards |
 | `grass density` | float; slider 0 … 2 | 1 | Grass Density | Multiplies grass candidates per page (FUN_1406d0340) | Zones loaded afterwards |
 | `foliage range` | float; slider 0.1 … 4 | 1; **≤ 0 → 0.1** | Foliage View Range | Mesh foliage page range multiplier (FUN_1406d3e30); a zone gets foliage only when it is above 0 (FUN_1409f9560), which the clamp always makes true | Zones loaded afterwards |
-| `objects view range` | float; slider 1000 … 8000 | 3000; **< 1000 → 1000** | Objects View Range | Rendering distance of building parts ([zones.md](zones.md#draw-distance-and-distant-towns); FUN_140558b40, FUN_14055f6e0) | Objects created afterwards |
+| `objects view range` | float; slider 1000 … 8000 | 3000; **< 1000 → 1000** | Objects View Range | Rendering distance of building parts ([zones.md](zones.md#placement-files-and-assembly); FUN_140558b40, FUN_14055f6e0) | Objects created afterwards |
 | `npc range` | float; slider 1000 … 8000 | 3250; **< 1000 → 3000** | NPC View Range | Character relevance radius ([game-loop.md](../game/game-loop.md)) | No |
 | `feature range` | int, stored as float; slider 0 … 8 | 2; **clamped 0 … 6** | Terrain Feature Range | Square of ±N zones (64 × 64 zone grid) around the camera's zone that map features load for (FUN_140a098e0) | No |
 | `distant town range` | int, stored as float; slider 0 … 8 | 6; **clamped 0 … 10** | Distant Towns Range | Square of ±N zones around the camera's zone that distant towns show for (FUN_140a0b340) | No |
-| `generate distant towns` | bool | 0 | Generate Distant Towns | Build distant meshes for towns without a baked one ([zones.md](zones.md#draw-distance-and-distant-towns); FUN_1400d8350) | Towns loaded afterwards |
+| `generate distant towns` | bool | 0 | Generate Distant Towns | Build distant meshes for towns without a baked one ([zones.md](zones.md#placement-files-and-assembly); FUN_1400d8350) | Towns loaded afterwards |
 
-"Zones loaded afterwards" etc. are **Observed** from where the consumers run (zone or object set-up), not from a test in the game.
-The slider limits of `feature range` and `distant town range` (0 … 8) differ from the loader's clamps (0 … 6, 0 … 10): a slider
-value of 7 or 8 for features is cut back to 6 at the next start (**Verified** both numbers; the in-session effect of 7–8 before
-a restart is **Unknown**).
-
-## Camera and controls
+### Camera and controls
 
 | Key | Type, range | Missing → | Options label | What it does |
 | --- | --- | --- | --- | --- |
@@ -246,16 +102,7 @@ a restart is **Unknown**).
 | `mouse speed horizontal` | float | 1.5 (see text) | none | Scales the raw mouse x movement |
 | `mouse speed vertical` | float | 1.5 (see text) | none | Scales the raw mouse y movement |
 
-- The block mapping of the four camera sliders is now **Verified** (base address above): `camera speed` +0x00, `mouse speed pan`
-  +0x04 = "Camera Rotate Speed X", `mouse speed tilt` +0x08 = "… Y", `camera zoom` +0x0C.
-- `mouse speed horizontal` / `vertical` are **not** in the main loader but are read at start by FUN_1408149a0 (after the
-  launcher dialog closes) into two floats that multiply the mouse's relative x and y in the input listener
-  (`MainListener::vfunc_1`, the results feed the camera code). If `vertical` reads as 0 (missing), both become 1.5 and the three
-  default lines are appended to the file. (**Verified** the reads, the defaults and the multiplication; what the scaled deltas
-  drive beyond the camera functions that read them is **Observed**.) No options control; restart to change.
-- Key bindings live in `controls.cfg` ([ui-input.md](../game/ui-input.md)).
-
-## UI and general
+### UI and general
 
 | Key | Type, range | Missing → | Options label | What it does |
 | --- | --- | --- | --- | --- |
@@ -269,15 +116,7 @@ a restart is **Unknown**).
 | `language` | string, locale code | see text | none in options | The locale folder `locale/<code>/` used for translations |
 | `steam_language` | string, Steam language name | see text | none | The Steam language the `language` was last chosen from |
 
-**Language** (**Observed**, FUN_140175a90): the game has a table of Steam language names, display names and locale codes
-(`english` / `en_GB`, `german` / `de_DE`, `french` / `fr_FR`, `russian` / `ru_RU`, `italian` / `it_IT`, `portuguese` / `pt_BR`,
-`spanish` / `es_ES`, `chinese` / `zh_CN`, `japanese` / `ja_JP`, `korean` / `ko_KR`) plus translations found under `./locale`. On
-Steam, if Steam's current game language differs from `steam_language`, the locale matching Steam's language wins; otherwise
-`language` is used; failing both, the first entry (English). Both keys are written back at once.
-
-## Audio
-
-All floats, sliders 0 … 1, **missing → 0.5**, applied when the options close (FUN_1403e7290 → the audio manager).
+### Audio
 
 | Key | Options label |
 | --- | --- |
@@ -289,7 +128,7 @@ All floats, sliders 0 … 1, **missing → 0.5**, applied when the options close
 | `UI volume` | UI volume |
 | `Music frequency` | Music Frequency (minutes); float, slider 1 … 20, missing → 5 |
 
-## Gameplay
+### Gameplay
 
 | Key | Type, range | Missing → | Options label | Details |
 | --- | --- | --- | --- | --- |
@@ -301,18 +140,14 @@ All floats, sliders 0 … 1, **missing → 0.5**, applied when the options close
 | `Dismemberment` | int 0 … 2 | 1 | Dismemberment: Never = 0, Rare = 1, Frequent = 2 | [combat.md](../game/combat.md), [character-stats.md](../game/character-stats.md) |
 | `civilians` | bool | 1 | none | Loaded and saved; **no reader found** (no instruction addresses its global other than the writer; an access through the block's base pointer would not show up, so **Unknown**) |
 | `Fast zone hopping` | bool | 0 | Fast zone hopping | Keeps a larger area loaded so switching between distant characters skips loading ([game-loop.md](../game/game-loop.md); FUN_140a0f640) |
-| `Auto save` | bool | 1 | Auto save | [save.md](save.md#autosave-and-quicksave) |
+| `Auto save` | bool | 1 | Auto save | [save.md](save.md#saveload-contract) |
 | `Auto save time (minutes)` | float; slider 1 … 30 | 10 | Auto save time (minutes) | same |
 | `User save location` | bool | 1 (see save.md) | User Save Location | Saves in `%LOCALAPPDATA%\kenshi\save` (1) or the install (0); [save.md](save.md) |
 | `continue` | string | — | none | Save the "Continue" button loads; written after every save ([save.md](save.md)) |
-| `autosaveindex` | int | 0 | none | Rotating autosave slot ([save.md](save.md#autosave-and-quicksave)) |
+| `autosaveindex` | int | 0 | none | Rotating autosave slot ([save.md](save.md#saveload-contract)) |
 | `editor` | string, a mod name | none | none (level editor) | Written when the in-game level editor saves a mod ("Save Mod", FUN_140777ce0); read when the editor opens to preselect that mod in its mod list (FUN_14077be90; an unknown name selects the first). Absent from the install's file (the editor was never used) |
 
-**`attacks`** (**Observed**, FUN_140286a70): sets a countdown drawn uniformly from a range per level: Bombardment 0, High 6 … 48,
-Normal 32 … 96, Fewer 72 … 144, Rare 130 … 188; Never leaves it unset. The unit (presumably in-game hours) is **Unknown**. The
-tooltip says the old default was High.
-
-## kenshi.cfg (Ogre's config)
+### kenshi.cfg (Ogre's config)
 
 `kenshi.cfg` is Ogre's own configuration file: the renderer set-up FUN_140818970 references `Plugins_x64.cfg` and `kenshi.cfg`
 (**Observed**: the strings, presumably the `Ogre::Root` constructor's plugin and config file names; the call was not traced), and
@@ -332,15 +167,7 @@ the game calls `Root::restoreConfig` / `saveConfig` (**Verified**), which use th
 | `FSAA` | 1 | Ogre's option; 1 = no multisampling ([post-processing.md](post-processing.md)) |
 | `Floating-point mode`, `Backbuffer Count`, `Driver type`, `Allow NVPerfHUD`, `Information Queue Exceptions Bottom Level`, `Min/Max Requested Feature Levels`, `sRGB Gamma Conversion` | as shipped | Ogre's D3D11 render-system options; Kenshi's code does not reference them (**Observed**: none of the names is a string in the exe) |
 
-All of these need a restart (Ogre reads them when the window is created). The launcher ("Rendering system", "Resolution",
-"Rendering device", "Full screen", "Borderless", "VSync", "Monitor" rows, FUN_140122270) edits them before the game starts; the
-options screen reads `Full Screen` and `Border` from the render system's current config and writes `Full Screen`, `Border` and
-`Video Mode` back when it closes. Other `.cfg` files: `controls.cfg` (key bindings, [ui-input.md](../game/ui-input.md)),
-`resources.cfg` / `Plugins_x64.cfg` (Ogre resources and plugins, [overview.md](overview.md)), `screens.cfg`, `mods.cfg`.
-
-## What the Meitou viewer does with these
-
-`meitou-viewer` **does not read `settings.cfg` or `kenshi.cfg`**. It uses the game's defaults as constants and its own options:
+### What the Meitou viewer does with these
 
 | Setting | Viewer |
 | --- | --- |
@@ -352,38 +179,13 @@ options screen reads `Full Screen` and `Border` from the render system's current
 | `FXAA`, `HeatHaze` | Honoured as options (`--no-fxaa`, `--no-heat-haze`; Faithful switches) |
 | `camera speed`, `camera zoom` | Constants in `KenshiCamera` / `CameraSettings` (500, 125) |
 | `water reflection`, `reflection range` | Honoured as options (2026-10-06): `--water-reflection <0..4>` (viewer default 4; the game's missing-key default is 2) and the reflection range (viewer default 3; the game's 0.6; Tab slider only, the `--reflection-range` option was removed); `--water-reflection 0` / `R` are the on/off switch (`--no-reflections` was removed). See "Viewer: water reflection" below |
-| `terrain detail`, `terrain distant`, `terrain threshold`, `terrain patch size` | Not honoured, deliberately (2026-10-06): the viewer does not replicate the game's per-node rule above. Its CDLOD (64-quad patches) uses its own resolution-aware screen-space error, measured in pixels of the picture actually rendered (after the upscaler's render scale): `--terrain-error <px>` (default 10, Tab slider "Terrain detail"), no far ramp (the `--terrain-far-error` and `--terrain-ramp` options were removed). See [terrain.md](terrain.md#in-the-viewer-terrainquadtree-terrainlod-terrainrenderer-terrainshaders) |
+| `terrain detail`, `terrain distant`, `terrain threshold`, `terrain patch size` | Not honoured, deliberately (2026-10-06): the viewer does not replicate the game's per-node rule above. Its CDLOD (64-quad patches) uses its own resolution-aware screen-space error, measured in pixels of the picture actually rendered (after the upscaler's render scale): `--terrain-error <px>` (default 10, Tab slider "Terrain detail"), no far ramp (the `--terrain-far-error` and `--terrain-ramp` options were removed). See [terrain.md](terrain.md#lod-water-and-sun) |
 | `texture resolution gimping` | Honoured as `--texture-quality <0..4>` (viewer default 0, full size; the game's missing-key default is 1; restart to change, like the game). See "Viewer: texture quality" below |
 | `Decal Range`, `Decal Resolution`, `Blood`, `harpoonLimit` | Not implemented (no decals) |
 | `generate distant towns` | Not honoured: towns without a baked mesh are drawn from their buildings' distant meshes |
 | `npc range`, `mouse speed *`, `invert *`, UI, audio, gameplay keys | Not applicable / not implemented |
 
-### Viewer: texture quality
-
-`--texture-quality <0..4>` (viewer default **0**, full size; the game's value for a missing key is 1; `TextureQuality` in `Meitou.Data.Textures`). Like the game it
-is read when textures load, so it needs a restart; it is set from the options before the world loads.
-
-- **Object and foliage textures** (`WorldTextureCache`): the DDS is rewritten as in "Mip skipping" above (`TextureQuality.LevelsToDrop`
-  for the name and resource group, `DropTopMips` for the rewrite; unit tests in `TextureQualityTests`). The group is the file's
-  `resources.cfg` group (`OgreScriptResources.GroupOfFile`; the first group in ordinal order that holds the file, so a folder listed in
-  two groups is not told apart: **Observed**, a file the game loads through one group and finds in another is a corner case not checked).
-  442 `_HI.` / `_LO.` files exist in the install (mostly `animal`, `characters`), so those branches are live.
-- **Terrain layers** (**Observed** approximation): the game's biome textures are in the `Landscape` group (see
-  [terrain.md](terrain.md#biomes-fields-and-shader-parameters-verified-kenshi_x64exe)), so at 1 and above they lose `level` mips: 2048² becomes
-  1024² at the default. The viewer's layer arrays have one size (2048; the `--layer-size` option was removed), so the size is lowered to `2048 >> drop` for all
-  layers instead of per file. **This halves the terrain texture resolution against earlier builds at the default**; `--texture-quality 0` restores it.
-  Sources smaller than 2048² (a few 1024² and one 512²) are not given a further drop, so they differ from the game slightly.
-- **Memory budget**: the game sets the TextureManager to 2 GiB / 1.5 GiB / 1 GiB (above). The viewer's two texture caches (objects, foliage)
-  each use it as the size at which they unload least-recently-used textures (`HighWaterMb`; before: 1024 always). The game has one manager, so the
-  viewer's total can be up to twice that: **Observed** (an approximation).
-- **Not applied**: sky, water, post-processing and heat-haze textures (the game also drops mips of non-cube `SkyX` / `General` group DXT textures; the viewer loads those at
-  full size), the decal compensation (no decals), and per-file group lookups for the model viewer (it kept level 0; removed in phase 8, [../character-viewer.md](../character-viewer.md)).
-
 ### Viewer: water reflection
-
-`--water-reflection <0..4>` (viewer default **4**; the game's value for a missing key is 2; Tab slider "Water reflection 0-4 (game)", which shows the level's name beside it: 0 off (no reflection pass at all, the low-end setting), 1 landscape, 2 characters, 3 buildings, 4 everything) and the reflection range
-(viewer default 3, the game's 0.6; Tab slider only). `ReflectionPass.Level` / `Range`. What the levels draw, in the viewer's terms (the sky and terrain always come first; the
-viewer's own cut-downs from [render-foliage.md](../render-foliage.md) "Reflections" stay and say *how much*, the level says *what*):
 
 | Level | Game | Viewer |
 | --- | --- | --- |
@@ -392,17 +194,6 @@ viewer's own cut-downs from [render-foliage.md](../render-foliage.md) "Reflectio
 | 2 | + queue 50 | the same: queue 50 is the characters (**Observed** from the label), none exist in the viewer yet |
 | 3 | + queue 20 | + every placed object (buildings and map features are not told apart: **Unknown** which queue the features use) |
 | 4 | no list: everything | + foliage (trees, bushes, rocks; no grass, as before). Which queue the game's foliage is in is **Unknown**; "everything" is assumed to be the only level that includes it |
-
-- **Reflection range**: the mirrored scene's far clip is `Sky.HazeDistance × range` (the game's view distance × 10 × value; 30000 with the defaults),
-  set each frame (the intended value: the game's quirk that it only applies once the View Distance or Terrain Detail slider has moved, before which Ogre's
-  default far clip applies, is **not** reproduced). The viewer's previous constant was 150000, which the range 3 (now the default) reproduces.
-- **Not done**: the "only when more than 100 water pixels are visible" occlusion query. The Vulkan GL layer's `BeginQuery` supports only elapsed-time queries
-  (`QueryTarget` has no samples-passed), and that layer is not part of this change. Town display state 4 at levels 3 and 4 is not reproduced either (**Unknown**).
-- **Checked** (**Observed**, Release, Port North from the west at 1280x720): levels 0 to 1 differ by the mirrored terrain and sky on the sea (mean 0.15 of 255), 1 to 3 add the
-  mirrored town (mean 0.53, 1.5% of pixels over 12), 3 to 4 are identical there (a desert: no foliage; the foliage path is unchanged from before and
-  the defaults, `--water-reflection 4` with range 3, reproduce the old pictures exactly). Range 0.6 against 3 in the default (Meitou) haze: no difference in that view, no hard edge seen.
-- **Default changed**: the viewer used to draw sky, terrain, objects and foliage (level 4) out to 150000; the default is now the game's level 2 and
-  range 0.6, so objects and foliage no longer appear in reflections unless `--water-reflection 3` / `4` is given.
 
 ## Unknowns
 
@@ -414,3 +205,16 @@ viewer's own cut-downs from [render-foliage.md](../render-foliage.md) "Reflectio
 - The number and pixel format of the decal textures; the unit of the `attacks` timers; the `font size2` mapping.
 - Whether anything reads `civilians`.
 - In-session effect of `feature range` 7 or 8 (above the loader's clamp).
+
+## Expression reference
+
+- The file and how it is read: `key=value`; `key=`; `=`
+- Graphics: terrain: `terrain hi-res distance=400`; `t = clamp((distance − D_t) / D_t, 0, 1)`
+- kenshi.cfg: `Render System=<name>`
+- Viewer: water reflection: `uReflect = 0`
+
+## Evidence index
+
+Evidence scopes below apply only to their named sources/checks.
+
+- The file and how it is read (Verified: FUN_1403e84f0 and its helpers)

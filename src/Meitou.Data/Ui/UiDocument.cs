@@ -12,6 +12,8 @@ public sealed record UiControl(string Name, string Type, UiRect Bounds, string C
 /// <summary>A frame shared by both frontends; bindings supply data and visibility without changing source documents.</summary>
 public sealed class UiBindings
 {
+    /// <summary>Scale pixel-based template chrome along with viewport-relative layouts.</summary>
+    public float TemplateScale { get; set; } = 1;
     public Dictionary<string, string> Text { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, string> Actions { get; } = new(StringComparer.Ordinal);
     public HashSet<string> Hidden { get; } = new(StringComparer.Ordinal);
@@ -40,7 +42,8 @@ public static class MyGuiPresentation
             if (props.GetValueOrDefault("Visible") == "false") return;
             var bounds = bindings.Positions.TryGetValue(w.Name, out var positioned) ? positioned : w.RealPosition ? w.Position.RelativeTo(parent, true)
                 : props.TryGetValue("TemplateReferenceWidth", out var rw) && props.TryGetValue("TemplateReferenceHeight", out var rh)
-                    ? w.Position.AlignTo(parent, float.Parse(rw, System.Globalization.CultureInfo.InvariantCulture), float.Parse(rh, System.Globalization.CultureInfo.InvariantCulture), w.Align)
+                    ? new UiRect(w.Position.X * bindings.TemplateScale, w.Position.Y * bindings.TemplateScale, w.Position.Width * bindings.TemplateScale, w.Position.Height * bindings.TemplateScale)
+                        .AlignTo(parent, float.Parse(rw, System.Globalization.CultureInfo.InvariantCulture) * bindings.TemplateScale, float.Parse(rh, System.Globalization.CultureInfo.InvariantCulture) * bindings.TemplateScale, w.Align)
                     : w.Position.RelativeTo(parent, false);
             if (bindings.Progress.TryGetValue(w.Name, out float fraction)) bounds = bounds with { Width = bounds.Width * Math.Clamp(fraction, 0, 1) };
             string caption = bindings.Text.GetValueOrDefault(w.Name) ?? props.GetValueOrDefault("Caption") ?? "";

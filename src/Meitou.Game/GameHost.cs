@@ -234,9 +234,6 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         return new GameClock(startHour, startDay, sunrise: c.Sunrise, sunset: c.Sunset, daysPerYear: c.DaysPerYear);
     }
 
-    /// <summary>DLSS asked for, on the command line or in the saved settings: Streamline must be loaded before the Vulkan device.</summary>
-    bool WantsDlss() => o.Post.Upscale.Kind == UpscalerKind.Dlss || !o.Post.Upscale.Explicit && config.Graphics.TryGetValue(WorldFrame.UpscalerSliders[0], out float k) && WorldFrame.AntiAliasingKind(k) == UpscalerKind.Dlss;
-
     void ApplyCamera(CameraState s)
     {
         camera.Target = s.Target;

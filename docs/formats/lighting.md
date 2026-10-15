@@ -1,23 +1,27 @@
 # Scene lighting
 
-How Kenshi lights the world it has drawn into the G-buffer: the sun, the ambient (image-based) light, the per-biome
-ambient map, and the exposure that turns the HDR result into the screen image. The sky itself is in [sky.md](sky.md), the
-render order and the composite in [post-processing.md](post-processing.md). Labels as in [../README.md](../README.md).
+Original deferred.hlsl/lighting materials, SkyX/exe setters, ambient map and DDS research.
+Field/formula tables retained; [sky](sky.md), [shadows](shadows.md), [lights](lights.md),
+[post](post-processing.md). Engine GI is separate from original fixed ambient.
 
-Sources: the shipped shaders `data/materials/deferred/deferred.hlsl`, `deferred.material`, `gbuffer.hlsl`,
-`common/lightingFunctions.hlsl`, `common/common.program` (read for facts only), `kenshi_x64.exe` (the sky controller's
-update, its creation, the ambient map builder, the deferred shared-parameter update) and `SkyX_x64.dll`
-(`AtmosphereManager::getColorAt`, `SkyX::setLightingMode`), decompiled outside the repository on 2026-10-04.
+## BRDF and inputs
 
-## The main lighting pass (Verified: `deferred.material` `Main_Lighting_RTW`, `deferred.hlsl` `main_fs`)
+**Verified** fullscreen deferred sun/ambient; separate point/spot passes. GBuffer YCoCg albedo,
+checkerboard chroma, metalness/gloss/normal, translucency/emissive and depth. Unclamped HDR.
+Dielectric F0=0.04; metal uses albedo for specular. Diffuse/sun/environment formula block below;
+GGX alpha=roughness², roughness=1-0.99gloss, Schlick-like exponential Fresnel and visibility.
+Specular cube mip7*(1-gloss), dominant-direction blend, RGB*alpha*10 and analytic environment BRDF.
+Irradiance cube16² BC3/5mips reads mip3, RGB*alpha*4; specularity256² BC3/9mips. World cube-face
+orientation not confirmed. Ambient map RGB=biome ambient, alpha=trunc(clamp(sun-brightness,0,2)*127.5);
+1024² covers±147456 with camera-origin-adjusted mapping. Missing biome white/0x80.
 
-One full-screen pass computes the sun and the ambient light for every G-buffer pixel; point and spot lights are added by
-separate passes (`DeferredLight`, see [lights.md](lights.md)). Inputs per pixel: albedo (stored as YCoCg with the chroma checkerboarded over two pixels and
-rebuilt with an edge filter: unscaled, 8 bits), metalness, gloss, normal, a translucency/emissive byte, the depth. Per frame:
-`sunDirection`, `sunColour`, `envColour`, `ambientParams`, `worldSize` / `worldOffset`, and the textures `ambientmap.png`, the
-cube maps `mp_irradiance.dds` (diffuse) and `mp_specularity.dds` (specular), and the shadow map.
+**Verified** real-sun sky colour at direction+(0,0,0.04), /5.6, black belowY=-0.2.
+SunDirection lighting clampsY>=0 then normalizes; daylight sun.w differs from real-sun direction.
+Ambient factorclamp(5L.y+0.2,0.1,1) bottoms0.2 due clamp, not0.1. Ambient/env shared defaults
+have no found setters; only read components apply. Shadows multiply sun terms, not ambient.
+Exposure band/composite is authoritative in post reference. [render-sky](../render-sky.md).
 
-For a dielectric (metalness 0) the result is
+### The main lighting pass (Verified: `deferred.material` `Main_Lighting_RTW`, `deferred.hlsl` `main_fs`) — layout/example
 
 ```
 sun     = sunColour.rgb · sunColour.w · ambientParams.w · ambientMap.a · 2
@@ -26,73 +30,7 @@ envDiff = irradiance(N) · (1 − 0.04) · ambientMap.rgb · envColour.w · clam
 colour  = albedo · (diffuse + envDiff) + sunSpecular + envSpecular + albedo · emissive
 ```
 
-- `1 − 0.04`: the diffuse share left by a dielectric's specular colour 0.04 (`1 − mean(specColour)`); a metal's albedo goes to
-  its specular colour instead.
-- `L` is `sunDirection`, towards the sun. The sky controller sets it from SkyX's sun direction with **y clamped to 0** and
-  renormalised (**Verified**, exe sky update), so at night the sun "lies on the horizon": `N·L` still lights faces that look
-  towards it, but `sun` is zero by then (below), and the ambient factor `clamp(5 L.y + 0.2, 0.1, 1)` bottoms out at **0.2**, not
-  0.1. It is 1 from a sun height of 0.16 (9 degrees) up.
-- `irradiance(N)`: `mp_irradiance.dds` looked up in the normal's direction at mip level 3, `rgb · a · 4`.
-- Sun specular: a GGX lobe (`D = α² / (π (cos²θh (α² − 1) + 1)²)`, `α = roughness²`, `roughness = 1 − 0.99 · gloss`), a Fresnel
-  term `F0 + (1 − F0) · 2^((−5.55473 c − 6.98316) c)` with `c = L·H`, a visibility `1 / (c² (1 − k²) + k²)` with `k = α / 2`, all
-  times `N·L` and the light colour, divided by π.
-- Environment specular: `mp_specularity.dds` at mip `7 (1 − gloss)` along a direction between the normal and the reflected
-  view (Frostbite's "dominant direction", `lerp(N, R, gloss (√gloss + roughness))`), `rgb · a · 10`, times Lazarov's analytic
-  environment BRDF for the gloss and `N·V`, then times `ambientMap.rgb · envColour.w · clamp(5 L.y + 0.2, 0.1, 1)` like the
-  diffuse part.
-- The result goes into the HDR target (`R11G11B10_FLOAT`) unclamped; the atmosphere haze is blended over it afterwards
-  ([sky.md](sky.md#haze-distance-fog-how-vanilla-does-it)).
-
-### `sunColour` (Verified: exe sky update, `SkyX_x64.dll`)
-
-Each frame the sky controller asks SkyX for its colour in a direction next to the sun and divides it down:
-
-- `sunColour.rgb = getColorAt(sunDir + (0, 0, 0.04)) / (4 · exposure)` with SkyX's exposure 1.4, so `/ 5.6`. The offset is a fixed
-  +0.04 in world Z (`getColorAt` normalises the direction), about 2.3 degrees from the sun, so the colour includes much of
-  the Mie glow around the sun. When the sun is lower than `y = −0.2` the colour is (0, 0, 0).
-- `getColorAt` is SkyX's CPU copy of the skydome shader: the same 4-sample O'Neil integral from SkyX's fixed camera
-  (`inner + 0.01 · thickness`), with the game's options. In HDR mode, which the game selects (`setLightingMode(1)`; mode 0 is the
-  `1 − exp(−exposure · x)` LDR form), it returns `exposure · (rayleighPhase · Rayleigh + miePhase · Mie)` plus the night glow
-  `nightmult · ((0.05, 0.05, 0.1) (2 − 0.75 saturate(−sunY)) (1 − dirY)³)^2.2`, `nightmult = saturate(1 − 10 · max channel)`.
-- `sunColour.w` is a daylight scale: with `c` a sky controller value (1.0, set when the sky is created; no other writer found
-  in the sky code, **Observed**), `w = 0.5 c + (c − 0.5 c) · sunY` while the sun is up (0.5 at the horizon, 1 at the zenith),
-  `w = 0.5 c − 0.5 c · 10.8 · sunY` (sunY negative) below, i.e. `0.5 + 5.4 sunY`, clamped at 0: gone when the sun is 0.093
-  (5.3 degrees) under the horizon.
-- So the sun's light is `sunColour.rgb · w · ambientMap.a · 2`, and a white surface facing the sun reflects
-  `π · 0.96 ·` that.
-
-### `ambientParams`, `envColour` (Verified: no setter)
-
-`common.program`'s `AmbientParams` defaults: `ambientParams (0.89, 0.66, 0.16, 1)`, `envColour (1, 1, 1, 1)`. Neither name occurs
-in `kenshi_x64.exe` or any DLL of the install (byte search for the strings), and the exe's other writes to the `AmbientParams`
-block are `worldSize` (below), `zenithLight` and `nadirLight` (the sky update; declared only by `SkyX_Clouds.hlsl`, which uses `zenithLight`, [clouds.md](clouds.md)). So in the
-lighting pass `ambientParams.w = 1` and `envColour.w = 1`; `envColour.rgb`, `groundLight` and `ambientParams.xyz` are not read
-by `main_fs`.
-
-### The ambient map (Verified: exe builder, against `data/newland/land/overlaymaps/ambientmap.png`)
-
-`ambientmap.png` is built by the game from the biome map and the BIOMES records, an image named `ambientmap` in
-`data/newland/land/overlaymaps`: for each pixel of the biome map (sampled down to the ambient map's size) the BIOMES record with that
-`index` colour gives
-
-- **rgb** = the record's `ambient light` (an int, 0xRRGGBB);
-- **alpha** = `sun brightness` clamped to 0..2, × 0.5 × 255, truncated to a byte; the shader's `ambientMap.a · 2` gives the sun
-  brightness back (1 → 127 → 0.996);
-- a biome-map colour without a record: white, alpha 0x80.
-
-The shipped `ambientmap.png` (1024², RGBA) matches: its 14 colours are exactly the records' (`D6D6DB` / alpha 0x7F the most
-common, `D6D6DB` / 0x30 for Ashlands' `sun brightness` 0.38, `827A47` / 0x5B for the swamps' 0.72, `FFFFFF` / 0xA8 for Serpentine
-Wastes' 1.32, ...). Merged load order values: most biomes have `ambient light` `FFFFFF` or `D6D6DB` and `sun brightness` 1;
-the swamps `827A47` (a dark olive), Skinner's Roam `A19EA3`, Artery `BEBEBE`.
-
-The texture covers the world: `mapCoord = (world.xz + worldOffset.xz) · worldSize.xy + worldSize.zw` with
-`worldSize = (1 / 294912, 1 / 294912, 0.5, 0.5)` adjusted for the camera-relative origin, i.e. the square ±147456 (**Verified**,
-the deferred shared-parameter update). Clamped, filtered (Ogre's default bilinear; **Observed**, the material sets no filtering).
-
 ### The irradiance and specular cubes (Verified: the files, `DdsReader`)
-
-`mp_irradiance.dds`: a 16² BC3 cube with 5 mips. It is a fixed environment: it does not change with the time of day (only the
-`clamp(5 L.y + 0.2, 0.1, 1)` factor and the biome's ambient colour scale it). `rgb · a · 4` per face, averaged at mip 3 (2² texels):
 
 | Face | rgb · a · 4 |
 |---|---|
@@ -103,41 +41,21 @@ the deferred shared-parameter update). Clamped, filtered (Ogre's default bilinea
 | +Z | (1.33, 1.45, 1.80) |
 | −Z | (1.19, 1.39, 1.79) |
 
-So a surface facing up gets about (1.05, 1.15, 1.45) of blue-white ambient light (× 0.96), a surface facing down a warmer
-ground bounce. `mp_specularity.dds`: 256² BC3 cube, 9 mips. Which way the cube's faces are oriented in Kenshi's world (D3D's
-cube convention against Ogre's right-handed world) is **Unknown**; the faces differ by at most 25%.
+## Expression reference
 
-## Exposure (Verified: exe sky update and sky creation, `post/hdrfp4.hlsl`)
+- The main lighting pass: ` sun = sunColour.rgb · sunColour.w · ambientParams.w · ambientMap.a · 2 diffuse = π · max(N·L, 0) · sun · shadow · (1 − 0.04) (translucent pixels also take light from behind) envDiff = irradiance(N) · (1 − 0.04) · ambientMap.rgb · envColour.w · clamp(5 L.y + 0.2, 0.1, 1) colour = albedo · (diffuse + envDiff) + sunSpecular + envSpecular + albedo · emissive `
+- `sunColour`: `sunColour.rgb = getColorAt(sunDir + (0, 0, 0.04)) / (4 · exposure)`; `y = −0.2`; `nightmult = saturate(1 − 10 · max channel)`; `w = 0.5 c + (c − 0.5 c) · sunY`; `w = 0.5 c − 0.5 c · 10.8 · sunY`
+- `ambientParams`, `envColour`: `ambientParams.w = 1`; `envColour.w = 1`
+- The ambient map: `mapCoord = (world.xz + worldOffset.xz) · worldSize.xy + worldSize.zw`; `worldSize = (1 / 294912, 1 / 294912, 0.5, 0.5)`
+- Exposure: `MIN_LUMINANCE = exposure min · lerp(night darkness, 1, saturate(5 · sunY))`
 
-The composite scales the HDR image by `0.55 / adapted`, `adapted` the scene's mean Rec. 601 luminance (linear) smoothed
-over about 2 s and clamped to `[MIN_LUMINANCE, MAX_LUMINANCE]` ([post-processing.md](post-processing.md#exposure-and-tone-mapping-verified)).
-The exe sets both: `MAX_LUMINANCE` = CONSTANTS `exposure max` (1.2 in GLOBAL CONSTANTS after all mods, the same in the base game's own load order; Verified by loading both) once at creation, and every frame
-`MIN_LUMINANCE = exposure min · lerp(night darkness, 1, saturate(5 · sunY))` with `exposure min` 0.8 and `night darkness` 0.35
-(sunY: the sun's real height). By day the band is 0.8..1.2, a scale of ×0.69 to ×0.46; at night it opens down to 0.28, up to
-×1.96, which is what keeps the night readable. So **`night darkness` is the night's exposure floor** (resolves an Unknown in
-[sky.md](sky.md)).
+## Evidence index
 
-**Observed** (the viewer's mean luminance in the game's units at `--at -51468,-14324 --distance 3000 --pitch 8 --yaw 95 --weather Default`): 0.66 at 13:00, 0.33 at 22:30, 0.16 at 23:00, 0.042 from 0:00 to 3:00, 0.21 at 5:30, 0.32 at 6:00, 0.45 at 7:00. The mean falls well under the band's floor at night (0.28), so the auto exposure's clamped value hides it; the viewer's `nightgrade` switch reads the unclamped mean ([render-post.md](../render-post.md) "Night grading"). The land has no moon light: the night's light is the irradiance cube times 0.2, lifted by the floor.
+Evidence scopes below apply only to their named sources/checks.
 
-## What the viewer does
-
-See [render-sky.md](../render-sky.md): the world view lights in these units (sun, irradiance cube, ambient map, the same
-GGX and environment terms with the viewer's gloss), draws the sky with SkyX's own formula, and applies the game's exposure from
-the measured mean luminance. The sun term (diffuse and specular, not the ambient or environment light) is multiplied by the
-shadow term of the game's CSM mode ([shadows.md](shadows.md)), on by default (`--shadow-range 0` turns it off). Not reproduced: the temporal
-adaptation (screenshots use the steady state), point lights, translucency, and dust on objects.
-
-**Planetshine** (Meitou's `planetshine` switch, a viewer feature the game does not have; [sky.md](sky.md#planetshine-meitou)). The `L` and `sunColour` above are what
-the game feeds the pass; with the switch on the viewer feeds the same pass the sun's light and the big planet's together: `sunColour · w` becomes the
-sum of the sun's and the planet's light (the planet's from its phase, size and mean albedo, scaled by a strength), and `L` the two directions
-weighted by the square root of their luminances, so after dusk the surfaces are lit from the planet (12° up) instead of from the horizon.
-The ambient factor `clamp(5 L.y + 0.2, 0.1, 1)` is still taken from the **sun's** clamped direction (the planet's height would raise the night ambient
-fivefold), and the exposure floor is unchanged.
-
-**Eye height.** Nothing in the lighting pass depends on the eye's height (only on the direction towards it), and the sky and
-`sunColour` come from SkyX's fixed camera, which suits the game's camera (at most 1840 above its pivot, [camera.md](camera.md)).
-The viewer keeps both as they are at any height (from high up the sky looks as it does from the ground: a viewer choice, the
-game has no such view). Two viewer terms do change above the game's camera heights, by the altitude weight of
-[sky.md](sky.md#in-the-viewer---haze-kenshi-default-and-physical): the haze moves to the physical model, and the water's
-widened sun glint takes the Fresnel factor the game's GGX sun specular has (`F0 + (1 − F0) 2^((−5.55473 c − 6.98316) c)`, F0 0.04),
-which keeps the sun's reflection from becoming a large blown-out disc on the sea.
+- The main lighting pass (Verified: `deferred.material` `Main_Lighting_RTW`, `deferred.hlsl` `main_fs`)
+- `sunColour` (Verified: exe sky update, `SkyX_x64.dll`)
+- `ambientParams`, `envColour` (Verified: no setter)
+- The ambient map (Verified: exe builder, against `data/newland/land/overlaymaps/ambientmap.png`)
+- The irradiance and specular cubes (Verified: the files, `DdsReader`)
+- Exposure (Verified: exe sky update and sky creation, `post/hdrfp4.hlsl`)

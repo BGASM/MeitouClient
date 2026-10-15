@@ -47,6 +47,8 @@ internal sealed class FogVolumes
 
     /// <summary>Off: no volume is drawn (<c>--no-fog-volumes</c>; also while the simple sky is on).</summary>
     public bool Enabled { get; set; } = true;
+    /// <summary>Presentation-only: the placed volumes of <c>fogfeatures.dat</c> are left out and only the effects' are drawn (the Meitou title's staging); false in play.</summary>
+    public bool HidePlaced { get; set; }
     /// <summary>Off: nothing is left out for being hidden by the fog (<c>--no-fog-cull</c>; see <see cref="Hidden(Vector3, Vector3, CullKind)"/>).</summary>
     public bool CullEnabled { get; set; } = true;
     /// <summary>What <see cref="Hidden(Vector3, Vector3, CullKind)"/> left out since the last <see cref="Update"/>, by <see cref="CullKind"/> (statistics).</summary>
@@ -298,7 +300,7 @@ internal sealed class FogVolumes
         if (on && Enabled)
         {
             var wedge = Wedge.From(forward, fieldOfView, aspect);
-            foreach (var v in statics) Consider(v, eye, far, wedge);
+            if (!HidePlaced) foreach (var v in statics) Consider(v, eye, far, wedge);
             int e = 0;
             if (effectFogs is not null)
                 foreach (var fog in effectFogs)

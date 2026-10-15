@@ -15,7 +15,7 @@ sealed partial class PlayerInterface
 
     bool InventoryPointerDown(Vector2 p)
     {
-        if (!UiVisible || UiMode != UiMode.Faithful || faithfulScreens.HitTest(p) is not { } picked) return false;
+        if (!UiVisible || !UseScreenInput || faithfulScreens.HitTest(p) is not { } picked) return false;
         var bounds = picked.Control.Bounds;
         Vector2 Grab() => (p - new Vector2(bounds.X, bounds.Y)) / new Vector2(bounds.Width, bounds.Height);
         if (picked.Control.Properties.TryGetValue("TradeItem", out var stockIndex))
@@ -37,7 +37,7 @@ sealed partial class PlayerInterface
         var moving = inventoryDrag;
         tradeDrag = null;
         inventoryDrag = null;
-        if ((buying is null && moving is null) || !UiVisible || UiMode != UiMode.Faithful) return;
+        if ((buying is null && moving is null) || !UiVisible || !UseScreenInput) return;
         ArrangeUi();
         if (faithfulScreens.HitTest(p) is not { } hit) return;
         var trade = session.CurrentSnapshot.Trade;
@@ -80,7 +80,7 @@ sealed partial class PlayerInterface
         x = y = 0;
         var controls = faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent).First(f => f.Id == screen).Controls;
         var slot = controls.FirstOrDefault(c => c.Name == slotName);
-        if (slot is null || columns <= 0 || rows <= 0 || !slot.Bounds.Contains(p.X, p.Y)) return false;
+        if (slot is null || columns <= 0 || rows <= 0 || !slot.Bounds.Contains(p.X, p.Y) || slot.Clip is { } clip && !clip.Contains(p.X, p.Y)) return false;
         x = (int)MathF.Floor((p.X - slot.Bounds.X) / slot.Bounds.Width * columns - grab.X * width + 0.5f);
         y = (int)MathF.Floor((p.Y - slot.Bounds.Y) / slot.Bounds.Height * rows - grab.Y * height + 0.5f);
         return true;

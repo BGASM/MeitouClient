@@ -1,7 +1,7 @@
 # Camera
 
 How far and how high the game's camera can go: what the haze and lighting (which assume an eye near the ground, see
-[sky.md](sky.md#haze-distance-fog-how-vanilla-does-it)) can be relied on for, and where the viewer's own choices begin.
+[sky.md](sky.md#haze-and-weather)) can be relied on for, and where the viewer's own choices begin.
 Labels as in [../README.md](../README.md).
 
 Sources: `kenshi_x64.exe` (the camera rig's set-up, its zoom, pitch, movement and ground-clearance steps, the settings loader;

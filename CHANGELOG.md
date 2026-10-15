@@ -5,7 +5,7 @@ notes and refuses to release a version without one: add a `## vX.Y.Z` section wi
 
 ## v0.10.0
 
-- Meitou UI mode has a live, poster-inspired title scene with a wanderer, damaged tower, rock formations and both moons; Faithful keeps the original title screen
+- Meitou UI mode has a live title scene: the real world at sunrise near Okran's Shield, the sun turned into the view, both moons, a lone wanderer and the brush-stroke Kenshi logo; Faithful keeps the original title screen
 - New games, Continue and loading saves use a slower, skippable camera transition through the stars, with lighting animated independently of simulation time
 - Startup and scene loading keep the window responsive, show progress and tips, and warm the new view before play
 - Load original Kenshi saves from the menu or command line, choose new-game starts, and return to the main menu without restarting

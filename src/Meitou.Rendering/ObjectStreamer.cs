@@ -68,6 +68,33 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
     /// <summary>No zone is laid out until the landmarks are collected (<see cref="SetLandmarks"/>), or a zone laid out before would hold them too.</summary>
     public bool WaitForLandmarks { get; set; }
 
+    /// <summary>
+    /// Presentation-only placements added to the zones they stand in (the Meitou title's staging). Setting or clearing it lays those zones out again;
+    /// null, the world as the game places it, in play.
+    /// </summary>
+    public IReadOnlyList<PlacedMesh>? Staged
+    {
+        get => staged;
+        set
+        {
+            var touched = (staged ?? []).Concat(value ?? []).Select(ZoneOf).Distinct().ToList();
+            staged = value;
+            foreach (var coordinate in touched)
+            {
+                zones.Remove(coordinate);
+                jobs.Remove(coordinate);
+                if (!populated.Any(p => p.Coordinate == coordinate))
+                {
+                    var (x, z) = WorldLayout.ZoneOrigin(coordinate);
+                    populated.Add((coordinate, x, z));
+                }
+            }
+        }
+    }
+    IReadOnlyList<PlacedMesh>? staged;
+
+    static ZoneCoordinate ZoneOf(PlacedMesh p) => WorldLayout.ZoneOf(p.Transform.M41, p.Transform.M43);
+
     /// <summary>Makes the landmark pseudo-zone from the collected placements (the render thread, once) and lets the zones be laid out without them.</summary>
     public void SetLandmarks(List<(PlacedMesh Placed, float Radius)> placements)
     {
@@ -128,10 +155,12 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
         {
             if (jobs.Count >= MaxJobs || Paused || WaitForLandmarks) break;
             var landmarkClass = Landmarks;
+            var extra = staged;
             jobs[coordinate] = BackgroundWork.Run(() =>
             {
                 var laid = objects.BuildZone(coordinate);
                 if (landmarkClass is not null) laid.Items.RemoveAll(landmarkClass.IsLandmark);   // they live in LandmarkZone
+                if (extra is not null) laid.Items.AddRange(extra.Where(p => ZoneOf(p) == coordinate));
                 return laid;
             });
         }
@@ -180,7 +209,8 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
 
     Instance Make(PlacedMesh p, bool stand, Zone zone)
     {
-        bool terrainMode = p.Kind == PlacedKind.MapFeature && p.Source.GetInt("texture mode") == 2;
+        // A map feature names its texturing "texture mode", a foliage mesh (staged by the Meitou title) "material type"; 2 is TERRAIN in both.
+        bool terrainMode = p.Kind == PlacedKind.MapFeature && p.Source.GetInt(p.Source.Type == Meitou.Data.Fcs.FcsRecordType.FOLIAGE_MESH ? "material type" : "texture mode") == 2;
         var mesh = meshes.Get(p.MeshPath, distant: stand);
         if (terrainMode) mesh.KeepLevelIndices = true;
         var inst = new Instance { Placed = p, Mesh = mesh, Transform = p.Transform, Centre = p.Transform.Translation, TerrainMode = terrainMode, Stand = stand };

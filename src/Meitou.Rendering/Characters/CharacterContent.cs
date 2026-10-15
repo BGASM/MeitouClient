@@ -405,7 +405,7 @@ internal sealed class CharacterContent : IDisposable
     BodyShapeData? Shape(CharacterAppearance c, SkeletonRig rig)
     {
         if (rig.BoneCount != CharacterShape.HumanBoneCount) return null;
-        var input = CharacterShape.InputFor(db, c);
+        var input = c.Shape ?? CharacterShape.InputFor(db, c);
         var shape = CharacterShape.Compute(input, name => rig.Handle(name) is not null);
         return rig.Shape(shape.BoneSize, shape.PositionalSize, shape.MovementScale);
     }
@@ -571,6 +571,7 @@ internal sealed class CharacterContent : IDisposable
             m.Description = $"icon {spec.Type} '{spec.Name}'";
             m.Tex[CharacterShaders.SlotDiffuse] = Texture(Tex(spec, "texture map"), false);
             m.Tex[CharacterShaders.SlotNormal] = Texture(Tex(spec, "normal map"), false);
+            m.ClipOnNormalAlpha = Tex(spec, "normal map") is not null;
             m.DoubleSided = spec.GetInt("material type") == 2;
         }
         else
@@ -579,6 +580,7 @@ internal sealed class CharacterContent : IDisposable
             m.Description = candidate?.Description ?? "untextured";
             m.Tex[CharacterShaders.SlotDiffuse] = Texture(candidate?.Diffuse, false);
             m.Tex[CharacterShaders.SlotNormal] = Texture(candidate?.Normal, false);
+            m.ClipOnNormalAlpha = candidate?.Normal is not null;
             m.DoubleSided = candidate?.DoubleSided ?? false;
         }
         var asset = new CharacterAsset { Appearance = null!, Rig = null!, IsIcon = true, AttachCount = 1 };

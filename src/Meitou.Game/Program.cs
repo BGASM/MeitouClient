@@ -38,6 +38,9 @@ static class Program
             Console.Error.WriteLine("--title-preview needs --screenshot <path>.");
             return 2;
         }
+        // Booting to the Meitou title: the world is loaded round the title's view, which it shows first (docs/engine.md).
+        bool toTitle = game.TitlePreview || world.Screenshot is null && !game.NewGame && game.Load is null && game.Sandbox == 0 && !game.Duel && !game.NoPopulation;
+        if (world.X is null && world.Zone is null && world.Town is null && toTitle) (world.X, world.Z) = TitleComposition.Focus;
         if (world.X is null && world.Zone is null && world.Town is null) world.Town = "The Hub";
         var install = GameInstall.Locate();
         if (install is null)

@@ -88,6 +88,8 @@ public sealed class CharacterAppearance
     public string? PartMap { get; private init; }
     public GameRecord? Head { get; private init; }
     public GameRecord? Hair { get; private set; }
+    /// <summary>A fixed body shape for a staged character (the Meitou title's wanderer), used instead of <see cref="CharacterShape.InputFor"/>; null in play.</summary>
+    public CharacterShapeInput? Shape { get; set; }
     public GameRecord? Beard { get; private set; }
 
     /// <summary>Linear RGB multiplier the body shader gets as <c>skintone</c>: 1 − <c>Skin Tone</c> (white = no change).</summary>

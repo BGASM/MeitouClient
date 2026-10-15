@@ -36,6 +36,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
 
     /// <summary>Characters farther than this from the eye are neither posed nor drawn.</summary>
     public float DrawDistance { get; set; } = 6000;
+    /// <summary>A presentation fill light (linear colour, 0 in play): added ambient, three times as strong at the silhouette, so a backlit figure reads.</summary>
+    public Vector3 Fill { get; set; }
     /// <summary>Assets built per <see cref="Update"/> (0: all of them, for stills).</summary>
     public int LoadBudget { get; set; } = 4;
     /// <summary>Ogre's camera LOD bias as a distance factor (above 1: coarser levels sooner).</summary>

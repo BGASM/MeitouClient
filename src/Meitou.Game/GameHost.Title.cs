@@ -1,83 +1,90 @@
-using System.Numerics;
 using Meitou.Data.Ui;
 using Meitou.Data.World;
 using Meitou.Rendering;
-using Meitou.Rendering.Characters;
 
 namespace Meitou.Game;
 
 sealed partial class GameHost
 {
     TitleComposition? titleComposition;
-    WorldFrame.Gpu? titleFrame;
-    WorldScene? titleScene;
     float? gameplayLens;
+    /// <summary>The characters' usual source (the simulation), set aside while the title shows only its wanderer.</summary>
+    Action<CharacterDrawList>? gameplayCharacters;
     bool TitleVisible => player.TitleOpen && player.UiMode == UiMode.Meitou;
-    float TitleHour => scene.Clock.Sunset - 0.65f;
+    float TitleHour => scene.Clock.Sunrise + 0.75f;
+    /// <summary>The moons' fill light, and the shafts' air layer (a multiple of the usual) on the title: thick morning air so the low sun casts strong rays.</summary>
+    const float TitlePlanetFill = 0.8f, TitleShaftAir = 2, TitleClouds = 0.38f;
+    /// <summary>The title's white balance: keeps the orange of the early hour with the sun a little higher than that hour would put it.</summary>
+    static readonly System.Numerics.Vector3 TitleBalance = new(1.1f, 0.98f, 0.88f);
+    /// <summary>The wanderer's fill light on the title: warm sky light so his back, turned to the low sun, is not a flat silhouette.</summary>
+    static readonly System.Numerics.Vector3 TitleFill = new(0.064f, 0.052f, 0.04f);
 
     void EnsureTitleScene()
     {
-        if (titleFrame is not null || scene.Database is not { } db) return;
-        titleScene = TitleComposition.CreateTerrain(scene.Focus, db, scene.Clock);
-        var terrain = new TerrainRenderer(gpu.Post!.Gpu, titleScene.Coarse, titleScene.CoarseSize, titleScene.Window);
-        terrain.SetTextures(gpu.Terrain.TextureSet, owns: false);
-        titleComposition = new(install, db, scene.Focus, terrain.HeightAt, SandboxRecord(db));
-        var objects = WorldObjects.Stage(install, db, titleComposition.Meshes);
-        titleFrame = new()
-        {
-            Terrain = terrain, Sky = gpu.Sky, Post = gpu.Post, Shadow = gpu.Shadow,
-            Objects = new WorldObjectRenderer(gpu.Post!.Gpu, assets, objects) { LoadBudget = 0, ObjectDistance = 24000 },
-            Characters = new CharacterRenderer(gpu.Post.Gpu, install, db, assets)
-            {
-                LoadBudget = 0,
-                Source = list => titleComposition.Fill(list, (float)realTime.Elapsed.TotalSeconds),
-            },
-            GiActive = false,
-        };
+        if (titleComposition is not null || scene.Database is not { } db) return;
+        titleComposition = new(install, db, scene.GroundAt, SandboxRecord(db));
     }
 
-    /// <summary>Poster framing independent of the gameplay camera rig, facing the original game's fixed moons.</summary>
+    /// <summary>
+    /// The title's own view of the real world (<see cref="TitleComposition.Spot"/>), independent of the gameplay camera rig; the world's renderers
+    /// stream round it as round any camera. While the title shows, the characters drawn are its wanderer alone.
+    /// </summary>
     void ApplyTitleCamera()
     {
         if (!TitleVisible)
         {
-            if (gameplayLens is { } lens) { camera.FieldOfView = lens; gameplayLens = null; }
+            if (gameplayLens is { } lens) { camera.FieldOfView = lens; camera.MaxNear = 200; gameplayLens = null; }
+            if (gameplayCharacters is { } source && gpu.Characters is { } restore) { restore.Source = source; gameplayCharacters = null; }
+            if (gpu.Foliage is { } plants && titleComposition is { } shown && plants.Shift == shown.Ruins) plants.Shift = null;
+            if (gpu.Objects is { } things && titleComposition is { } staged && things.Staged == staged.Staged) things.Staged = null;
             return;
         }
         EnsureTitleScene();
-        if (titleComposition is null) return;
+        if (titleComposition is not { } title) return;
         gameplayLens ??= camera.FieldOfView;
-        SkyArrival.Place(camera, titleComposition.Eye, TitleComposition.Yaw, TitleComposition.Pitch, 100, TitleComposition.FieldOfView);
+        player.TitleLogoSource ??= TitleLogo.Load;
+        if (gpu.Characters is { } characters && gameplayCharacters is null)
+        {
+            gameplayCharacters = characters.Source;
+            characters.Source = title.Fill;
+        }
+        if (gpu.Foliage is { } foliage && foliage.Shift != title.Ruins) foliage.Shift = title.Ruins;
+        if (gpu.Objects is { } objects && objects.Staged != title.Staged) objects.Staged = title.Staged;
+        TitleComposition.Place(camera);
     }
 
     void DrawTitleWorld(int width, int height)
     {
         EnsureTitleScene();
-        if (titleFrame is null) return;
+        if (titleComposition is not { } title) return;
+        // Clear sky with a few clouds whatever the region's weather, no placed fog volumes, the sun turned into the right of the view, the moons lit
+        // full face so they read by day, and thicker morning air so the hill the sun peeks over casts rays through it.
         var sky = gpu.Sky;
-        var weather = sky.Weather;
-        var coverage = sky.CloudCoverage;
+        var (weather, coverage, regions, clock, wind) = (sky.Weather, sky.CloudCoverage, gpu.Weather, scene.Clock, sky.CloudWind);
         sky.Weather = SkyWeather.Default;
-        sky.CloudCoverage = 0;
-        titleFrame.GameHours = 0;
-        // The post chain, sky and shadow pass are shared; terrain, objects and actor belong to the dummy scene.
-        titleFrame.Shadow = gpu.Shadow;
-        try
+        sky.CloudCoverage = TitleClouds;
+        sky.CloudWind = TitleComposition.CloudWind(camera);
+        sky.PlanetTurn = TitleComposition.MoonTurn(camera);
+        sky.PlanetFill = TitlePlanetFill;
+        if (gpu.FogVolumes is { } placedFog) placedFog.HidePlaced = true;
+        if (gpu.Characters is { } lit) lit.Fill = TitleFill;
+        var shafts = gpu.Post?.Options;
+        var (air, strength, balance) = shafts is null ? (0f, 0f, System.Numerics.Vector3.One) : (shafts.ShaftAir, shafts.ShaftStrength, shafts.Balance);
+        if (shafts is not null) (shafts.ShaftAir, shafts.ShaftStrength, shafts.Balance) = (TitleShaftAir, 1, TitleBalance);
+        gpu.Weather = null;
+        float hour = presentationHour ?? TitleHour;
+        scene.Clock = clock with { SunTurn = TitleComposition.SunTurn(clock, hour, camera) };
+        double seconds = realTime.Elapsed.TotalSeconds;
+        if (gpu.Foliage is { } foliage && o.Screenshot is null) foliage.SwaySeconds = seconds;
+        try { WorldFrame.Draw(gpu, scene, camera, render, width, height, hour, (float)seconds / 600f, o.FogDistance); }
+        finally
         {
-            WorldFrame.Draw(titleFrame, titleScene!, camera, new WorldRenderOptions { Water = false, Reflections = false }, width, height,
-                presentationHour ?? TitleHour, (float)realTime.Elapsed.TotalSeconds / 600f, o.FogDistance);
+            (sky.Weather, sky.CloudCoverage, gpu.Weather, scene.Clock, sky.PlanetFill, sky.CloudWind, sky.PlanetTurn) = (weather, coverage, regions, clock, 0, wind, System.Numerics.Quaternion.Identity);
+            if (shafts is not null) (shafts.ShaftAir, shafts.ShaftStrength, shafts.Balance) = (air, strength, balance);
+            if (gpu.FogVolumes is { } restoreFog) restoreFog.HidePlaced = false;
+            if (gpu.Characters is { } unlit) unlit.Fill = default;
         }
-        finally { sky.Weather = weather; sky.CloudCoverage = coverage; }
     }
 
-    void DisposeTitleScene()
-    {
-        titleFrame?.Characters?.Dispose();
-        titleFrame?.Objects?.Dispose();
-        titleFrame?.Terrain.Dispose();
-        titleScene?.Dispose();
-        titleFrame = null;
-        titleScene = null;
-        titleComposition = null;
-    }
+    void DisposeTitleScene() => titleComposition = null;
 }

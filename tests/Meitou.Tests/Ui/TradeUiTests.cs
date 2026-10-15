@@ -16,6 +16,11 @@ namespace Meitou.Tests.Ui;
 /// <summary>The Faithful trade (docs/simulation.md "Trade"): the trader window opens with the trade, drags between it and the pockets buy and sell at the next tick, closing it ends the trade.</summary>
 public class TradeUiTests
 {
+    sealed class StockSource : ITickSystem, Meitou.Simulation.Trading.ITradeSource
+    {
+        public Meitou.Simulation.Trading.TradeView? Trade { get; set; }
+        public Meitou.Simulation.Trading.TradeView? PublishTrade() => Trade;
+    }
     static Vector2 Centre(UiControl c) => new(c.Bounds.X + c.Bounds.Width / 2, c.Bounds.Y + c.Bounds.Height / 2);
 
     static void Drag(PlayerInterface ui, Vector2 from, Vector2 to)
@@ -25,8 +30,46 @@ public class TradeUiTests
         ui.MouseUp(MouseButton.Left, to, false);
     }
 
-    [Fact, Slow]
-    public void Dragging_between_the_trader_window_and_the_pockets_buys_and_sells()
+    [Theory, Slow]
+    [InlineData(UiMode.Faithful)]
+    [InlineData(UiMode.Meitou)]
+    public void Scrolled_stock_keeps_its_cells_and_buys_the_visible_item(UiMode mode)
+    {
+        var install = GameInstall.Locate(); Assert.SkipWhen(install is null, "No Kenshi install configured");
+        var stock = new StockSource();
+        using var session = new WorldSession(Vector3.Zero, (-100, -100, 100, 100), (_, _) => 0, systems: [new PlayerSystem(), stock]);
+        var hero = session.World.Characters.Spawn(new(), new() { Name = "Hero", IsPlayer = true, Inventory = new Inventory() }, 0);
+        session.World.Player.Faction = 0; session.World.Player.Selection.Add(hero);
+        stock.Trade = new(hero, new CharacterId(1, 0), "Armour King", 1000, 1000, 20, 100,
+            [new(0, "top", "Top", "main", 0, 0, 1, 1, 1, 1, 1, 1, false), new(1, "bottom", "Bottom", "main", 0, 99, 1, 1, 1, 1, 1, 1, false)], [], false);
+        session.World.RunTick();
+        var resources = OgreScriptResources.ForInstall(install!, LoadOrder.FromInstall(install!));
+        var ui = new PlayerInterface(session, (_, _) => 0, c => c.Position) { Width = 1600, Height = 900 };
+        ui.LoadUi(mode, name => resources.Find(name));
+        try
+        {
+            var before = ui.UiFrame.Single(c => c.Name == "backpack_content");
+            Assert.True(before.Bounds.Height > before.Clip!.Value.Height);
+            Assert.True(ui.UiScroll(Centre(before with { Bounds = before.Clip.Value }), -1000));
+            var after = ui.UiFrame.Single(c => c.Name == "backpack_content");
+            Assert.Equal(before.Bounds.Height, after.Bounds.Height);
+            Assert.True(after.Bounds.Y < before.Bounds.Y);
+            var bottom = ui.UiFrame.Single(c => c.Name == "trade-item-1");
+            Assert.True(bottom.Clip!.Value.Contains(Centre(bottom).X, Centre(bottom).Y));
+            ui.MouseMove(Centre(bottom));
+            Assert.Contains(ui.UiFrame, c => c.Name == "inventory-tooltip" && c.Caption == "Bottom\nc.1");
+            Drag(ui, Centre(bottom), Centre(ui.UiFrame.Single(c => c.Name == "main")));
+            var buy = Assert.Single(session.World.Commands.TakeDue(long.MaxValue).OfType<Meitou.Simulation.Trading.BuyItem>());
+            Assert.Equal("bottom", buy.Item.Record);
+            Assert.DoesNotContain(ui.UiFrame, c => c.Name == "trade-item-1" && c.Caption.Contains("c.", StringComparison.Ordinal));
+        }
+        finally { ui.DisposeUi(); }
+    }
+
+    [Theory, Slow]
+    [InlineData(UiMode.Faithful)]
+    [InlineData(UiMode.Meitou)]
+    public void Dragging_between_the_trader_window_and_the_pockets_buys_and_sells(UiMode mode)
     {
         var install = GameInstall.Locate(); Assert.SkipWhen(install is null, "No Kenshi install configured");
         var data = TradeTests.Data(TradeTests.Shops);
@@ -52,14 +95,17 @@ public class TradeUiTests
 
         var resources = OgreScriptResources.ForInstall(install!, LoadOrder.FromInstall(install!));
         var ui = new PlayerInterface(session, (_, _) => 0, c => c.Position) { Width = 1600, Height = 900 };
-        ui.LoadUi(UiMode.Faithful, name => resources.Find(name));
+        ui.LoadUi(mode, name => resources.Find(name));
         try
         {
             // The trade opened both windows: the stock shows in the trader's.
             var stock = world.Snapshot.Trade!.Stock[0];
             var source = ui.UiFrame.Single(c => c.Name == $"trade-item-{stock.Index}");
             var pockets = ui.UiFrame.First(c => c.Name == "main").Bounds;   // the inventory window opened first, so its pocket grid comes first
-            var cell = new Vector2(pockets.X + pockets.Width * 4.5f / 8, pockets.Y + pockets.Height * 3.5f / 6);
+            var stockGrid = ui.UiFrame.Single(c => c.Name == "backpack_content").Bounds;
+            Assert.Equal(stockGrid.Width / world.Snapshot.Trade.StockWidth, stockGrid.Height / world.Snapshot.Trade.StockHeight, 3);
+            Assert.True(stockGrid.X > pockets.X + pockets.Width);
+            var cell = new Vector2(pockets.X + pockets.Width * 4.5f / 8, pockets.Y + pockets.Height * 3.5f / 10);
             Drag(ui, Centre(source), cell);
             Assert.Equal(100_000, world.Player.Money);   // nothing moves before the tick
             world.RunTick();

@@ -16,6 +16,17 @@ sealed partial class PlayerInterface
     void AddHoverLabel(List<UiControl> controls)
     {
         if (inventoryDrag is not null || tradeDrag is not null) return;
+        if (MyGuiPresentation.HitTest(controls, mouse.X, mouse.Y) is { } hit)
+        {
+            if (hit.Properties.TryGetValue("ItemTooltip", out string? tooltip))
+            {
+                float scale = InventoryScale, width = Math.Min(Width, 280 * scale), height = (tooltip.Contains('\n') ? 76 : 48) * scale;
+                controls.Add(new("inventory-tooltip", "TextBox", new(Math.Clamp(mouse.X + 18 * scale, 0, Width - width), Math.Clamp(mouse.Y + 18 * scale, 0, Height - height), width, height),
+                    tooltip, "", "Kenshi_GenericTextBoxSkin", true,
+                    new Dictionary<string, string> { ["TextAlign"] = "Left Top", ["TextPadding"] = "8 6 8 6", ["TextColour"] = MyGuiColours.InkText, ["WordWrap"] = "true" }, Vector4.Zero, Pickable: false));
+            }
+            return;
+        }
         var snapshot = session.CurrentSnapshot;
         if (hover.Tick != snapshot.Tick || hover.Mouse != mouse)
         {

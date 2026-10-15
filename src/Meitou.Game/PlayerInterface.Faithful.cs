@@ -22,8 +22,11 @@ sealed partial class PlayerInterface
         // The Meitou mode: Esc closes an open panel, else opens or closes the game menu (it no longer quits at once).
         if (UiMode == UiMode.Meitou && !FrontendActive)
         {
+            if (!ReservedKeys.Contains(key) && key is Meitou.Engine.Input.Key.I or Meitou.Engine.Input.Key.C)
+            { ExecuteUiAction(key == Meitou.Engine.Input.Key.I ? "inventory" : "stats", ""); return true; }
             if (key != Meitou.Engine.Input.Key.Escape) return false;
-            if (openPanel is not null && !menuOpen) openPanel = null; else ToggleMenu();
+            if (InventoryScreensOpen) faithfulScreens.Escape();
+            else if (openPanel is not null && !menuOpen) openPanel = null; else ToggleMenu();
             return true;
         }
         if (key == Meitou.Engine.Input.Key.Escape)
@@ -66,17 +69,20 @@ sealed partial class PlayerInterface
     {
         if (!UiVisible || !UseScreenInput) return false;
         ArrangeUi();
+        if (InventoryWheel(p, steps)) return true;
         if (MapWheel(p, steps)) return true;
         return faithfulScreens.Wheel(p, steps);
     }
     void FaithfulAction(MyGuiEvent e)
     {
+        if (e.Action.StartsWith("inventory-scroll:", StringComparison.Ordinal))
+        { ScrollInventory(e.Screen, float.Parse(e.Action[17..], CultureInfo.InvariantCulture)); return; }
         if (HandleFrontendAction(e)) UpdateMenuPause();
         else if (e.Screen == "stats" && e.Action == "select") selectedStat = e.Text;
         else if (e.Screen == "overview") MapAction(e.Widget);
         else if (e.Screen is "inventory" or "bag")
         {
-            if (e.Widget == "OpenBagButton") faithfulScreens.Open("bag");
+            if (e.Widget == "OpenBagButton") { faithfulScreens.Open("bag"); PlaceBagWindow(); }
             else if (e.Widget == "LimbsButton") faithfulScreens.Open("limbs");
             else if (e.Widget == "ArrangeButton" && Selected().FirstOrDefault() is { } lead) Say(new Meitou.Simulation.Items.ArrangeInventory(lead.Id) { Tick = session.World.Tick });
         }
@@ -91,21 +97,21 @@ sealed partial class PlayerInterface
         else if (id == "trader") BindTraderScreen(b);
         else if (id is "inventory" or "stats" or "bag" or "limbs")
         {
-            b.Text["Root"] = (id == "stats" ? "CHARACTER STATS" : id == "limbs" ? "LIMBS" : id == "bag" ? "BACKPACK" : "INVENTORY") + " - " + (lead?.Name ?? "No character selected");
+            b.Text["Root"] = id == "stats" ? "CHARACTER STATS - " + (lead?.Name ?? "No character selected")
+                : id == "bag" ? lead?.ItemGrid?.Items.FirstOrDefault(i => i.Section == "backpack_attach")?.Name.ToUpperInvariant() ?? "BACKPACK"
+                : id == "limbs" ? "LIMBS" : lead?.Name.ToUpperInvariant() ?? "INVENTORY";
             if (id is "inventory" or "bag" or "limbs")
             {
                 // Each window binds only what its own layout has: the character window the data panel and the limbs button, the generic (bag) window
                 // the capacity box; the limb window has neither.
                 if (id == "inventory")
                 {
-                    b.Text["datapanel"] = lead?.Inventory.FirstOrDefault() ?? "Select a character";
-                    b.Properties["datapanel"] = new Dictionary<string, string> { ["TextColour"] = MyGuiColours.InkText, ["TextPadding"] = "8 6 8 6" };
+                    b.Properties["datapanel"] = new Dictionary<string, string> { ["SkipCaption"] = "true" };
                     if (lead?.ItemGrid is { BagWidth: > 0, BagHeight: > 0 }) { b.Disabled.Remove("OpenBagButton"); b.Actions["OpenBagButton"] = "OpenBagButton"; }
                 }
                 if (id == "bag")
                 {
-                    b.Text["CapacityText"] = lead?.ItemGrid is { } bagGrid ? $"{bagGrid.BagWidth} x {bagGrid.BagHeight}" : "No backpack";
-                    b.Properties["CapacityText"] = new Dictionary<string, string> { ["Static"] = "true" };
+                    b.Hidden.Add("CapacityText"); b.Hidden.Add("TypeText");
                 }
                 if (id != "limbs")
                     foreach (string name in id == "inventory" ? new[] { "ArrangeButton", "LimbsButton" } : ["ArrangeButton"])
@@ -137,6 +143,7 @@ sealed partial class PlayerInterface
             // Editor preview markers are unrelated to the current camera and orders.
             b.Hidden.Add("CameraMarker"); b.Hidden.Add("MovemementMarker");
         }
+        if (id is "inventory" or "bag" or "limbs" or "trader") BindInventoryGeometry(id, b);
         return b;
     }
     /// <summary>
@@ -166,24 +173,22 @@ sealed partial class PlayerInterface
     };
     void AddFaithfulContent(string id, List<UiControl> controls)
     {
+        if (id == "title" && UiMode == UiMode.Meitou) { MeitouTitleMenu(controls); return; }
         AddMapContent(id, controls);
-        if (id == "trader") { AddTraderContent(controls); return; }
+        if (id == "trader") { ArrangeContainerGrid(id, controls, session.CurrentSnapshot.Trade?.StockWidth ?? 0, session.CurrentSnapshot.Trade?.StockHeight ?? 0); AddTraderContent(controls); return; }
         if (id is not ("inventory" or "bag" or "limbs") || Selected().FirstOrDefault() is not { ItemGrid: { } grid } lead) return;
         string gridSection = id == "bag" ? "backpack_content" : "main";
         int columns = id == "bag" ? grid.BagWidth : grid.Width, rows = id == "bag" ? grid.BagHeight : grid.Height;
-        int mainIndex = controls.FindIndex(c => c.Name == gridSection);
-        if (mainIndex >= 0)
-        {
-            var slot = controls[mainIndex];
-            var props = new Dictionary<string, string>(slot.Properties, StringComparer.Ordinal) { ["TileSize"] = FormattableString.Invariant($"{slot.Bounds.Width / Math.Max(1, columns)} {slot.Bounds.Height / Math.Max(1, rows)}") };
-            controls[mainIndex] = slot with { Properties = props };
-        }
+        if (id == "bag") ArrangeContainerGrid(id, controls, columns, rows);
+        else ArrangeEquipmentGrid(controls, grid);
+        if (id == "inventory") AddInventorySummary(controls, lead);
         foreach (var item in grid.Items.Where(i => id == "bag" ? i.Section == "backpack_content" : id == "limbs" ? i.Section.EndsWith("_replace", StringComparison.Ordinal) : i.Section != "backpack_content"))
         {
             if (controls.FirstOrDefault(c => c.Name == item.Section) is not { } slot) continue;
             var area = slot.Bounds;
             if (item.Section == gridSection && columns > 0 && rows > 0) area = new(area.X + item.X * area.Width / columns, area.Y + item.Y * area.Height / rows, item.Width * area.Width / columns, item.Height * area.Height / rows);
-            AddItemCell(controls, $"inventory-item-{item.Index}", area, item.Record, item.Material, item.Name, item.Quantity, SellCaption(lead.Id, item.Index), "InventoryItem", item.Index, slot.Clip);
+            else area = new(area.X + item.X * InventoryCell, area.Y + item.Y * InventoryCell, item.Width * InventoryCell, item.Height * InventoryCell);
+            AddItemCell(controls, $"inventory-item-{item.Index}", area, item.Record, item.Material, item.Name, item.Quantity, SellCaption(lead.Id, item.Index), "InventoryItem", item.Index, slot.Bounds.Intersect(slot.Clip ?? slot.Bounds));
         }
     }
     readonly List<string> uiMessages = [];

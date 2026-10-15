@@ -31,6 +31,7 @@ sealed partial class PlayerInterface
     public void LoadUi(UiMode mode, Func<string, string?> resolve)
     {
         UiMode = mode;
+        uiResolve = resolve;
         uiResources = MyGuiResources.Load("kenshi_init.xml", resolve);
         faithfulHud = MyGuiTemplates.Expand(MyGuiReader.ReadLayout(resolve("Kenshi_MainPanel.layout") ?? throw new FileNotFoundException("Kenshi_MainPanel.layout not found.")), uiResources);
         faithfulScreens = new(uiResources);
@@ -83,7 +84,7 @@ sealed partial class PlayerInterface
     UiBindings BindUi()
     {
         var b = new UiBindings();
-        var lead = Selected().FirstOrDefault();
+        var lead = Lead();
         b.Text["clock"] = $"{session.Clock.DayText}  {session.Clock.TimeText}";
         b.Text["DayText"] = session.Clock.DayText;
         b.Text["TimeText"] = session.Clock.TimeText;
@@ -179,18 +180,22 @@ sealed partial class PlayerInterface
             foreach (var screen in faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent))
             {
                 controls.AddRange(screen.Controls.Where(c => UiMode == UiMode.Faithful ||
-                    !c.Properties.TryGetValue("ImageResource", out var resource) || resource != "Kenshi_TitleScreen")
-                    .Select(c => screen.Id == "title" && UiMode == UiMode.Meitou && c.Type == "Button" ? c with { TextScale = 1.8f } : c));
-                if (screen.Id == "title" && UiMode == UiMode.Meitou && !showCredits)
-                    controls.Add(new("MeitouTitle", "TextBox", new(Width * 0.55f, Height * 0.68f, Width * 0.42f, Height * 0.18f), "KENSHI", "", "", true,
+                    !c.Properties.TryGetValue("ImageResource", out var resource) || resource != "Kenshi_TitleScreen"));
+                if (screen.Id == "title" && UiMode == UiMode.Meitou && !showCredits && TitleLogoReady())
+                {
+                    float logoWidth = Math.Min(Width * 0.3f, Height * 0.6f);
+                    controls.Add(new("MeitouTitle", "ImageBox", new(Width * 0.975f - logoWidth, Height * 0.04f, logoWidth, logoWidth * 0.469f), "", "", "", true,
+                        new Dictionary<string, string> { ["ImageTexture"] = TitleLogoTexture }, Vector4.Zero, Pickable: false));
+                }
+                else if (screen.Id == "title" && UiMode == UiMode.Meitou && !showCredits)
+                    controls.Add(new("MeitouTitle", "TextBox", new(Width * 0.6f, Height * 0.04f, Width * 0.37f, Height * 0.14f), "KENSHI", "", "", true,
                         new Dictionary<string, string> { ["FontName"] = "Meitou_TitleFont", ["TextAlign"] = "Right VCenter" },
                         Vector4.Zero, new Vector4(0.89f, 0.84f, 0.71f, 1), TextScale: Height / 720f));
             }
         }
-        else if (openPanel is not null) AddDetailsPanel(controls);
-        if (UiMode == UiMode.Meitou) AddTradePanel(controls);
+        if (openPanel is not null && !FrontendActive) AddDetailsPanel(controls);
         if (UiMode == UiMode.Meitou && menuOpen) AddMenuPanel(controls);
-        if (UiMode == UiMode.Faithful) AddInventoryDrag(controls);
+        AddInventoryDrag(controls);
         AddContextMenu(controls);
         AddHoverLabel(controls);
         return controls;
@@ -219,7 +224,15 @@ sealed partial class PlayerInterface
         if (action.StartsWith("speed:", StringComparison.Ordinal)) PressButton(int.Parse(action[6..], CultureInfo.InvariantCulture));
         else if (action is "inventory" or "stats")
         {
-            if (UiMode == UiMode.Faithful) { if (faithfulScreens.IsOpen(action)) faithfulScreens.Close(action); else faithfulScreens.Open(action); }
+            if (UiMode == UiMode.Faithful || action == "inventory")
+            {
+                if (faithfulScreens.IsOpen(action))
+                {
+                    faithfulScreens.Close(action);
+                    if (action == "inventory") { faithfulScreens.Close("bag"); faithfulScreens.Close("limbs"); }
+                }
+                else faithfulScreens.Open(action);
+            }
             else openPanel = openPanel == action ? null : action;
         }
         else if (action == "close") openPanel = null;

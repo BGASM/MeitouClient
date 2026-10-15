@@ -70,6 +70,7 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
             medical.Tick(HoursPerTick, ctx, events);
             n.MaxSpeed = Speed.Run(race, stats, medical, encumbrance);
             TrainOnTheMove(stats, race, medical, in n, encumbrance, world.TickSeconds);
+            if (cold.IsPlayer || table.IdOf(i) == world.Player.Inspected) cold.Extended = ExtendedOf(stats, race, medical, n.MaxSpeed, encumbrance, ctx.Resting);
             n.Health = Math.Clamp(medical.Blood / MathF.Max(MedicalState.BloodCapacity(race, stats.Strength), 1) * 100, 0, 100);
             foreach (var e in events)
             {
@@ -80,6 +81,21 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// The numbers behind the information panel's extended lines (<c>FUN_140895350</c>, docs/game/ui-screens.md section 4). Toughness XP: 1, or 2 with the left arm crippled, plus 2
+    /// for the right arm and 2 for blood-loss KO (the original adds a fourth term for a counter at <c>+0xa4</c> under 15, <b>Unknown</b>, left out). Strength XP is the carrying rate;
+    /// what the original shows instead with a weapon in hand ("Weapon weight") is not modelled.
+    /// </summary>
+    ExtendedStats ExtendedOf(CharacterStats stats, RaceData race, MedicalState medical, float speed, float encumbrance, bool resting)
+    {
+        float runValue = Speed.RunValue(race, stats.Athletics);
+        var arms = medical.Aggregates();
+        float toughness = (arms.LeftArmDisabled ? 2 : 1) + (arms.RightArmDisabled ? 2 : 0) + (medical.BloodKo ? 2 : 0);
+        float hunger = race.HungerRate * MedicalState.HungerSituationFactor(Constants, resting || medical.Unconscious || medical.Dead, false, encumbrance);
+        return new ExtendedStats(XpService.AthleticsRate(encumbrance, speed, runValue), xp.StrengthCarryRate(encumbrance), toughness,
+            MedicalState.KoPoint(Constants, stats.Toughness), speed, runValue, hunger);
     }
 
     /// <summary>

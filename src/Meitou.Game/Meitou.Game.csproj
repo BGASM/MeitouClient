@@ -33,6 +33,8 @@
 
   <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.GC.HeapCount" Value="4" />
+    <!-- The Meitou title's wordmark (TitleLogo). -->
+    <EmbeddedResource Include="../../assets/branding/kenshi-logo.png" LogicalName="kenshi-logo.png" />
   </ItemGroup>
 
 </Project>

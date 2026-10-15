@@ -46,6 +46,24 @@ sealed partial class PlayerInterface
     })];
 
     /// <summary>
+    /// The extended lines (shown when the information panel is expanded; <c>FUN_140895350</c>, docs/game/ui-screens.md section 4): the XP rates, the KO point, the run
+    /// speed in mph (units per second x 0.22369362) with its change from the unhurt run value in brackets, and the hunger rate.
+    /// </summary>
+    internal static HudLine[] ExtendedLines(CharacterSnapshot lead)
+    {
+        if (lead.Hud?.Extended is not { } e) return [];
+        static string Percent(float f) => ((int)(f * 100)).ToString(CultureInfo.InvariantCulture) + "%";
+        const float Mph = 0.22369362f;
+        int speed = (int)MathF.Round(e.RunSpeed * Mph), change = (int)MathF.Round((e.RunSpeed - e.RunValue) * Mph);
+        string run = change == 0 ? $"{speed} mph" : change < 0 ? $"{speed} ({change}) mph" : $"{speed} (+{change}) mph";
+        return [new("Athletics XP:", Percent(e.AthleticsXp)), new("Strength XP:", Percent(e.StrengthXp)),
+            new("Toughness XP:", ((int)e.ToughnessXp).ToString(CultureInfo.InvariantCulture) + "x"),
+            new("KO point:", ((int)e.KoPoint).ToString(CultureInfo.InvariantCulture)),
+            new("Run speed:", run, ValueColour: change < 0 ? BadColour : change > 0 ? GoodColour : null),
+            new("Hunger Rate:", Percent(e.HungerRate))];
+    }
+
+    /// <summary>
     /// The medical header's word (the original's list is longer; Meitou shows the states it models): Dead, Unconscious, Starving below 1 hunger, then by the worst
     /// part h: Wounded below 0.7, Hungry below 2 hunger, Slightly Injured below 0.9, else Normal.
     /// </summary>
@@ -81,12 +99,13 @@ sealed partial class PlayerInterface
     /// <summary>The information panel's and the medical rows' text (Faithful HUD; called after the layout is arranged).</summary>
     void AddHudText(List<UiControl> controls)
     {
-        if (Selected().FirstOrDefault() is not { } lead) return;
+        if (Lead() is not { } lead) return;
         float row = 20 * Height / 1080f;   // the panels' font, Exo2 SemiBold 20, at the 1080-line reference
         string faction = FactionName?.Invoke(lead.Faction) ?? "";
         AddLines(controls, "NameText", [new(lead.Name, faction, TitleColour, TitleColour)], row);
         AddLines(controls, "StateText", StateLines(lead), row);
         AddLines(controls, "StatsText", StatsLines(lead), row);
+        if (infoExpanded) AddLines(controls, "ExtendedStatsText", ExtendedLines(lead), row);
         foreach (var (bar, name, arrows) in medicalRows)
         {
             if (controls.FirstOrDefault(c => c.Name == bar + "Datapanel") is not { } host) continue;

@@ -1,357 +1,56 @@
 # Water rendering
 
-Part of the world view of `meitou-viewer` (and the game, which shares `src/Meitou.Rendering`); options, keys and the rest of the world mode are in [viewer.md](viewer.md#world-mode).
+`WaterRenderer`, `ReflectionPass`, ocean/shore/river bake and WaterShaders implement two modes.
+Original water/material records: [formats/terrain.md](formats/terrain.md). Meitou motion is visual;
+gameplay water stays Y100. Evolution follows the game clock and stops paused.
 
-- **Water** (`WaterRenderer`; [formats/terrain.md](formats/terrain.md#water)): one surface at Y = 100, a
-  quad centred on the eye and 1.5 times the view distance wide, so the sea reaches the horizon in every direction, past
-  the world's edge too (the game's own distant plane stops at the edge; the infinite sea is the viewer's choice).
-  50% of the view distance the rendered water gradually fades into the sky behind it, disappearing at 90% before the far clip;
-  the shafts' water correction uses the same fade ([render-shafts.md](render-shafts.md#water-horizon-correction-2026-10-12)).
-  This viewer choice removes the straight sunset/sunrise edge where the water's haze colour differs from the sky.
-  Beyond
-  the edge the water colour and parameters fade over 30000 units from the edge pixels to the open sea (the most common
-  parameters among the outer ring of the maps), so the last pixels do not stretch outwards, and the water counts as deep.
-  It has colour from `watercolourmap.png`, flow from `flowmap.png`, the `water.png` normal map scrolled three
-  times, and per-pixel biome parameters (`BiomeField` over `blendinfo.dat` + `blendmap.png`). Shallow water is
-  see-through near the camera, and it is opaque beyond 4000 units, as in the game. With reflections (default; `R` or `--water-reflection 0` toggles) it reflects the mirrored scene (`ReflectionPass`: sky, terrain, objects at 2000 units or nearer (Meitou; the game-like 3000 with `--ab refl-cull` off) drawn about Y = 100 into a half-resolution RGBA16F texture, drawn 4x multisampled and resolved (without it the mirrored shoreline showed stair steps, magnified by the normal-map distortion), with oblique near-plane clipping at the water; the Fresnel and normal-map distortion are the old shader's); without, it reflects the sky colour. The glint widens and dims with distance and is capped, so a far sea shows no blown-out disc.
-- **Meitou water** (the `water` switch, `F9`, default on; `--faithful water` is the game's flat water above, unchanged to the pixel;
-  `WaterRenderer` with `WaveSet`, `WaterFoam`; branch `meitou-water`, 2026-10-08). Visual only: the water the game uses stays a plane at Y = 100.
-  - *Mesh.* A polar grid round the eye instead of the quad (`--water-grid <n>` segments, default 256; 128 for lower detail, 512 for finer geometry): rings
-    from 1 unit out to 6000 spaced as finely across as along (23553 vertices at 128, 92417 at 256), then one ring at the plane's extent. One draw.
-  - *Open water.* Tessendorf's FFT ocean (`OceanSpectrum`, `OceanWaves`, since 2026-10-08; it replaced four Gerstner waves whose
-    wavelength and speed changed with the wind, which made a change of weather look like a change of game speed). A fetch-limited JONSWAP
-    spectrum (fetch 30 km, wind U = weather wind speed / 10 m/s, 1.5 to 20) spread round the wind by Q(s) |cos(θ/2)|^2s (s after
-    Mitsuyasu, narrowest at the peak, normalised with Γ) gives each wave vector its amplitude, with random phases from a hash of the texel,
-    so a new wind keeps the pattern. Three cascades of 256² wave vectors over tiles of 250, 47 and 9 m (ratios that are not whole numbers,
-    so the tiles never line up), each keeping its own band of wave numbers (a cascade starts at 6 times its own fundamental). On the GPU each
-    frame: evolve to the game clock (ω = √(g k) quantised to multiples of 2π / 600 s, so the clock is taken modulo 600 s and float phases
-    stay small), an inverse FFT over rows and then columns (Stockham radix 2 in shared memory, four complex fields packing the eight real
-    ones: displacement x, y, z, the height's two slopes and the horizontal displacement's three derivatives), then two RGBA16F texture arrays
-    with mips. The vertices take the displacement at the mip whose texels are as far apart as the grid's vertices (finer waves would alias
-    into facets), out to 3000-5500 units; the fragment takes the slopes per pixel, so the shading never shows the grid. Foam where the
-    Jacobian of the horizontal displacement falls below 0.7 (folding crests in a wind). A change of wind of more than 10 degrees or 12 %
-    builds a new spectrum on a worker thread and blends it in over 10 game seconds; nothing is computed while the clock stands still. The
-    game's scrolled normal map stays, at a third of its strength near the eye and full beyond 6000 units (its second and third samples
-    rotated and rescaled against its 250-unit tile). The waves die out in water shallower than 20 units and towards the shore (the breakers
-    take over), and are weaker in sheltered water. **Verified** (`OceanTests`): the spectrum pairs each wave with its mirror's conjugate,
-    is empty at k = 0, on the Nyquist row and column and outside each band; the spreading integrates to 1; the GPU's transform of one wave
-    per cascade gives Dy = 2A cos(k·x − ωt) and D = −2A k̂ sin(k·x − ωt) at every texel tested, at two times, under synchronisation
-    validation.
-  - *Shore.* Per pixel (and vertex) the distance to the waterline and its exposure come from the shore distance field below (until
-    2026-10-08 the distance was estimated as depth / bottom slope, which bent and branched the crests in small bays), the direction to the
-    shore as the field's gradient. Breakers (every 8 s, 110
-    units apart, in sets: each one about 0.3-1.9 times the height of 3.5-5.3 units) run along that distance, so their crests follow the depth
-    contours. They build from 460 units out, steepen (a brighter, greener, less see-through face, a darker trough ahead) and break at
-    35-120 units from the waterline (varying along the shore and with the size), bursting white, then run in as a low bore of whitewater
-    with lace trailing behind it, stronger in some stretches than others (a foam-texture noise); at the beach they run up as a thin sheet to
-    where the ground is 1.4-3.2 units above the water (the run-up height grows with the wind), at most about 120 units inland so low flats behind a beach stay dry, and back, leaving wet sand that dries
-    until the next one. The grid is lifted to the run-up's top along the beach and the fragment cuts the sheet's edge. Only exposed
-    shores get surf (the field's exposure), so ponds, swamp channels (Shark) and sheltered bays stay calm. The geometry gets only a smooth
-    hump per breaker (none where the vertices are more than a fifth of a breaker apart); the steep front, lip and trough are shading, so no
-    vertex shows. Sizes, timing and whether a wave breaks vary along the shore (below). The shore fades out from 7000 to 10000 units from the eye.
-  - *Surf in sections* (2026-10-08, `shoreAt`'s `waveAt`, **Observed** in pictures at several `--water-seconds`; the numbers are tuned by eye).
-    The breakers used to be one unbroken line at one distance from the waterline, all breaking at once, so the surf read as an
-    outline drawn round the coast. Now each wave has a number (the wave count, `uShore.x`, which runs on and wraps at 4096; the wave at a
-    place keeps its number as it travels in) and slow, coarse value noise on the *shore point* it is heading for (the pixel moved along
-    the shore distance field's gradient by its distance, so the noise is constant across the wave and varies only along the shore;
-    its pattern drifts about 1 unit a second on a loop periodic in the wrap, so there is no jump when the count wraps) decides three things.
-    **Phase**: an offset of up to about ±1 cycle with features of 200-500 units (plus the old 3000-unit term) bends the crests against the
-    shore by up to some 15 degrees, so the break point, which is at a fixed distance, travels along the crest (peeling). **Size**: sets of about
-    seven waves (a sine of the wave number, irregular, shifted along the shore) take each wave from 0.55 to 1.6 times the
-    breaker height. **Breaking**: a noise of about 620 units per wave (more breaking for the bigger waves) gives stretches a few hundred
-    units long where the wave rolls in without breaking (lower, its break point moved to the waterline, no collapse into a bore, foam
-    and bore scaled to 0.35), so there are gaps between the pieces of whitewater. The amount was raised on the
-    user's "more foam" and then set halfway back (2026-10-08): the noise's offset 0.71 (0.62 at first), foam in the gaps 0.275 (0.2), the
-    surf's coverage capped at 0.85 (0.8) and the erosion threshold 0.075 + 0.475 × age (0.1 + 0.55 × age); a quiet set of small waves
-    still leaves stretches without whitewater. Then all foam ×1.5 on the user's word (2026-10-08): the surf's coverage (its cap 0.95)
-    and the open water's (the Jacobian's ramp 2.5 to 3.75, the lingering foam ×1.5). The same `Shore` values (size, `brk`, `breakAt`, the
-    phase) feed the vertex hump, the lip, burst, bore, trail, feather, the run-up and the sand's wetness, so geometry and foam agree.
-    The offsets fade out (with the shore field's gradient length) on the axis between two shores, where the nearest shore jumps, so an
-    inlet shows no seam (**Observed** in the shore-field debug view (since removed) at Port North's inlet: the bands bend there as the distance does).
-    Per-wave values change at the troughs (where the breaker profile is nil) and are blended over the trough ahead of the next wave's front, so they
-    are continuous in space and time; the sand's wetness (a jump at each crest by design) remembers the size of the last crest to pass.
-    Outside the surf zone (more than 700 units out) the extra noise is not evaluated. **Unknown / not done**: tying the heights to the FFT
-    ocean's own swell. A wave's height would have to be read where and when it was offshore, and the ocean has no memory of that (its
-    height at a point oscillates with the swell, so reading it at the break would make a wave grow and shrink on its way in); the set
-    envelope above stands in for it.
-  - *Foam.* `WaterFoam` bakes a tileable 256² texture at load: R a lace of bubble rims (cellular noise, F2 − F1), G a five-octave
-    value noise, B fine bubble walls (96 cells, about 17 units a repeat as the shader uses it). The shader blends R and G at two scales
-    (about 110 and 37 units a repeat) and lets more through the more foam there is; within 150-600 units of the eye the bubbles show in
-    it, lit on their walls. Foam on the open water lingers: the ocean's assemble kernel keeps a foam value per texel and cascade, renewed
-    where that cascade's surface folds (its Jacobian below 0.75) and fading to a third in 4 game seconds elsewhere, so a crest leaves foam
-    behind it (in the displacement texture's fourth channel; **Observed** in pictures, no test). No texture is downloaded: all are baked.
-  - *Water colour* (2026-10-08). The shader reads the biome's water colour (the colour map, the sea's outside the world) for more than the
-    body tint: `clean` is 0 for dark water (luma under 0.06; the sea outside the world, the west sea and the Black Desert lake around (8700, -13300) have colour-map pixels of about 0.05, **Verified** by reading `watercolourmap.png`) and 1 from luma 0.3,
-    cut by up to three quarters by how warm it is (red over blue: rust, olive). Only clean water glows through its crests, and a breaker's
-    lip is tinted by the water's colour and only ever brightens the water (before, a fixed green-blue was added to every water, which
-    drew a teal line along every wave; the lip only brightens now, so on dark water the steep face reads as the thin dark streak that its
-    tilted normal gives, **Observed** at 700 units on the west coast). The foam takes the colour: its albedo is white (0.72, a tenth tinted by the
-    water's hue) on clean water and, as the water darkens or turns warm, a dirty grey-brown of the hue at 0.42-0.6 of that brightness (a rust
-    on red water); dark water also foams less (the foam amount to 0.7, the opacity from 0.92 to 0.8). The foam is lit as the land is: in the
-    game's sky mode by `foamLight` (the diffuse terms of `kenshiLight`: the sun colour times the biome's ambient map alpha times
-    `kenshiShadow`, the irradiance cube times the ambient map's colour and the environment factor, no specular; a normal tilted 60 % to
-    straight up). It dims at night (**Observed**: at 1:00 on the west coast the foam outlines are gone, where before they stayed as a faint
-    outline; the dark water's lower amount and albedo contribute) and follows the biome's ambient map; that it falls into the shadow of cliffs and buildings is wired in (the same `kenshiShadow` as the land)
-    but **Unknown** in a picture: the shadow term read 1 on every water pixel of the west-coast view at 16:00 (a debug view), and
-    in the pictures at Port South (7 and 18) and the west coast (11 and 16) no cast shadow crosses surf. In the simple sky it is the old formula times the shadow. It was lit by the sun colour and a fixed share of the sky's zenith colour with no shadow, and its albedo
-    was a fixed 0.72, which against black water and a dark biome glared. The weather does not dim the sun in the viewer's lighting model
-    (the game's own lighting has no weather term, [formats/lighting.md](formats/lighting.md)); what dims the land under rain is its
-    wetness, the haze and the biome's ambient map, so the foam is as bright as land of the same albedo. The shadow is looked up for all
-    water within 8000 units, outside the foam's branch (the Meitou receiver takes derivatives, defined only in uniform control flow); **Observed** at 1920 × 1080 on a beach (`--fly-benchmark 300`, three interleaved runs each): the
-    water pass 0.26-0.27 ms before and after, so its cost is below the noise of a shared GPU.
-  - *Surf foam that wears away* (2026-10-08, `WaterRenderer` fragment shader). Until now the surf's coverage (burst, bore, trail, swash) went
-    through the open water's world-fixed lace, so the band sat in a static pattern as a solid stripe with a clean cut-out edge. Now the
-    surf has its own pattern, read in the wave's frame: q = p + dir (dist − L g) (dir the unit direction to the shore, dist the distance to
-    it, L the 110-unit wavelength, g the breaker phase). That is the point's nearest shore point shifted by the phase, so a point carried
-    in by a wave keeps its q (the wave moves along the shore's normal, the nearest shore point does not change) and the lace drifts in with
-    the wave instead of swimming through a fixed pattern. Three scales of the baked texture (clumps about 270 units, blotches 110, rims 37
-    and 12-17 units) are summed; the threshold rises with the foam's age, `age` = 0.6 × the share of the way from the break point to the
-    waterline the wave has run (taken at the crest the point trails: g − 0.5 wavelengths) + 0.5 × the distance behind the crest (g from
-    0.5 to 0.95) ± a clump jitter, so the fresh break is dense and the foam further in and further back is lace with holes, then patches.
-    The bands' own edges are ragged: the clump noise shifts g by up to ±0.11 wavelength and the distance by ±18 units before the burst,
-    bore, trail and feather envelopes, and the trail now follows the crest back out to the break point (it used to stop at the break point
-    in space, which cut the band's offshore edge off). The swash sheet uses the same age (thinning as it recedes) and its front is
-    broken by the lace. The open water's foam (Jacobian, the FFT's lingering foam, the waterline's thin edge, rivers) is unchanged and
-    still world-fixed. **Observed** in pictures at Port South's beach (distance 350-2500, water clock at 0, 3 and 5.5 s): the stripe is
-    broken into streaks and patches, with feathered edges, thinning towards the shore. **Unknown**: whether it holds at other shores (the
-    nearest-shore-point coordinate jitters where the shore field's gradient is noisy, and stretches where a concave shore focuses it).
-    Cost (**Observed**, same setup as above, noisy): the water pass 0.28-0.33 ms GPU against 0.33 ms before (CPU 0.19-0.26 against 0.25) (three more texture reads within the shore fade
-    distance of the eye).
-  - *Living surf foam* (2026-10-09, `WaterRenderer` fragment shader, `popCells`). The wave-frame lace above slid in rigidly like a decal,
-    every wave reading the same strip of texture and the age only moving one global threshold, so the same lines appeared and vanished.
-    Three changes, all in the surf's branch:
-    - *A wave of its own.* `Shore.wave` keeps the breaker's number (floor of the phase count, wrapping at 4096: the wave whose crest is at
-      g 0.5 of the point's cycle). The lookup q0 = p + dir (dist − L g) is offset by a hash of it (0 to 997 units on each axis), so each
-      wave reads a different part of the tiled texture. The number changes at g 0/1, in the trough, where the envelopes (burst and bore
-      from g 0.42, trail to g 0.95, ± the clump's 0.11) leave no foam; **Observed** with a temporary debug view of the number: the
-      boundaries are smooth lines in the clear water between the bands, and screenshots of the same spot at water clock 0, 3 and 5.5 s
-      show differently patterned waves.
-    - *Cells that burst.* An animated cellular pattern in the (seeded, stretched) wave frame, cells about 22 units (3 × 3 neighbours, one
-      scale, points jittering on 10 and 20 s cycles), gives each cell a lifetime between 0.25 and 1 of the foam's age; once the age passes
-      it the cell's middle is cut out of the lace (−0.45 × smoothstep(0.04, 0.3, F2 − F1) over an age of 0.12), the walls between cells
-      untouched. The global threshold now rises 0.3 × age instead of 0.475, so holes open cell by cell while the walls linger as lace. A
-      first try that also brightened the walls of burst cells drew thin forked "antlers" on the bands' back edges where little else was
-      left; the walls are now only spared, never added.
-    - *Stretched with travel.* The along-normal part of the lookup for the blotches and rims is scaled about the crest by 1 / S, S = 1 + 1.1
-      × ageS² (ageS: the age without the clump jitter), so fresh foam is round and the old foam behind the crest and further in runs out
-      into streaks along the direction of travel (up to 2.1 times). The texture gradients are scaled the same way; the clump (the bands'
-      envelope) is not stretched. The lookup stays in the wave frame, so nothing smears and no cross-faded phases are needed.
+## Surface and waves
 
-    **Observed** in pictures at Port South's beach (distance 250-2500, water clock 0-6.5 s): the foam's pattern differs from wave to wave
-    and from moment to moment, with streaky back edges; the white area over five views is within 1% of before (counted bright pixels,
-    −9% to +20% per view). Cost (**Observed**, a temporary GPU timestamp pair round the water draw, 1600 × 900, three runs each, medians):
-    0.286 / 0.292 / 0.262 ms at distance 350 (clock 0, 3) and 800, against 0.271 / 0.273 / 0.260 ms before: about +0.015-0.02 ms near the
-    shore. **Unknown**: how it moves in a running game (judged from stills a fraction of a second apart).
-  - *Rivers* (2026-10-08, `RiverFlowBake`, `FlowMapTests`, `RiverFlowTests`). The game's `flowmap.png` does not follow the river channels ([formats/terrain.md](formats/terrain.md)), so the viewer bakes its own map at load from the whole-world heights the world already holds (one texel per flow-map texel, 144 units, RGBA8, 16 MB, about 0.45 s on the CPU). Water is a river where its half-width (the largest distance to land within 5 texels) is under 3 texels (fading out to 6: a lake or the sea is not a river); the river texels' axis is the principal axis of the river texels within 10 texels, and has to be clearly elongated (ponds and marsh are not); the sense comes from the valley: the lowest land beside each river texel is regressed along the axis, the senses are made consistent along each connected river (spread from texel to texel), and one vote of the clamped slopes per river decides which way is down (a river shorter than 24 texels, or whose vote is not clearly downhill, is no river). R, G the direction, B the half-width, A the weight, dilated three texels onto the banks. In the shader (`Shore.river`, `flow`, `speed`): the direction is refined by the shore field's channel axis (sampled 40 units each way) only within about 25 degrees of the map and in a narrow channel (half-width under 2-4 texels; round a pond the isolines circle and the first version, which trusted them within 50 degrees, made the water spin in a pinwheel); where neighbouring map texels disagree the filtered direction shortens and the river fades there to still water (before, it snapped to +x along the texel grid: the straight seams). The bake smooths the fitted directions (4 passes of 3 × 3 weighted averaging) and fades the weight where the directions within 2 texels disagree (mean length under 0.55-0.85); **Verified** on the game's heights (`RiverFlowWorldTests`): of about 16 000 neighbouring texel pairs with weight none turns by more than 37 degrees (2 before the smoothing, so the seams and the pinwheel came from the shader); the speed falls from 30 (narrow) to 14 units a second (wide), times 1.5 in the shallows to 0.8 beyond 60 units depth. In a river the normal map's three layers are carried with the flow by two cross-faded phases (2.5 s cycle, renewed where their weight is zero, so the pattern does not stretch where the flow turns); the foam's two scales are stretched three and a half times along the flow into streaks and carried the same way, with a thin trace everywhere and a white rush in rapids (fast, shallow stretches, in patches of the foam noise); the open waves, the breakers and the swash are switched off by the river weight (`oceanScale` and the shore's exposure are multiplied by 1 - weight). **Observed** in pictures (SW rivers at (-65016, 87768) and (-99144, 97416); the NW river): the stretches carry coherent directions along their bends, and the surface moves (two screenshots 0.8 s apart differ by a mean of 2.9 of 255 over the picture); the direction's sign is **Unknown** to be right (no ground truth: the game's own rivers flow nowhere visible). The real rivers are shallow streams (about a decimetre to a metre of water) that mostly show the ground through them, so the effect is subtle; coverage is partial: rivers whose water mask is broken into pieces under 24 texels long at this resolution, or whose banks give no clear fall, stay still. Cost (**Observed**, `--fly-pipelined --fly-benchmark 300` at (-99144, 97416), 1920 × 1080, RTX 4070 shared with other jobs): the water pass 0.08 ms with rivers against 0.06 ms without (stage line 0.16 against 0.11); +16 MB video memory.
-  - *Light and colour* (2026-10-08). **Refraction**: before each draw in a depth slice that can show transmitted colour or wet sand, the scene pass ends, the slice's colour
-    is copied at half size (`CaptureRefraction`, one blit), and the pass opens again; the water looks the copy up bent by its normal (less
-    in thin water and far off) and composites itself opaque, instead of blending over the scene. The former `--no-water-refraction` (removed) kept the
-    blending (the game's alpha from depth). **Absorption**: what is under the water is dimmed per channel by exp(−σ L), σ = the biome's
-    opacity (its parameter map's alpha, the game's alpha per unit of depth) × (4.5, 1.6, 1.1), L the path through the water to the terrain
-    (so in clear water red goes first: turquoise shallows over sand, dark deep water; a strongly coloured biome water, by the saturation
-    of its colour map, filters towards its own colour instead: olive swamps, red lakes; since 2026-10-10 so does *dark* grey water, the clear
-    spectrum fading in with the colour's luma from 0.06 to 0.3: Shark's ForestLand water is 20, 20, 20 with visibility 10 (a thin colourless film
-    over the mud in the game and in Faithful), and red going first had turned the mud under it teal, **Observed** against a base-game screenshot;
-    the bright clean waters (Ashlands, Kenshi Bowl, White Inlet, Blister Sands) are unchanged, Port South's sea still teal), and the water's own colour scatters in for what is absorbed; the
-    floor fades out by 4400 units, as the game's water turns opaque at 4000. **Clarity** (2026-10-10, Tab panel, Meitou only): L is the depth
-    over view.y (floored at 0.05), so at grazing angles it is up to 20 times the depth and distant shallows read as opaque body colour, which
-    is why the water looked see-through only near the eye. "Water clarity x" divides σ (also the alpha of the blending
-    path, the former `--no-water-refraction`; default 0.5 since 2026-10-10, was 1, the game's opacity; 0.25–8); "Far water clarity" k makes L = depth / view.y^(1−k) (0 the true slant path; 1 the plain depth; default 0.25).
-    "Water see-through distance" D (default 10000, the game 4000; 1000–100000) replaces the fixed 4000–4400 cutoff: the floor fades out
-    over D to 1.5 D (smoothstep) when refracted, the blended path goes opaque over 0.9 D to 1.25 D. From high above the game's 4000 left
-    only a clear disc under the camera, darker water all round it.
-    **Glint occlusion** (2026-10-10): the sun's specular is multiplied by how much the mirror shows sky there (its luminance over the
-    analytic sky's in the same direction, smoothstep 0.5–0.85), as the game multiplies its specular by the reflection's brightness; before,
-    the low sun's streak ran straight through the dark reflection of the hills in front of it.
-    **Caustics**: on the floor seen through shallow water, two
-    drifting copies of the foam lace (cell rims) multiplied and read a mip or three down, the blur growing with the depth (0.15 mips a unit),
-    at a quarter of the strength they had until 2026-10-08 (they covered a whole beach); gone in the shallows (zero under 1.5 units, full from 7),
-    fading over 18 units of depth, out between 500 and 2500 units from the eye, and in rain (to a fifth at the heaviest). **Crest light**: where
-    an ocean crest stands more than about 1 unit high and the eye looks towards the sun, a glow of light through the thin top, in the
-    water's own colour (before 2026-10-08 a fixed green-blue, teal on every water): a faint blue-green is added only to *clear* water (see
-    "Water colour" above); none in water under 6 units deep (full at 40), and dimmed in rain.
-    **Glitter**: beyond 800-4000 units a broader glint lobe let through where a fine moving pattern peaks, so the far sea sparkles in a
-    band instead of fading flat. All of it in the Meitou shader only.
-    **Glint under clouds** (2026-10-10): the game's specular ignores the weather, so in Shark's heavy rain (`Heavy_Rain`, clouds density 1) the
-    swamp water still mirrored a bright sun. The Meitou water scales the glint's colour by `1 − 0.95 · smoothstep(0.3, 1, o)` (`WaterRenderer.
-    GlintCloudFade`, `GlintCloudShade`), `o` how overcast the sky is: the cloud density after the weather's transition (`--clouds` wins) or the
-    rain's `rainAmount` where that is more (`WorldFrame.Overcast`, [render-shafts.md](render-shafts.md) "Cloud cover"); `swamp rain no wind` keeps
-    about 24 % of the glint. The Faithful water keeps it whole.
-    *Observed* the same day at Shark in `Heavy_Rain` at 16:00: the owner judged it good.
-  - *Clock.* Everything runs on the game clock (`GameHours`; the viewer's heat-haze hours, still for a picture): paused water stands
-    still, game speed speeds it up. (The `--water-seconds` option, which started it at s game seconds, was removed.)
-  - *Cost* (**Observed** 2026-10-08, 1920 × 1080, Port South's beach at distance 900, `--fly-benchmark 300` with `MEITOU_PASS_STATS=1` and
-    the clock running, one run each, so noisy): the ocean's compute pass 0.21-0.37 ms GPU (256², timestamps round it; `--water-ocean 128`
-    is a quarter of the transform), the water pass 0.30 ms GPU with refraction (the copies included), 0.12 ms without, against 0.03 ms for
-    the Faithful water; the shore bake 40-95 ms on a worker thread. Memory: about 21 MB (spectrum 6, work buffers 9,
-    textures 4) plus the 8 MB shore field (up to about 32 MB since 2026-10-10: two recycled textures kept for the next bake, one being written, and the shown one). The reflection pass is unchanged (the mirror stays the plane at Y = 100).
-  - *Runs whether or not water is in view* (**Observed** 2026-10-12, The Hub, [bench.md](bench.md) "Measured, the Hub at 1080p DLAA"): before the water gate below, `WaterRenderer.Draw` had no visibility test, so every frame recorded the ocean FFT (`OceanWaves.Record`, 0.31-0.33 ms GPU a pass on the RTX 4070 with the clock running, 0.19 for a lone cold pass, into the `water` stage), the refraction copy of the near slice (`NeedsRefraction` tested the slice distance only) and the 185 k-triangle grid in both slices (its vertex stage reads the shore and ocean textures; at the Hub the near slice's draw shades 6 fragments, the far slice's 338 k of the fogged sea past the map edge). The FFT is spared in the benchmark harness and in `--fly-benchmark` without `--time-speed`, because `Record` returns early while the clock stands still (the harness's water stage reads 0.10 ms, the interactive viewer 0.34 in the same view); since 2026-10-12 `--time-speed` also runs the water's clock in the fly benchmark (`water ocean: 300 passes` over 300 frames), so the FFT can be measured headless. The reflection's `MaxDistance` is 3 x the haze distance (150 000 units; the game's `reflection range` is 0.6) while the haze is complete at 30 000 in clear weather; the reflection is redrawn every fourth frame while water is in view (`CanReuse`'s `MaxAge`), about 0.21 ms GPU and 0.6-0.8 ms CPU a pass.
-  - *The water gate* (Meitou only, always on; **Verified** 2026-10-12 by A/Bs against the pass as before, through a `--ab water-gate` switch since removed, and the `nearest water` figure in the reflection's stats line): `ReflectionPass.WaterRect` counts water only out to `SkyRenderer.HazeCompleteDistance` (`ReflectionPass.WaterDistance`, set by `WorldFrame`; past it the fog hides the sea completely) and reports the nearest water its rays meet (`NearestWater`: NaN when it did not look, e.g. under water or reflections off; infinity for none). With none the reflection is not drawn and the verdict is reused like an image (`CanReuse`: same picture size, camera within tolerance, up to `MaxAge` frames). `WorldFrame` hands the figure to the water: the ocean FFT is skipped while the nearest water is past `OceanFadeEnd` (14 000, where the shader's open-ocean weight `1 - smoothstep(9000, 14000, dist)` reaches 0; not `WaveFadeEnd` 5500, which only ends the vertex displacement while the normals read the FFT out to 14 000), and the refraction copy while `SliceCanTransmit(NearestWater, ClearDistance)` says no water near enough can show the bottom (bound 15 000). Unknown (NaN) gates nothing. Outcome at the Hub: the nearest water is 13 118 units (the sea past the map edge, inside both 14 000 and the haze's 30 000), so the gate legitimately keeps the FFT, the copy and the reflection, and the A/B read no change there; nearest water at Shark 1 253, at Port North 2 632. It pays only in views with no water within 14 000 units, and fully (reflection too) with none before the haze. Pictures (`--upscaler off --no-particles`, still): Port North coast 888 pixels by 4/255 or more, 118 by 12, max 48, identical to a null A/B of the same view (`--ab record-threads`: 888 / 118, max 48); swamp 477 / 34, max 28; Hub 590 / 3, max 12; nothing is gated in those views, so these are the harness's floors. Not done: the grid draw skipped in a slice with no water (needs a per-slice verdict and a picture check at a coast, the Hub and the whole-world view); a lower FFT rate for far water (a picture change by design).
-  - *Shore distance field* (`ShoreField`, `ShoreBake`; read by the water shader since 2026-10-08). A 1024² grid of 10-unit texels (±5120 units round the eye) holding (signed distance to the waterline, exposure). The
-    waterline is where 100 − height changes sign between neighbouring texels, placed by linear interpolation of that difference, so it is
-    sub-texel; the distance is to those points (8SSEDT: two sweeps carrying the nearest crossing point, O(N²)), positive over water and
-    negative over land, clamped to ±4000, then one 3×3 binomial Gaussian so the gradient has no kinks. **Exposure** is
-    smoothstep(600, 1200, reach), reach = the largest distance-to-shore of any water within 1500 units (measured on 8-texel blocks, a disc
-    dilation over them, bilinearly upsampled): a pond, swamp channel or narrow bay whose water is never more than about 600 units from a
-    shore within 1500 units is 0, open sea (1200 units of open water within 1500) is 1 (until 2026-10-08 200 / 450 within 500, which let
-    Shark's town pond, about 400 units from shore at its middle, get surf; **Observed** in a picture). **Islets** get no surf: the exposure is multiplied by smoothstep(π·250², π·450², area of the
-    land mass of the nearest shore), the land masses found by a flood fill of the land texels (4-connected; one touching the grid's edge
-    counts as large), averaged per 8-texel block and over the 3×3 blocks round it before the upsample, so the surf fades over a few hundred
-    units where the nearest shore switches from an islet to the coast behind it. A rock in open sea is as exposed as the coast, and until
-    then breakers ringed it on every side and met in the middle (**Observed**, the user's picture, and at an islet of about 150 units
-    off Port South at (89750, −93430): a ring before, no surf after, the mainland's surf beside it kept). `ShoreFieldTests` checks a
-    150-unit islet (exposure under 0.05 round it) against a 700-unit island (over 0.95). It adds about 15 ms to the bake (70-77 ms against
-    56-81, **Observed**, the bench test). Past the grid's edge the water counts as open sea (reach =
-    max) when the nearest edge block is water, else as land. The bake runs on a worker thread from a `HeightSnapshot` (an immutable copy of
-    the terrain's coarse grid, fine window and band, taken on the render thread by `TerrainRenderer.Snapshot()`; `HeightAt` is defined
-    through it); `ShoreField.Update(eye, snapshot)` starts a bake when nothing is baked yet or the eye is more than 2560 units (a quarter of
-    the width) from the centre in X or Z, the centre snapped to whole texels so the field does not swim, and uploads the finished grid
-    as an RG32F texture (8 MB, linear, clamped); the old texture is released four frames later (since 2026-10-10 kept for the next
-    bake, see "Upload cost" below). **Verified** (unit tests
-    on synthetic terrain, `ShoreFieldTests`): on a straight beach at three angles and on a circular island the distance is within 3 units
-    (0.3 texel) of the true one with the right sign; a 150-unit pond and the inside of a 300-unit-wide channel have exposure under 0.05,
-    open sea more than 0.95; the gradient direction turns less than 30 degrees between neighbouring water texels near a straight shore.
-    **Observed** (2026-10-08, desktop CPU with 12 logical cores, Release, 1024², a height function of two sines and a plane): the bake
-    took about 63 ms per grid (mean of 5; the height sampling alone about 10 ms; the sweeps ran 35 ms with managed arrays, before they were
-    made pointer-based on one packed array). The rebake rule means one bake per 2560 units flown. The GPU upload was not measured (no GPU test).
-  - *Upload cost* (2026-10-10; the numbers and the command are in [renderer-native.md](renderer-native.md) 8.21). **Cause** of the many
-    8 MB uploads: not a bug but the rule above at speed: at 150 units a frame (9000 units a second) the eye leaves the quarter-width box every
-    17 frames, so the 3600-frame fast flight rebaked and re-uploaded 180 times (**Observed**, `upload shore field` row of the spikes table:
-    180 uploads, 1440 MB, 8 MB in one frame, 4 to 6 ms of staging copy on the render thread), and **131 of 184 bakes (71 %) came out with no
-    waterline in the field at all** (inland, or open sea), which is one value everywhere. **Fixed**: `ShoreGrid.IsUniform` finds those on the
-    worker and the field is then a 1 x 1 R32G32 texture (the shader clamps to the edge and takes `Rect` as before, so every texel reads the
-    same: pictures identical, `ShoreFieldTests`); a field with a coast is laid out (interleaved) on the worker into one of two reused arrays
-    and written to a recycled 1024² texture (up to two retired ones are kept) 256 rows (2 MB) a frame, the new texture replacing the shown
-    one, with `Rect`, once whole (the very first field, and a screenshot's, is written at once); no new result is taken while an upload is in
-    progress. `ShoreBake.Scratch` keeps the bake's arrays between bakes (the bake allocated about 44 MB each, `ShoreFieldTests` checks
-    59 KB instead of 2.3 MB per bake after the first). **Observed** after: 53 uploads of 2 MB a frame (424 MB in the run) and 131 one-texel
-    fields; the field on the render thread costs 1.0 to 1.3 ms in a frame that writes rows and nothing worth a log line otherwise, except the first
-    one or two fields of a run (2 to 3 ms: the first, whole, write) (`water     shore field ...` lines of `--log-spikes`). Pictures
-    at Port South (coast) and at the flight's start: `image-diff` against the same-commit baseline, mean 0, max 0.
+Faithful: flat surface and game shading/reflection rules. Meitou: camera-centred polar grid,
+default256 segments; `--water-grid 128` reduces geometry with visible quality differences.
+Three256² FFT cascades cover250/47/9m tiles with separate wave-number bands. JONSWAP wind spectrum,
+mirror-conjugate coefficients and normalized directional spreading; zero/Nyquist/out-of-band
+modes excluded. Evolve omega=sqrt(g*k), quantized to2pi/600s; modulo clock keeps phases precise.
+Stockham row/column FFT packs displacement/slopes/derivatives into two mipmapped RGBA16F arrays.
+Vertices choose mips by spacing; fragment slopes preserve fine shading. Jacobian<0.7 produces
+crest foam. Wind change>10deg or12% rebuilds on a worker and blends10 game seconds.
+**Verified** OceanTests single-mode transform and symmetry under synchronization validation.
 
-Verified with screenshots (2026-10-04, saved outside the repo): Shark (houses on stilts and walkways over swamp water), Port North (coast with sun glitter), the whole world (sea around the land), and The Hub towards the horizon (terrain to the edge of the map, fading into the haze); the sky part is in [render-sky.md](render-sky.md).
+Wave displacement fades in shallow/sheltered/shore water; surf uses baked distance/gradient and
+exposure, with breaker/swash/foam envelopes, rather than bottom-slope distance approximation.
+Game normal maps remain with reduced near strength. Shore-field bakes/publishing must not stall
+frames; retain ready textures until replacements finish. RiverFlowBake derives channel flow from
+heights because source flowmap RG does not follow channels; suppress ocean/surf in river channels.
+River coverage, biome scum and object-contact foam are incomplete.
 
-## Fog in the reflection (Meitou, 2026-10-10)
+## Shading and reflection
 
-*Observed* 2026-10-10: low over Shark's pond in `swamp rain no wind` the water showed a blue-grey sky that the swamp's fog hides from the eye.
-The swamp's fog is the placed fog volumes ([formats/fogfeatures.md](formats/fogfeatures.md)), drawn by one full-screen pass that fogs the water at
-the water's own distance; the reflection camera draws no volumes (as the game's queue-60 reflection), so the mirror held the open sky. How much
-water reflects is the Fresnel term, a matter of angle and not of light, so a low eye over dim water still sees a near-mirror: a mirror of the fog.
+Water combines Fresnel, normal distortion, depth absorption/refraction, sky/scene reflection,
+caustics, crest light/glitter and persistent foam. Surface colour/clarity depend on biome/Tab
+settings. Foam uses diffuse sun/ambient/weather lighting and dims at night, not emissive white.
+The reflected scene remains mirrored around Y100 despite waves. Reflect level/range, frustum,
+clip plane, water coverage and reuse age determine work; use original rules in Faithful.
+Meitou reflection skips unnecessary casters/shadows, shortens object/foliage reaches and has
+separate sample/quality settings. Fog in reflection must evaluate reflected world geometry
+against the appropriate air/water bounds; ordinary camera fog cannot be applied indiscriminately.
 
-*From the code.* `ReflectionPass.RunFog`, after the reflection is drawn and resolved, when `FogVolumes` is set (the frame loop sets it while the
-Meitou water draws and volumes are in view; the Faithful water keeps the game's mirror). One full-screen draw over the half-resolution colour with
-the main fog pass's blend (`colour × transmittance + fog`, colour channels only), shader `ReflectionPass.FogFragment`: each texel's depth (the
-multisampled target's first sample, `sampler2DMS`, or the plain depth with one sample; both now made sampleable) is unprojected
-through the inverse of the near slice's mirrored, *oblique* view-projection (the depth mapping is not the plain perspective one), which gives
-the distance to the world point the texel shows. The ray's direction comes from the same slice's plain (non-oblique) matrix: the oblique
-one's far plane is skewed, and for the grazing rays of the mirrored horizon (where Fresnel makes the water reflect most) its mid-depth point
-lies behind the eye, so the first version left a band of sky there unfogged (**Observed** with a debug colouring, then gone). The ray from the
-mirrored eye crosses the water plane at distance `tw`; from there on it is the real reflected ray, so `fogVolumesAccumulate` runs from that
-crossing along the same direction for `total − tw` (the sky, depth 1: to the far clip). The eye-to-water part is left to the main pass, which
-fogs the water pixel. Not fogged: what lies only in the far slice (from 20000 units on; its depth is cleared before the near slice) is treated
-as sky, and the water's sky-colour fallback (with reflections off, or outside the reflection's rectangle) stays unfogged.
+## Safe work skips
 
-*Observed* (same view, 1280 × 720, `--pitch 5 --yaw 0 --distance 900` at Shark, 16:00, the fog pass off (a temporary switch, since removed) against on): the band of water
-reflecting the mirrored horizon went from a cyan grey (37, 41, 39) to a fog brown (35, 34, 28), the near water from (44, 43, 42) to
-(42, 40, 37), the hue of the fog above the horizon (120, 115, 103); the 4x and 1x reflections agree. **Measured** (`--view swamp-rain --size
-1920x1080 --upscaler dlss --render-scale native --bench-frames 600`, two pairs, RTX 4070): the `reflection` stage 0.37 → 0.43 ms mean in both
-pairs (+0.06 ms); the GPU total moved by less than the run-to-run noise (6.27 / 6.24 off, 6.26 / 6.21 on).
+Surf branches only for surf/swash contribution. Zero ocean strength skips displacement/slope
+reads with explicit fragment gradients. Caustics skip beyond2500, at depth<=1.5 or sun below
+horizon; bubble reads skip beyond600. Reuse depth/shore reads when compatible.
+Refraction copy omitted when slice near plane>=max(1.5*clamped clarity distance,10000):
+transmission is zero and swash faded. Higher clarity restores the copy. Do not infer absence
+from terrain/reflection visibility. `--ab water-lean` isolates shader/copy skips; geometry quality
+is independent. A scene with no nearby water can skip water work, with conservative bounds.
 
-## Reflection cost: shadows and multisampling (2026-10-09)
+## Verification and limitations
 
-- **No sun shadows in the reflection** (Meitou; `ReflectionPass.NoShadows`, default on, `--ab refl-shadows`; Faithful shadows keep them). While the pass records, `GpuContext.Globals.OverrideBlock` swaps the frame's `KenshiShadowReceiver` block for an all-zero one (the shadows-off block), so every receiver (terrain, objects, foliage, the atmosphere's sun term) sees a lit surface and `kenshiShadow` returns 1 before touching the map; no new pipelines, no shader change. What the game does for its reflection target is **Unknown**, so Faithful (`ShadowPass.Meitou` false) keeps them as before. **Observed** (swamp target view, `--upscaler dlss --render-scale native`, 600 frames, `--ab refl-shadows`, period 1 and 16): the `reflection` GPU stage 0.53 to 0.46 ms (-0.06 +-0.01 and -0.06 +-0.02, median -0.05/-0.06); less than the 0.15 to 0.27 ms the receiver was estimated to cost in the pass (shadows.md), because the half-resolution mirror pass is mostly vertex, draw and fill bound. The frame total moved -0.33 and -0.17 ms in those runs but that includes shadow-scheduling noise from other work and is not attributable. Picture (`--upscaler off --no-particles --bench-motion still`, `ReflectionPass.MaxAge` 0 so each side draws its own reflection): 1,692 pixels differ by 1/255 or more, none by 4, max 3 (the swamp's shadows are faint in the mirror; views with long tree shadows on the shore were not compared: **Unknown**).
-- **Multisampling** (`ReflectionPass.Samples`, default `DefaultSamples` = 4, unchanged; the `--reflection-samples` option was removed, `--ab refl-msaa` = 4 samples against 1). **Observed** (same view, 600 frames, `--ab refl-msaa`): the `reflection` stage 4 samples 0.46 ms, 2 samples 0.43 ms (-0.03 +-0.01), 1 sample 0.38 ms (4 against 1: -0.08 +-0.01, 2 against 1: -0.04 +-0.01 paired); so 4x costs 0.08 ms more than none at half resolution. Picture (stills, as above): 4 against 1: 14,005 pixels differ by 1/255 or more, 3 by 4, max 10; 4 against 2: 8,919, none by 4, max 3; 2 against 1: 13,334, 3 by 4, max 10. The swamp orbit has little mirrored shoreline, so the stair steps the earlier note describes were not looked for here (**Unknown** in views with a straight shore or buildings on it); the default is left at 4 for the user to decide.
-
-
-## Water optimizations (2026-10-11, water-optimization)
-
-**From the code** (`WaterRenderer`, `WorldFrame`): five changes to the Meitou water; Faithful keeps its flat quad.
-
-- The surf coordinates, envelopes and texture reads run only where the surf zone contributes or the pixel is swash.
-  River foam, open-water foam and the waterline edge remain independent of this branch.
-- The ocean strength is evaluated before the six fragment texture reads. Zero strength skips those reads; vertices
-  also skip displacement reads at zero strength. Texture gradients are explicit in the fragment branch.
-- The candidate polar grid of 128 segments (23553 vertices / 46976 triangles instead of 256 segments,
-  92417 vertices / 184576 triangles; vertex mip selection still follows the grid spacing, fragment normals
-  retain the fine waves) was tried and reverted: the default is 256 (see "Mesh quality correction" below), and
-  `--water-grid 128` selects the lower density. This changes geometry and is not pixel-exact.
-- A slice with near plane at or beyond max(1.5 times the clamped see-through distance, 10000) skips the refraction
-  copy and its pass restart. The near-plane distance bounds the fragment's eye distance from below, transmission
-  is then zero, and swash has faded out; the ordinary blended path is opaque there. Increasing the clarity distance
-  restores the copy for the far slice. No heuristic based on terrain or reflection visibility is used.
-- Caustic reads are omitted beyond 2500 units, at depths of at most 1.5 units or with the sun below the horizon;
-  bubble reads are omitted beyond 600 units. The repeated floor height lookup reuses the shore's depth inside the world.
-
-`--ab water-lean` disables the shader skips and slice-copy skip for comparisons.
-The mesh is selected at load, independently with `--water-grid`; the FFT resolution and reflection settings are unchanged.
-
-**Verified** (`MeitouWaterTests.Refraction_slice_keeps_transparent_floor_and_shore_runup`): the cutoff preserves
-near water, high-clarity far water and the shore's range even when the see-through distance is very short; the boundary
-at 15000 units for default clarity is excluded. The existing polar-grid test checks topology and winding for both densities.
-
-**Observed**, RTX 4070, 1600x900, upscaler off, texture quality 3, water clock 3 s, no particles: Port South
-(distance 900, pitch 30, yaw 180, time 16), old build `c5327ae` versus the shader/copy changes at grid 256:
-image-diff mean 0.0061/255, 0.001% of pixels over 12/255, maximum 19. Grid 256 versus 128 with the shader changes:
-mean 0.1220/255, 0.142% over 12, maximum 75; differences concentrate on water and its shoreline. These are stills,
-not a guarantee for all views or moving waves.
-
-**Unknown**: a reliable GPU saving. A 768-frame paired `water-lean` run at Shark (`--view swamp-rain --bench-motion still
---size 1920x1080 --upscaler off --texture-quality 3 --water-grid 256 --ab-period 16`) was heavily disturbed by another
-viewer sharing the GPU (97% utilization, 11 GB used): water stage medians 0.23 ms on / 0.28 off, but scheduling stalls
-of roughly 67 ms dominated the means and paired deltas. Those timings do not establish a performance gain. The initial
-full-texture baseline aborted at the VRAM guard; all subsequent visual comparisons used texture quality 3 consistently.
-
-**Observed**, close unobstructed shore at (87627, -88100), distance 350, pitch 25, yaw 180, same clock,
-resolution and quality, objects/foliage off: old grid 256 against new default grid 128, mean 0.5372/255,
-1.448% of pixels over 12/255, max 123. Differences are on the moving water and shoreline; there was no visible
-faceting in the still. Motion and other wind conditions remain **Unknown**.
-
-**Observed**, synchronization-validation screenshots of the baseline and new build: zero errors during rendering,
-both report one leaked `VkImageView` at device destruction. This existing shutdown diagnostic is not fixed here.
-
-**Observed**, verification: Release build has zero warnings/errors; quick suite 1050 passed, water/ocean/native
-texture tests 22 passed. Full suite before refreshing the intentional Meitou water snapshots: 1351 passed,
-7 failed (two shader snapshots, four local save-fixture checks, one shore-bake timing assertion at 962 ms).
-After refreshing only the water entries, the final quick/GPU/snapshot selection has 1053 passed and two failures
-for foliage mesh, foliage depth and velocity hashes; those identical two failures were reproduced in the untouched
-`c5327ae` baseline. No save or foliage/velocity code is changed by this branch; the full suite is not green.
-
-
-### Shark A/B after the GPU became quiet (2026-10-11)
-
-**Observed**, RTX 4070, 1920x1080 native, upscaler off, default texture quality, forced `swamp rain no wind`,
-time 16, still camera `018C6C25C7309B75C4723B5747D78075406DF4113E00A00C46`. GPU utilization was 5% before
-measurement, with roughly 2 GB used before loading. The harness holds the water clock (one FFT dispatch per run),
-so these results measure surface/refraction work; they do not measure an animated ocean's whole per-frame cost.
-
-Same-process `--ab water-lean --water-grid 256 --ab-period 16 --bench-frames 1024` (A on / B off), GPU means:
-water 0.36 / 0.44 ms, paired delta -0.07 +/-0.01 ms; total 4.63 / 4.79 ms, delta -0.16 +/-0.09 ms.
-Wall frame 5.25 / 5.41 ms, delta -0.16 +/-0.38 ms (not significant); render-thread water 0.29 / 0.38 ms,
-paired delta -0.10 +/-0.03 ms. This isolates the four shader/copy changes at the original mesh density.
-
-All five together: alternating processes of baseline `c5327ae` (grid 256) and new defaults (grid 128),
-768 frames per process, two pairs:
-
-| Metric, mean ms | Old 1 | New 1 | Old 2 | New 2 |
-| --- | ---: | ---: | ---: | ---: |
-| GPU water | 0.4123 | 0.3382 | 0.4591 | 0.3521 |
-| GPU total | 4.6577 | 5.0839 | 5.2910 | 4.9851 |
-| Wall frame | 5.5919 | 8.1413 | 6.2419 | 7.2226 |
-| CPU total | 4.8778 | 7.5134 | 5.2504 | 6.6787 |
-
-Water is 18% / 23% cheaper on the GPU. Total frame results are inconsistent and the optimized processes have
-higher CPU times elsewhere: in pair 2 foliage 1.76 -> 2.32 ms, shadows 1.14 -> 1.43, terrain 0.13 -> 0.32,
-GI 0.31 -> 0.40. The separate-process FPS decreased; these runs do not establish an overall FPS benefit or
-attribute the CPU increase to the water change. The same-process GPU water gain above is the stronger evidence.
-Temporary result prefix: `%TEMP%/water-shark-ab-clean` and `%TEMP%/water-shark-old1`, `new1`, `old2`, `new2`
-(JSON, frame CSV and logs). **Unknown**: moving-camera, animated-wave and DLSS gains.
-
-
-### Mesh quality correction (2026-10-11)
-
-**Observed**: the owner judged the optimized water noticeably worse in the interactive Shark view with DLSS at
-native render scale. The 128-segment mesh was the change with a known visual tradeoff; its earlier screenshot
-checks do not establish acceptable quality in motion. The default is restored to 256 segments. `--water-grid 128`
-remains an explicit lower-detail option; the four shader/refraction optimizations remain enabled. The mesh's role
-in the reported regression is an **Unknown** inference until the owner compares the restored-density view.
-The 128-grid measurements above describe the earlier candidate, not the current default.
+**Verified** MeitouWaterTests.Refraction_slice_keeps_transparent_floor_and_shore_runup checks
+near water, high-clarity far water, short-clarity shore and the15000 default boundary. Grid tests
+check both topology/winding. **Observed** close-shore screenshots show256/128 differences;
+a still does not establish moving-wave quality. GPU savings on a shared card remain uncertain.
+Use a fixed water clock, wind, clarity, resolution/upscaler and texture quality for comparisons.
+**Unknown:** pictures demonstrating all foam shadows, incomplete river/scum/object interactions,
+and behaviour over all winds/biomes. A shutdown VkImageView leak was observed in validation;
+zero rendering-time errors alone does not establish clean destruction.

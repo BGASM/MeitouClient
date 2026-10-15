@@ -178,6 +178,9 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
     float LandmarkReach => Math.Max(RealRange, LandmarkDistance * (guard?.RangeScale ?? 1f));
     /// <summary>Whether the landmarks are kept apart from the zones (the renderer was made with them).</summary>
     public bool HasLandmarks => landmarkClass is not null;
+
+    /// <summary>Presentation-only placements (<see cref="ObjectStreamer.Staged"/>): the Meitou title's staging; null in play.</summary>
+    public IReadOnlyList<PlacedMesh>? Staged { get => streamer.Staged; set => streamer.Staged = value; }
     float DistantReach => DistantRange * (guard?.RangeScale ?? 1f);
 
     /// <summary>Draw nothing but the real objects (no distant meshes): the game with distant towns off.</summary>

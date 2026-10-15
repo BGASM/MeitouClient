@@ -16,12 +16,12 @@ sealed partial class PlayerInterface
     public void SetRenderedIcons(Func<string, (Meitou.Rendering.Gpu.Texture Texture, Meitou.Rendering.Gpu.SampledTexture Sampled)?>? lookup) { if (uiPainter is not null) uiPainter.RenderedIcons = lookup; }
 
     /// <summary>
-    /// The cell of one item in an inventory or trader grid: its icon filling <paramref name="area"/> with the quantity and <paramref name="extra"/> (a price) in the corner, or, while it has
-    /// none (no file, nothing drawn yet), the dark box with the item's name. The box is the pickable control and carries <paramref name="property"/>.
+    /// An item icon filling <paramref name="area"/> with its quantity in the corner, or a name while the icon loads. <paramref name="extra"/> (a price) appears in the hover tooltip.
+    /// The transparent text control handles picking and carries <paramref name="property"/>.
     /// </summary>
     void AddItemCell(List<UiControl> controls, string name, UiRect area, string record, string material, string itemName, int quantity, string? extra, string property, int index, UiRect? clip)
     {
-        string count = quantity > 1 ? $"x{quantity}" : "";
+        string count = quantity > 1 ? quantity.ToString(CultureInfo.InvariantCulture) : "";
         Dictionary<string, string>? image = null;
         if (itemIcons?.Choose(record, material) is { } choice && uiPainter is { } painter)
         {
@@ -32,9 +32,9 @@ sealed partial class PlayerInterface
         }
         bool shown = image is not null;
         if (shown) controls.Add(new($"{name}-icon", "ImageBox", area, "", "", "", true, image!, System.Numerics.Vector4.Zero, Clip: clip));
-        string caption = shown ? string.Join("\n", new[] { count, extra }.Where(s => !string.IsNullOrEmpty(s))) : string.Join("\n", new[] { itemName + (count.Length > 0 ? " " + count : ""), extra }.Where(s => !string.IsNullOrEmpty(s)));
+        string caption = shown ? count : itemName + (count.Length > 0 ? " x" + count : "");
         controls.Add(new(name, "TextBox", area, caption, "", "", true,
-            new Dictionary<string, string> { ["WordWrap"] = "true", ["TextAlign"] = shown ? "Right Bottom" : "Center", ["FontName"] = "Kenshi_StandardFont_Medium", [property] = index.ToString(CultureInfo.InvariantCulture) },
-            shown ? System.Numerics.Vector4.Zero : new(0.2f, 0.2f, 0.16f, 0.6f), Pickable: true, TextScale: 0.8f, Clip: clip));
+            new Dictionary<string, string> { ["WordWrap"] = "true", ["TextAlign"] = shown ? "Right Bottom" : "Center", ["FontName"] = "Kenshi_StandardFont_Medium", ["ItemTooltip"] = itemName + (extra is null ? "" : "\n" + extra), [property] = index.ToString(CultureInfo.InvariantCulture) },
+            shown ? System.Numerics.Vector4.Zero : new(0.2f, 0.2f, 0.16f, 0.6f), TextColour: System.Numerics.Vector4.One, Pickable: true, TextScale: 0.9f * InventoryScale, Clip: clip));
     }
 }

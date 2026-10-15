@@ -125,14 +125,23 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         if (dragging)
         {
             dragging = false;
-            Select(InBox(from, p), shift);
+            var boxed = InBox(from, p);
+            Select(boxed, shift);
+            if (boxed.Count > 0) Inspect(CharacterId.None);
         }
         else
         {
+            // A click on another faction's character shows it in the information and medical panels and drops the squad's selection (docs/game/ui-screens.md section 4). Shift keeps the selection, a click on your own or on the ground clears the inspection.
             var hit = Pick(p);
+            var other = hit is null && !shift ? PickWhere(p, c => !c.IsPlayer) : null;
             Select(hit is { } id ? new[] { id } : [], shift);
+            if (other is { } stranger) Inspect(stranger);
+            else if (!shift || hit is not null) Inspect(CharacterId.None);
         }
     }
+
+    /// <summary>Shows <paramref name="target"/> (another faction's character; <see cref="CharacterId.None"/> for nobody) in the HUD panels.</summary>
+    void Inspect(CharacterId target) => Say(new InspectCommand(target) { Tick = session.World.Tick });
 
     /// <summary>
     /// Once a frame: while the right button is held after a move order, the order is given again at the ground point under the cursor once every world

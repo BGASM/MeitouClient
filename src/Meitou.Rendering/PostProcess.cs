@@ -134,14 +134,14 @@ public sealed unsafe partial class PostProcess : IDisposable
     sealed class CompositePass : FullscreenProgram
     {
         public readonly SamplerSlot Scene, Ao, Adapted;
-        public readonly UniformHandle Auto, Exposure, UseAo, Dither, SceneSize, Tone, ToneMix, Grade, Saturation, Contrast, Night;
+        public readonly UniformHandle Auto, Exposure, UseAo, Dither, SceneSize, Tone, ToneMix, Grade, Saturation, Contrast, Night, Balance;
         public CompositePass(GpuContext gpu) : base(gpu, PostProcessShaders.Composite, "post composite")
         {
             (Scene, Ao, Adapted) = (P.Sampler("uScene"), P.Sampler("uAo"), P.Sampler("uAdapted"));
             SceneSize = P.Uniform("uSceneSize");
             (Auto, Exposure, UseAo, Dither) = (P.Uniform("uAuto"), P.Uniform("uExposure"), P.Uniform("uUseAo"), P.Uniform("uDither"));
             (Tone, ToneMix, Grade, Saturation, Contrast) = (P.Uniform("uTone"), P.Uniform("uToneMix"), P.Uniform("uGrade"), P.Uniform("uSaturation"), P.Uniform("uContrast"));
-            Night = P.Uniform("uNight");
+            (Night, Balance) = (P.Uniform("uNight"), P.Uniform("uBalance"));
         }
     }
 
@@ -694,6 +694,7 @@ public sealed unsafe partial class PostProcess : IDisposable
         c.P.Set(c.Saturation, PostOptions.Saturation);
         c.P.Set(c.Contrast, PostOptions.Contrast);
         c.P.Set(c.Night, auto ? Math.Clamp(o.NightGradeStrength, 0, 1) : 0f);
+        c.P.Set(c.Balance, o.Balance);
         if (fxaa || haze) Draw(c.P, ldr!); else DrawFinal(c.P, final);
         Stamp("composite");
         var picture = ldr;

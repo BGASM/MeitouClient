@@ -53,6 +53,8 @@ public sealed class PostOptions
     public float NightGradeStrength = Meitou.Data.World.NightGrade.MeitouStrength;
     /// <summary>Linear scale of the scene before everything else. 1 keeps the shaders' brightness (the - and = keys).</summary>
     public float Exposure = 1;
+    /// <summary>Presentation-only white balance: the scene's linear colour is multiplied by it before the tone map (the Meitou title warms its light with it); 1, 1, 1 in play.</summary>
+    public System.Numerics.Vector3 Balance = System.Numerics.Vector3.One;
     /// <summary>World units: how far from a point occluders count.</summary>
     public const float SsaoRadius = 12, SsaoStrength = 4;
     /// <summary>How much of the occlusion stays on the characters' own pixels (Meitou): 0 none, 1 the same as everywhere else. They still darken the ground round them.</summary>

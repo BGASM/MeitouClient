@@ -1,33 +1,33 @@
-# Post-processing
+# Original post-processing
 
-What Kenshi does to the lit scene before it reaches the screen, and what `meitou-viewer --world` does
-([render-post.md](../render-post.md)). Sources are the shipped scripts in `data/materials/compositors/` and
-`data/materials/post/` (read for facts only; none of their code is used), `settings.cfg`, `kenshi.cfg` and the
-strings of `kenshi_x64.exe`. Labels as in [../README.md](../README.md).
+Source: compositors/workspace/main/post files, post HDR/FXAA/haze shaders and exe settings/sky
+writers. Tables/expression scopes retained. Engine alternatives: [render-post](../render-post.md).
 
-## Pipeline order
+## Chain and exposure
 
-**Verified** (`compositors/workspace.compositor`, `main.compositor`, `compositors.cfg`): the `Kenshi_Main` workspace is a
-deferred renderer with these nodes, in this order:
+**Verified** reflection512² A8R8G8B8 → three-target GBuffer → R11G11B10 HDR lighting
+(sky/moons,lighting,water,haze,fog/particles) → luminance/adaptation/bloom/composite → FXAA →
+HeatHaze → debug/GUI. HDR unclamped until LDR composite. SSAO/RTW-debug nodes commented out.
+Linear mean luminance Rec601 weights0.299/0.587/0.114, floor0.0001; downsample128→64→16→4→1,
+not log mean despite final log storage. Adapt=last+(current-last)*(1-exp(-dt*0.5)), then bound.
+Runtime min=exposure-min*lerp(night-darkness,1,saturate(5sunY)), max=exposure-max;
+base day0.8..1.2, night floor0.28. Scale=max(0.55/adapt,0.001). No filmic curve/gamma/sRGB step.
+Bloom magnitude0; shipped blur code is not evidence bloom is active.
 
-1. `Water_Reflection`: 512x512 `PF_A8R8G8B8` reflection texture (a second camera, everything up to render queue 60).
-2. `GBuffer`: queues 20 to 80 into three render targets (two `A8R8G8B8`, one `FLOAT32_R` depth), no FSAA; cleared to
-   (0, 0.5, 0, 1) (the Deferred clear colour #008000, "resolves to black"). The G-buffer's normals and depth feed SSAO and heat haze.
-3. `Lighting_HDR`: **`rt_hdr` is `PF_R11G11B10_FLOAT`** at the target size. Sky and moons (queues 1 to 10), then the custom
-   `MainLight` pass (the deferred lighting), water (81 to 82), a full-screen `AtmosphereFogMaterial` quad, then fog volumes
-   and particles (82 to 85).
-4. `Resolve_HDR`: luminance measure, adaptation, bright-pass, bloom blur, then **`HDR/Composite`** into `rt_input`
-   (exposure, bloom, an optional gamma step; see below).
-5. Extra nodes listed in `compositors/compositors.cfg`, in order, each reading the previous output: `FXAA`, `HeatHaze`
-   (`#SSAO` and `#RTWDebug` are commented out). They run on `A8R8G8B8` buffers, i.e. after the HDR composite, on LDR.
-6. `Debug` (queues 87 to 89) and the GUI.
+## Heat haze
 
-The scene is lit in HDR, so brightness is not clamped until the composite writes the LDR result.
+**Verified** last post effect reads FXAA output and FLOAT32_R scene depth, flow FlowHAZE.dds,
+Perturber.dds, gameTime and weather heatHaze. Node setting defaults on when absent; settings/UI
+writer uses compositor names, comments skipped. Character editor sets strength0.
+Flow and perturbation use default anisotropic16/wrap; depth point/clamp, base bilinear/clamp.
+Shimmer animates in game hours, strength from weather/sun, depth falloff has capped reach
+(about8333 units at standard settings). Do not reinterpret apparent view-distance scale as
+unbounded effect. Paused motion and strength have different clocks; [weather](weather.md).
 
-## Exposure and tone mapping (Verified)
+No discovered default motion blur, DOF, vignette, chromatic aberration or HDR tone curve in the
+surveyed post/compositor files. Absence is scoped to those sources, not all possible mods.
 
-`post/hdrfp4.hlsl` + `hdrutils.hlsl` + `hdr.material`. Parameters (`shared_params HDRSettings`, comment in the file: "attached
-to sliders"):
+### Exposure and tone mapping (Verified)
 
 | Parameter | Default |
 | --- | --- |
@@ -38,91 +38,7 @@ to sliders"):
 | `BLOOM_MAGNITUDE` | **0.0** |
 | `BLOOM_BLUR_SIGMA` | 0.8 |
 
-- **Average luminance**: Rec. 601 weights (0.299, 0.587, 0.114), floored at 0.0001; the HDR image is reduced by a 2x2
-  luminance downsample to 128x128 and 3x3 box downsamples through 64, 16, 4 down to 1x1, **in linear space** (a plain average,
-  not a log average, although the value is stored as `log` in the 1x1 target).
-- **The band at run time** (**Verified**, `kenshi_x64.exe` sky creation and sky update, 2026-10-05): the exe overwrites the
-  script defaults. `MAX_LUMINANCE` = CONSTANTS `exposure max`, set once; `MIN_LUMINANCE` = `exposure min · lerp(night darkness, 1,
-  saturate(5 · sunY))`, set every frame (sunY the sun's height). With GLOBAL CONSTANTS' 0.8 / 1.2 / 0.35 (after all mods; the same in the base game's
-  own load order) the day band is **[0.8, 1.2]** and the night's floor drops to 0.28. Details: [lighting.md](lighting.md).
-- **Adaptation**: `adapted = last + (current - last) * (1 - exp(-frameTime * rate))` with rate 0.5 (a time constant of about 2 s),
-  then **clamped to [MIN_LUMINANCE, MAX_LUMINANCE]**.
-- **Exposure**: `scale = max(EXPOSURE_KEY / adapted, 0.001)`: by day 0.55 / 0.8 to 0.55 / 1.2 = **x0.69 down to x0.46**, at
-  night up to 0.55 / 0.28 = x1.96. A day scene of mean luminance under 0.8 sits at x0.6875; a bright one (a sunlit desert
-  floor) darkens towards x0.46. The earlier reading of this section (a band fixed at [0.8, 0.96], a nearly constant gain) took the
-  script defaults for the run-time values.
-- **Tone-mapping curve: none.** `ToneMap()` is exposure only. A Hable-style filmic function (`ToneMapFilmicALU`, constants
-  `a`, `b`) is present in the file but its call is commented out. Values over 1 are clipped by the LDR target.
-- **Gamma**: `hdr_to_gamma = false` and `hdr_disable = false` (constants in `common/constants.hlsl`); `kenshi.cfg` has
-  `sRGB Gamma Conversion=No`. So there is no `pow(1/2.2)` and no sRGB conversion anywhere in the chain: lighting is done in
-  the same non-linear "display-referred" space as the textures.
-- `hdr.hlsl` (the older `COLOR`-semantics variant with `BRIGHT_LIMITER`) is not referenced by `hdr.material`
-  (it uses `hdrfp4.hlsl`): **Observed** dead code.
-
-## Bloom (Verified code, Observed that it is off)
-
-- The "bright pass" is not a threshold. It is the 3x3-downsampled scene (at quarter size, `R11G11B10_FLOAT`) multiplied by
-  `2^(exposure - BLOOM_THRESHOLD)`, i.e. exposure scale / 64 with the default threshold 6, so it only passes the very brightest
-  HDR values. It is blurred with a 12-tap Gaussian (separable, sigma 0.8, `BloomBlurV` then `H`, at quarter size) and
-  **added** after exposure, scaled by `BLOOM_MAGNITUDE`.
-- **`BLOOM_MAGNITUDE` defaults to 0.0**, and `settings.cfg` / `kenshi.cfg` have no key for it, so bloom is off in a stock install
-  (**Observed**: the string "Bloom" exists in `kenshi_x64.exe`, which suggests a developer or mod slider; its UI is **Unknown**.
-  "exposure min" / "exposure max" are the CONSTANTS fields that set the luminance band, above).
-
-## FXAA (Verified)
-
-`post/FXAA.hlsl` includes `Fxaa3_11.h` (Timothy Lottes' FXAA 3.11, PC/HLSL4): quality preset 12, **green as luma**
-(`FXAA_GREEN_AS_LUMA`), `fxaaSubpix` 0.75, `fxaaEdgeThreshold` 0.166, `fxaaEdgeThresholdMin` 0.0833. The input is bilinear with
-border addressing, so FXAA runs on the final LDR image. `settings.cfg` `FXAA=1` is the toggle (the options screen has "FXAA" and
-"HeatHaze" entries: `options.cpp` messages in `locale/en_GB/LC_MESSAGES/main.pot`). `kenshi.cfg` has `FSAA=1`: no hardware
-multisampling at all.
-
-## SSAO (Verified shipped, Verified disabled)
-
-`post/AO.hlsl` + `SSAO_Test.material`: 16 Poisson-disc taps, a screen-space radius `filterRadius` (0.001, 0.001) in
-texture units, `distanceThreshold` 0.5, depth from the G-buffer (view-space position rebuilt along camera corner rays), the
-stored world normal rotated into view space. Occlusion = mean of `max(dot(n, dir), 0) * (1 - smoothstep(thr, 2 thr, distance))`;
-the result **multiplies the finished (LDR) scene**. The node is **commented out in `compositors.cfg`**, and there is no
-settings key for it: not part of the shipped look (the material is called `SSAO_Test`).
-
-**Meitou: the occlusion fades with the air in front of the surface** (a Meitou choice, no game counterpart; the game draws no AO). The game's
-haze and weather fog are applied inside every world shader and the fog volumes by a pass over the scene, all before the post chain, so a depth-only SSAO would draw dark contact
-shadows through them (seen in the Shark swamp). The SSAO pass rebuilds the world position from depth and evaluates the haze's `atmoApply`
-twice (white and black: the difference is the transmittance, since the blend is linear in the colour) and multiplies the fog volumes' transmittance
-(`fogVolumesTransmittance`; additive volumes add and do not hide; the volumes themselves are drawn by one full-screen pass after the scene, [fogfeatures.md](fogfeatures.md#in-meitou)), takes its luminance as the visibility and writes `ao = 1 - (1 - ao) * visibility`. The old
-distance fade (3000 to 10000) stays on top. **Observed** (Shark swamp, `--post-debug ao`, before and after): the occlusion on rocks and trees in
-the fog is gone, the foreground is unchanged. Costs the SSAO pass (half resolution) one more atmosphere evaluation per pixel with some occlusion.
-
-**Reusing the fog pass's transmittance in SSAO: tried, not kept** (**Observed**, 2026-10-08, Shark swamp, 6 volumes in view, Release, RTX 4070). The idea: the fog pass already computes
-each pixel's transmittance, so SSAO could sample it instead of calling `fogVolumesTransmittance` for every occluded pixel. The render graph has no multiple render targets (`RenderingDesc`
-has one colour attachment), so the fog pass had to draw unblended into its own render-size RGBA16F target and a second pass blend that over the scene. Measured at 2560 x 1440 (three runs
-each, GPU ms from the post chain's timestamps): fog 0.28 and SSAO 0.32 before; fog 0.36 and SSAO 0.34 after, so the sum went from 0.60 to 0.70. At 1280 x 960: fog 0.10 to 0.12 or 0.14, SSAO
-0.07 to 0.06 or 0.07. SSAO's fog loop is only run on pixels with some occlusion at half resolution and was already about 0.01 ms; the extra blit costs more than that. The occlusion also
-changed (`--post-debug ao`, mean 0.05 of 255, 0.02% of pixels over 12, largest 42 to 69, specks on thin silhouettes where the bilinear fetch mixes a sky pixel, and the water pixels now see the
-transmittance to the water plane, which the fog pass clamps to, instead of to the sea floor). Reverted; SSAO still loops the volumes. It would pay only with multiple render targets (the fog
-pass writing the transmittance for free) or with many more volumes in view than the 5 or 6 of the swamp (**Unknown**: no base-game view has been measured with more).
-
-## Heat haze (Verified)
-
-A screen-space shimmer over the finished LDR picture. Sources: `post/heathaze.hlsl` and `post/heathaze.compositor` (the
-material), `compositors/post.compositor` (the node), `compositors/compositors.cfg` (the order), `common/common.program`
-(`SharedSkyParams`), the `deferred/*.hlsl` G-buffer writers, and in `kenshi_x64.exe` the compositor setup FUN_1403ea7b0 /
-FUN_140814500 / FUN_140813870, the options screen FUN_1403f0260, the settings writer FUN_1403eca90, the default texture
-filtering FUN_140815b40, the sky update FUN_14066f190 (`gameTime`) and the weather manager FUN_1409e8f70 / FUN_1409ea410
-(`heatHaze`, [weather.md](weather.md#heat-haze-verified-decompiled-fun_1409e8f70-fun_1409ea410)).
-
-**Place in the chain** (**Verified**, the scripts): node `HeatHaze` in `post.compositor` draws one full-screen quad with material
-`HeatHaze`, image input = the previous node's output (`rt_input`), and input 2 = `global_gbuffer` target 2 (the `FLOAT32_R` depth).
-`compositors.cfg` lists `FXAA` then `HeatHaze`, so the haze reads FXAA's result and is the last post effect before the GUI. (A
-`compositor HeatHaze` block at the end of `heathaze.compositor` with an R11G11B10 `rt_full` is commented out: dead.)
-
-**Setting** (**Verified (decompiled)**): every node named in `compositors.cfg` (lines starting `#` or `;` are skipped; a mod's
-copy is merged with the base list) is switched on or off by a `settings.cfg` line `<node name>=<bool>` read in FUN_1403ea7b0;
-**without such a line the node is on**. The flag is stored on the node definition (FUN_140813870 copies it, FUN_140814500 checks
-the node exists and has two outputs and logs "Post processing compositior ... is invalid" otherwise). The options screen
-(FUN_1403f0260) adds one checkbox per listed node, so `FXAA` and `HeatHaze` appear there by their node names, and FUN_1403eca90
-writes them back. The shipped `settings.cfg` has `HeatHaze=1`. The character editor's workspace sets `heatHaze` to 0
-(FUN_1405f4dd0).
+### Heat haze (Verified)
 
 **Inputs** (**Verified**, `heathaze.compositor`):
 
@@ -133,88 +49,7 @@ writes them back. The shipped `settings.cfg` has `HeatHaze=1`. The character edi
 | 2 `depth` | G-buffer target 2 | `filtering none`, clamp |
 | 3 `base` | the previous node's picture | `filtering bilinear`, clamp |
 
-Uniforms: `gameTime` and `heatHaze`, both from `SharedSkyParams`. `gameTime` is the sky controller's total game hours minus
-the value at load (FUN_14066f190; [game-loop.md](../game/game-loop.md)), so it stops when the game is paused.
-
-**The shader** (**Verified**, read for facts; screen coordinates are the D3D quad's, v from the top):
-
-- Flow: `direction = flow(uv · 3.341).rg · 2 − 1` (not normalised; the flow map tiles 3.341 times across the screen).
-- Three layers of the normal map at `uv · 7.341`, the second and third offset by (0.1, 0.3) and (0.4, 0.7) in texture units. Layer
-  *k* has the phase `t = frac(gameTime · 100 + {0, 0.33, 0.66})`, samples at `+ direction · t` (speed 1) and is weighted by the
-  triangle `1 − |2t − 1|` (0 at the jump, 1 half way), so the scroll resets unseen. One cycle is 0.01 game hours = 36 game
-  seconds = **1.09 real seconds at game speed 1** (0.22 s at speed 5; [game-loop.md](../game/game-loop.md) for the clock rate).
-- The layers' `rgb · 2 − 1` are swizzled `xzy` and added to (0, 1, 0); then the middle component is zeroed, so only the sum of the
-  maps' **red** and **green** remains, and it is normalised. **The offset is a unit direction**: its length does not depend on the
-  maps, only its direction does. (A zero sum would normalise a zero vector, undefined; the maps make that practically impossible.)
-- Length: `0.002 · heatHaze · saturate(6 · depth)` in screen units (0.2 % of the width and of the height, so 3.2 × 1.8 pixels at
-  1600 × 900 with `heatHaze` 1), where `depth` is the G-buffer's: **distance from the eye / `farClip`** (`writeDepth(length(worldPos
-  − cameraPos) / farClip)` in every deferred shader; `farClip` = `far_clip_distance` (**Verified**, `deferred/*.material`) = **the camera's far clip D = 10 × the `view distance` setting**, [sky.md](sky.md), [settings.md](settings.md): 50000 at 5000, **120000 at the install's present 12000**), with 0
-  (nothing drawn: the sky, the clear value) replaced by 1. So the shimmer grows linearly up to full at **D / 6** (8333 units at 5000, **20000 at 12000**) and is full on
-  the sky. Water and particles are forward-drawn and not in the G-buffer, so over water the amplitude is that of the ground beneath
-  (or full where none was drawn) (**Observed**, from the pass order).
-- Output: `mix(image(uv + o), image(uv + 0.7 · o), 0.5)`: the mean of the taps at **1 and 0.7** of the offset (the earlier reading
-  here, "0.5 and 0.7", took the blend weight for a tap), bilinear and clamped to the edge.
-
-`heatHaze` itself: [weather.md](weather.md#heat-haze-verified-decompiled-fun_1409e8f70-fun_1409ea410) (the camera region's
-weather's `heat haze` × its strength × the sun factor, moving at 1/3 per second); which weathers and regions have it is listed
-there.
-
-**Checked against the shader and the game's pictures 2026-10-08** (Ashlands, heat haze 0.9, [weather.md](weather.md)):
-
-- **Verified** (`heathaze.hlsl` read line by line against the viewer's GLSL): scales (3.341, 7.341, the (0.1, 0.3) and (0.4, 0.7)
-  offsets), the layer phases and triangle weights, the `xzy` swizzle and the dropped middle component, the normalisation, the two taps at
-  1 and 0.7, `depth == 0 → 1`, `saturate(6 · depth) · 0.002 · heatHaze`. Textures, **Observed** with a debug view of the viewer's own
-  pass: the flow map decodes as a smooth swirl, the perturbation map (`Perturber.dds`) as a field of domes about 130 texels across
-  (BC1 header and block data checked), so its red/green gradients change direction every few pixels at 7.341 tiles per screen. Sampling
-  does not change this: anisotropy 1 vs 16, a fixed level 3 and a fixed level 6 gave the same tearing, and with the flow set to zero
-  it stays. **So the shader itself tears fine detail wherever the amplitude is a few tenths of a pixel or more**; the game's own
-  picture does too at its edges against the sky (the sky counts as depth 1, full amplitude): a game screenshot of the Ashlands by day
-  (`images/4.webp`) shows ragged silhouettes of about 3 pixels at 1920 × 1080, the size of 0.2 % of the width.
-- **The discrepancy found: the depth scale.** The viewer fed the pass the sky haze's constant D = 50000 (`view distance` 5000), but the
-  game's `farClip` is the camera's far clip, 10 × the *current* `view distance`, and the install's `settings.cfg` has **12000** since
-  2026-10-06 ([settings.md](settings.md)), so D = 120000: the amplitude reaches full at **20000** units instead of 8333, and at 5000 it
-  is 0.25 instead of 0.6. Everything in the 2000 to 15000 range, which is all that a normal camera sees of a settlement, shimmers
-  2.4 times less. (The sky haze still uses 5000, which keeps the parity baseline; its own D is a separate, unchanged question, see
-  [sky.md](sky.md).) A depth scale of 5000 (the former `--heat-haze-view-distance 5000`, removed) gave the earlier look.
-- **Unknown**: the game's `heatHaze` in its own screenshots. At the edge against the sky the amplitude is `0.002 · heatHaze` whatever D is
-  (the sky counts as depth 1): image 4 shows about 3 px of tearing there (so `heatHaze` near 1), image 5 (Ashlands, a floating rock and
-  pillars against the sky) shows none. The two disagree at the same claimed weather, so either the in-game hour or the weather differed
-  (`saturate(6 · sunY)`, a weather change settling at 1/3 per second) or something else scales it down: the hour and the active weather
-  of image 5 are needed. Also checked and ruled out: the `base` and `depth` units' filtering (the viewer's LDR picture is bilinear, as
-  `filtering bilinear`), the node (`post.compositor` `HeatHaze`: full size, one quad, no blur), no mod or second copy of
-  `Perturber.dds` / `FlowHAZE.dds` in the install. `HeatHaze=1` in the install's `settings.cfg`.
-
-**The viewer** (`PostProcess.RunHeatHaze`, `PostProcessShaders.HeatHaze`, written from the facts above): the same pass with the
-two maps loaded from the install at start (BC1 uploaded with the files' own 12 mips; trilinear, anisotropy 16, repeat), run last,
-after FXAA (when no temporal upscaler runs) or after the composite (with TAA / FSR / DLSS: on the upscaled, exposed LDR picture,
-the game's input; before the upscaler its history would reject or smear the shimmer, and the game has no such stage). Depth: the
-near depth slice's depth buffer, linearised and turned into the distance along the view ray, over D (10 × the install's view distance setting 12000, so 120000);
-beyond the near slice (20000+) and on the sky the amplitude is 1, as in the game (8333 < 20000, so the clear hides no ramp). The
-lookups use the game's screen orientation (v from the top), the offset is flipped back. Differences: a zero direction sum leaves
-the pixel in place, and the viewer's water writes depth, so over water the amplitude follows the water surface's distance, not the
-sea floor's. When `heatHaze` is 0 (or `--no-heat-haze`) the pass is skipped, which equals the game's
-pass at 0 (both taps then land on texel centres). Options and costs: [render-post.md](../render-post.md).
-
-## Absent (Verified against everything in `data/materials/post` and `compositors`)
-
-No colour grading and no LUT in the shipped chain (`kelvin_to_scale_lut.png` is read by `Composite` only when the constant
-`debug_lit_temperature` is true, which it is not; `exposure_key_lut.png` is commented out). No depth of field, film grain,
-vignette, sharpening, motion blur or lens flare. `fog.hlsl` / `atmospherefog.hlsl` are scene fog and sky scattering, not post
-effects (see [terrain.md](terrain.md#atmosphere-verified-constants-observed-shader)). Dithering: none.
-
-## What the viewer does
-
-In game-sky mode (the default) the viewer's scene shaders light in the game's HDR units ([lighting.md](lighting.md)), so the
-composite applies Kenshi's exposure: the scene's mean Rec. 601 luminance (a 4×4-tap reduction into a 256² R32F target, then its
-mip chain to 1×1: a plain linear mean like the game's, by a different reduction), adapted at rate 0.5 per second, clamped
-to this frame's `[MIN_LUMINANCE, MAX_LUMINANCE]` from the CONSTANTS record, and `0.55 / adapted` multiplies the image
-(`PostProcess.AutoExposure`). Screenshots adapt at once (`InstantAdaptation`) and print the mean, the adapted value and the
-scale. The exposure multiplier (Tab slider and the `-` / `=` keys, default 1) multiplies on top; the `--exposure` option and the `--simple-sky` mode with its display-referred shaders were removed. Nothing is clamped before the composite (RGBA16F scene buffer).
-The band is the game's at every camera height; the viewer adds no guard of its own. The white overview shots from far above the
-game's camera heights were not the exposure's doing: the game's haze formula gave values in the thousands there (a mean luminance
-of 715, the band then holds the scale at its floor ×0.46), fixed at the source ([sky.md](sky.md#haze-distance-fog-how-vanilla-does-it));
-the same views now measure 0.65 to 0.88 by day and stay finite at dawn, sunset, dusk and night.
-Details, options and costs: [render-post.md](../render-post.md).
+### What the viewer does
 
 | Stage | Faithful (`--post kenshi`, `--faithful all`) | Meitou (the default) | Basis |
 | --- | --- | --- | --- |
@@ -229,3 +64,22 @@ Details, options and costs: [render-post.md](../render-post.md).
 | Dither | off | on | not in Kenshi |
 | Night grading | none (the game has no grading; night is the day's colours at the exposure's night floor, see [render-post.md](../render-post.md) "Night grading" for why the ground reads orange) | scotopic blue shift by the scene's mean luminance (`nightgrade` switch, Tab slider; the `--night-grade` options were removed); the viewer's own | Kenshi: none (**Verified**: the composite is exposure only) |
 | Heat haze | the game's, after FXAA (`--no-heat-haze`) | at half strength (`heathaze` switch, Tab slider), after the composite when a temporal upscaler runs | Kenshi: `HeatHaze` node, on by default |
+
+## Expression reference
+
+- Exposure and tone mapping: `adapted = last + (current - last) * (1 - exp(-frameTime * rate))`; `scale = max(EXPOSURE_KEY / adapted, 0.001)`; `hdr_to_gamma = false`; `hdr_disable = false`; `sRGB Gamma Conversion=No`
+- FXAA: `FXAA=1`; `FSAA=1`
+- SSAO: `ao = 1 - (1 - ao) * visibility`
+- Heat haze: `<node name>=<bool>`; `HeatHaze=1`; `direction = flow(uv · 3.341).rg · 2 − 1`; `t = frac(gameTime · 100 + {0, 0.33, 0.66})`; `depth == 0 → 1`
+- What the viewer does: `=`
+
+## Evidence index
+
+Evidence scopes below apply only to their named sources/checks.
+
+- Exposure and tone mapping (Verified)
+- Bloom (Verified code, Observed that it is off)
+- FXAA (Verified)
+- SSAO (Verified shipped, Verified disabled)
+- Heat haze (Verified)
+- Absent (Verified against everything in `data/materials/post` and `compositors`)

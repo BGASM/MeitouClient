@@ -97,7 +97,7 @@ Pockets and backpacks support validated drag/move and arrangement commands;
 equipment changes are not simulated by those commands. Live medical rows use the
 snapshot's anatomy order, health fraction `(flesh - stun + rig) / maximum`, blood
 and hunger; this is an implementation choice, not a verified original row mapping.
-Meitou mode keeps the initial shared native inventory/stats popups. The installed HUD and
+Meitou mode uses the same original inventory/trader windows as Faithful, while stats keeps its native popup. The installed HUD and
 native frontend were rendered in the sandbox at 1280x720; the styled native HUD,
 populated inventory and stats were also captured in a real Wanderer new game at
 1600x900 using `--ui-showcase`. These are rendering smoke checks, not a
@@ -115,7 +115,8 @@ UI and gameplay gaps are tracked separately in [Faithful parity](../faithful-ui-
 
 - **Observed** in the installed `Kenshi_InventorySlotSkin`: `TileRect` states carry
   `TileSize`, `TileH` and `TileV` properties. The renderer repeats the atlas cell and
-  crops partial cells at the bounds; pocket cell size is bound to the simulated grid.
+  crops partial cells at the bounds. Inventory presentation uses square cells at 25 px times viewport height / 1080; bag bounds follow the container dimensions, and trader stock
+  keeps its full canvas behind a clipped viewport with wheel/arrow scrolling. This scaling policy is Meitou's approximation; the screenshot observations are in [UI screens](../game/ui-screens.md#6-inventory-trade-dialogue-build).
 - **Observed** in installed image sets: Group selects a texture and a two-component
   image size; Index selects a named frame sequence; Frame point gives the atlas
   origin. Meitou currently draws the first frame. `Kenshi_TitleScreen` points at

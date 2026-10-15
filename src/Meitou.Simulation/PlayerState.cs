@@ -16,9 +16,15 @@ public sealed class PlayerState
     public List<CharacterId> Selection { get; } = [];
     /// <summary>The player's squad (the one the start created).</summary>
     public int Squad { get; set; } = -1;
+    /// <summary>The character of another faction the HUD shows (<see cref="InspectCommand"/>), or <see cref="CharacterId.None"/>. Display only: not hashed and not saved.</summary>
+    public CharacterId Inspected { get; set; } = CharacterId.None;
 
     /// <summary>Drops characters that are gone (serial phases, after the commit).</summary>
-    internal void Prune(CharacterTable table) => Selection.RemoveAll(c => !table.TryResolveNext(c, out _));
+    internal void Prune(CharacterTable table)
+    {
+        Selection.RemoveAll(c => !table.TryResolveNext(c, out _));
+        if (!Inspected.IsNone && !table.TryResolveNext(Inspected, out _)) Inspected = CharacterId.None;
+    }
 
     internal void Hash(ref StateHasher h)
     {
@@ -48,6 +54,9 @@ public sealed class PlayerSystem : ITickSystem
                     if (!select.Additive) player.Selection.Clear();
                     foreach (var id in select.Characters)
                         if (table.TryResolveNext(id, out int slot) && table.Cold(slot)!.IsPlayer && !player.Selection.Contains(id)) player.Selection.Add(id);
+                    break;
+                case InspectCommand inspect:
+                    player.Inspected = inspect.Target;
                     break;
                 case StopCommand stop:
                     foreach (var id in stop.Characters.Count > 0 ? stop.Characters : player.Selection.ToArray())

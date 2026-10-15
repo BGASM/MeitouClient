@@ -85,6 +85,12 @@ public class ItemIconRenderTests
                 wanted.Add((new IconKey(item, material), file));
                 if (wanted.Count(w => InstallData.FullLoadOrder.Find(w.Key.Record)!.Type == type) == 2) break;
             }
+        // Include the actual sandbox starter items: generic opaque samples miss the torn cloth's cut-outs.
+        foreach (var (item, material) in new[] { ("2308-clothes_v1.mod", "2312-clothes_v1.mod"), ("52295-rebirth.mod", "914-gamedata.base") })
+        {
+            string file = Path.Combine(cache, $"{item}.{material}.png");
+            if (File.Exists(file)) wanted.Add((new IconKey(item, material), file));
+        }
         Assert.NotEmpty(wanted);
         var drawn = Draw(install, [.. wanted.Select(w => w.Key)]);
         string dump = Path.Combine(Path.GetTempPath(), "meitou-icon-test");
@@ -100,7 +106,8 @@ public class ItemIconRenderTests
             string name = Path.GetFileNameWithoutExtension(file);
             PngWriter.Write(Path.Combine(dump, name + ".ours.png"), ours.Width, ours.Height, flipped);
             File.Copy(file, Path.Combine(dump, name + ".game.png"), overwrite: true);
-            Assert.True(overlap >= 0.9, $"{name}: the drawn icon covers {overlap:0.00} of the saved one's picture (ours {ours.Width}x{ours.Height})");
+            double requiredOverlap = key.Record == "2308-clothes_v1.mod" ? 0.99 : 0.9;
+            Assert.True(overlap >= requiredOverlap, $"{name}: the drawn icon covers {overlap:0.000} of the saved one's picture (ours {ours.Width}x{ours.Height})");
             double colour = MeanColourDifference(ours.Pixels, theirs.Pixels, ours.Width, ours.Height);
             Assert.True(colour <= 0.15, $"{name}: the drawn icon's mean colour is {colour:P0} off the saved one's");
         }

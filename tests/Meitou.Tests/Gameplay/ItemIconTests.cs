@@ -45,6 +45,24 @@ public class ItemIconTests
         Assert.All(named, r => Assert.NotNull(locator.Find(ItemIcons.StaticIconOf(r))));
     }
 
+    [Fact, Slow]
+    public void Cached_starter_icons_use_the_original_files_without_rendering_replacements()
+    {
+        var install = InstallData.Install;
+        Assert.SkipWhen(install is null || InstallData.FullLoadOrder is null, "no Kenshi install");
+        var folder = Path.Combine(install!.DataDirectory, "icons");
+        (string Item, string Material)[] starters = [("2308-clothes_v1.mod", "2312-clothes_v1.mod"), ("52295-rebirth.mod", "914-gamedata.base")];
+        Assert.SkipWhen(starters.Any(s => !File.Exists(Path.Combine(folder, $"{s.Item}.{s.Material}.png"))), "the game has not cached these starter icons");
+        var locator = new Meitou.Rendering.AssetLocator(install);
+        var icons = new ItemIcons(InstallData.FullLoadOrder!, locator.Find, new ItemIconCache(folder));
+        foreach (var (item, material) in starters)
+        {
+            var icon = icons.Choose(item, material);
+            Assert.Equal(ItemIconSource.File, icon.Source);
+            Assert.Equal(Path.Combine(folder, $"{item}.{material}.png"), icon.File);
+        }
+    }
+
     /// <summary>A record of <paramref name="type"/> with only the given integer fields, made through the database as the game data is.</summary>
     static GameRecord Record(Meitou.Data.Fcs.FcsRecordType type, params (string Key, int Value)[] ints)
     {

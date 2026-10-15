@@ -1,19 +1,44 @@
 # Sun shadows
 
-How Kenshi shadows the sun: the three `shadow mode`s, the cascaded shadow maps (CSM) the viewer rebuilds, the
-rectilinear-texture-warped map (RTW) that is the game's other choice, the caster and receiver rules, and how the shadow term
-enters the deferred lighting ([lighting.md](lighting.md)). Labels as in [../README.md](../README.md).
+Original CSM/RTW/settings/caster/receiver research from exe, shipped HLSL/materials and data.
+Meitou scheduling/range/array choices: [render-shadows](../render-shadows.md). Source scopes,
+settings and split expression are retained below.
 
-Sources: `kenshi_x64.exe` (the deferred light renderer's shadow-mode switch and per-frame update, the CSM class (creation,
-split set-up, per-cascade fit, render), the RTW class (creation, fit, importance, warp and shadow-map passes), the options
-screen, the settings loader and writer, the `setCastShadows` callers), decompiled outside the repository on 2026-10-05; the
-shipped shaders and scripts `data/materials/common/shadowFunctions.hlsl`, `shadowcaster.hlsl`, `shadows.material`,
-`shadows.program`, `common.program`, `rtwshadows.hlsl` / `.material` / `.program`, `rtwforward.hlsl`, `rtwbackward.hlsl`,
-`deferred/deferred.hlsl`, `deferred.material`, `terrain.material`, `terrain.hlsl`, `foliage.material`, `objects.material`,
-`skin.material`, `construction.material` (read for facts only). The published techniques are Zhang et al.'s parallel-split /
-"practical split scheme" cascades (PSSM) and Rosen's *Rectilinear Texture Warping for Fast Adaptive Shadow Mapping* (2012).
+## CSM fit and casters
 
-## Settings (Verified: exe settings loader, writer and options screen; `settings.cfg`)
+**Verified** one float32 atlas, cascades tiled ceil(sqrt(n)); four→2x2, tile column=i/2,row=i%2.
+Point sampling/white border; queues10..80 use shadow-caster materials. Splits use near1,
+far Shadow-Range,lambda0.95 with INNER splits halved: default1,35.3,96.1,376.2,5000.
+Light z points away from sun; choose +Z up near vertical sun. Stable diameter
+max(sqrt((f+n)^2*k+(f-n)^2),2*f*sqrt(k)), k=(aspect*t)^2+2*t, t=tan(fov/2).
+The extra2*t differs from textbook squared tangent. Bound camera-near..splitFar, grow depth
+max(0.025*depth,2)+D/65536; snap XY texels and depth quantum. Preserve caster bias/coverage,
+terrain and cutout material rules, including materials with no shadow caster.
+
+## CSM receiver
+
+**Verified HLSL** cascade selected by projection z WITHOUT dividing w, compared to split-next-1;
+actual boundary about split+4 for near5/far50000. Beyond last split fully lit, no far fade.
+Transform light-space point with per-cascade scale/trans. No per-tile bound check: taps can
+read neighbouring cascade; white border only outside whole atlas. Receiver bias0.
+
+HEX12 offsets: (1,0),(-0.5,0.866),(-0.5,0.866),(2.5,0.866),(1,1.732),(-0.5,2.598),
+(-2,1.732),(-2,0),(-2,-1.732),(-0.5,-2.598),(1,-1.732),(2.5,-0.866).
+Duplicate is intentional fidelity; do not fix the asymmetric mean(0,0.144).
+Noise=red white-noise.png64² at atlasUV*1024, point/wrap. Shift X bynoise*0.25,
+rotate angle=noise*2*3.1415, scale csmRadius*0.6*0.5. Project offset to light-normal plane
+and use its third component as depth delta: mixed UV/depth units and Y convention are original.
+Mean comparisons produces lit fraction; ambient forced0. Shadow multiplies sun diffuse/specular/
+translucency, not ambient/environment.
+
+## RTW and engine differences
+
+RTW mode2 uses separate warp/receiver pipeline; not reproduced as CSM. Settings mode/quality/
+range and original restart semantics are in tables/[settings](settings.md). Meitou soft shadows,
+minimum-radius impostor filtering, fifth cascade, fog cap and terrain-horizon sweep are engine
+features; preserve Faithful formulas and independent switches. [Lighting](lighting.md).
+
+### Settings (Verified: exe settings loader, writer and options screen; `settings.cfg`)
 
 | `settings.cfg` key | Values | Meaning |
 | --- | --- | --- |
@@ -21,354 +46,30 @@ shipped shaders and scripts `data/materials/common/shadowFunctions.hlsl`, `shado
 | `shadow quality` | 0, 1, 2 | The map side, from the table **{1024, 2048, 4096}** indexed by the value. A missing key reads as **0** (corrected: an earlier version said it left the previous value; the loader's fallback local is 0 and nothing else writes it before). |
 | `Shadow Range` | 1000 … 9000 | How far shadows reach (world units; options slider 1000 to 9000). A missing key reads as **5000**; a value of 10 or less becomes **10000**. |
 
-All settings keys, including these: [settings.md](settings.md).
-
-- The renderer switches modes in `DeferredLightRenderer::setShadowMode(mode, size)` (the exe names it in its exception text):
-  mode 0 sets the lighting material `Main_Lighting_NoShadow`; mode 1 `Main_Lighting_CSM` and creates the CSM object with
-  **4 cascades** and the map side; mode 2 `Main_Lighting_RTW` and creates the RTW object with the map side and a **512**
-  importance size. Any other mode throws "Invalid light mode". Applying the options calls it with
-  `table[shadow quality]`; when the renderer creates its shadows lazily before that, it passes **2048** (**Verified**).
-- **The labels are swapped** (**Verified**, settled 2026-10-06): the tag is the item's **data**, not its position. The combo
-  helper (FUN_1406f6f10) stores the tag as an `int` attached to the item, and FUN_1406fc2a0 selects the item whose data equals
-  the setting and writes that data back (the `Decal Resolution` list, whose tags are 512 / 1024 / 2048, works the same way). The
-  items are "1024 (poor)" with data 1, "2048 (nice)" with data 0 and "4096 (some video cards may freak out)" with data 2, so
-  "1024 (poor)" gives a **2048²** map and "2048 (nice)" a **1024²** map; 4096 is right.
-- **Observed**: this install's `settings.cfg` had `shadow mode=0`, `shadow quality=0`, `Shadow Range=5000` (shadows off) when
-  this doc was first written; on 2026-10-06 it has `shadow mode=2` (RTWSM).
-- The tooltips: "Turn off shadows if you have problems with performance"; for the range, a longer range "reduces the shadows
-  resolution/quality" (one map, or one set of cascades, is stretched over it).
-
-## The CSM mode (mode 1)
-
-### The map (Verified: exe CSM creation)
-
-- **One** square texture of the quality's side, format code 33 (Ogre `PF_FLOAT32_R`, one 32-bit float channel; **Observed**:
-  the enum value read against Ogre's `PixelFormat` list), a render target with its own depth buffer. The cascades are
-  **viewports in a ceil(√n) × ceil(√n) grid** of it: 2 × 2 tiles of half the side each (512² per cascade at 1024, 1024² at
-  2048). Tile `i` is at column `i / 2`, row `i % 2` of the grid (row 0 at the top, Direct3D; the viewer places its tiles the same way).
-- Each viewport draws only the shadow-caster visibility layer, render queues **10 to 80**, with the scene manager in its
-  shadow-texture stage (so every material's `shadow_caster_material` is used); cleared to white (depth 1) per frame.
-- The value stored is the caster's depth (below), not a hardware depth buffer: the receiver reads it with point sampling
-  (`filtering none`) and a white border (`tex_address_mode border`, colour 1: outside the map is lit).
-
-### Splits (Verified: exe CSM split set-up)
-
-Called with near **1**, far **`Shadow Range`**, 4 cascades and λ **0.95**:
+### Splits (Verified: exe CSM split set-up) — layout/example
 
 ```
 split[0] = 1,   split[4] = Shadow Range
 split[i] = 0.5 · ( λ · near · (far / near)^(i/4) + (1 − λ) · (near + (far − near) · i/4) )      i = 1..3
 ```
 
-The practical split scheme, with the **inner splits halved** (an extra factor 0.5 in the exe). For the default range:
-**1, 35.3, 96.1, 376.2, 5000**. The receiver's `csmParams[i].x` is `split[i + 1] − split[0]`.
+## Expression reference
 
-### Cascade fitting (Verified: exe per-cascade fit, disassembly where the decompiler was unclear)
+- Settings: `shadow mode=0`; `shadow quality=0`; `Shadow Range=5000`; `shadow mode=2`
+- Splits: ` split[0] = 1, split[4] = Shadow Range split[i] = 0.5 · ( λ · near · (far / near)^(i/4) + (1 − λ) · (near + (far − near) · i/4) ) i = 1..3 `
+- Cascade fitting: `D = max( √((f + n)² k + (f − n)²), 2 f √k )`; `n = split[i]`; `f = split[i + 1]`; `k = (aspect · t)² + t + t`; `t = tan(fovY / 2)`; `texel = D / tile pixels`; `biasParams = (fixed, 4.0, 0.04, 0)`; `fixed = max(0.75 · |2 / size.z|, 0.001)`; `shadowParams = (0, 0.05, 0, ·)`
+- Casters: `pos.z = max(pos.z, 0)`
+- Meitou shadows: `uShadowAtlas.w = 1`
 
-For cascade `i` (serving view depths `split[i] .. split[i + 1]`), every frame:
+## Evidence index
 
-1. **Light view.** A rotation built from the direction the sky controller keeps for the sun, `d`, towards the sun
-   (**Observed**: the direction field is read from the sky controller object; "towards the sun" follows from the depth order
-   below). The view's z axis is `−d`, its up is world **+Y**, or world **+Z** when `|d·Y| > 0.985` and `|d·Y| > |d·Z|`,
-   made perpendicular to z; x = up × z. Depth therefore **grows away from the sun**.
-2. **Stable size.** `D = max( √((f + n)² k + (f − n)²), 2 f √k )` with `n = split[i]`, `f = split[i + 1]` and
-   `k = (aspect · t)² + t + t`, `t = tan(fovY / 2)`. This is the classic rotation-invariant bounding-sphere diameter of the
-   slice, except that the textbook `k` is `(1 + aspect²) t²`: the exe adds the tangent twice instead of squaring it
-   (**Verified** in the disassembly), which only makes the cascades larger.
-3. **Box.** The camera's frustum from **its own near plane** to `split[i + 1]` (Ogre's camera with the far plane set to the split;
-   the near plane is not moved to `split[i]`) is transformed to light space and bounded by an axis-aligned box. Its depth range is
-   grown at each end by `max(0.025 · depth, 2) + D / 65536`. The size used is `max(D, box size)` per axis.
-4. **Snapping.** The translation `−centre` is floored to whole texels in x and y (`texel = D / tile pixels`) and to `D / 65536`
-   in z, so the map moves in whole texels as the camera moves and keeps its size as it turns (no shimmering).
-5. **Projection.** A plain scale `2 / size` on all three axes (centred box, z −1..1 in Ogre's GL convention; the Direct3D 11
-   render system turns it into 0..1). Near-plane culling of the shadow camera is **disabled**, and the caster vertex program
-   clamps clip z at 0: casters between the box and the sun are flattened onto the box's near face ("pancaking").
-6. **Per-cascade parameters**, written before that cascade is drawn:
-   - caster bias `biasParams = (fixed, 4.0, 0.04, 0)` with `fixed = max(0.75 · |2 / size.z|, 0.001)`, i.e. about
-     **1.5 world units** of depth, or 0.1 % of the box depth when that is larger (PCF branch; a VSM branch exists with other
-     constants and is not used, its flag is off);
-   - `csmParams[i].y`, the PCF radius, `max(0.3 · 2 / size.x, 0.8 / tile pixels)` in the atlas's UV units;
-   - `csmScale[i]`, `csmTrans[i]`: the cascade's transform relative to cascade 0's light view (`shadowViewMat`, the rotation
-     with the translation zeroed), including the tile's place in the atlas and the texture flip.
-7. Fixed for the whole map: `shadowParams = (0, 0.05, 0, ·)` (debug off, a layer overlap 0.05 used only by an unused
-   cascade-selection variant), the UV bounds of each tile inset by 8 texels (same unused variant).
+Evidence scopes below apply only to their named sources/checks.
 
-### Casters (Verified: `shadowcaster.hlsl`, `shadows.material`, `terrain.hlsl`, the `.material` files; Observed where noted)
-
-- The caster stores `z + min(maxSlope, slope · |(∂z/∂x, ∂z/∂y)|) + fixed` (the depth's screen-space gradient length).
-- `cull_hardware clockwise` (Ogre's default) on the standard and terrain casters. With the light view above (right-handed,
-  depth growing along +z, x and y kept), the faces whose normals point **away from the sun** are the ones drawn: in effect the
-  game renders the back faces of closed meshes and of the terrain into the shadow map (**Observed**: derived from the matrices
-  and the culling mode, not seen in a capture). That hides self-shadowing acne on lit faces.
-- Which materials cast with what (from `shadow_caster_material`):
-  - terrain (`Terrain`, `DistantTerrain`) → `TerrainShadow`: the terrain's own vertex program (morph between LOD levels), no
-    alpha;
-  - `StaticObject` (buildings and objects), characters (`character.material`), birds, distant towns, map features, previews
-    → `standardShadowCaster` (no alpha test); skinned meshes → `SkinnedShadowCaster`; buildings under construction →
-    `ConstructionShadowCaster` (scaffold texture cut-out above the built height);
-  - foliage and grass → `FoliageShadowCaster`: alpha-tested (`clip(alpha − threshold)`), **no culling**; farm plants →
-    `FarmShadowCaster`. At run time the foliage builder clones `<material>_shadow` from the technique's caster and puts the
-    mesh's texture into its first unit (**Verified**: exe foliage material builder); the object material builder also sets
-    casters (not traced further).
-  - **Unknown**: the alpha-test `threshold` of these casters. `ShadowCaster_ALPHA_FP` (`shadowcaster.hlsl`:
-    `clip(alpha − threshold)`) declares it as a plain uniform and neither `shadows.program`, `shadows.material` nor
-    `foliage.material`'s `FoliageShadowCaster` / `FarmShadowCaster` gives it a value (**Verified** by reading them; the foliage
-    colour materials use 0.4, grass 0.6; `shadowFunctions.hlsl`'s own caster has `ALPHA_REJECT` 0.5 but its alpha test is off).
-    An unset Ogre constant reads 0, which would cut nothing, unless the exe sets it (not traced). Also Unknown: whether the grass
-    is drawn into the map at all (its material names a caster, but its render queue and caster flag were not traced).
-  - The caster vertex program clamps **per vertex** (`pos.z = max(pos.z, 0)`, then interpolated), and the map is a colour target
-    (R32F) whose hardware depth test uses the **unbiased** depth while the colour stores the biased one.
-- Objects that do **not** cast (`setCastShadows(false)` callers, identified by the strings they use): editor gizmos, effect
-  objects (emission and light effects), interior masks, the water planes and the reflection camera's helpers, debug lines,
-  some instanced-node helpers (**Observed**: the callers were not all traced to their objects). Characters' bodies and the
-  sun light set it **true**; other entities keep Ogre's default (cast).
-
-### Receiver (Verified: `deferred.hlsl` `main_fs` with `CSM`, `shadowFunctions.hlsl` `computeShadowMultiplier`)
-
-Every G-buffer pixel receives (the lighting pass is full screen); forward-drawn things (water, sky, particles) do not.
-
-1. **Cascade by clip-space z**: `deferred.hlsl` passes `(proj · viewPos).z`, not divided by w, with `proj` the auto parameter
-   `projection_matrix` (`deferred.material`), i.e. the camera's Direct3D projection: `f (d − n) / (f − n)` for view depth `d`,
-   about `d − n`. It is compared with `csmParams[i].x = split[i + 1] − split[0]`; the first cascade whose value is not exceeded
-   is used. With the camera's near `n` = 5 and far `f` = 50000 (**Observed**: camera.md "a virtual call on the camera with
-   5.0", sky.md for the far clip) the boundaries lie at view depth `5 + (split − 1) · 49995 / 50000`, about **split + 4**.
-   **Beyond the last split the term is 1**: no fade-out at the far end (a fade is commented out in the RTW branch only).
-2. Light-space position `shadowViewMat · worldPos` (the camera-relative position, the rotation of cascade 0's light view), then
-   `csmTrans[c] + csmScale[c] · that` → atlas UV (Direct3D: v grows downwards) and 0..1 depth. There is **no check that the point
-   is inside its tile**: a tap that leaves the tile reads the neighbouring tile (another cascade); only outside the whole atlas
-   does the `border` colour (1, lit unless the tap's depth exceeds 1) apply.
-3. **PCF, 12 taps** ("HEX12"), each `tex2Dlod` of the point-sampled map (`filtering none`: the one texel holding the position)
-   compared as `stored − tapDepth ≥ 0`, `lit = mean`. The offsets (in the order listed, units of the scaled radius) are
-   (1, 0), (−0.5, 0.866), (−0.5, 0.866), (2.5, 0.866), (1, 1.732), (−0.5, 2.598), (−2, 1.732), (−2, 0), (−2, −1.732),
-   (−0.5, −2.598), (1, −1.732), (2.5, −0.866): points of a hexagonal lattice at radius 1 and √7 ≈ 2.65 (and 2), with
-   (−0.5, 0.866) **listed twice** where the ring's (−0.5, −0.866) belongs, so that point weighs 2/12 and the kernel's mean is
-   (0, 0.144) off the centre. For each tap (**Verified** by reading `computeShadowMultiplier` / `pcfSample`):
-   - `noise` = the **red channel of `white-noise.png`** (`data/materials`, 64 × 64 RGB 8-bit) bound to the `WarpMap` unit of
-     `Main_Lighting_CSM` with `filtering none` and Ogre's default wrap addressing, read at **atlas UV × 1024** (UV in the
-     Direct3D frame), so the pattern is fixed to the ground, not to the screen;
-   - the offset is shifted by `(noise · 0.25, 0)`, then turned by `(c·x + s·y, −s·x + c·y)` with the angle **`noise · 2 · 3.1415`**
-     (not 2π) and scaled by `csmParams[c].y · 0.6 · 0.5` (the radius in atlas UV);
-   - the result `r` (atlas UV, Direct3D frame) becomes `(r, 0) − nₗ (nₗ · (r, 0))` with `nₗ` the normalised **light-space**
-     normal: its u and v are added to the atlas UV and its third component to the 0..1 depth. So the taps are "projected onto the
-     surface's plane", but in mixed units: the normal is in light space (y up) while the offsets are atlas UV (v down) and the
-     depth step is in UV units, not depth units (**Observed**: follows from the shader and the receiver matrix's flip; a plane
-     tilted along light y gets its depth step with the wrong sign, and the step is `nz` times, not `1 / nz` times, the true one).
-   No receiver bias (`csmParams[c].z = 0`).
-4. `shadow = ambient + lit · (1 − ambient)` with the ambient level forced to **0** by the lighting shader.
-
-Other kernels exist behind defines (7-tap hexagon, 3 taps, 8-tap Poisson disk, 4-tap square, a single tap, VSM with a
-Chebyshev bound); the shipped defaults select HEX12 with jitter.
-
-## How the term enters the lighting (Verified: `deferred.hlsl`)
-
-The sun's colour is multiplied by it before the BRDF: `CalcPunctualLight(N, L, V, gloss, specColour, lightColour · shadow,
-translucency)`. So **the sun's diffuse, its specular and the translucent back-light are shadowed; the ambient and
-environment light are not**. The debug mode 4 of the lighting shader shows the term.
-
-## The RTW mode (mode 2; Verified from the shaders and the exe RTW class unless noted; not reproduced yet)
-
-One map of the quality's side whose texels are redistributed towards where the camera needs them (Rosen's RTW, the
-"backward" importance analysis):
-
-1. **Fit.** A light view along the sun's direction with the up taken from the camera's orientation (another camera axis when
-   the two are within `|cos| > 0.985`), boxed around the camera frustum out to `Shadow Range`, scaled `2 / size`, no snapping.
-   `shadow_matrix` (texture flip and bias × projection × view × the camera's translation) maps camera-relative positions.
-2. **Importance.** A grid of points, one per 4 × 4 screen pixels (screen size × 0.25 each way), reads the G-buffer's depth and
-   normal, is projected into light space (with the depth row zeroed) and writes `clamp((1 − depth / range)³, 1e−4, 1) ·
-   (1 + direction_bonus · saturate(N · view axis))` (`direction_bonus` 2) into a 512² float map cleared to 0.
-3. **Warp.** `RTWWarp` pass 0 reduces it to 512 × 2 (row 0: the maximum of each column, row 1: of each row); pass 1 spreads
-   each maximum to its neighbours over 10 texels with weights 0.75ᵏ; pass 2 builds a 513 × 2 map of offsets placing each
-   texel at the normalised running sum of the importance (texels outside the important range go to ±1.05).
-4. **Shadow map.** Casters' technique `RTWShadow`: the vertex program moves clip x and y through the warp map (with a
-   tessellation hull/domain pair when the GPU supports it, else `RTWShadow_Legacy`, "Tessellation not supported. Using legacy
-   RTW shader"). Caster bias `(0, 6, 0.002)`.
-5. **Receiver** (`RTWShadow`): the position through `shadow_matrix` and the warp map, 3 × 3 Gaussian-weighted taps 1e−4 apart
-   (jittered by a small fixed table), each a soft compare `1 − saturate((depth − stored − bias) / bias)` with `shadow_bias`
-   **3e−5** (the shared-parameter default; **Observed**: no setter found) plus an edge bias near the map's border that grows
-   with distance beyond 0.6 × range. The code after the `return` (a border fade) never runs.
-
-## What the viewer does
-
-`--world` draws the **CSM mode** by default (`--shadow-range 0` turns it off, `--shadow-quality <0|1|2>` picks the side from
-the table, default 2 = 4096² since 2026-10-12 (1 = 2048² before; the game itself defaults to 1024², a missing key), `--shadow-range <u>`). It follows the facts above, with these differences:
-
-- **Backend split.** `Meitou.Data.World.ShadowCascades` (no GL) does the splits, the light view, the stable size, the box,
-  the snapping (in double, in absolute light space, so far from the origin the map still moves in whole texels), the bias and
-  filter radius per cascade, the caster culling planes (four sides and the far end, no near plane) and the receivers' matrices
-  (relative to the eye, so the GPU sees only small numbers). `ShadowPass` is the GPU part: a D32 2D array (the Faithful CSM: the game's atlas as its one layer; Meitou: a layer per cascade; below, "Tiles"),
-  depth clamp for the pancaking, the bias written as `gl_FragDepth` (the same formula on the same 0..1 depth), one uniform
-  block for the receivers and one for the casters' bias.
-- **Casters** are the renderers' own geometry through depth-only entry points: the terrain's patches (levels chosen from the
-  camera's eye, as in the picture), objects (including TERRAIN-mode meshes), foliage meshes with their cut-out mask. The
-  renderers' culling stays as it is (the terrain culls back faces as the game's caster does; objects are drawn two-sided).
-  Grass does not cast. Foliage casts out to 1.2 × the range (a saving; the game's limit is Unknown). Differences that remain:
-  the atlas is a depth texture, so the depth test runs on the **biased** depth (the game tests the unbiased one and stores the
-  biased one in R32F; only where two casters nearly touch can the kept one differ), and casters nearer the sun than the box are
-  flattened **per fragment** (depth clamp) instead of per vertex (where a triangle crosses the box's near face the game's
-  interpolated depths are larger). Both would need the renderers' caster shaders changed.
-- **Tiles** sit where the game puts them (cascade i in column i / 2, row i % 2 from the top), so the atlas is the game's picture
-  and taps that leave a tile read the same neighbour as the game's. Since 2026-10-12 the atlas is the one layer of a 2D depth array
-  (`sampler2DArrayShadow`, a bindless array of its own, `shadowArrays`), which the Meitou shadows fill with a tile-sized layer per cascade
-  ("Five cascades" below); the Faithful CSM keeps the whole atlas in layer 0, drawn and read as before. **Verified** why the Faithful CSM
-  does not use a layer per cascade too (2026-10-12, `meitou-viewer --world --town "The Hub" --radius 1 --distance 900 --pitch 30 --yaw 300
-  --size 1280x720 --upscaler off --shadow-quality 1 --faithful shadows`, `--debug-shadows 1` for the maps): with a layer per cascade
-  the picture differed from the atlas build by 7,161 pixels (2,538 by 12/255 or more; both builds repeat themselves exactly), all at
-  distant tree and object shadow edges, because cascade 3's map differed in 157 scattered texels of alpha-tested foliage. A copy of the
-  atlas build with cascade 3's tile moved to the atlas's origin gave the layer's map within 8 debug-view pixels (at most 2/255, the view's
-  own filtering) and differed from its own unmoved map as much (165): the rasteriser rounds window coordinates differently at another
-  place in the target, so a cascade drawn elsewhere changes a few edge texels. With the atlas kept as one layer, **Verified** 0 differing
-  pixels against the build before (the same tree, `--upscaler off`, `--faithful shadows`): `meitou --sandbox 2 --size 1600x900 --pitch 12
-  --yaw 150 --ticks 30` at `--distance 45`, `200`, `600` and `--distance 45 --time 17.5`, the Hub view above (a before/after pair run back
-  to back; other programs held 6 to 8 GB of the card and the memory guard clamped streaming, which makes runs at different free memory
-  differ, so the specified `--radius 2` view could not be run), and its `--debug-shadows 1`.
-- **Cascade selection** follows the game's clip-z test with the game camera's near 5 and far 50000 (`ShadowCascade.SelectDepth`),
-  not the viewer's own near plane; the boxes start at the game's near plane too (or at the viewer's when that is nearer).
-- **Receiver** (`kenshiShadowFaithful` in `ShadowShaders`, called by `kenshiShadow`, which the lighting uses): the game's HEX12
-  offsets (with the repeated tap), shift, turn (same sense, angle `noise · 2 · 3.1415`), radius `csmParams.y · 0.3` and
-  mixed-unit plane projection, all computed in the Direct3D atlas frame and turned into GL's (v up) only for the final read.
-  `noise` is the red channel of the install's `white-noise.png`, loaded at run time (never shipped) and read with `texelFetch`
-  at the Direct3D atlas UV × 1024 × 64, wrapped (the game's point sampling and wrap); without the file a hash of the same
-  coordinate stands in (the log says so). Each tap is **point sampled**: the atlas keeps linear filtering with hardware compare
-  (for other receivers), and the faithful receiver reads the **texel's centre**, `(floor(uv · size) + 0.5) / size`, where the
-  bilinear weights are exactly 1, 0, 0, 0 for a power-of-two side, so the compare returns 0 or 1 like the game's (D3D picks row
-  `floor(v · size)` from the top, GL `floor((1 − v) · size)` from the bottom: the same texel except exactly on a texel edge).
-  Outside the atlas the tap is lit unless its depth exceeds 1 (the `border` colour 1). No tile clamp, no receiver bias.
-- **Low sun**: the map is drawn along the lighting direction (y clamped to 0 under the horizon, `KenshiLighting.LightDirection`)
-  while the **real sun** is at or above −0.2 (`ShadowPass.MinSunHeight` = `KenshiLighting.SunColourCutoff`), as the game; the
-  light view keeps world +Y as its up for a horizontal light. (The simple sky, not the game's, keeps its own light at y ≥ 0.02.)
-  **Meitou planetshine** (the `planetshine` switch, [sky.md](sky.md#planetshine-meitou)):
-  the direction passed to the pass is the published light's (the sun's and the big planet's, turning from one to the other in about ten game minutes of deep twilight, sun 2° to 5° down
-  movement), and the cut-off is lifted while the planet lights the land (`SkyRenderer.ShadowSunHeight`), so the shadows go on all night along the planet's
-  fixed direction, 12° up. Low light needs nothing special from the fit (it already runs at a horizontal light); the Meitou shadows' stale test
-  redraws the cascades and the terrain map as the direction turns, as it does for the moving sun.
-- The camera's near plane can lie beyond the first split (the viewer's near plane grows with the eye's height, up to 200): such
-  a cascade covers nothing on screen and is not drawn, so its tile stays cleared to 1 where the game has the cascade's casters;
-  only taps that stray into that tile from a neighbour can see the difference.
-- `--debug-shadows 1` shows the cascade layers laid out as the game's atlas (a 2 × 2 grid for four, 3 × 3 for the Meitou five, empty cells dark
-  blue); `2` the term over the scene's surfaces tinted by cascade (red, orange, yellow, green: the game's own debug colours, then cyan for a
-  fifth Meitou cascade; grey where no cascade applies), reconstructed from the near depth slice with the
-  depth's own slope as the normal; `3` multiplies the term over the finished picture. Modes 2 and 3 call `kenshiShadow`, so they
-  show **whichever receiver is active**: the Meitou one by default, the game's only with `--faithful shadows`. Comparing a
-  Faithful picture with a debug view taken without that switch compares two different receivers.
-- **Beyond the range is lit, also at a low sun** (**Observed**, 2026-10-05, the forest view `--at -37582,-80684 --yaw -70.5
-  --pitch 6.1 --distance 10588 --time 7`): with `--faithful shadows` the near hillside (view depth up to about 5004) lies in the
-  cliffs' shadow and everything further away, most of the valley, is fully lit, because the game's receiver returns 1 past the last
-  split (**Verified**: `shadowFunctions.hlsl`, the `posSs.z > csmParams[last]` early return; see Receiver step 1). The lit pass and
-  `--debug-shadows 2 --faithful shadows` agree pixel for pixel there (checked by writing the lighting's term out as the colour:
-  the same black/white boundary at the range, the same few lit taps at its edge), so the gap between the shadowed foreground and
-  the lit valley is the game's own, not a receiver error. The Meitou receiver shadows that valley (terrain beyond the range, below).
-  The view is a viewer view: the game's camera boom stops at 2000 ([camera.md](camera.md)), but from there a low camera still sees
-  terrain beyond 5000, which the game leaves unshadowed the same way.
-- The lighting itself (`kenshiLight`) applies the term once `AtmosphereShaders` includes `ShadowShaders.Functions` and
-  multiplies the sun by `kenshiShadow(world, n)`; the program builder already binds the blocks and the map's unit.
-
-### Meitou shadows (the `shadows` switch)
-
-Not the game's: the remaster's choice, on by default (F5 / `--faithful shadows` gives the CSM above, pixel-identical). The same cascade
-array (five layers instead of four), `shadow quality` and `Shadow Range`; `ShadowPass.Meitou.cs`, `MeitouShadowFit` (Meitou.Data), `MeitouShadowShaders`,
-`TerrainShadowMap`. The receiver is `kenshiShadowMeitou`, chosen by `uShadowAtlas.w = 1` in the receiver block; the game's body is
-`kenshiShadowFaithful`, `kenshiShadow` dispatches.
-
-- **Fit.** Splits by the practical scheme (λ 0.8, no halving) from the camera's near plane, rounded down to a power of 1.25 so the
-  splits change only in steps while zooming, to the range: all the cascades cover something visible (with the game's splits the
-  first two lie in front of a near plane of 100-200 in most views). Each cascade is a light-space square around the bounding sphere of
-  its own slice (the textbook sphere, smaller than the game's), its centre snapped to whole texels (no shimmering; on a grid through an anchor near the eye, below), 2-8 % larger than
-  the sphere as slack for the schedule, its depth reaching two radii further towards the sun so casters there keep their depth.
-  Example (The Hub from 300 units): texels 0.64 / 1.58 / 3.71 / 10.0 units against the game's 0.09 / 0.24 / 0.94 / 12.4 of which
-  only the last two are on screen.
-- **First split by the focus** (2026-10-12, `MeitouShadowFit.Splits(near, far, count, focus)`, `ShadowView.Focus` = the orbit camera's boom). The practical scheme's first
-  split is mostly its uniform term, a fifth of a quarter of the range (about 530 units at 10000 from a near plane of 6), so in a close-up (boom 45) cascade 0 covered
-  depths 6 to 530 and drew the characters with texels of about 0.45 units, while the game's first cascades (in view up close) have 0.09. The first split is now
-  `FocusSplit` (2) times the boom, rounded down to a power of 1.25, between twice the near plane and the practical one; the other three are split from there to
-  the range by the same scheme. A far view (first split already under twice the boom) is unchanged. **Observed** (`meitou --sandbox 2 --distance 45 --pitch 12`,
-  noon and 17:30): the ground shadow of a character goes from a blur to crisp edges at the feet that still soften towards the far end (the contact-hardening
-  penumbra); `--faithful shadows` at the same view is softer and grainy. Not measured: the cost (cascade 1 now covers more of the near view).
-- **Five cascades** (2026-10-12, `ShadowPass.MeitouCascades`, default `MeitouShadowFit.DefaultCascades` = 5; Faithful keeps the game's 4 and its
-  splits). The four-cascade splits leave a deep second slice: in the close-up above (boom 45, range 10000) 6 / 87 / 1016 / 2982 / 10000, so what
-  stands 100 to 1000 units away was drawn with cascade 1's texels for a slice reaching 1016. The fifth cascade divides that slice
-  (`MeitouShadowFit.Subdivided`): the four's splits are computed as before (focus first split included) and the extra one goes at the second
-  slice's geometric mean, 6 / 87 / **297** / 1016 / 2982 / 10000; from The Hub at 900 (range capped at 5277 by the fog) 454 / **686** / 1036 / 2206 / 5277 (computed from the four splits that view logged).
-  The first slice and the last two are the four's own, with the same margins, so the near cascade and the far ones keep their texels (the
-  cascade after the new one starts its blend band later, so it is no larger); `ShadowTests` checks it. More than five would divide the same
-  slice by equal ratios. Box margins follow the cadence from the far end (`MeitouShadowFit.Margin`: 0.02 / 0.04 / 0.06 / 0.08 / 0.08; four keep
-  0.02 / 0.06 / 0.08 / 0.08). Cadence 1 / **2** / 4 / 16 / 32 (`ShadowPass.Cadence`: the last three as the four's far ones, any between every
-  second frame: the new cascade is small, a few hundred units, and holds what is near enough for moving characters to matter), phases
-  0 / 1 / 2 / 0 / 20 chosen so that no two cascades past the first are due on the same frame (`ShadowPass.Phases`; four keep 0 / 1 / 10 / 15).
-  The far budget (`ShadowSchedule`) counts the last three only (`NearCascades`): the new cascade is never deferred, so the far ones queue as
-  before. The coarse-caster rules (`ShadowLod.Applies`, from cascade 1) and the small-foliage cut go by each cascade's texel, so the new
-  cascade's (about 0.3 units in the close-up) makes them no coarser than the picture. **Observed** (`meitou --sandbox 2 --distance 600 --pitch 12
-  --yaw 150`, `--upscaler off`): the two characters' shadows at 600 units are darker and better defined (279 pixels differ, 56 by 12/255 or
-  more, max 41); at `--distance 45` and `200` (the characters in cascade 0, the floor casts nothing) the picture is unchanged. **Observed** at
-  The Hub (`meitou-viewer --world --town "The Hub" --radius 1 --distance 900 --pitch 30 --yaw 300 --size 1280x720 --upscaler off
-  --shadow-quality 1`): logged splits 740 / **1139** / 1754 / 3946 / 10000 and texels 1.40 / **2.20** / 3.45 / 7.92 / 20.06 against the four's
-  1.40 / 3.45 / 7.92 / 20.06; 70,373 pixels differ (16,977 by 12/255 or more, max 131), all in the band 740 to 1754, where small shadows are
-  crisper. The cost against four cascades is **Unknown** (the bench's Hub view was aborted by the memory guard while other programs held the card).
-- **Grid anchor** (added 2026-10-10, `MeitouShadowFit.Fit`, `ShadowPass.Anchor`; *measured*). The light rotation turns about the world origin, and the game snaps in that absolute light space, so when the sun turns by an angle the texel grid slides past a point by its distance from the origin times the angle. With the clock running (the viewer's `--time-speed` or a camera flight whose keys carry the hour) that slide is several texels a frame far from the origin, and every shadow edge flickers. Measured at The Hub (51000 units out), a sun step of one 60 fps frame of a 72-game-minute-in-48-s flight (0.006 degrees): samples changed by more than 6/255 in the picture, 1328 of 57600 at noon (max 74) and 37 at 05:33, against 2 for the same frame rendered twice. Meitou now snaps on a grid through an anchor near the eye (light space minus the anchor's light-space position is whole texels), so the slide is the distance from the anchor times the angle: 95 at noon (max 28), 3 at 05:33. The anchor moves to the eye only while the sun turns and the eye is more than 1000 units from it (a move shifts the grids by a fraction of a texel, once); with the sun still nothing slides, so it stays. `ShadowTests` checks the slide. Faithful keeps the game's grid through the origin (the same slide must exist in the game whenever its sun turns, at its slower clock: from the code, not looked at in the game).
-- **Schedule** (changed 2026-10-08: cached far cascades). Cascade 0 every frame, 1 every 4th, 2 every 16th, 3 every 32nd frame
-  (`ShadowPass.Cadence`, fixed in code; its phases put the redraws on different
-  frames; it was 1 / 2 / 4 / 4 before; with five cascades 1 / 2 / 4 / 16 / 32, above). Each cascade is kept with the matrices it was drawn with (the receiver uses each cascade's own) and
-  only its layer is cleared (its rendering's load op). That is only the longest a cascade goes unchanged: it is redrawn at once when the current slice's sphere
-  (plus the filter's reach) no longer fits its box (the camera moved or turned: `MeitouShadowFit.Covers`), when the sun has turned further
-  than half a texel at a 150 units tall caster allows (`SunTolerance`: 0.25° to 2°, so about 0.6° for cascade 1 and 2° for the far
-  two), and for all of them at once when the map size or the number of cascades changes, the shadow range moves by more than 10 %
-  (`RangeTolerance`; the memory guard moves it by small steps), or the sun jumps by more than 2°. The camera's near plane, which moves the
-  splits, no longer redraws every cascade: each keeps the slice it was drawn for (the receiver reads each cascade's own range) and goes
-  through the same `Covers` test against the new slice (before, every step of the near plane, which follows the camera's height above the
-  ground, redrew all four: 224 times in 3200 frames of a slow orbit over uneven ground). A point outside a stale box falls through to the
-  next cascade. Newly streamed casters reach the far cascades up to 32 frames late (half a second at 60 fps).
-  **Observed** (2026-10-08, RTX 4070 alone on the card, Release, 1280x720 DLSS, Shark `--distance 3000 --pitch 10 --yaw 300 --time 12`,
-  swamp rain, `--fly-pipelined --log-spikes`, GPU time of the `shadows` stage from the profiler's stamps, mean of the frames after the
-  first 1200, two runs each): still camera 0.72 / 0.73 ms before, 0.30 / 0.29 after (p95 1.17 against 0.85; the cascades are drawn 3200 /
-  800 / 200 / 100 times instead of 3200 / 1600 / 800 / 800 in 3200 frames); slow flight (3 units a frame) 0.94 against 0.49; orbit
-  (the view turning 0.14° a frame) 0.92 against 0.34 to 0.46 (p95 2.24 against 1.05; cascades drawn 3200 / 840 / 229 / 101 times
-  instead of 3200 / 1716 / 979 / 982). Where the time went (still camera, all four drawn every frame, `MEITOU_PASS_STATS=1`, GPU ms per
-  draw): cascade 0 0.12, cascade 1 0.30, cascade 2 0.73, cascade 3 1.14, of which objects 0.33, foliage meshes 0.51 and TERRAIN-mode rocks
-  0.27 in cascade 3 (13,135 foliage meshes, 388 objects, 751k terrain triangles) and the same kinds 0.23 / 0.40 / 0.08 in cascade 2.
-  The far cascades are the cost, and they hardly change, hence the cache.
-  The same at `--radius 2` (the user's benchmark view, one run each, the other schedule being 1,2,4,4): GPU
-  time of the stage, mean without the card's outliers / p95 / max, still camera 0.33 / 1.16 / 4.06 ms (0.75 / 1.50 / 2.06 before),
-  orbit 0.36 / 1.09 / 2.96 (1.08 / 3.11 / 8.75), slow flight 0.49 / 1.19 / 2.06 (1.00 / 1.85 / 4.32), fast flight (17 units a frame)
-  0.37 / 1.06 / 2.79 (0.81 / 1.66 / 2.60); cascade 1, 2 and 3 drawn 876 / 220 / 110 times in 3500 frames still (1751 / 876 / 876 before).
-  The render thread's `shadows` stage barely moved (flight 0.78-1.04 against 0.95-1.35 ms; the first cascade drawn each frame still
-  collects the foliage candidates, 0.5-0.75 ms): the saving is GPU time.
-  **Observed** image difference of the new schedule against
-  every cascade drawn every frame (`--faithful aa`, the orbit above, frames 900 / 1500 / 2100, `meitou-tools image-diff`): mean 0.0009 /
-  0.0166 / 0.0115 of 255, 0.001 / 0.026 / 0.010 % of the pixels over 12, largest 24 / 63 / 58; the differences are thin edges of the
-  tree shadows in the lower right (the old 1/2/4/4 schedule differed by at most 2 in the same pictures). Not done: a cascade drawn
-  piece by piece over several frames, and drawing only what moved (the world has no moving casters but characters, which are small there).
-  **Verified** (2026-10-08): a still picture (`--screenshot`, Shark, `--faithful aa`) is identical to the build before the change with the Meitou shadows (0 differing pixels) and with `--faithful shadows,aa` (0 pixels; the Faithful path is untouched).
-- **Receiver.** The point is moved off its triangle by a normal offset of 0.5-2 texels (more at grazing light; the triangle's normal
-  from screen derivatives, not the shading normal), then a blocker search (8 taps in a half-resolution map of the nearest depths,
-  rebuilt for the tiles drawn) gives the penumbra: the blocker's distance × tan(0.35°) (a sun of 0.7°), at least 1 texel, at most 3
-  world units; 16 bilinear comparisons on a Vogel disk of that radius, rotated per pixel by interleaved gradient noise (changing every
-  frame when a temporal anti-aliasing pass runs, fixed otherwise), their depths following the receiver's plane. The last 15 % of each
-  slice blends into the next cascade (whose fit covers it); the last 15 % of the range fades to lit.
-- **Terrain beyond the range.** For the sun's direction, per sample of the whole-world height grid (2049², 144 units), the height of
-  the top of the shadow the land towards the sun casts there and the distance to that land: 13 passes of a doubling sweep (each looks
-  2^k samples further towards the sun, lowered by the sun's slope) into RG32F, rebuilt when the sun turns by more than 0.1°. A point
-  is shadowed below that height (bias 20 units, softness 6 units plus the occluder's distance × the sun's angular radius); one fetch.
-  It fades in from 55 % to 90 % of the range and combines with the cascades by the minimum, so it agrees with them where both apply
-  (Observed: the same picture at range 5000 and 9000 at 07:00). This is where the two modes differ most at a low sun: at the
-  forest view at 07:00 the valley beyond the range is shadowed by the cliffs here and lit with `--faithful shadows`, as in the game.
-- **Filter tiers** (2026-10-08, `ShadowPass.FilterQuality`, `--shadow-filter <0|1|2>`, Tab "Shadow filter"). 2 (default): every cascade with the blocker search and 16 taps, as before. 1: all but the far two cascades so (the two nearest of four; with five, the three nearest, so the full filter still reaches the same distance), the far two 8 taps at the least radius. 0: every cascade 8 taps at the least radius and no blocker map pass (no contact hardening), for low-end GPUs. The tier goes to the receiver as `uMsFlags.z` (cascades filtered in full). **Observed** (RTX 4070, 2560x1440, forest at `--at -26640,-68976`, one or two runs each, other GPU users on the machine): tier 1 against 2 differs on 0.05 % of pixels close up and 0.007 % at 2500; tier 0 on 1.7 % close up (penumbrae no longer widen with the caster's height). Scene GPU time moved by about 0.3 ms or less, within the noise on this GPU; the saving is meant for integrated GPUs, where the taps weigh more (not measured there). The Tab shadow distance slider's left end ("0 (off)") turns the sun shadows off altogether (`ShadowPass.Enabled`).
-- **The filter's taps are constants** (2026-10-09, `MeitouShadowShaders.Disk`). The receiver used to compute each tap's radius and angle in the loop (a `sqrt`, a `sin` and a `cos` per tap, 16 filter taps and 8 blocker taps a pixel); the 8- and 16-point sunflower disks (radius `sqrt((k + 0.5) / n)`, angle k times the golden angle) are now constant arrays the loops read, and the full and the half-tap filters are two loops of fixed length. The values are the same, so the shadows do not change. **Observed** (RTX 4070, `--view swamp --size 1920x1080 --upscaler dlss --render-scale native`, 512 frames, two runs of each build alternating, the builds differing only by this change; `--bench-compare`): GPU total 7.49 against 7.22 ms (-0.27 +-0.10, -3.6 %; the same 7.49 and 7.22 in both pairs), stage by stage terrain -0.07 (1.16 to 1.10), objects -0.03 (0.77 to 0.74), foliage -0.13 (1.80 to 1.67), reflection -0.05 (0.98 to 0.93), shadows (the casters) unchanged. The picture: 20,798 pixels differ by 1/255 and 8 by 4 (maximum 4) from the build before, float rounding in the sample positions. These are the receivers of the Meitou shadows only (the `shadows` switch off keeps the game's receiver). What the receiver costs on the swamp view (**Observed**, `--ab shadow-pass` and a probe build that returned 1.0 from `kenshiShadow` in the terrain shader): the terrain's 1.25 ms includes 0.28 ms of shadow receiving before this change, the objects about 0.1 to 0.15, the foliage 0.4 to 0.5 and the reflection 0.15 to 0.27.
-- **Small foliage casters** (2026-10-08). A cascade skips foliage meshes whose size (radius × largest scale, `FoliageSizes.Size`) is under 2 of its texels (`ShadowPass.MinFoliageCasterTexels`): their shadow there would be a blur of a few texels under the soft filter. With the default 2048² atlas the texels are about 1.7 / 4 / 9 / 20 units, so the last cascades lose the litter and small plants only. Meitou only. **Observed** (`--at -26640,-68976 --distance 2500 --pitch 12`): pixel-identical picture, 7 of 73 cascade draw calls fewer in the nearer cascades; the GPU gain there is within noise (the small class reaches 3500, mostly inside the first two cascades).
-- **Landmark shadows** (2026-10-08). The landmarks (placements of world radius 2000+, drawn to the landmark distance, 150000 by
-  default; [../renderer-native.md](../renderer-native.md) 8.19) cast shadows however far they are. Every landmark drawn (resolved,
-  within its reach and part distance) goes into one more depth map along the sun, 4096² D32 (64 MB), a light-space square fitted
-  around all their bounding spheres (`MeitouShadowFit.FitLandmarks`; about 60 units per texel with the 70-75 landmarks around the Ribs; a texture
-  and sampler of its own, not a layer of the cascade array, and its box carries `ShadowCascade.LandmarkIndex` (-1), no longer the index 4 a fifth cascade now has),
-  drawn by the objects' depth path at the camera's LOD choice, again only when the set of landmarks changes or the sun turns by more
-  than 0.1°. The receiver reads it like the terrain term (faded in from 55 % to 90 % of the range, combined by the minimum; nearer,
-  the cascades draw the landmarks): a normal offset of 1.5 texels, 8 comparisons on a rotated disk of 1.5 texels; a point outside the
-  map is lit. **Observed**: looking down on the Ribs from 25000 units at 16:00 (`--at -1018,77000 --pitch 45 --distance 25000`),
-  the rib cages now shade the ground and themselves and the wreck cages their insides; before, nothing beyond 10000 had a shadow
-  but the terrain's. Faithful shadows have none (the game draws nothing past its range).
-- **Costs** (**Observed**, 2026-10-05, the same machine and caveats as the measurements in [../render-shadows.md](../render-shadows.md),
-  Meitou against `--faithful shadows` on the same build): The Hub `--fly-benchmark 1000`, three interleaved pairs, shadow stage CPU
-  mean 2.43 ms against 3.31 ms (casters: terrain 0.36 / 0.80, objects 0.29 / 0.44, foliage 1.66 / 2.00), flight p50 21.6-22.0 ms
-  against 23.2-24.3 ms. Forest camera, 13:00: shadow CPU mean 2.1-2.3 ms (p95 3.3-3.8, on the frames that draw cascade 3) against
-  3.6 ms, shadow GPU 0.29 / 0.77 ms. The Hub from 300 units, 09:00: CPU 2.0 / 3.5 ms, GPU 0.62 / 1.44 ms, scene pass (with the
-  receiver) 2.45 / 3.17 ms. Terrain sweep 1.0-1.5 ms CPU per rebuild (once per 0.1° of sun). Memory: 64 MB RG32F terrain shadow,
-  8 MB heights, 4 MB blocker map on top of the atlas (as of 2026-10-12 at quality 2: the cascade array 5 × 2048² D32 = 80 MB in Meitou, the one 4096² layer
-  = 64 MB in Faithful, against 64 MB for the 4096² atlas; the blocker array 5 × 1024² R32F = 20 MB against 16 MB; the landmark map 64 MB as before).
+- Settings (Verified: exe settings loader, writer and options screen; `settings.cfg`)
+- The map (Verified: exe CSM creation)
+- Splits (Verified: exe CSM split set-up)
+- Cascade fitting (Verified: exe per-cascade fit, disassembly where the decompiler was unclear)
+- Casters (Verified: `shadowcaster.hlsl`, `shadows.material`, `terrain.hlsl`, the `.material` files; Observed where noted)
+- Receiver (Verified: `deferred.hlsl` `main_fs` with `CSM`, `shadowFunctions.hlsl` `computeShadowMultiplier`)
+- How the term enters the lighting (Verified: `deferred.hlsl`)
+- The RTW mode (mode 2; Verified from the shaders and the exe RTW class unless noted; not reproduced yet)

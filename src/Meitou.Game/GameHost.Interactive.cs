@@ -37,7 +37,7 @@ sealed partial class GameHost
             IsVisible = false,
             FramesPerSecond = 0,
             UpdatesPerSecond = 0,
-        }, vsync, streamline: WantsDlss());
+        }, vsync, streamline: true);   // Load before the device so the settings panel can switch to DLSS without restarting.
         streamline = display.Streamline;
         var window = display.Window!;
         // Borderless full screen as the viewer starts (Alt+Enter and the Tab panel switch it); --windowed keeps the window for this run, maximised.
@@ -338,8 +338,8 @@ sealed partial class GameHost
                     profiler?.Draw(overlay, size.X, size.Y);
                 }
                 if (ui) panel?.Draw(size.X, size.Y);
-                // Over everything: the letterbox, and the cinema's editor (F6, also with F7) or its status line (not with F7).
-                if (overlay is not null && !covered) cinema.Draw(overlay, size.X, size.Y, shot || take || (interfaceHidden && !cinema.EditorVisible));
+                // Over everything: the letterbox and the cinema's editor (F6, also with F7); the game hides its status line.
+                if (overlay is not null && !covered) cinema.Draw(overlay, size.X, size.Y, shot || take || (interfaceHidden && !cinema.EditorVisible), showStatus: false);
                 // The loading screen over the whole frame while a scene loads or the world warms up.
                 if (covered && loading is not null && loadingOverlay is not null)
                 {

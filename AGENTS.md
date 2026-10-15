@@ -5,13 +5,19 @@ drop-in replacement that runs original content and mods unchanged. Plan in [ROAD
 
 ## Research notes: read and keep them current
 
-- Start with [docs/README.md](docs/README.md). Format knowledge lives in `docs/formats/`
+- Keep all `.md` files as small as possible: concise facts and instructions, no repetition or filler.
+- Start with the compact [docs/README.md](docs/README.md) index, then read only the topic/sections needed.
+  Format knowledge lives in `docs/formats/`
   ([overview](docs/formats/overview.md), [FCS .mod/.base](docs/formats/fcs-mod.md)).
 - Whenever you learn something about the original game's files or behaviour (a field's meaning, a
   layout, a merge rule, a disproved guess), write it into the matching doc in the same change.
   Create a new doc in `docs/formats/` for a new format and link it from `docs/README.md`.
 - Mark each claim **Verified** (say against which files and how), **Observed**, or **Unknown**.
   Don't promote a guess to Verified without a test that checks it.
+
+- Document current contracts, facts, evidence and unresolved questions. Do not append development
+  narration, progress diaries, completed plans, merge history or raw benchmark logs. Keep one
+  authoritative description per fact and link to it; Git retains historical implementation details.
 
 ## Game assets
 
@@ -35,6 +41,9 @@ drop-in replacement that runs original content and mods unchanged. Plan in [ROAD
   (`dotnet tool install -g ilspycmd`). Its `GameData` class is the reference for the `.mod` format.
 
 ## Build
+
+- Get the user's explicit approval before adding tests, including new cases in existing tests.
+  Explain briefly what they would catch and why existing coverage is insufficient; wait for approval.
 
 `dotnet build`, `dotnet test`, `dotnet run --project tools/Meitou.Tools`. Warnings are errors. Tests that need the game, a GPU or
 long runs are marked `[Slow]`; tests that assert a timing are marked `[Bench]` (they fail on a loaded machine). The quick run while

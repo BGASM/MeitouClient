@@ -407,9 +407,9 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
     /// <summary>
     /// The letterbox bars (clean picture), then, unless the frame is being saved (<paramref name="saving"/>: a screenshot or a recorded
     /// frame), the timeline editor (F6, also over the letterbox) or, while there are keys and no letterbox, a status line. Call after the other
-    /// panels, so the editor is on top.
+    /// panels, so the editor is on top. The game disables <paramref name="showStatus"/> to hide the idle/playback hint bar.
     /// </summary>
-    public void Draw(DebugOverlay o, int width, int height, bool saving)
+    public void Draw(DebugOverlay o, int width, int height, bool saving, bool showStatus = true)
     {
         if (Clean)
         {
@@ -423,7 +423,7 @@ sealed class Cinema(Func<WorldCamera> camera, Func<float> getHour, Action<float>
         if (saving) { ui = null; return; }
         if (EditorVisible) { DrawEditor(o, width, height); return; }
         ui = null;
-        if (Clean || (keys.Count == 0 && !Playing)) return;
+        if (!showStatus || Clean || (keys.Count == 0 && !Playing)) return;
         string line = $"keys {Summary()}   {(pathNext is not null ? $"recording the camera path {time:0.0} s" : Playing ? $"{(Recording ? "recording" : "playing")} {time:0.0} / {End:0.0} s" : "numpad Enter plays, F6 edits")}";
         float y = height - o.LineHeight - 12;
         o.Rect(8, y - 4, 16 + line.Length * o.CharWidth, y + o.LineHeight + 2, new Vector4(0.05f, 0.05f, 0.06f, 0.8f));

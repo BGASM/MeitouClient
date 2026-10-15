@@ -1,0 +1,297 @@
+/* Meitou UI: Kenshi's materials as floating plates with soft corners (the main menu's variant A).
+   Three surfaces: the dark rust plate, the worn paper card, and the game's charcoal button plate.
+   Textures are crops of the game atlas in textures/ (tools/scripts/meitou-ui-textures.ps1); slice numbers are the game skin's
+   own insets in source pixels. */
+
+body {
+  margin: 0;
+  background: var(--vignette);
+  color: var(--main);
+  font: 600 16px/21px var(--font-exo);
+}
+
+/* Preview helpers: the world, darkened, behind the UI. */
+.mt-stage {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: var(--space-7);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-7);
+  align-items: flex-start;
+  background: radial-gradient(ellipse at 70% 20%, #4a3f33, var(--vignette) 75%);
+}
+.mt-row { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center; }
+.mt-stack { display: grid; gap: var(--space-5); }
+
+/* Focus: brass ring, offset from the plate. */
+.mt-btn:focus-visible, .mt-tab:focus-visible, .mt-close:focus-visible, .mt-squad:focus-visible, .mt-item:focus-visible,
+.mt-speed-btn:focus-visible, .mt-check input:focus-visible, .mt-dialogue-choices button:focus-visible, .mt-save:focus-visible {
+  outline: 2px solid var(--brass-light);
+  outline-offset: 2px;
+}
+
+/* ---------- Surfaces ---------- */
+
+/* Plate: the rust texture, almost hidden under plate-tint, with a faint rim. */
+.mt-plate, .mt-window {
+  box-sizing: border-box;
+  border-radius: var(--radius-card);
+  background: linear-gradient(var(--plate-tint), var(--plate-tint)), url("textures/rust.png") 0 0 / 492px auto, var(--plate);
+  box-shadow: var(--plate-border), var(--plate-drop);
+  color: var(--main);
+}
+.mt-plate { padding: var(--space-5) var(--space-6); }
+
+.mt-window { display: flex; flex-direction: column; max-width: 100%; }
+.mt-window-bar { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-4) var(--space-4) var(--space-6); border-bottom: 1px solid var(--plate-rim); }
+.mt-window-title { flex: 1; min-width: 0; margin: 0; font: 600 24px/30px var(--font-exo); color: var(--main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mt-window-meta { font: 600 14px/18px var(--font-exo); color: var(--main); opacity: .8; font-variant-numeric: tabular-nums; }
+.mt-window-body { padding: var(--space-5) var(--space-6) var(--space-6); }
+.mt-window-foot { display: flex; justify-content: space-between; gap: var(--space-4); margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--plate-rim); font: 600 14px/18px var(--font-exo); font-variant-numeric: tabular-nums; }
+
+/* Paper card: GenericTextBoxSkin with its soft alpha rim cropped off (176x93), stretched whole,
+   with the edge drawn inside it. Never stretch the uncropped skin: its rim reads as a halo. */
+.mt-card {
+  box-sizing: border-box;
+  padding: var(--space-5) var(--space-6);
+  border-radius: var(--radius-card);
+  background: url("textures/paper-inner.png") 0 0 / 100% 100% , var(--paper);
+  box-shadow: var(--paper-border);
+  color: var(--secondary);
+}
+.mt-card.is-floating { box-shadow: var(--paper-border), var(--plate-drop); }
+.mt-card h3, .mt-plate h3 { margin: 0 0 var(--space-2); font: 600 20px/26px var(--font-exo); color: inherit; }
+
+/* Close: CloseButtonSkin 31x32, sprite at 0 / 36 / 72 */
+.mt-close { flex: none; width: 31px; height: 32px; padding: 0; border: 0; border-radius: var(--radius-btn); background: url("textures/close.png") 0 0 no-repeat; cursor: pointer; }
+.mt-close:hover { background-position: -36px 0; }
+.mt-close:active { background-position: -72px 0; }
+
+/* Message: MessageSkin 170x70, left 82 / right 53. The game's banner, kept square. */
+.mt-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 70px;
+  box-sizing: border-box;
+  padding: 0 var(--space-7);
+  border-style: solid;
+  border-width: 0 53px 0 82px;
+  border-color: transparent;
+  border-image: url("textures/message.png") 0 53 0 82 fill / 0 53px 0 82px stretch;
+  color: var(--secondary);
+  font: 600 16px/21px var(--font-exo);
+  text-align: center;
+}
+.mt-message > span { margin: 0 -60px; }
+
+/* ---------- Buttons ---------- */
+
+/* Plate button: Button1Skin (118x45, slice 6) at 70% brightness, clipped to radius-btn; pressed skin on hover. */
+.mt-btn {
+  position: relative;
+  display: inline-grid;
+  grid-auto-flow: column;
+  align-items: center;
+  justify-content: start;
+  column-gap: var(--space-5);
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 0 var(--space-5) 0 10px;
+  border: 0;
+  background: none;
+  color: var(--main);
+  font: 600 14px/18px var(--font-exo);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+.mt-btn:not(.has-icon) { justify-content: center; padding: 0 18px; }
+.mt-btn.is-block { display: grid; width: 100%; }
+.mt-btn::before { content: ""; position: absolute; inset: 0; border: 1px solid transparent; border-image: url("textures/button.png") 6 fill / 6px stretch; filter: brightness(.7); clip-path: inset(0 round var(--radius-btn)); }
+.mt-btn > * { position: relative; }
+.mt-btn:hover, .mt-btn[aria-pressed="true"] { color: var(--paper-light); }
+.mt-btn:hover::before, .mt-btn:active::before, .mt-btn[aria-pressed="true"]::before { border-image-source: url("textures/button-pressed.png"); filter: brightness(.85); }
+.mt-btn-danger:hover { color: var(--bad-bright); }
+.mt-btn:disabled { color: var(--greyed-bright); cursor: not-allowed; }
+.mt-btn:disabled::before { border-image-source: url("textures/button.png"); filter: brightness(.5); }
+.mt-btn-sm { min-height: 30px; font-size: 12px; }
+.mt-btn .mt-icon { opacity: .8; }
+.mt-btn:hover .mt-icon { opacity: 1; }
+
+/* Primary: a small paper card. One per screen. */
+.mt-btn-primary { color: var(--secondary); border-radius: var(--radius-btn); background: url("textures/paper-inner.png") 0 0 / 100% 100%, var(--paper); box-shadow: var(--paper-border), var(--plate-drop); }
+.mt-btn-primary::before { content: none; }
+.mt-btn-primary:hover, .mt-btn-primary[aria-pressed="true"] { color: var(--secondary); filter: brightness(1.1); }
+.mt-btn-primary:active { transform: translateY(1px); }
+
+/* Icons: crops of the game's order-icon sprite, drawn at 20px. */
+.mt-icon { display: inline-block; width: 24px; height: 20px; background: center / contain no-repeat; }
+.mt-icon-continue { background-image: url("textures/icon-continue.png"); }
+.mt-icon-new { background-image: url("textures/icon-new.png"); }
+.mt-icon-load { background-image: url("textures/icon-load.png"); }
+.mt-icon-options { background-image: url("textures/icon-options.png"); }
+.mt-icon-credits { background-image: url("textures/icon-credits.png"); }
+.mt-icon-exit { background-image: url("textures/icon-exit.png"); }
+img.mt-icon { object-fit: contain; }
+
+/* ---------- Tabs: a dark track, the selected tab is a lit plate ---------- */
+
+.mt-tabs { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); padding: 3px; border-radius: calc(var(--radius-btn) + 3px); background: rgba(8, 6, 5, .55); box-shadow: var(--plate-border); }
+.mt-tab { position: relative; min-height: 32px; padding: 0 var(--space-6); border: 0; border-radius: var(--radius-btn); background: none; color: var(--greyed-bright); font: 600 14px/18px var(--font-exo); letter-spacing: .06em; cursor: pointer; }
+.mt-tab:hover { color: var(--main); }
+.mt-tab[aria-selected="true"] { color: var(--paper-light); }
+.mt-tab[aria-selected="true"]::before { content: ""; position: absolute; inset: 0; border: 1px solid transparent; border-image: url("textures/button-pressed.png") 6 fill / 6px stretch; filter: brightness(.85); clip-path: inset(0 round var(--radius-btn)); }
+.mt-tab > span { position: relative; }
+.mt-tab:disabled { color: var(--greyed); cursor: not-allowed; }
+
+/* ---------- Checkbox: TickBoxSkin 35x33, off / on ---------- */
+
+.mt-check { display: inline-flex; align-items: center; gap: var(--space-4); font: 600 16px/21px var(--font-exo); color: inherit; cursor: pointer; }
+.mt-check input { appearance: none; -webkit-appearance: none; flex: none; width: 28px; height: 27px; margin: 0; border-radius: var(--radius-portrait); background: url("textures/tick-off.png") 0 0 / 100% 100% no-repeat; cursor: pointer; }
+.mt-check input:checked { background-image: url("textures/tick-on.png"); }
+.mt-check.is-disabled { opacity: .5; cursor: not-allowed; }
+
+/* ---------- Time controls: the game's speed sprite (186x211) and a plate clock ---------- */
+
+.mt-time { display: inline-flex; align-items: center; gap: var(--space-5); }
+.mt-speed { display: inline-flex; }
+.mt-speed-btn { width: 47px; height: 50px; padding: 0; border: 0; background: url("textures/speed.png") no-repeat; cursor: pointer; }
+.mt-speed-btn.s0 { width: 47px; --x: 0px; }
+.mt-speed-btn.s1 { width: 46px; --x: -47px; }
+.mt-speed-btn.s2 { width: 45px; --x: -93px; }
+.mt-speed-btn.s3 { width: 48px; --x: -138px; }
+.mt-speed-btn { background-position: var(--x) -161px; }
+.mt-speed-btn:hover { background-position: var(--x) -107px; }
+.mt-speed-btn:active { background-position: var(--x) -54px; }
+.mt-speed-btn[aria-pressed="true"] { background-position: var(--x) 0; }
+.mt-clock { display: grid; justify-items: start; padding: 6px var(--space-6) 7px; border-radius: var(--radius-btn); font: 600 16px/20px var(--font-exo); font-variant-numeric: tabular-nums; }
+.mt-clock-money { font-size: 14px; line-height: 18px; opacity: .8; }
+
+/* ---------- Bars: the game's fill textures in a rounded dark track ---------- */
+
+.mt-stat { display: grid; gap: var(--space-1); }
+.mt-stat-head { display: flex; justify-content: space-between; gap: var(--space-4); font: 600 14px/18px var(--font-exo); }
+.mt-stat-value { font-variant-numeric: tabular-nums; }
+.mt-plate .mt-stat.is-down .mt-stat-value, .mt-window-body > .mt-stat.is-down .mt-stat-value { color: var(--bad-bright); }
+.mt-bar { position: relative; display: block; height: 12px; overflow: hidden; border-radius: var(--radius-bar); background: var(--metal-edge); }
+.mt-bar > span { position: absolute; top: 1px; bottom: 1px; left: 1px; display: block; border-radius: 2px; background-size: 100% 100%; }
+.mt-bar-fill { background-image: url("textures/bar-life.png"); }
+.mt-tone-hunger .mt-bar-fill { background-image: url("textures/bar-healed.png"); }
+.mt-tone-robot .mt-bar-fill { background-image: url("textures/bar-robot.png"); }
+.mt-bar-stun { background-image: url("textures/bar-stunned.png"); }
+.mt-bar-neg { background-image: url("textures/bar-hurt.png"); }
+.mt-bar-thin { height: 6px; }
+.mt-bar-thin > span { top: 1px; bottom: 1px; }
+
+/* Skill rows: ProgressBarEmptySkin / FilledSkin */
+.mt-skill { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: var(--space-4); row-gap: 3px; padding: 3px 0 6px; }
+.mt-skill-name { font: 600 16px/21px var(--font-exo); }
+.mt-skill-level { display: inline-flex; align-items: baseline; gap: var(--space-2); font: 600 16px/21px var(--font-exo); font-variant-numeric: tabular-nums; }
+.mt-skill-level b { font-weight: 600; font-size: 20px; min-width: 2ch; text-align: right; }
+.mt-skill-bonus { font-size: 14px; color: var(--good); }
+.mt-skill-bonus.is-neg { color: var(--bad-bright); }
+.mt-card .mt-skill-bonus { color: var(--secondary); }
+.mt-xp { grid-column: 1 / -1; height: 8px; overflow: hidden; border-radius: var(--radius-bar); background: url("textures/progress-empty.png") 0 0 / 100% 100%; }
+.mt-xp > div { height: 100%; background: url("textures/progress-filled.png") 0 0 / auto 100%; }
+
+/* ---------- Squad ---------- */
+
+.mt-squad { display: grid; justify-items: center; gap: var(--space-3); width: 96px; padding: var(--space-4) var(--space-3); border: 0; border-radius: var(--radius-btn); background: none; color: var(--main); font: 600 14px/18px var(--font-exo); cursor: pointer; }
+.mt-squad:hover { background: rgba(175, 166, 139, .06); }
+.mt-portrait { display: grid; place-items: center; width: 64px; height: 64px; border-radius: var(--radius-portrait); background: rgba(20, 8, 6, .72); box-shadow: inset 0 0 0 1px var(--plate-rim); color: var(--main); font: 600 26px/1 var(--font-exo); }
+.mt-squad.is-selected .mt-portrait { box-shadow: 0 0 0 2px var(--brass-light); }
+.mt-squad.is-selected .mt-squad-name { color: var(--paper-light); }
+.mt-squad-name { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mt-squad-status { margin-top: -4px; font-size: 12px; line-height: 14px; color: var(--bad-bright); }
+.mt-squad .mt-bar { width: 64px; }
+
+/* ---------- Inventory: InventorySlotSkin tile in a rounded well ---------- */
+
+.mt-inv {
+  display: grid;
+  grid-template-columns: repeat(var(--cols), var(--cell));
+  grid-template-rows: repeat(var(--rows), var(--cell));
+  width: max-content;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-portrait);
+  background: url("textures/slot.png") 0 0 / var(--cell) var(--cell) repeat;
+  box-shadow: 0 0 0 2px var(--metal-edge);
+}
+.mt-item { position: relative; display: flex; min-width: 0; margin: 2px; padding: 3px 4px; overflow: hidden; border-radius: var(--radius-bar); background: rgba(20, 8, 6, .66); box-shadow: inset 0 0 0 1px rgba(175, 166, 139, .3); color: var(--main); font: 600 11px/12px var(--font-exo); cursor: grab; }
+.mt-item:hover { background: rgba(20, 8, 6, .8); }
+.mt-item.is-selected { box-shadow: inset 0 0 0 2px var(--brass-light); }
+.mt-item.is-tall .mt-item-name { writing-mode: vertical-rl; transform: rotate(180deg); align-self: flex-start; }
+.mt-item-name { overflow: hidden; overflow-wrap: anywhere; }
+.mt-item-count { position: absolute; right: 3px; bottom: 2px; font: 600 12px/12px var(--font-exo); font-variant-numeric: tabular-nums; color: var(--paper-light); }
+
+/* ---------- Tooltip ---------- */
+
+.mt-tip { width: 300px; max-width: 100%; padding: var(--space-5) var(--space-6); font: 600 14px/18px var(--font-exo); }
+.mt-tip-name { font: 600 20px/26px var(--font-exo); color: var(--item-standard); }
+.mt-tip-name.g0 { color: var(--grade-0); }
+.mt-tip-name.g1 { color: var(--grade-1); }
+.mt-tip-name.g2 { color: var(--grade-2); }
+.mt-tip-name.g3 { color: var(--grade-3); }
+.mt-tip-name.g4 { color: var(--grade-4); }
+.mt-tip-name.art { color: var(--artifact); }
+.mt-tip-sub { margin-top: 2px; opacity: .85; }
+.mt-tip-stats { display: grid; grid-template-columns: 1fr auto; gap: 2px var(--space-5); margin: var(--space-4) 0 0; padding-top: var(--space-3); border-top: 1px solid var(--plate-rim); }
+.mt-tip-stats dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+.mt-tip-stats dd.is-good { color: var(--good); }
+.mt-tip-stats dd.is-bad { color: var(--bad-bright); }
+.mt-tip-desc { margin: var(--space-4) 0 0; font-style: italic; }
+.mt-tip-foot { display: flex; justify-content: space-between; margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--plate-rim); font-variant-numeric: tabular-nums; }
+
+/* ---------- Dialogue ---------- */
+
+.mt-dialogue { max-width: 560px; }
+.mt-dialogue-who { display: flex; align-items: baseline; gap: var(--space-4); flex-wrap: wrap; }
+.mt-dialogue-speaker { font: 600 20px/26px var(--font-exo); }
+.mt-dialogue-faction { font: 600 14px/18px var(--font-exo); opacity: .75; }
+.mt-dialogue-line { margin: var(--space-2) 0 0; font: 600 16px/22px var(--font-exo); color: var(--dialogue-bubble); }
+.mt-dialogue-choices { list-style: none; margin: var(--space-5) 0 0; padding: var(--space-3) 0 0; border-top: 1px solid var(--plate-rim); display: grid; gap: 2px; }
+.mt-dialogue-choices button { width: 100%; padding: 4px 6px; border: 0; border-radius: var(--radius-portrait); background: none; color: var(--dialogue-option); font: 600 16px/21px var(--font-exo); text-align: left; cursor: pointer; }
+.mt-dialogue-choices button:hover { color: var(--dialogue-hover); background: rgba(175, 166, 139, .06); }
+.mt-dialogue-n { font-variant-numeric: tabular-nums; }
+
+/* ---------- Save card (the main menu's Continue) ---------- */
+
+.mt-save {
+  position: relative;
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  align-items: center;
+  column-gap: var(--space-5);
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-5) var(--space-6) var(--space-5) var(--space-5);
+  border: 0;
+  border-radius: var(--radius-card);
+  background: url("textures/paper-inner.png") 0 0 / 100% 100%, var(--paper);
+  box-shadow: var(--paper-border), var(--plate-drop);
+  color: var(--secondary);
+  font-family: var(--font-exo);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: filter .1s, transform .1s;
+}
+.mt-save:hover { filter: brightness(1.1); }
+.mt-save:active { transform: translateY(1px); }
+.mt-save .mt-portrait { grid-row: 1 / span 3; width: 48px; height: 48px; font-size: 22px; box-shadow: none; }
+.mt-save-label { font-size: 22px; line-height: 24px; letter-spacing: .08em; text-transform: uppercase; }
+.mt-key { justify-self: end; padding: 0 6px; border-radius: var(--radius-portrait); background: rgba(20, 8, 6, .6); color: var(--paper-light); font: 600 10px/15px var(--font-exo); letter-spacing: .06em; text-transform: uppercase; }
+.mt-save-line, .mt-save-meta { grid-column: 2 / span 2; font-size: 12px; line-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mt-save-meta { opacity: .75; font-variant-numeric: tabular-nums; }
+
+/* ---------- Main menu: floating plates over a vignette ---------- */
+
+.mt-menu-scene { position: relative; overflow: hidden; background: var(--vignette) center / cover; }
+.mt-menu-scene::before { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 620px 470px at 4% 100%, rgba(8, 6, 5, .93) 25%, rgba(8, 6, 5, .6) 55%, transparent 80%); }
+.mt-menu { position: relative; display: grid; gap: var(--space-3); width: 320px; max-width: 100%; }
+.mt-menu .mt-save { margin-bottom: var(--space-4); }
+.mt-menu .mt-btn-danger { margin-top: var(--space-2); }

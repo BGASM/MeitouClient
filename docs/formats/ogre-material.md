@@ -1,27 +1,23 @@
-# Ogre material scripts (`.material`, `.program`)
+# Ogre material and program scripts
 
-Sources:
-- **OGRE source** (MIT): Kenshi runs Ogre 2.0, whose v1 material system reads text scripts with the
-  generic ScriptLexer / ScriptParser / ScriptCompiler and per-object translators. The rules below follow
-  ogre-next branch `v2-0`: `OgreScriptLexer.cpp`, `OgreScriptParser.cpp`, `OgreScriptCompiler.cpp`,
-  `OgreScriptTranslator.cpp`, `OgreTextureUnitState.cpp`, `OgreResourceGroupManager.cpp`.
-  `Meitou.Data.Ogre.OgreScript*` / `OgreMaterial*` follow the same structure.
-- Rules taken from the source are **Observed (source)**: they describe Ogre v2-0, not checked against
-  Kenshi's own `OgreMain_x64.dll`. Where a synthetic test pins our port to the rule, the test is named.
-- **Verified 2026-10-04** (`OgreMaterialTests.Compiles_every_base_game_material_script` and the two
-  tests after it, `meitou-tools materials`): every base-game `.program` and `.material` compiles; the
-  counts in "Base game" below come from those runs.
-- **Verified (decompiled)**: read in Ghidra's decompilation of `kenshi_x64.exe` (Steam build, 2026-10),
-  citing the function's entry address. Kenshi imports Ogre by name from `OgreMain_x64.dll`, so the Ogre calls
-  it makes are certain; what those Ogre functions do inside is Observed (source).
-- Kenshi's `OgreMain_x64.dll` is ogre-next **2.0 "Tindalos"** (Observed): the DLL contains the string
-  `Tindalos` (`OGRE_VERSION_NAME` of the v2-0 branch, whose suffix is `unstable`, also present), Hlms
-  property strings, the `ResourceManager::add` / "Resource with the name" messages and the
-  `parseResourceGroupScripts` export, and neither the DLL nor the exe has any `Ogre::v1` mangled name (2.1
-  moved `Material`, `Pass`, `Entity` into `Ogre::v1`). Not checked: exact commit, and whether Kenshi patched it.
+Script compiler/source tests and original resource registration/loading binary research.
+Lexical/import/inheritance rules are compatibility behaviour, not conventional C-like parsing.
+`OgreMaterialLibrary` resolves scripts; runtime cloning: [runtime-materials](runtime-materials.md).
 
-The same grammar is used by `.compositor`, `.particle` and `.os` scripts; only materials and GPU
-programs are interpreted here.
+## Compilation and resources
+
+Concrete nodes/properties are line-based: one property consumes remaining line tokens; object
+block follows class/name/values/bases, abstract objects serve only as bases. Per-file passes:
+imports → ordered inheritance/child pairing → variable expansion → translator. Base properties
+copy before own properties; class/name/index matching governs overridden children. Scope/global
+variable rules and malformed input differ from normal text substitution.
+
+Material/technique/pass/texture-unit model retains script defaults for blend/cull/depth/alpha/
+program/texture/filter/address parameters. Runtime sets named texture UNITs, not aliases.
+Resource registration order/group and collision handling matter: resources.cfg, base/mod folders,
+translations, imports and listeners are not one flattened filesystem search. Preserve declared
+base-name/path/group identities and initialization timing. Original programs/HLSL are reference
+facts only; own rendering compiles own GLSL. Unsupported script/resource features remain explicit.
 
 ## Lexing (Observed (source); `Lexer_*` tests)
 
@@ -99,11 +95,7 @@ Each file is compiled on its own, in three passes:
 Then each top-level, non-abstract object is created by the translator for its class. Base-game scripts
 use **no** variables and **no** `abstract` (Verified by search); both are implemented for mods.
 
-## Material model (Observed (source); `Pass_accessors_follow_the_translator`, `Pass_defaults_match_ogre`)
-
-`material` > `technique` > `pass` > `texture_unit`, plus `*_program_ref` objects inside passes. The
-translators apply properties in order, so the last valid one wins; an invalid one is ignored (an error is
-logged). Names and keywords are case-sensitive.
+### Material model (Observed (source); `Pass_accessors_follow_the_translator`, `Pass_defaults_match_ogre`)
 
 | Level | Property | Meaning, default |
 | --- | --- | --- |
@@ -129,185 +121,6 @@ logged). Names and keywords are case-sensitive.
 | texture_unit | `content_type compositor <node> <texture> [index]` / `shadow` | filled at run time, no file |
 | texture_unit | `tex_address_mode`, `filtering`, `tex_coord_set`, `mipmap_bias`, `tex_border_colour`, `binding_type`, `env_map`, ... | kept raw |
 
-GPU programs: `vertex_program Name lang { source file  entry_point f  target ...  default_params { } }`
-(also `fragment_`, `geometry_`, `tessellation_hull_`, `tessellation_domain_`, `compute_program`); a
-`unified` program lists `delegate` programs and uses the first one the render system supports.
-
-## Resource locations
-
-All registration happens in FUN_140816d90 (called from the renderer setup FUN_140818970).
-
-### `resources.cfg` (Verified (decompiled) unless marked)
-
-- Read with Ogre's `ConfigFile::load("resources.cfg", "\t:=", trimWhitespace = true)`. `ConfigFile` keeps
-  sections in a `std::map` and the settings of a section in a `std::multimap` keyed by the setting name
-  (Observed (source), `OgreConfigFile.h`), so locations are added **group by group in ordinal (case-sensitive)
-  group-name order**, and within a group by type name, then file order. Base game order: `Blood`, `Bootstrap`,
-  `Characters`, `Editor`, `GUI`, `General`, `Icons`, `Landscape`, `Overlaymaps`, `Particles`, `SkyX`, `foliage`.
-- **Every** line is added, whatever its type: `addResourceLocation(path, type, group, recursive = false,
-  readOnly = type != "FileSystem")`. So no location is recursive, and `Zip=./data/meshes/OgreCore.zip` **is**
-  registered (group `Bootstrap`). Nothing is skipped by Kenshi; the 17 listed folders that do not exist (see
-  "Base game") evidently register as empty locations, since the game starts.
-- Path rewrite: the first `/land` in a path (searching from the start, only if the path is longer than 4) gets
-  `newland/` inserted after the slash, so `./data/land` becomes `./data/newland/land` and
-  `./data/land/textures` becomes `./data/newland/land/textures`. Both trees exist on disk; the game uses
-  `data/newland/land`.
-- For `FileSystem` lines the path relative to `data/` is recorded with its group (later sections overwrite
-  earlier ones for the same folder); mod folders use this to pick their group (below).
-- Caelum: the exe contains no `caelum` (any case, binary search) and `./data/materials` is not recursive, so
-  `materials/caelum/` is **not registered** (Verified by search). `SkyX_x64.dll`, `Plugin_ParticleUniverse_x64.dll`
-  and `Plugin_Terrain_x64.dll` contain no `addResourceLocation` symbol, so they register no locations
-  (Observed).
-- For `./data/land`, listed in both `Landscape` and `Overlaymaps`, the folder-to-group record ends as
-  `Overlaymaps` (ordinally later section); it is the only folder listed twice in the base file.
-
-### Mods and translations (Verified (decompiled) unless marked)
-
-After all `resources.cfg` lines, FUN_140816d90 scans a list of root folders: first the folder of the current
-locale (only when a flag byte on the active locale object is clear; **Observed**, presumably "not the built-in
-language"; a `.translation` mod in the mod list becomes the active locale), then each active mod's folder in
-`data/mods.cfg` order. For each root:
-
-- Every sub-folder below the root, at any depth (**Observed**: the iterator is Boost's recursive one, judging
-  by its state, and the group lookup only makes sense for nested paths), in sorted path order, that is not
-  empty and directly contains at least one regular file, is added as its own non-recursive `FileSystem`
-  location (`readOnly = false`). Folders inside `leveldata`, `newland/leveldata`, `locale` and
-  `LC_MESSAGES` (relative to the root) are skipped (**Observed**: the comparison is a relative-path test).
-- Its group: take the folder's path relative to the mod root, look it up among the `resources.cfg` folders
-  relative to `data/`; if absent, try its parent, and so on; `General` if nothing matches. So
-  `mods/X/materials/deferred` joins the group of `./data/materials/deferred`, and
-  `mods/X/newland/land/textures` the group of the (rewritten) land textures.
-- The root itself is added to `General` if it directly contains a file whose name does not start with `_` and
-  whose extension is not `.mod` or `.translation` (**Observed**: the "directly in the root" test is a relative-path
-  comparison whose arguments were partly lost in decompilation).
-
-### Lookup (Observed (source) for Ogre's rules)
-
-- `addResourceLocation` indexes every file of the archive by name into its group, **overwriting** an earlier
-  entry of the same name (`ResourceGroup::addToIndex`); FileSystem archives on Windows are case-insensitive. So
-  within a group the **last added** location wins for a bare file name: a mod's file beats the base file, and a
-  later mod (in `mods.cfg` order) beats an earlier one. `openResource(name, group)` uses that index first.
-- When a name is not in the requested group, `openResource` (with `searchGroupsIfNotFound`, the default, used
-  e.g. for texture images) tries the groups in their map order, i.e. **ordinal group name**
-  (`findGroupContainingResourceImpl`). A clone of `StaticObject` lives in `General`, so its textures are found in
-  `General` first, then in `Autodetect`, `Blood`, `Bootstrap`, ... order.
-- Kenshi's loading listener (below) does not redirect `resourceLoading`, so it does not change this.
-
-### Group initialisation (Verified (decompiled))
-
-FUN_140818970 calls `initialiseResourceGroup("GUI")` right after registration. The other groups are initialised
-later, from a loading state of the main loop (FUN_14082b370), with one `initialiseAllResourceGroups()`, which walks
-Ogre's group map (`std::map`, ordinal name order; Observed (source)) and skips already initialised groups. So
-scripts are parsed `GUI` first, then `Autodetect`, `Blood`, `Bootstrap`, `Characters`, `Editor`, `General`,
-`Icons`, `Internal`, `Landscape`, `Overlaymaps`, `Particles`, `SkyX`, `foliage` (`Autodetect` and `Internal` are
-Ogre's own, normally empty).
-
-### Loading listener (Verified (decompiled))
-
-FUN_140816d90 installs a `ResourceLoadingListener` (static object 0x141fc64e0, vtable 0x14171b3a0):
-
-- `resourceLoading` (FUN_14082dbe0): returns no stream (no override).
-- `resourceStreamOpened` (FUN_14082ddc0): for names containing `dds` outside the groups `Overlaymaps`, `GUI`,
-  `PLSM2` and the empty group, copies the stream into memory and drops top mip levels according to the
-  texture-quality setting; the step count depends on the name and on whether the group is `Landscape`
-  (**Observed**, details not decoded).
-- `resourceCollision` (FUN_14081d840): **returns false**. See below.
-
-## Script loading in Kenshi
-
-- Ogre parses scripts per resource group, pattern by pattern (`*.program`, `*.material`, `*.particle`,
-  `*.compositor`, `*.os`), and for each pattern location by location in the order they were added. Every
-  matching file is parsed, including files with the same name in two folders (each is opened from its own
-  archive) (Observed (source), `parseResourceGroupScripts`, `findResourceFileInfo`).
-- **Duplicate names** (Verified (decompiled) for Kenshi's part, Observed (source) for Ogre's): materials and
-  programs share one name space across groups (all groups are in the global pool). When a second definition of a
-  name is created, v2-0's `ResourceManager::addImpl` finds the name taken and does **not** throw: it asks the
-  loading listener's `resourceCollision` (if any) and only retries (and could then throw) when that returns true.
-  Kenshi's returns false, so the default holds: the new object is created and filled by the translator but never
-  registered. **The first definition parsed wins**; the rest of the file compiles normally. (The earlier note
-  here that a repeated name throws was wrong.) Kenshi has no `ScriptCompilerListener` (no
-  `ScriptCompilerManager` import).
-- Consequence for mods: a mod's script that redefines a base material or program in a folder of the **same group**
-  is parsed after the base one and is ignored. One mapped to a group that is initialised **earlier** (e.g. a
-  mod's `materials/...` folder is `General`, but a folder mapped to `Characters` is parsed before `General`)
-  would win.
-- `OgreMaterialLibrary` keeps the first definition and reports `DuplicateDefinition`, which matches.
-
-## Kenshi runtime materials
-
-Kenshi assigns most mesh materials at run time: it clones a template script material (`StaticObject`,
-`Skinned`, `Triplanar`, `FarmPlants`, `RTTIcons_*`), sets its texture units **by unit name** (`diffuseMap`,
-`normalMap`, `metalnessMap`, created `diffuseMap2`/`normalMap2`/`metalnessMap2`, `scaffold`, `dust`,
-`interiorMask`, and `colorMap` for clothing) from the FCS material record's texture fields (bare file names),
-and switches to variants of the GPU programs compiled with preprocessor defines chosen from a flag word
-(`COLOURING`, `DUAL_TEXTURE`, `CONSTRUCTION`, `TRANSPARENCY`, `DOUBLESIDED`, `EMISSIVE`, `DUST`,
-`INSTANCED`, `INTERIOR`, `CLIP_INTERIOR`). Details, the record field -> unit/parameter mapping and the flags per
-use: [runtime-materials.md](runtime-materials.md) (Verified (decompiled), FUN_140841a50 and callers).
-
-## Base game (Verified 2026-10-04)
-
-- 164 `.material` and 17 `.program` files under data/ (181 compiled, 0 failures). 252 top-level
-  materials, 242 distinct names; 320 distinct GPU programs (124 vertex, 204 fragment definitions, one
-  tessellation hull and domain); 11 `shared_params`; one `compositor_node` (in `interiormask.material`).
-- Only diagnostics: 20 repeated names. Materials: `01-Default` in 7 files, `NoMaterial` in 3,
-  `Standard_3` and `Material#131` in 2 each, all exporter leftovers. Programs: the two `Shaders.program`
-  files (`character/meshes/`, `items/armour/meshes/`) define the same 9 programs; `atmospherefog.material`
-  redefines `Deferred_VP_HLSL` from `deferred.material` (a comment there says importing it did not work).
-- Every base resolves; every `vertex_program_ref` / `fragment_program_ref` names a defined program.
-  31 materials and 71 programs use `:` inheritance; 13 `import` lines, all `import * from` except
-  `import Deferred_RTT_Lighting from "deferred.material"`. 3 materials use `set_texture_alias` (Caelum samples).
-- After inheritance: 258 techniques, 271 passes, 462 texture units. Most used properties: `texture` 268,
-  `tex_address_mode` 221, `depth_write` 143, `filtering` 138, `scene_blend` 137, `lighting` 104,
-  `content_type` 100 (render targets: `rt_interiormask` in particles, `global_gbuffer`, `rt_reflection`,
-  HDR), `texture_alias` 84.
-- Folders: 147 of the `resources.cfg` locations exist (17 listed folders do not; `Zip=./data/meshes/OgreCore.zip`
-  holds Ogre's own `OgreCore.material` / `OgreProfiler.material`, not read yet, but registered by the game: see
-  "Resource locations"). 166 of the 181 scripts are in them; outside: `materials/caelum/` (Caelum sky plugin
-  samples, not registered by the game) and `character/meshes/Shaders.program`. These counts use the paths as
-  written; the game rewrites `./data/land...` to `./data/newland/land...` (see "Resource locations").
-- The Kenshi shaders are in `materials/deferred/` (e.g. `StaticObject` in `objects.material`, `Building*`,
-  `Character`, `Hair`, foliage, terrain), `materials/forward/`, `materials/post/`, `particles/materials/`.
-
-## Mesh materials (Verified 2026-10-04, `Base_game_mesh_materials_are_mostly_not_script_materials`)
-
-Submesh material names mostly **do not** name a script material:
-
-- 3,748 submeshes use 114 distinct names; 12 are defined, covering 2,400 submeshes (64.0%).
-- `StaticObject` alone covers 1,843 submeshes. It is the base building/object shader whose texture units
-  have placeholder textures (`black.dds`, `flat.dds`).
-- The other 11 defined names (`01-Default`, `08-Default`, `Material#84`, `NoMaterial`...) come from
-  leftover 3ds Max exports next to the meshes (fixed-function passes naming `.bmp`/`.psd`/`.jpg` files).
-- The 102 undefined names are exporter defaults (`default` 486 submeshes, `defaultMat`, `N-Default`,
-  `Material#N`, `Standard_N`, `lambert18`, `blinn3`), an empty name (89 submeshes) and a few descriptive
-  ones (`Coloured`, `Emissive`, `severed_leg_left`...).
-- Not defined elsewhere either (Verified by text search on 2026-10-04): `Coloured`, `OutpostConcrete01`,
-  `Mask`, `aaaaa`, `Rebel_Interior`, `Foundry_Temp`, `severed_leg_left`, `drifter_coat_mat`, `CaptureMat`
-  appear in no `.material`, `.program`, `.compositor`, `.particle`, `.os`, `.pu`, `.xml`, `.layout` or
-  `.cfg` file. Of these only `OutpostConcrete01` occurs in the game data (`gamedata.base`,
-  `Newwworld.mod`), as part of texture paths (`OutpostConcrete01_DIF.dds`, `_NML.dds`) in records.
-- No submesh has texture aliases (chunk 0x4200), so Ogre's per-mesh material cloning is not involved.
-
-So Kenshi assigns materials itself (Verified (decompiled)): it calls `Entity::setMaterial` with a clone of
-`StaticObject` (or `Skinned`, `Triplanar`...) filled from the record's `MATERIAL_SPEC` /
-`MATERIAL_SPECS_CLOTHING` / `MATERIAL_SPECS_WEAPON` / map-feature fields, matching texture units **by unit
-name**, not by `texture_alias`. The `BuildingShader` "material type" becomes shader defines, not a choice
-of the `Building_*` script materials, which the executable never names. See "Kenshi runtime materials" and
-[runtime-materials.md](runtime-materials.md).
-
-## Textures (Verified 2026-10-04, `Base_game_material_textures_mostly_exist`)
-
-- 289 file references from texture units, 155 distinct names; 124 (80.0%) exist as a file of that
-  name (case-insensitive) somewhere under data/; 110 of 140 within the `resources.cfg` folders only.
-- The missing ones: exporter leftovers (`ATLAS1.psd`, `Door_Texture.bmp`...), Caelum samples
-  (`TudorHouse.jpg`, `Starfield.jpg`...), `blask.dds` and `cloudy_noon.jpg` in `rtticons.material`,
-  names with a folder (`textures/woo001.jpg`, `texture\wall1.dds`), a few particle textures
-  (`Haboob_Finger.png`, `SteamRise01.png`, `TwisterDust_Large.png`) and two unquoted names with spaces:
-  `texture Copy of Dplate2.jpg` reads as texture `Copy` (other words go to the type/format slots).
-- 173 units name no file: 100 `content_type` units plus units meant to get a texture at run time (e.g.
-  `Building_Dual`'s `diffuseMap2`; that material is unused by the engine, which instead adds its own
-  `diffuseMap2` unit to a `StaticObject` clone and fills it from `texture map 2`, see
-  [runtime-materials.md](runtime-materials.md)).
-
 ## Open questions
 
 - Whether Kenshi's Ogre build matches the v2-0 lexer/parser quirks above (the DLL is 2.0 "Tindalos", but the
@@ -319,3 +132,22 @@ Answered (see the sections above): which duplicate definition wins (the first pa
 listener returns false), recursion (none for `resources.cfg`; mod folders are scanned and every sub-folder
 added), `OgreCore.zip` (registered) and Caelum (not registered), group initialisation order (`GUI`, then
 ordinal name order), and how records map onto materials.
+
+## Expression reference
+
+- `resources.cfg` unless marked): `ConfigFile::load("resources.cfg", "\t:=", trimWhitespace = true)`; `addResourceLocation(path, type, group, recursive = false, readOnly = type != "FileSystem")`; `Zip=./data/meshes/OgreCore.zip`
+- Mods and translations unless marked): `readOnly = false`
+
+## Evidence index
+
+Evidence scopes below apply only to their named sources/checks.
+
+- Material model (Observed (source); `Pass_accessors_follow_the_translator`, `Pass_defaults_match_ogre`)
+- `resources.cfg` (Verified (decompiled) unless marked)
+- Mods and translations (Verified (decompiled) unless marked)
+- Lookup (Observed (source) for Ogre's rules)
+- Group initialisation (Verified (decompiled))
+- Loading listener (Verified (decompiled))
+- Base game (Verified 2026-10-04)
+- Mesh materials (Verified 2026-10-04, `Base_game_mesh_materials_are_mostly_not_script_materials`)
+- Textures (Verified 2026-10-04, `Base_game_material_textures_mostly_exist`)

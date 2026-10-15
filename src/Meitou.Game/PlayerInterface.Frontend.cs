@@ -30,7 +30,8 @@ sealed partial class PlayerInterface
     public void ShowTitle() { faithfulScreens.Open("title"); RefreshSlots(); UpdateMenuPause(); }
     public bool TitleOpen => faithfulScreens.IsOpen("title");
     bool FrontendActive => TitleOpen || faithfulScreens.IsOpen("new-game") || faithfulScreens.IsOpen("load") || faithfulScreens.IsOpen("message");
-    bool UseScreenInput => UiMode == UiMode.Faithful || FrontendActive;
+    bool UseScreenInput => UiMode == UiMode.Faithful || FrontendActive || InventoryScreensOpen;
+    bool InventoryScreensOpen => faithfulScreens.OpenScreens.Any(id => id is "inventory" or "bag" or "limbs" or "trader");
     /// <summary>After leaving a game: title controls over the original image or the live world, according to UI mode.</summary>
     public void ShowMainMenu() => ShowTitle();
     public void CloseFrontend()
@@ -153,9 +154,7 @@ sealed partial class PlayerInterface
             if (UiMode == UiMode.Meitou)
             {
                 b.Hidden.Add("ImportGameButton");
-                string[] buttons = ["ContinueButton", "NewGameButton", "LoadGameButton", "OptionsButton", "CreditsButton", "ExitButton"];
-                for (int i = 0; i < buttons.Length; i++)
-                    b.Positions[buttons[i]] = new(Width * 0.045f, Height * (0.47f + i * 0.073f), Width * 0.19f, Height * 0.055f);
+                foreach (var (widget, at) in MenuLayout(card: slots.Count > 0 && slotReadable)) b.Positions[widget] = at;
             }
             // Continue is shown only when a save exists (docs/game/ui-screens.md section 3), not greyed out.
             if (slots.Count > 0 && slotReadable) Enable("ContinueButton"); else b.Hidden.Add("ContinueButton");

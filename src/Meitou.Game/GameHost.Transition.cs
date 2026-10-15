@@ -96,7 +96,7 @@ sealed partial class GameHost
         if (!warming) return;
         warmSeconds += seconds;
         smoothSeconds = seconds < SmoothFrame ? smoothSeconds + seconds : 0;
-        if (TitleVisible && titleFrame is { } title && (title.Objects?.Pending > 0 || title.Characters?.Assets == 0) && warmSeconds < WarmLimit) return;
+        if (TitleVisible && (gpu.Objects?.Pending > 0 || gpu.Foliage?.Pending > 0 || gpu.Characters?.Assets == 0) && warmSeconds < WarmLimit) return;
         if (smoothSeconds < SmoothRun && warmSeconds < WarmLimit) return;
         warming = false;
         skyArrival?.Arrive();

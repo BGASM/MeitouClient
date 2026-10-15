@@ -13,12 +13,24 @@ public sealed class UiPainter : IDisposable
     readonly MyGuiResources resources;
     readonly Func<string, string?> resolve;
     DebugOverlay? standardFont, paintedFont, titleFont;
+    /// <summary>The standard and painted faces baked at <see cref="LargePixels"/>: lettering scaled well past the 16 px atlases is drawn from these, so it stays sharp.</summary>
+    DebugOverlay? standardLarge, paintedLarge;
+    const float LargePixels = 48;
     readonly Dictionary<string, (Texture Texture, SampledTexture Sampled)> textures = new(StringComparer.Ordinal);
     /// <summary>Textures the host draws at run time (the squad portraits), shown by an ImageBox's <c>ImageTexture</c> under their name; not owned.</summary>
     readonly Dictionary<string, (Texture Texture, SampledTexture Sampled)> external = new(StringComparer.Ordinal);
 
     /// <summary>Makes <paramref name="texture"/> the image an ImageBox shows for <c>ImageTexture</c> <paramref name="name"/> (the caller keeps and frees it).</summary>
     public void SetTexture(string name, Texture texture, SampledTexture sampled) => external[name] = (texture, sampled);
+
+    /// <summary>
+    /// Uploads <paramref name="image"/> (made by the host) as <c>ImageTexture</c> <paramref name="name"/>, between frames; the painter owns the copy. <paramref name="srgb"/>
+    /// false stores the bytes as they are, as the game's atlas textures are (art baked from them then draws in their colours).
+    /// </summary>
+    public void SetImage(string name, RgbaImage image, bool srgb = true) => Upload(name, image, srgb);
+
+    /// <summary>Whether <c>ImageTexture</c> <paramref name="name"/> is on the GPU.</summary>
+    public bool HasTexture(string name) => textures.ContainsKey(name) || external.ContainsKey(name);
 
     public UiPainter(DebugOverlay overlay, MyGuiResources resources, Func<string, string?> resolve)
     {
@@ -28,10 +40,15 @@ public sealed class UiPainter : IDisposable
         // Upload before rendering starts. Missing atlas files remain an explicit diagnostic.
         try
         {
-            if (resolve("Exo2-SemiBold.ttf") is { } standard) standardFont = DebugOverlay.FromFont(overlay.Gpu, standard);
+            if (resolve("Exo2-SemiBold.ttf") is { } standard)
+            {
+                standardFont = DebugOverlay.FromFont(overlay.Gpu, standard);
+                standardLarge = DebugOverlay.FromFont(overlay.Gpu, standard, LargePixels);
+            }
             if (resolve("Sentencia_1.ttf") is { } painted)
             {
                 paintedFont = DebugOverlay.FromFont(overlay.Gpu, painted);
+                paintedLarge = DebugOverlay.FromFont(overlay.Gpu, painted, LargePixels);
                 titleFont = DebugOverlay.FromFont(overlay.Gpu, painted, 144);
             }
             foreach (string name in resources.Skins.Values.Select(s => s.Texture).Where(s => s.Length > 0).Distinct())
@@ -131,6 +148,12 @@ public sealed class UiPainter : IDisposable
             font.Target = overlay.Target;
             float scale = c.TextScale ?? (c.Skin.Length > 0 ? Math.Clamp(height / 1080f, 0.5f, 1.5f) : 1);
             scale = Math.Min(scale, textArea.Height / font.LineHeight);
+            if (scale > 1.25f && (font == standardFont ? standardLarge : font == paintedFont ? paintedLarge : null) is { } large)
+            {
+                scale *= font.LineHeight / large.LineHeight;
+                font = large;
+                font.Target = overlay.Target;
+            }
             string text = c.Caption.Replace("\\n", "\n", StringComparison.Ordinal);
             var lines = c.Properties.GetValueOrDefault("WordWrap") == "true" ? font.WrapText(text, textArea.Width, scale) : text.ReplaceLineEndings("\n").Split('\n').Select(line => font.FitText(line, textArea.Width, scale)).ToArray();
             string align = c.Properties.GetValueOrDefault("TextAlign") ?? "Left VCenter";
@@ -228,11 +251,11 @@ public sealed class UiPainter : IDisposable
         return Upload(name, TextureLoader.LoadFile(path, allMips: false).Levels[0]);
     }
 
-    (Texture Texture, SampledTexture Sampled) Upload(string name, RgbaImage image)
+    (Texture Texture, SampledTexture Sampled) Upload(string name, RgbaImage image, bool srgb = false)
     {
         var gpu = overlay.Gpu;
         using var upload = gpu.Uploads.Begin();
-        var texture = upload.Create(new TextureDesc(Format.R8G8B8A8Unorm, image.Width, image.Height, Name: $"UI {name}"));
+        var texture = upload.Create(new TextureDesc(srgb ? Format.R8G8B8A8Srgb : Format.R8G8B8A8Unorm, image.Width, image.Height, Name: $"UI {name}"));
         var sampled = new SampledTexture(gpu.Samplers.Get(SamplerDesc.FromGl(TextureMinFilter.Linear, TextureMagFilter.Linear,
             TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge, false, DepthFunction.Lequal, false, 1, false, 0)), texture.View(), texture.Image);
         upload.Write(texture, 0, 0, new Rect2D(default, new Extent2D((uint)image.Width, (uint)image.Height)), image.Pixels);
@@ -243,7 +266,7 @@ public sealed class UiPainter : IDisposable
     {
         foreach (var t in textures.Values) t.Texture.Dispose();
         textures.Clear();
-        standardFont?.Dispose(); paintedFont?.Dispose(); titleFont?.Dispose();
-        standardFont = null; paintedFont = null; titleFont = null;
+        standardFont?.Dispose(); paintedFont?.Dispose(); titleFont?.Dispose(); standardLarge?.Dispose(); paintedLarge?.Dispose();
+        standardFont = null; paintedFont = null; titleFont = null; standardLarge = null; paintedLarge = null;
     }
 }

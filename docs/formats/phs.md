@@ -65,7 +65,7 @@ rest read.
 
 using the bone transform **stored in the file**, i.e. the point's place relative to the bone in the binding
 pose. These offsets are what `Entity::attachObjectToBone` later gets
-([../characters.md](../characters.md#weapons-and-other-bone-attached-items)).
+([../characters.md](../characters.md#assembly-and-generation)).
 
 ## Unknown
 

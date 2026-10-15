@@ -25,14 +25,10 @@ sealed partial class GameHost
     unsafe int Screenshot()
     {
         VulkanDisplay.RayTracing = o.WantsRayTracing;
-        using var display = new VulkanDisplay(null, vsync: false, streamline: WantsDlss());
+        using var display = new VulkanDisplay(null, vsync: false, streamline: true);
         streamline = display.Streamline;
         Boot(display, interactive: false);
-        if (g.TitlePreview)
-        {
-            ApplyTitleCamera();
-            titleFrame?.Objects?.Settle(camera.Eye);
-        }
+        if (g.TitlePreview) ApplyTitleCamera();
         if (g.UiShowcase && playerSquad is not null) player.Select([playerSquad.Leader], additive: false);
         if (playerSquad is not null && g.MoveTo is { } to)
         {
@@ -57,17 +53,9 @@ sealed partial class GameHost
             camera.Target = DrawnPosition(walker);
         }
         gpu.Streamer?.Settle(camera.Eye);
-        if (g.TitlePreview)
-        {
-            titleFrame?.Objects?.Settle(camera.Eye);
-            titleFrame?.Characters?.Settle(camera.Eye);
-        }
-        else
-        {
-            gpu.Objects?.Settle(camera.Eye);
-            gpu.Foliage?.Settle(camera.Eye);
-            gpu.Characters?.Settle(camera.Eye);
-        }
+        gpu.Objects?.Settle(camera.Eye);
+        gpu.Foliage?.Settle(camera.Eye);
+        gpu.Characters?.Settle(camera.Eye);
         WorldFrame.FinishLoading(display.Context);
         var context = display.Context;
         int w = o.Width, h = o.Height;

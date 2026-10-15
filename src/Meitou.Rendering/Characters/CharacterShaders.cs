@@ -31,6 +31,7 @@ static class CharacterShaders
     const string PushMembers = """
             vec3 flatColour;
             uint depthIndex;
+            vec4 fill;          // rgb; a unused
         """;
 
     static readonly string Structs = $$"""
@@ -217,7 +218,8 @@ static class CharacterShaders
                 bool clip = flag(f, 512u);
                 if (flag(f, 2u) || clip) nm = tex(m.tex[1], uv);
                 vec3 cm = flag(f, 1024u) ? tex(m.tex[2], uv).rgb : vec3(0.0);
-                cut = clip && nm.a < 0.6;
+                // Inventory RTT materials reject at 0.5; worn clothing retains its separate 0.6 threshold.
+                cut = clip && nm.a < (view.fogDistance < 0.0 ? 0.5 : 0.6);
                 if (flag(f, 1024u))
                 {
                     float intensity = dot(d.rgb, vec3(1.0 / 3.0));
@@ -272,6 +274,8 @@ static class CharacterShaders
                 vec3 sunLight = vec3(1.0, 0.97, 0.92);
                 colour = albedo * (ambient + diff * sunLight) + spec * diff * sunLight;
             }
+            // A presentation fill (CharacterRenderer.Fill, 0 in play): ambient light, stronger towards the silhouette as a back light rims it.
+            if (view.fogDistance > 0.0) colour += albedo * pc.fill.rgb * (1.0 + 2.0 * pow(1.0 - max(dot(n, v), 0.0), 3.0));
             if (view.fogDistance > 0.0) colour = atmoApply(colour, view.eye, vWorld);
             fragColour = vec4(colour, 1.0);
         }
@@ -345,12 +349,14 @@ struct CharacterMaterialRecord
 [InlineArray(CharacterShaders.TextureSlotCount)]
 struct TextureSlots { uint first; }
 
-/// <summary>The C# side of the push block (<c>flatColour</c>, <c>depthIndex</c>): 16 bytes. <c>DepthIndex</c> is the near depth texture's bindless index in the motion pass and 0 otherwise.</summary>
+/// <summary>The C# side of the push block (<c>flatColour</c>, <c>depthIndex</c>, <c>fill</c>): 32 bytes. <c>DepthIndex</c> is the near depth texture's bindless index in the motion pass and 0 otherwise.</summary>
 [StructLayout(LayoutKind.Sequential)]
 struct CharacterPush
 {
     public Vector3 FlatColour;
     public uint DepthIndex;
+    /// <summary>The colour pass's fill light (<see cref="CharacterRenderer.Fill"/>; w unused).</summary>
+    public Vector4 Fill;
 }
 
 /// <summary>One instance (144 bytes): the model matrix whose rows the vertex program reads, the palette's first bone, the material's index, the morph base and last frame's matrix.</summary>

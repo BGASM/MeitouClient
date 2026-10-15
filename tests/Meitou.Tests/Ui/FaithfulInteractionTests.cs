@@ -73,8 +73,10 @@ public class FaithfulInteractionTests(ITestOutputHelper output)
         finally { ui.DisposeUi(); }
     }
 
-    [Fact, Slow]
-    public void PocketDragRunsThroughTheOriginalWindowAndOnlyMovesAtASimulationTick()
+    [Theory, Slow]
+    [InlineData(UiMode.Faithful)]
+    [InlineData(UiMode.Meitou)]
+    public void PocketDragRunsThroughTheOriginalWindowAndOnlyMovesAtASimulationTick(UiMode mode)
     {
         using var session = new WorldSession(Vector3.Zero, (-100, -100, 100, 100), (_, _) => 0, systems: [new PlayerSystem()]);
         var inventory = new Inventory(8, 6);
@@ -85,14 +87,54 @@ public class FaithfulInteractionTests(ITestOutputHelper output)
         var ui = Ui(session);
         try
         {
+            ui.SetUiMode(mode);
             ui.ShowUiPanel("inventory");
             var source = ui.UiFrame.Single(c => c.Name == "inventory-item-0");
             var slot = ui.UiFrame.Single(c => c.Name == "main").Bounds;
+            Assert.Equal(slot.Width / 8, slot.Height / 6, 3);
+            Assert.Contains(ui.UiFrame, c => c.Properties.ContainsKey("CaptionOwner") && c.Caption == "PLAYER");
             var target = new Vector2(slot.X + slot.Width * 2.5f / 8, slot.Y + slot.Height * 1.5f / 6);
             ui.MouseDown(MouseButton.Left, Centre(source), false); Assert.True(ui.UiCapturesPointer);
             ui.MouseMove(target); ui.MouseUp(MouseButton.Left, target, false);
             Assert.Equal((0, 0), (item.X, item.Y));
             session.World.RunTick(); Assert.Equal((2, 1), (item.X, item.Y)); Assert.False(ui.UiCapturesPointer);
+        }
+        finally { ui.DisposeUi(); }
+    }
+
+    [Theory, Slow]
+    [InlineData(UiMode.Faithful, 1280, 720)]
+    [InlineData(UiMode.Meitou, 1600, 900)]
+    [InlineData(UiMode.Faithful, 2560, 1440)]
+    public void BackpackFitsItsContentsAndEquipmentKeepsItsFootprint(UiMode mode, int width, int height)
+    {
+        using var session = new WorldSession(Vector3.Zero, (-100, -100, 100, 100), (_, _) => 0, systems: [new PlayerSystem()]);
+        var inventory = new Inventory();
+        inventory.Items.Add(new() { Record = "bag", Name = "Thieves Backpack", Section = "backpack_attach", Width = 4, Height = 4, Contents = new Inventory(10, 14) });
+        inventory.Items.Add(new() { Record = "sword", Name = "Sword", Section = "back", Width = 7, Height = 1 });
+        var character = session.World.Characters.Spawn(new(), new() { Name = "Wolf", IsPlayer = true, Inventory = inventory }, 0);
+        session.World.Player.Faction = 0; session.World.Player.Selection.Add(character); session.World.RunTick();
+        var ui = Ui(session);
+        try
+        {
+            ui.SetUiMode(mode); ui.Width = width; ui.Height = height;
+            ui.ShowUiPanel("inventory");
+            var main = ui.UiFrame.Single(c => c.Name == "main").Bounds;
+            Assert.Equal(8, inventory.Width); Assert.Equal(10, inventory.Height);
+            Assert.Equal(main.Width / 8, main.Height / 10, 3);
+            var sword = ui.UiFrame.Single(c => c.Name == "inventory-item-1").Bounds;
+            Assert.Equal(7, sword.Width / sword.Height, 3);
+            Assert.Equal("disabled", ui.UiFrame.Single(c => c.Name == "shirt").Properties["State"]);
+            Click(ui, "OpenBagButton");
+            var bag = ui.UiFrame.Single(c => c.Name == "backpack_content");
+            Assert.Equal(bag.Bounds.Width / 10, bag.Bounds.Height / 14, 3);
+            Assert.True(bag.Bounds.X + bag.Bounds.Width <= ui.UiFrame.Single(c => c.Name == "backpack_attach").Bounds.X);
+            Assert.Contains(ui.UiFrame, c => c.Properties.ContainsKey("CaptionOwner") && c.Caption == "THIEVES BACKPACK");
+            Assert.DoesNotContain(ui.UiFrame, c => c.Name is "CapacityText" or "TypeText");
+            Assert.DoesNotContain(ui.UiFrame, c => c.Name == "inventory-scroll-thumb");
+            Assert.True(ui.UiKey(Key.Escape));
+            Assert.DoesNotContain(ui.UiFrame, c => c.Name == "backpack_content");
+            Assert.Contains(ui.UiFrame, c => c.Name == "main");
         }
         finally { ui.DisposeUi(); }
     }
@@ -165,6 +207,26 @@ public class FaithfulInteractionTests(ITestOutputHelper output)
         var lead = new CharacterSnapshot(new CharacterId(0, 0), null, Vector3.Zero, 0, [])
             { Hud = new HudView(150, 150, 0, 1, [new("Strength:", 99.4f, 100), new("Toughness:", 100, 100), new("Dodge:", 105, 100)]) };
         Assert.Equal(["STRENGTH: 99 (-1)", "TOUGHNESS: 100", "DODGE: 105 (+5)"], PlayerInterface.StatsLines(lead).Select(l => $"{l.Label} {l.Value}"));
+        var extended = lead with { Hud = lead.Hud! with { Extended = new ExtendedStats(1.5f, 0.25f, 3, -37.6f, 30, 40, 1.35f) } };
+        Assert.Equal(["Athletics XP: 150%", "Strength XP: 25%", "Toughness XP: 3x", "KO point: -37", "Run speed: 7 (-2) mph", "Hunger Rate: 135%"],
+            PlayerInterface.ExtendedLines(extended).Select(l => $"{l.Label} {l.Value}"));
+    }
+
+    /// <summary>A click on another faction's character shows it in the HUD without selecting it (<see cref="InspectCommand"/>).</summary>
+    [Fact]
+    public void InspectingACharacterPublishesItsHudDetailsWithoutSelectingIt()
+    {
+        using var session = new WorldSession(Vector3.Zero, (-100, -100, 100, 100), (_, _) => 0, systems: [new PlayerSystem()]);
+        var stranger = session.World.Characters.Spawn(new(), new() { Name = "Stranger", Faction = 3 }, 0);
+        session.World.Player.Faction = 0;
+        session.World.Commands.Enqueue(new InspectCommand(stranger) { Tick = session.World.Tick });
+        session.World.RunTick();
+        var shown = Assert.Single(session.CurrentSnapshot.Characters);
+        Assert.True(shown.Inspected);
+        Assert.False(shown.Selected);
+        session.World.Commands.Enqueue(new InspectCommand(CharacterId.None) { Tick = session.World.Tick });
+        session.World.RunTick();
+        Assert.False(Assert.Single(session.CurrentSnapshot.Characters).Inspected);
     }
 
     /// <summary>Names the HUD bindings carry for the Meitou mode's native HUD only; the faithful layout has no widget for them.</summary>

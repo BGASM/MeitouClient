@@ -1,161 +1,44 @@
 # Character renderer
 
-The native Vulkan renderer for characters (stage 4 of [simulation.md](simulation.md)): `src/Meitou.Rendering/Characters/`. The
-simulation (or the `--crowd` harness) fills a `CharacterDrawList` every frame; the renderer owns everything on the GPU side. Inputs it
-reproduces are described in [characters.md](characters.md), [animation.md](animation.md) and [character-viewer.md](character-viewer.md).
+`Meitou.Rendering.CharacterRenderer` partials: core content/material/lifetime; Draw cull/LOD/batches;
+Motion previous state; Portraits offscreen portraits; Stats diagnostic rings. Inputs are
+interpolated simulation snapshots and data appearances, not simulation-owned GPU resources.
+Game assembly rules: [characters](characters.md), [animation](animation.md).
 
-## Test harness
+## GPU layout and shading
 
-`--world --town "The Hub" --crowd N` (the seed is fixed at 1 and the still clock at 0.35 of the day; the `--crowd-seed` and `--crowd-time` options were removed): N characters generated with `CharacterGenerator` from the CHARACTER
-records of the town's `residents` and `bar squads` (SQUAD_TEMPLATE `choosefrom list`, weighted), standing on a sunflower spiral round the
-start point, even indices idling (`idle_stand_relax`) and odd ones walking in place (`walk lower` + `walk upper`). Stills use a fixed
-time (default 0.35 s); the interactive viewer uses a clock. Without `--crowd` nothing of the renderer is created and the world image is
-unchanged (image-diff 0 px against the pre-change baseline, `--upscaler off`).
+Instance bones/material offsets index shared storage buffers; group compatible mesh parts.
+CharacterShaders set0 bindings: bones6, materials7, morphs8, previous bones9; material20 texture
+slots. CharacterLayoutTests pins CPU/GLSL layouts. Push depthIndex is near-depth bindless index
+for motion,0 otherwise. Camera-relative transforms preserve precision; previous bone/transform
+state must match motion history. Skin/body/head/hair/item modes share world lighting/haze.
+Head uses UV+(0,1); dye/vest/overlays and cutout rules come from research. Same-instance caster
+pass preserves alpha coverage. Face morphs and body shape precede skinning.
 
-There are no environment switches: the per-part build log, the keep-the-files'-own-LOD option, the face-pose and motion-vector switches and the
-real-time crowd clock (`MEITOU_CHARACTER_LOG`, `_LOD`, `_MORPH`, `_MOTION`, `MEITOU_CROWD_ANIMATE`, cleanup 2026-10) were removed. The generated LOD,
-the face poses and the motion vectors are always on; the `--crowd` harness holds a fixed time for stills.
+## Content, LOD and memory
 
-On exit a `characters ...` line gives counts per LOD level and timings (means of the last 10 frames, 40 for the shadow cascades; kept in rings of 64 samples).
+`CharacterContent` owns buffers/textures/morph arena; worker fetching/preparation precedes render
+uploads. Reuse appearances/content; replace only after ready and retire after GPU consumers.
+`CharacterTextureBudget` shares mip/VRAM pressure policy; unavailable content uses a stand-in.
+Generated four-level reductions are always enabled; pose updates stagger by distance:120/300/600
+units every2/4/8 frames, animal scale by radius/16. Shadow LOD doubles choice with cascade floors.
+Clamp stored bounds to real mesh extent. Animation rendering does not independently integrate
+walk-loop root movement; simulation owns relocation. Quads/morph and motion buffers retain
+correct previous-frame data across skipped poses and content changes.
 
-## Design
+## Animals and portraits
 
-- **Per appearance** (by reference): a `CharacterAsset` with the rig, body shape, parts (body, head, hair, beard, clothing, armour,
-  weapons) and their materials. Meshes are cached by (path, bone count) and shared; textures through one `WorldTextureCache`.
-- **Pose**: CPU, in parallel over characters, straight into the mapped bone storage buffer (binding 6; 64 B per bone skin matrix). Layers
-  are added **cumulatively** (Kenshi switches every character skeleton to cumulative, [ogre-skeleton.md](formats/ogre-skeleton.md#blending-in-kenshis-ogre); the
-  simulation keeps each body half at a total of 1); override bones in a second pass; a relocating clip's `Bip01` track keeps only its height
-  (the simulation moves the character by the rest); body-shape scales and the posture libraries (at weight 1, on top) applied as in the removed viewer. Bone-attached items (weapons) take the bone's world matrix times the part offset.
-- **Draw**: instanced per (mesh part, LOD level, sidedness). Per instance: a 4x4 matrix (vertex inputs 7-10) and a `uvec4`
-  (bone base, material slot, flags). Materials are a table in an SSBO (binding 7, 256 B records, bindless texture indices), so one
-  instance buffer and few draws cover a whole crowd. Sphere culling and LOD selection (`MeshLod`) on the CPU, per view.
-  The instance matrices (this frame's and last frame's) are relative to the view's eye, and the view's matrices take the eye back out
-  (in double on the CPU); the vertex program adds the eye back for the shading position. Skinned in world floats, characters tens of
-  thousands of units from the origin (the Hub) jiggled: every animated vertex rounds to a new float step each frame (~0.004 units at
-  30000, pixels in a close-up). Static meshes round the same way every frame, so the world does not show it. The LOD distance is taken in the same
-  eye-relative space (`eye - origin`); from 6e42731 until the fix (2026-10-13) it used the world eye against eye-relative centres, so a character's distance
-  was about the eye's distance from the world origin and far out every part took its last level (**Observed**: blocky Samurai at 42000, -110000).
-- **Shading**: one shader with three modes (item, body, hair) that layers vests, head at uv+(0,1), skin tone, hair/beard overlays and
-  dye, then the shared mesh lighting tail (`kenshiLight`, atmosphere), so characters are lit like the world.
-- **Shadows**: the same instances are drawn into the existing cascades with a depth program that only does the cut-out test.
+Animal race/body/mesh/fur/clips/size use shared assembly with animal inputs, not human fallback.
+Portraits use the same content/shading with a dedicated camera/render target; avoid mutating
+world draw state. Asset/appearance failure must not corrupt another instance or portrait.
+Item icons (`CharacterRenderer.Icons.cs`) are the same: an item's mesh drawn through the item shader into a texture of its own, as a pseudo-instance that the world and shadow views skip;
+the camera, lighting and sizes are in [game/ui-screens.md](game/ui-screens.md) "Item icons".
+Harness `--crowd` exercises instance scaling; compare pose/upload/draw/shadow separately.
+**Observed** human_male:23 poses, no normal offsets,2986/15504 vertices affected, max offset0.18.
 
-## Engine choices
+## Remaining limits
 
-- **Generated LOD** (always on; the files' own levels are no longer an option): every mesh gets four reduced levels by edge collapse
-  (`FoliageLodBuilder` with the character settings: `MeshSimplifier` by quadric error, open edges and skinning-weight changes penalised, no flips, no collapse that leaves its
-  UV island, without which a face's eyes and mouth smeared from the second level), at half, a quarter, an eighth and a twentieth of its triangles (floor 40 per part; a level kept only
-  with at most 85 % of the one before, a deviation under a quarter of the radius). **Where a level starts** (2026-10-12): the objects' screen-size rule (`ObjectLodGen.Distances`,
-  [render-objects.md](render-objects.md)): its deviation from the original, measured in the bind pose, under 1.5 rendered pixels (or twice that where the level before has
-  sub-pixel triangles), at the render's pixels per radian when the mesh loads (`CharacterContent.LodPixelsPerRadian`, from `SetView`). Hair and beards (ATTACHMENT records) start
-  4x farther (`HairLodScale`): they are alpha-tested cards, and a collapse merging cards loses strands that the surface deviation does not see (reduced at the rule's distance,
-  dark hair thinned visibly at 200 units). Before: fixed 5, 11, 22 and 45 radii of the part (faces and weapons reduced within 50 units), then briefly fixed 500/1000/2000/4000.
-  The levels only re-point corners at existing vertices, so one vertex buffer, the weights and the morph slots serve every level.
-- **Shadow levels** (2026-10-12): shadow cascades use LOD value x2 (`ShadowLodBias`), never below the far cascades' floor (`ShadowLod.ObjectLodFloor` of the cascade's
-  texel, as the objects, in both shadow modes since the levels are Meitou's own); hair takes the rule's own distances there (a silhouette, so not `HairLodScale`). The body
-  mesh also gets shadow-only levels (`AssetPart.ShadowDistances`, appended to its index buffer at distance infinity so the picture never picks them), built without the
-  texture guard: the guard's refusals stop the body at about 1300 triangles, a shadow map shows no texture, and the body has no cut-outs. **Observed** (`meitou --new-game
-  --crowd 500`, `--distance 600`): every character is in every cascade that holds the crowd, and cascade 0 is drawn every frame (the far ones every few); before, 1.04M
-  triangles per cascade call whatever the cascade (bodies at their 1300-triangle level, hair 4x); with the floor and hair's own distances 0.995M; with the shadow-only body
-  levels (down to about 260 triangles from about 390 units of LOD value) 0.42M. The picture's shadows at `--sandbox 500 --distance 200`: 2.7 % of pixels differ by 4/255 or more.
-  **Observed** (`meitou --sandbox 500`, 1600x900, `--distance 400 --pitch 40`, RTX 4070, stills): every part at full detail 4.6M triangles, GPU colour 3.4 ms; the rule 1.74M,
-  1.8 ms (1.38M and 1.1 ms with hair at the rule's distance). The colour pass is geometry-bound: the same 3.3-3.8 ms from 800x450 to 3200x1800, ~0.7 ms per million triangles.
-  The per-call GPU timer of the character shadow pass is too noisy in stills to compare (0.5 to 1.4 ms per call for the same build); count triangles instead.
-- **Pose rate by distance**: characters beyond 120, 300 and 600 units (animals: x their radius over 16, [Animals](#animals)) are posed every 2nd, 4th and 8th frame (staggered by key); the last palette is reused.
-  State per `Key` (`CharState`) holds the palette, the one before it, bone-attach matrices and last frame's model matrix.
-- **Texture memory**: character textures are loaded on demand (deferred) with the world's mip streaming (`MipStreaming` through `WorldTextureCache.Mips`): a texture
-  loads without the top levels its nearest user cannot show, and finer when something comes near. A governor scales every need up by 1.6x (up to 512x) while the cache
-  is above 90% of its mark (`MarkMb`, which the `VramGuard` budget lowers), back down under 50%. A still waits for everything once the camera is known.
-- **Building on workers**: a new appearance's files are read and its meshes prepared on the shared background workers first (`CharacterContent.Fetched`, six
-  appearances at once): the body's skeleton link, the rig, each mesh's model, morphs, generated and shadow levels and index buffers, each mesh once however many
-  appearances share it. The appearance is not drawn until then; afterwards `Build` only uploads and makes the materials, four a frame (`LoadBudget`). A still
-  (`LoadBudget` 0) prepares on the render thread. **Observed** 2026-10-14 (new game at The Hub): before, frames of 0.2 to 1.0 s for 5 s, the edge collapse on the
-  render thread; after, a build takes at most 70 ms (`human_female.mesh`).
-- LOD radius is bounded by the model's real extent (`min(stored radius, model.Radius)`): `human_female.mesh` stores 116 for a body about 20 units tall.
-- No root motion: the walk loop's root translation starts and ends in the same place (**Observed** on `walk lower`), so characters walk in place and the simulation moves them.
-- **Face poses**: the vertices any pose moves get a slot (1..n, in the vertex's colour X as raw bits; characters use no vertex colours); an appearance's offsets, the poses
-  summed at their weights as Kenshi bakes them (`CharacterShape.BakeWeight`), live in one growing storage buffer (`MorphArena`, binding 8), identical sets stored once
-  (squads share faces). The vertex program adds the offset before skinning; normals are not changed (the poses carry none, **Verified** in ogre-mesh.md).- **Motion vectors**: `PostProcess.ObjectMotion` (shared with the grass through one hook): the near slice's characters drawn again with last frame's palette (binding 9) and
-  model matrices (instance locations 12 to 15) into the motion target (red, green), where the near depth matches.  A character not posed this frame has no bone motion.
-
-## Animals
-
-Animals go through the same skinned path as people ([game/animals.md](game/animals.md#6-appearance) for the data).
-
-- **One asset per species**: `CharacterAppearance.BuildAnimal` reads the race's mesh, textures and fur (no head, no shape, no clothes), and the population's
-  `GeneratedAppearances` hands every animal of a record the same appearance instance, so the content builds one asset per record and every bonedog shares it.
-  `CharacterAsset.Animal` marks it.
-- **Size**: `CharacterSnapshot.Scale` / `CharacterInstance.Scale` (the medical `ScaleK`, lerp(age, scale min, scale max)) scales the world matrix uniformly and the
-  culling sphere with it. An animal's sphere is the body's bounds (height 2 x the bounds centre, radius plus the centre's horizontal offset), not the human one.
-- **Layers** resolve by name on the animal's own skeleton (`SkeletonRig.Layer(db, name, animal: true)`, cached apart from the humanoid masks): a creature technique's
-  name gives its mask through `FromTechnique`, anything else a plain whole-body mask of the clip of that name. The humanoid ANIMATION masks are never used for an animal
-  (`delete tail` and the like would hit animal bones of the same name).
-- **Textures repeat**: animal body textures are sampled with repeat addressing, a person's with the transparent border, since the goat, bull and beak thing put the
-  mirrored half at u 1..2 (**Observed**: with the border the goat drew black).
-- **Fur LOD**: the race's `hairs` fur is an ATTACHMENT but a whole-body shell, so it takes the LOD rule's own distances (x1, not `HairLodScale`) in the picture and
-  in shadows; at x4 a bonedog's fur stayed at full detail to about 1000 units.
-- **Pose rate**: the 120/300/600 distances are stretched by the instance radius over a person's (16, never below 1): a leviathan keeps its rate that many times farther, a dog keeps the human distances.
-- **Markers** now only stand for a character without a look (a failed build, a world without looks).
-- **Observed** cost (`meitou --sandbox 100 --sandbox-character <name>`, 1600x900, `--distance 300 --pitch 40`, RTX 4070, stills): 100 bonedogs 706k triangles, GPU colour
-  0.82 ms, CPU update 0.13 ms, shadow 0.12 ms per cascade call, one appearance with 2 meshes (3.5 MB) and 3 textures (3 MB); 100 beak things 629k triangles, 0.71 ms,
-  0.19 ms, 0.13 ms, 1 mesh (1.7 MB) and 2 textures (7 MB); 100 people 487k triangles, 0.72 ms, 0.21 ms, 0.04 ms, 100 appearances with 74 meshes (30.7 MB) and 45 textures
-  (68 MB). Animals cost about what people do on the GPU (more triangles per body, no clothes) and far less memory; the clip table adds 150-350 ms at startup
-  (`AnimationLengths.Load` reads every animal skeleton).
-- Not done: crossbow bolts in flight (an unskinned mesh per projectile) and bodies carried on the carrier's `Bip01 L UpperArm` (a second attach pass after posing);
-  turning and strafe clips, ragdolls.
-
-## Portraits
-
-The squad bar's pictures of each member (Faithful UI, `PlayerInterface.Portraits.cs`; the cell layout is in [game/ui-screens.md](game/ui-screens.md)).
-
-The original's portrait camera, read from `kenshi_x64.exe` `FUN_14084b890` (the function that reads the `portrait offset` fields and renders through the
-`RTT_Portrait` compositor):
-- **Observed** (disassembly): the character is drawn alone at the origin, in its posture layers (`postures`, `neck set`, `shoulder set` at the body file's
-  sliders). The camera looks at the `Bip01 Head` bone's position plus the RACE's (`portrait offset x`, `y`, `z`), the offset times a size of the character's
-  (a virtual call, most likely its scale).
-- **Observed**: the camera stands at (0, 0, `portrait distance`) from that point, turned about the vertical by ((s mod 500) / 1000 − 0.25)·π (up to 45 degrees
-  either way) and about the side axis by ((s mod 252) / 1000 − 0.083)·π, where s is a number the character carries (+0x664, **Unknown** what it is). The yaw
-  axis is held vertical.
-- **Unknown**: the call before the camera is placed takes 25 and 400. Meitou reads them as a 25 degree vertical field of view and a 400 unit far plane; that
-  framing matches the original's head-and-shoulders pictures.
-- **Observed** (`FUN_140414380`, [formats/save.md](formats/save.md)): the pictures live in a 2048 × 2048 atlas of 128 px cells, saved with the game.
-- **Verified** (decompile, 2026-10-14): portraits are stills rendered to texture. A re-render is queued, after a 1 s delay and at most one portrait a
-  frame, when the appearance changes (body rebuild, hair, clothing, barefoot and similar). The pose is the race's `idle stance` animation plus
-  `postures` at the body's "Posture" %, `shoulder set` at "Neck position" % and `neck set` at "Shoulder set" % (the last two pairs crossed in the
-  portrait code; whether the world pose crosses them too is **Unknown**, Meitou does not).
-- RACE values (**Verified**, merged base game, dumped with a scratch tool): people (Greenlander, Scorchlander, Shek, Hive, Skeletons, Fishmen) distance 10, offset
-  (0, 0.5, 0). Bonedogs and Land Bats 15 (0, −2.5, 6); bulls 20 (0, 0.5, 5); Garru 25 (0, 0, 5); Beak Thing 10 (0, −1, 21); Leviathan and Big-Bones
-  10 (0, 5, 280). The z offset puts an animal's long head in front of its head bone.
-
-Meitou (engine choices, 2026-10-14): `CharacterRenderer.DrawPortraits` runs after `Update` every frame for the host's `PortraitRequests` (the squad bar's members,
-member *i* in cell *i*, at most 32 in a 2048 × 256 sRGB atlas). A portrait is a still, as in the original (**Observed**: the original's squad bar pictures do
-not move while the character animates): the character is posed on its own in its idle stance (the body file's `IdleStance`, else `idle_stand_relax`) at time 0
-plus its posture layers, weapon sheathed, and drawn where it stands from the original's camera; s is a hash of the character's id. A cell is posed and drawn anew
-when its character or appearance (equipment) changes, and redrawn as the same still every 30 frames (one cell at a time) so textures that streamed in later show. The light is the shader's plain model (no fog, sky, shadows or GI), a key light from the camera's side, so a portrait
-looks the same by day and night. The background is transparent, so the cell's own background shows. A member beyond the draw distance is still posed for its
-portrait but not drawn in the world; one not in the draw list keeps its last picture. The UI shows a cell with the ImageBox properties `ImageTexture
-meitou:portraits` and `ImageFlipV` (the renderer's targets are stored bottom row first). **Observed**: the people's pictures look like the original's;
-a young Bonedog ("Guy with a dog") shows whole and small, as the distance does not scale with size.
-
-## Findings
-
-- **Observed**: `human_male.mesh` has 23 Ogre poses (cheekbones, mouth, nose, brow, eyes, jaw bite), all on the one submesh, none with
-  normals, together moving 2986 of its 15504 vertices, largest offset 0.18 units.
-- **Observed** (RTX 4070, shared and noisy; `--distance 260 --pitch 30`, 1600x900), before generated LOD: 500 characters 3.5M triangles per view, colour pass 2.7 ms,
-  shadow 1.8 ms per cascade call, CPU update 1.2-1.8 ms (pose 0.65-1.1) and draw 0.4 ms; 459 MB of textures and 72 MB of meshes.
-- **Observed**, after generated LOD, pose rate, morphs and motion: 500 characters 0.6M triangles, colour 0.5-0.8 ms, shadow 0.15-0.25 ms per cascade call, CPU update 0.9-1.5 ms
-  (pose 0.3), draw 0.5 ms; 50 characters colour 0.1-0.5 ms, update 0.2 ms. At a far camera (900 units) textures drop from 461 to 143 MB. With a forced integrated
-  GPU (`MEITOU_FORCE_INTEGRATED=1 MEITOU_VRAM_BUDGET_MB=3300`) the guard stops loading at its budget and the rest draw the stand-in.
-
-## Left
-
-A coarser or merged shadow caster for far characters; GPU culling; the guard's stand-in textures for characters (a small shared diffuse colour rather than grey);
-generated LOD as a Faithful/Meitou switch (`Enhancements`, `--faithful`; the old `MEITOU_CHARACTER_LOD` env switch was removed); normals for the face morph; the original's per-frame animation update budget (docs/game/game-loop.md) instead of the distance-based pose rate.
-
-## Code layout
-
-`CharacterRenderer` is a partial class: `CharacterRenderer.cs` (fields, `Update`, materials, `Settle`, teardown), `.Draw.cs` (culling, LOD choice, batches, the recorded draw job), `.Motion.cs`
-(`AttachMotion`: the near slice's hook into the post chain, called once per frame by `WorldFrame`; `DrawMotion`), `.Stats.cs` (timing rings, the `characters ...` line), `.Portraits.cs` (the squad portraits). The texture
-governor is `CharacterTextureBudget`. `CharacterContent` is disposable and owns the mesh buffers, textures and the morph arena. The program wrapper and the sphere test are
-shared (`ReflectedProgram.cs`; the objects renderer still has its own copy of both). `CharacterShaders` names the set 0 bindings (bones 6, materials 7, morphs 8, last frame's bones 9) and
-the material's texture slot count (20) and builds the GLSL from them; the push block's `depthIndex` is the near depth texture's bindless index in the motion pass and 0 otherwise
-(the colour fragment's flat-colour branch on it is unreachable and kept as it is). `CharacterLayoutTests` pins the sizes of the structs the shaders read.
+GPU culling, coarser/merged far shadow casters, better texture stand-ins, face-morph normals and
+original animation-update budgets remain incomplete. Generated LOD as a Faithful switch also
+needs explicit design. Tests pin layouts/data; visual parity requires named screenshots across
+races, bodies, gear, animals, attachments, motion and shadow views. [bench](bench.md).

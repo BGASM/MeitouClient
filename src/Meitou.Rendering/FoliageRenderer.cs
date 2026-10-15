@@ -58,6 +58,43 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     readonly Stopwatch clock = Stopwatch.StartNew();
     /// <summary>Seconds that drive the grass sway; null uses a wall clock started with the renderer. Screenshots fix it (pictures repeat exactly) and the game sets its own clock.</summary>
     public double? SwaySeconds { get; set; }
+
+    /// <summary>
+    /// A presentation-only move of some placed meshes (the Meitou title's staging): every instance of a mesh whose name <see cref="FoliageShift.Moves"/>
+    /// within <see cref="FoliageShift.Radius"/> of <see cref="FoliageShift.Centre"/> (x, z) is carried by <see cref="FoliageShift.Offset"/> and set on the
+    /// ground there. Applied as zones are accepted; setting or clearing it lays the zones it touches out again. Null, the game's placement, in play.
+    /// </summary>
+    public FoliageShift? Shift
+    {
+        get => shift;
+        set
+        {
+            var touched = new[] { shift, value };
+            shift = value;
+            dropping.Clear();
+            foreach (var state in zones.Values)
+                if (state.Job is null && touched.Any(s => s is not null && BoxDistance(state.X0, state.Z0, WorldLayout.ZoneSize, s.Centre with { Y = 0 }) <= s.Radius))
+                    dropping.Add(state);
+            foreach (var state in dropping) Drop(state);
+        }
+    }
+    FoliageShift? shift;
+
+    void ApplyShift(FoliageMesh mesh, FoliageInstanceRecord[] instances)
+    {
+        if (shift is not { } s || !s.Moves(mesh.Name)) return;
+        for (int i = 0; i < instances.Length; i++)
+        {
+            ref var r = ref instances[i];
+            float x = r.Transform.M41, z = r.Transform.M43;
+            if ((x - s.Centre.X) * (x - s.Centre.X) + (z - s.Centre.Z) * (z - s.Centre.Z) > s.Radius * s.Radius) continue;
+            float nx = x + s.Offset.X, nz = z + s.Offset.Z;
+            r.Transform.M41 = nx;
+            r.Transform.M42 += s.Ground(nx, nz) - s.Ground(x, z);
+            r.Transform.M43 = nz;
+            (r.Ground.X, r.Ground.Y) = (nx, nz);
+        }
+    }
     readonly int workers;
     /// <summary>Draw the grass / the meshes and impostors (not the TERRAIN-mode rocks) (the bench's `grass` and `foliage-meshes` switches).</summary>
     public bool DrawGrass { get; set; } = true;
@@ -541,6 +578,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         foreach (var g in prepared.Groups)
         {
             var asset = AssetFor(g.Mesh);
+            ApplyShift(g.Mesh, g.Instances);
             if (filter && asset.HasBounds && asset.SizeClass != FoliageSizeClass.Large) continue;
             if (filter && !asset.HasBounds) unknown = true;
             groups.Add(new Group
@@ -2539,3 +2577,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         nativeFrame.Dispose();
     }
 }
+
+/// <summary>A presentation-only move of placed foliage meshes (<see cref="FoliageRenderer.Shift"/>): those named so by <paramref name="Moves"/> within
+/// <paramref name="Radius"/> of <paramref name="Centre"/> (x, z) move by <paramref name="Offset"/> (x, z) and onto <paramref name="Ground"/> there.</summary>
+public sealed record FoliageShift(Vector3 Centre, float Radius, Vector3 Offset, Func<string, bool> Moves, Func<float, float, float> Ground);

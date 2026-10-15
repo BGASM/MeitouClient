@@ -6,7 +6,7 @@ namespace Meitou.Game;
 /// <summary>Presentation-only flight through the sky; the simulation clock and camera rig never change.</summary>
 sealed class SkyArrival(WorldCamera source, float hour)
 {
-    internal const double AscentSeconds = 2.4, DescentSeconds = 2.8;
+    internal const double AscentSeconds = 4, DescentSeconds = 4.8;
     internal const float SkyPitch = -1.45f;
     readonly Vector3 sourceEye = source.Eye;
     readonly float sourceYaw = source.Yaw, sourcePitch = source.Pitch, sourceDistance = source.Distance, sourceFov = source.FieldOfView;
@@ -27,7 +27,7 @@ sealed class SkyArrival(WorldCamera source, float hour)
         if (!arriving)
         {
             Place(camera, destinationReady ? camera.Eye : sourceEye, sourceYaw, float.Lerp(sourcePitch, SkyPitch, t), sourceDistance, sourceFov);
-            return ForwardHour(sourceHour, 0, t);
+            return NearestHour(sourceHour, 0, t);
         }
         var eye = camera.Eye;
         float yaw = sourceYaw + MathF.IEEERemainder(camera.Yaw - sourceYaw, MathF.Tau) * t;
@@ -36,8 +36,20 @@ sealed class SkyArrival(WorldCamera source, float hour)
         return ForwardHour(0, destinationHour, Ease(Math.Min(t * 2, 1)));
     }
 
-    // Quintic easing reaches a hold with both velocity and acceleration at zero.
-    static float Ease(float t) { t = Math.Clamp(t, 0, 1); return t * t * t * (t * (t * 6 - 15) + 10); }
+    // Smoothly ramp speed over the first/last 40%, with a short, steady cruise between them.
+    // Integrating smoothstep velocity keeps acceleration continuous through each join and at rest.
+    static float Ease(float t)
+    {
+        t = Math.Clamp(t, 0, 1);
+        const float ramp = 0.4f, area = 1 - ramp;
+        static float RampDistance(float u) => u * u * u * (1 - u * 0.5f);
+        if (t < ramp) return ramp * RampDistance(t / ramp) / area;
+        if (t > 1 - ramp) return 1 - ramp * RampDistance((1 - t) / ramp) / area;
+        return (t - ramp * 0.5f) / area;
+    }
+    /// <summary>The hour <paramref name="t"/> of the way from <paramref name="from"/> to <paramref name="to"/> the shorter way round: a dawn title rewinds to midnight rather than running through the day.</summary>
+    internal static float NearestHour(float from, float to, float t) =>
+        (from + ((to - from + 36) % 24 - 12) * Math.Clamp(t, 0, 1) + 24) % 24;
     internal static float ForwardHour(float from, float to, float t) =>
         (from + ((to - from + 24) % 24) * Math.Clamp(t, 0, 1)) % 24;
 

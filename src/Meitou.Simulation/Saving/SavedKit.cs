@@ -17,8 +17,7 @@ public static class SavedKit
 
     /// <summary>
     /// The items as an inventory, at their saved sections and cells. Items whose record the game data lacks are left out and named in <paramref name="notes"/>. The main
-    /// grid is 8 wide and as tall as the saved items need, at least 6: the saves place items down to row 8 (<b>Observed</b> in the five saves of save.md, 2026-10-14; the
-    /// original's grid size is <b>Unknown</b>).
+    /// grid is 8 wide and as tall as the saved items need, at least 10 (the vanilla screenshot's pocket grid, <b>Observed</b>, docs/game/ui-screens.md).
     /// </summary>
     public static Inventory ToInventory(IReadOnlyList<SaveItem> items, ItemFactory factory, List<string>? notes = null)
     {

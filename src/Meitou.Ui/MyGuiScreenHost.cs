@@ -85,7 +85,7 @@ public sealed class MyGuiScreenHost(MyGuiResources resources)
             }
             foreach (var root in s.Layout.Roots.Where(r => r.Type == "Window" || s.CentreRoot))
             {
-                var initial = root.Position.RelativeTo(new(0, 0, width, height), root.RealPosition);
+                var initial = b.Positions.GetValueOrDefault(root.Name, root.Position.RelativeTo(new(0, 0, width, height), root.RealPosition));
                 float w = Math.Clamp(initial.Width, 0, Math.Max(0, width - 24)), h = Math.Clamp(initial.Height, 0, Math.Max(0, height - 24));
                 b.Positions[root.Name] = new(Math.Clamp((width - w) / 2 + s.Offset.X, 0, Math.Max(0, width - w)),
                     Math.Clamp((height - h) / 2 + s.Offset.Y, 0, Math.Max(0, height - h)), w, h);

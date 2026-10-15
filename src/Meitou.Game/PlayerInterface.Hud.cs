@@ -70,6 +70,7 @@ sealed partial class PlayerInterface
         if (!ReferenceEquals(snapshot, selectedFor))
         {
             selected = [.. snapshot.Characters.Where(c => c.Selected)];
+            inspected = snapshot.Characters.FirstOrDefault(c => c.Inspected);
             selectedFor = snapshot;
         }
         return selected;
@@ -77,6 +78,10 @@ sealed partial class PlayerInterface
 
     WorldSnapshot? selectedFor;
     IReadOnlyList<CharacterSnapshot> selected = [];
+    CharacterSnapshot? inspected;
+
+    /// <summary>The character the HUD panels describe: the first selected one, else the other faction's character last clicked (docs/game/ui-screens.md section 4).</summary>
+    CharacterSnapshot? Lead() => Selected().FirstOrDefault() ?? inspected;
 
     /// <summary>The HUD, the selection rings and the drag box, over the finished picture.</summary>
     public void Draw(DebugOverlay o, int width, int height)

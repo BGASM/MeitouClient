@@ -34,6 +34,18 @@ public class MyGuiScreenTests
         """);
 
     [Fact]
+    public void BoundWindowSizeAndTemplateScalePreserveTheClientAndCloseButton()
+    {
+        var host = new MyGuiScreenHost(Resources());
+        host.Register("bag", Window()); host.Open("bag");
+        UiBindings Bind(string _) { var b = new UiBindings { TemplateScale = 2 }; b.Positions["Root"] = new(0, 0, 500, 400); return b; }
+        var frame = host.Arrange(1000, 800, Bind).Single().Controls;
+        Assert.Equal(new UiRect(250, 200, 500, 400), frame.Single(c => c.Type == "Window").Bounds);
+        Assert.Equal(new UiRect(690, 200, 60, 60), frame.Single(c => c.Action == "mygui:close:Root").Bounds);
+        Assert.Equal(new UiRect(263, 273, 100, 25), frame.Single(c => c.Name == "Name").Bounds);
+    }
+
+    [Fact]
     public void TemplateClientAndHeaderResizeWithoutChangingSource()
     {
         var source = Window();

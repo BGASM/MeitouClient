@@ -235,7 +235,7 @@ public sealed unsafe partial class SkyRenderer : IDisposable
         in vec2 vNdc;
         out vec4 fragColour;
         uniform mat4 uInverseViewProjection;
-        uniform vec4 uSkyExtra;        // y: cloud density c (0 skips the cloud pass), z: the starfield's shift (texture units, wrapped); x, w unused
+        uniform vec4 uSkyExtra;        // x: the planets' fill light (PlanetFill), y: cloud density c (0 skips the cloud pass), z: the starfield's shift (texture units, wrapped); w unused
         uniform vec4 uPlanetBody0, uPlanetBody1;   // the game's two planets (docs/formats/sky.md "Planets"): xyz towards the centre, w the sine of the angular radius
         uniform vec4 uPlanetSpin;      // cos and sin of each planet's turn about y: (cos 0, sin 0, cos 1, sin 1)
         uniform vec4 uCloudLight;      // rgb: zenithLight, a: Darkness
@@ -271,7 +271,8 @@ public sealed unsafe partial class SkyRenderer : IDisposable
             float far = length(ray), thickness;
             ray /= far;
             vec3 scatter = SKYX_EXPOSURE * skyxRayleighPhase(dot(uAtmoSun.xyz, ray)) * SKYX_RAYLEIGH * skyxInScatter(ray, far, uAtmoSun.xyz, thickness);
-            return vec4(albedo * clamp(dot(n, uAtmoSun.xyz), 0.0, 1.0) + scatter, cover);
+            // uSkyExtra.x: a presentation-only fill from the viewer's side (PlanetFill), so the face away from the sun shows too; 0 in play.
+            return vec4(albedo * (clamp(dot(n, uAtmoSun.xyz), 0.0, 1.0) + uSkyExtra.x * clamp(-dot(n, dir), 0.0, 1.0)) + scatter, cover);
         }
         // The cloud layer's density and tile: the game's textures, or with the Meitou clouds their smoothed copies (MeitouClouds.SmoothRed: the BC1 blocks' steps
         // showed as grain and contour bands once the clouds were lit). The condition is on a uniform, so the derivatives stay defined.
@@ -481,6 +482,12 @@ public sealed unsafe partial class SkyRenderer : IDisposable
     /// and the planet's together, the planet's alone once the sun is down; the ambient and the sky stay the game's. False: the game's.
     /// </summary>
     public bool Planetshine { get; set; } = true;
+
+    /// <summary>Presentation-only fill light on the planets from the viewer's side (the title raises it so their whole face shows); 0, the game's look, in play.</summary>
+    public float PlanetFill { get; set; }
+
+    /// <summary>Presentation-only turn of the planets' directions (the Meitou title nudges them into its framing); identity in play.</summary>
+    public Quaternion PlanetTurn { get; set; } = Quaternion.Identity;
 
     /// <summary>The planetshine's strength: a multiple of the physical value (<see cref="Meitou.Data.World.Planetshine"/>).</summary>
     public float PlanetshineStrength { get; set; } = Enhancements.MeitouPlanetshineStrength;
@@ -1030,13 +1037,13 @@ public sealed unsafe partial class SkyRenderer : IDisposable
         p.Set(program.CelX, frame.X.X, frame.X.Y, frame.X.Z, 0);
         p.Set(program.CelY, frame.Y.X, frame.Y.Y, frame.Y.Z, 0);
         p.Set(program.CelZ, frame.Z.X, frame.Z.Y, frame.Z.Z, 0);
-        p.Set(program.Extra, 0, coverage, Starfield.Shift(StarHours), 0);
+        p.Set(program.Extra, PlanetFill, coverage, Starfield.Shift(StarHours), 0);
         // The planets: fixed directions and sizes, each turned by the game's day and hour.
         Span<float> spin = stackalloc float[4];
         for (int i = 0; i < 2; i++)
         {
             var planet = SkyPlanet.All[i];
-            var towards = planet.Towards;
+            var towards = Vector3.Transform(planet.Towards, PlanetTurn);
             p.Set(program.Planet[i], towards.X, towards.Y, towards.Z, planet.SinRadius);
             float a = planet.Spin(Day, Hour);
             (spin[2 * i], spin[2 * i + 1]) = (MathF.Cos(a), MathF.Sin(a));
