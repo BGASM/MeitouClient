@@ -4,11 +4,13 @@ using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay;
 using Meitou.Data.Gameplay.Bodies;
 using Meitou.Data.Gameplay.Construction;
+using Meitou.Data.Save;
 using Meitou.Data.World;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Construction;
 using Meitou.Simulation.Items;
+using Meitou.Simulation.Saving;
 using static Meitou.Tests.Bodies.BodyFixtures;
 using SimWorld = Meitou.Simulation.World;
 
@@ -17,7 +19,7 @@ namespace Meitou.Tests.Simulation;
 /// <summary>Player construction (docs/simulation.md "Buildings", docs/game/buildings-production.md "Construction"): sites, builders, materials, dismantling.</summary>
 public class ConstructionTests
 {
-    const string Plank = "70-t", Iron = "71-t", Hut = "80-t", Shed = "81-t", Research = "90-t";
+    const string Plank = "70-t", Iron = "71-t", Hut = "80-t", Shed = "81-t", Outpost = "82-t", Research = "90-t";
     /// <summary>Engineering 41.17647: lerp(0.3, 2, e/100) is 1, the factor the build window's estimate leaves out.</summary>
     const float Unit = 100 * 0.7f / 1.7f;
 
@@ -26,7 +28,7 @@ public class ConstructionTests
 
     static FcsRecord Rec(string id, FcsRecordType type, string name) => new() { StringId = id, Flags = 0x10, Name = name, RecordType = type };
 
-    /// <summary>Two items, a hut (3 planks, 2 iron, build speed mult 2) and a shed (4 Building Materials), unlocked by one research.</summary>
+    /// <summary>Two items, a hut (3 planks, 2 iron, build speed mult 2), a shed (4 Building Materials) and a camp hut that creates a player town (2 Building Materials), unlocked by one research.</summary>
     static GameDatabase Database()
     {
         FcsRecord Item(string id, string name)
@@ -41,9 +43,12 @@ public class ConstructionTests
         var shed = Rec(Shed, FcsRecordType.BUILDING, "Test Shed");
         shed.Ints["build materials"] = 4;
         var research = Rec(Research, FcsRecordType.RESEARCH, "Test Research");
-        research.References["enable buildings"] = [new FcsReference(Hut, 0, 0, 0), new FcsReference(Shed, 0, 0, 0)];
+        var outpost = Rec(Outpost, FcsRecordType.BUILDING, "Test Camp Hut");
+        outpost.Ints["build materials"] = 2;
+        outpost.Bools["creates player town"] = true;
+        research.References["enable buildings"] = [new FcsReference(Hut, 0, 0, 0), new FcsReference(Shed, 0, 0, 0), new FcsReference(Outpost, 0, 0, 0)];
         var file = new FcsFile();
-        file.Records.AddRange([Item(Plank, "Plank"), Item(Iron, "Iron"), Item(BuildingBuildData.BuildingMaterialsItem, "Building Materials"), hut, shed, research]);
+        file.Records.AddRange([Item(Plank, "Plank"), Item(Iron, "Iron"), Item(BuildingBuildData.BuildingMaterialsItem, "Building Materials"), hut, shed, outpost, research]);
         var db = new GameDatabase();
         db.Apply(file, "test.mod");
         return db;
@@ -53,12 +58,13 @@ public class ConstructionTests
     {
         public const int PlayerFaction = 2;
         public SimWorld World { get; }
+        public GameDatabase Db { get; }
         public ItemFactory Items { get; }
         public List<CharacterId> Ids { get; } = [];
 
         public Rig(int threads = 1, bool snapshots = false, ulong seed = 6)
         {
-            var db = Database();
+            var db = Db = Database();
             Items = new ItemFactory(db, Constants);
             var walk = new OpenGroundWalkability(SyntheticTown.Ground);
             var systems = new List<ITickSystem>
@@ -168,6 +174,56 @@ public class ConstructionTests
             Assert.InRange(back, Math.Max(1, (int)(0.6f * delivered)), delivered);
         }
         Assert.DoesNotContain(rig.World.Snapshot.Buildings, b => b.Id == site.Id);
+    }
+
+    // ------------------------------------------------------------------ outposts
+
+    /// <summary>
+    /// A shed out in the open has no town; a camp hut 3000 away makes "Your Outpost" at its position and takes the shed in (nearest town within 8000). The save writes the outpost as a
+    /// town-list entry with its GAMESTATE_TOWN and the buildings' <c>town</c> handle; reading it back gives the same outpost, and saving again keeps its entry and handle.
+    /// </summary>
+    [Fact]
+    public void A_creates_player_town_building_makes_an_outpost_that_round_trips_through_the_save()
+    {
+        const string PlayerFactionId = "204-gamedata.base";
+        var campAt = ShedAt + new Vector3(3000, 0, 0);
+        using var rig = new Rig();
+        rig.Say(new PlaceBuildings([new PlannedBuilding(Shed, ShedAt, Quaternion.Identity)]) { Tick = 0 });
+        rig.Say(new PlaceBuildings([new PlannedBuilding(Outpost, campAt, Quaternion.Identity)]) { Tick = 1 });
+        rig.World.RunTicks(2);
+        var town = Assert.Single(rig.World.Buildings.Towns);
+        Assert.Equal((1, PlayerTown.DefaultName, campAt, Rig.PlayerFaction), (town.Number, town.Name, town.Position, town.Owner));
+        Assert.All(rig.World.Buildings.All, s => Assert.Equal(1, s.Town));
+
+        var builder = new SaveBuilder(1);
+        builder.AddFaction(PlayerFactionId, "Nameless", true, 1000, []);
+        builder.AddEmptyWorldState();
+        BuildingSave.Write(builder.Game, rig.World, PlayerFactionId, 5);
+        string dir = Path.Combine(Path.GetTempPath(), "meitou-outpost-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            builder.Game.Write(dir);
+            var save = SaveGame.Load(dir);
+            var entry = Assert.Single(save.TownInstanceList!.Instances);
+            Assert.Equal(PlayerTown.Template, entry.Target);
+            var state = Assert.Single(save.Towns).Record;
+            Assert.Equal((entry.Id + "-S5e", "Town state Your Outpost", entry.Id, PlayerFactionId), (state.StringId, state.Name, state.Strings["instance"], state.Strings["faction"]));
+
+            using var back = new Rig();
+            Assert.Equal(2, BuildingSave.Read(save, back.World, back.Db, PlayerFactionId, Rig.PlayerFaction));
+            var read = Assert.Single(back.World.Buildings.Towns);
+            Assert.Equal((town.Name, town.Position, entry.Id, Hand.Read(state, "hand")), (read.Name, read.Position, read.SaveInstance, read.SaveHandle!.Value));
+            Assert.All(back.World.Buildings.All, s => Assert.Equal(read.Number, s.Town));
+
+            var again = new SaveBuilder(save.Clone(), 1);
+            BuildingSave.Write(again.Game, back.World, PlayerFactionId, 7);
+            Assert.Equal(entry.Id, Assert.Single(again.Game.TownInstanceList!.Instances).Id);
+            Assert.Equal(Hand.Read(state, "hand"), Hand.Read(Assert.Single(again.Game.Towns).Record, "hand"));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
     }
 }
 
