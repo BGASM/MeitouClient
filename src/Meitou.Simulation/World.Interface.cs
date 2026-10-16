@@ -7,14 +7,15 @@ public sealed partial class World
     {
         if (Characters.Phase != TablePhase.Outside) throw new InvalidOperationException("interface commands require a tick boundary");
         var due = Commands.TakeDue(Tick, c => c is SelectCommand or InspectCommand or Items.MoveInventoryItem or Items.ArrangeInventory
-            or Trading.BuyItem or Trading.SellItem or Trading.CloseTrade);
+            or Trading.BuyItem or Trading.SellItem or Trading.CloseTrade
+            or Construction.PlaceBuildings or Construction.CancelSite or Construction.PauseSite);
         if (due.Count == 0) return;
         Characters.BeginTick();
         Characters.Phase = TablePhase.Inputs;
         try
         {
             foreach (var system in systems)
-                if (system is PlayerSystem or Trading.TradeSystem) system.Inputs(this, due);
+                if (system is PlayerSystem or Trading.TradeSystem or Construction.ConstructionSystem) system.Inputs(this, due);
         }
         finally
         {

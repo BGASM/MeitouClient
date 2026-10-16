@@ -26,6 +26,12 @@ public enum CharacterTask : byte
     Loot = 9,
     /// <summary>Creeps up behind <see cref="CharacterCold.CarryTarget"/> and swings to knock it out (<see cref="Carrying.CarrySystem"/>; the original's <c>Task_StealthKO</c>).</summary>
     StealthKo = 10,
+    /// <summary>Walks to <see cref="CharacterCold.BuildSite"/> and builds it, delivering what it carries when the site wants it (<see cref="Construction.ConstructionSystem"/>; the original's <c>Task_Build</c>, orders 2 and 95).</summary>
+    Build = 11,
+    /// <summary>Walks to <see cref="CharacterCold.BuildSite"/> and takes it apart (<see cref="Construction.ConstructionSystem"/>; <c>Task_Dismantle</c>, order 96).</summary>
+    Dismantle = 12,
+    /// <summary>At <see cref="CharacterCold.BuildSite"/>, filling the 5 s bar that hands over one unit per missing material (<see cref="Construction.ConstructionSystem"/>; <c>Task_AddMaterialsToBuilding</c>).</summary>
+    DeliverMaterials = 13,
 }
 
 /// <summary>Bits of <see cref="CharacterHot.Flags"/> the movement system uses.</summary>

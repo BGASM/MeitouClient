@@ -27,6 +27,8 @@ public enum RngPurpose : uint
     StealthKo = 13,
     /// <summary>Lock levels at creation and the pick rolls (<see cref="Locks.FixtureRegistry"/>, <see cref="Locks.Lockpicking"/>), keyed by the fixture's id.</summary>
     Lock = 14,
+    /// <summary>The refund counts of a dismantled site (<see cref="Construction.ConstructionSystem"/>), keyed by the site's id and the material entry.</summary>
+    Build = 15,
 }
 
 /// <summary>

@@ -123,12 +123,21 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     /// <summary>The whole-body clips held while a character bandages a patient (<c>medic</c>) or rests (<c>sitting idle</c>); -1 when the data has none. A held clip like the lying one (engine choice).</summary>
     int TreatingClip { get; } = library.IndexOf("medic");
     int RestingClip { get; } = library.IndexOf("sitting idle");
+    /// <summary>The whole-body clip held while a character takes a building apart (<c>stonemine</c>, <b>Verified</b>: <c>Task_Dismantle</c>); -1 when the data has none.</summary>
+    int DismantlingClip { get; } = library.IndexOf("stonemine");
     /// <summary>The carrier's lift clip (<c>shoulder lift left</c>, played backwards to put down) and a carried body's held pose (<c>carry me</c>, a category 3 record the library appends); -1 when the data has none.</summary>
     int LiftClip { get; } = library.IndexOf(Carrying.CarrySystem.LiftClip);
     int KnockoutClip { get; } = library.IndexOf(Carrying.CarrySystem.KnockoutClip);
     int CarriedClip { get; } = library.IndexOf(Carrying.CarrySystem.CarriedClip);
 
-    int HeldClip(CharacterTask task) => task switch { CharacterTask.Treat => TreatingClip, CharacterTask.Rest => RestingClip, _ => -1 };
+    // Building and delivering materials play the medic clip (Verified, Task_Build and Task_AddMaterialsToBuilding).
+    int HeldClip(CharacterTask task) => task switch
+    {
+        CharacterTask.Treat or CharacterTask.Build or CharacterTask.DeliverMaterials => TreatingClip,
+        CharacterTask.Rest => RestingClip,
+        CharacterTask.Dismantle => DismantlingClip,
+        _ => -1,
+    };
     // The combat system asks this system for its hit reaction clips (it owns the stun, this system the clips).
     readonly bool stumbleHook = Hook(combat, library, lengths);
 

@@ -24,6 +24,7 @@ public class GoldenHashTests(ITestOutputHelper output)
         ("ranged", () => RangedTests.Hashes(4)),
         ("carry", () => CarryTests.Scripted(4)),
         ("crime", () => CrimeTests.Scripted(4)),
+        ("build", () => ConstructionTests.Scripted(4)),
     ];
 
     /// <summary>A roaming town with bodies and feeding, cut into many partitions (the other worlds here are mostly one partition at the default size).</summary>
@@ -62,6 +63,7 @@ public class GoldenHashTests(ITestOutputHelper output)
         ["ranged"] = [0xCDB87B3C94CC14ACUL, 0x1D779480FC376D8EUL, 0x0DF5A302BB29A205UL, 0xDCAFFD8B368042F1UL, 0x574223B4CFCFA1ACUL],
         ["carry"] = [0xFB6457CC83EE9BDAUL, 0xF0258E9C2EFF2424UL, 0x18B0FB44D757DE4AUL, 0xF880D6722A2F50EBUL, 0xB3384CED264D88C7UL, 0x8FA8E4ADD75B4453UL, 0xD7EC0874FB54F71BUL],
         ["crime"] = [0x21C5A7B717D594DBUL, 0xC1126C11F921A5AEUL, 0x87F9DC29E54A73D8UL, 0x71E450EF7D33EC3CUL, 0x934CB003F5B82491UL, 0x7BC6E071DE99673AUL],
+        ["build"] = [0x65D4C75216A7692CUL, 0xA8C813F2CD3ECC26UL, 0x4C77BC946AC3E9D8UL, 0x5E86BB43B164AAC7UL, 0xB1D7B4CE0B74E759UL, 0xAA9839F9FD80A9C1UL, 0x0002677BB86FF1E8UL, 0x2B97AC9EF598FEBBUL],
     };
 
     [Fact]

@@ -17,8 +17,8 @@ public sealed partial class PopulationSystem
     /// start-off's <c>squad</c> list (a SQUAD_TEMPLATE is planned by the squad factory, a CHARACTER is one member) as one squad of the
     /// player's faction, standing idle, selected for them. Where: <see cref="NewGameStart.ForceStartPos"/> gives the place itself,
     /// otherwise the first listed town that is placed in the world (the new-game map's own choice of start town is not modelled), at a
-    /// seeded spot within a third of its radius. Faction relation overrides, research and <c>force race</c> are not applied yet (the first
-    /// two are <b>Unknown</b> in the original, docs/game/factions-squads-towns.md 3.2). The characters' items are what the generator rolls
+    /// seeded spot within a third of its radius. The start research is applied (<see cref="Meitou.Data.Gameplay.Construction.ResearchGate.StartResearch"/>); faction relation overrides and <c>force race</c> are not applied yet (the first
+    /// is <b>Unknown</b> in the original, docs/game/factions-squads-towns.md 3.2). The characters' items are what the generator rolls
     /// for their look; their inventory is built like everybody's (<see cref="CharacterAssembly"/>).
     /// </summary>
     public Squad StartPlayer(World world, NewGameStart start)
@@ -82,6 +82,7 @@ public sealed partial class PopulationSystem
         var squad = SpawnSquad(world, built, null, radius, player: true);
         world.Player.Faction = data.PlayerFaction;
         world.Player.Money = start.Money;
+        world.Research.Set(data.Db, Meitou.Data.Gameplay.Construction.ResearchGate.StartResearch(data.Db, start));
         world.Player.Squad = squad.Id;
         world.Player.Selection.Clear();
         if (squad.Members.Count > 0) world.Player.Selection.Add(squad.Members[0]);

@@ -32,8 +32,10 @@ public enum StandardParts
     Trade = 16384,
     /// <summary>The AI packages of the squads and their members' goals (<see cref="Meitou.Simulation.Ai.AiSystem"/>); runs right after the player system.</summary>
     Ai = 32768,
+    /// <summary>Player construction (<see cref="Meitou.Simulation.Construction.ConstructionSystem"/>): placing sites, building and dismantling them, the auto-job.</summary>
+    Construction = 65536,
     /// <summary>What the game runs.</summary>
-    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee | Carry | Crime | Trade | Ai,
+    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee | Carry | Crime | Trade | Ai | Construction,
 }
 
 /// <summary>What <see cref="StandardSystems.Build"/> builds and with which settings; the defaults are the game's.</summary>
@@ -62,6 +64,7 @@ public sealed class StandardSystemOptions
     public Meitou.Simulation.Crime.ArrestSettings? Arrest { get; init; }
     public Meitou.Simulation.Trading.TradeSettings? Trade { get; init; }
     public Meitou.Simulation.Ai.AiSettings? Ai { get; init; }
+    public Meitou.Simulation.Construction.ConstructionSettings? Construction { get; init; }
     /// <summary>The rigs the characters are drawn with: given, the physics ragdolls run (after the animation); null, the fall and lying clips stand in for them.</summary>
     public Meitou.Data.Characters.CharacterRigs? Ragdolls { get; init; }
     /// <summary>What ragdolls fall onto (null: the walkable ground, no buildings).</summary>
@@ -83,6 +86,7 @@ public sealed class StandardSystemSet
     public Meitou.Simulation.Locks.LockSystem? Locks { get; init; }
     public Meitou.Simulation.Trading.TradeSystem? Trade { get; init; }
     public Meitou.Simulation.Ai.AiSystem? Ai { get; init; }
+    public Meitou.Simulation.Construction.ConstructionSystem? Construction { get; init; }
     public Meitou.Simulation.Ragdolls.RagdollSystem? Ragdolls { get; init; }
 }
 
@@ -105,6 +109,7 @@ public sealed class StandardSystemSet
 /// (animation is placed after combat in the game's order, and the golden hashes pin it). Moving the swap to a separate end-of-tick hook would change what retaliation reads.</item>
 /// <item><b>Carry after body, before combat</b>: its <c>SlowWorld</c> sees the knock-outs of this tick's medical step and the corpses the body system removed, so a carrier that went down
 /// drops its load in the same tick; its <c>Inputs</c> come before combat's, so a carrier ordered to attack lets go of the body first. Everything it does is serial.</item>
+/// <item><b>Construction after carry, before combat</b>: its walks and work (all serial) see the characters the body and carry systems left this tick, and a builder ordered to attack lets go of its site before combat's <c>Inputs</c> run; it adds nothing to the hash until the player has a site.</item>
 /// <item><b>Feed after body</b>: the game's order; eating reads hunger the body system advanced in the same tick.</item>
 /// <item><b>Retaliation, then aggro, last</b>: both defer <c>AttackOrder</c>s for the next tick (<see cref="World.Defer"/>) after combat has swapped its arrays; aggro's
 /// leash sweep sees the tasks every other system left, and its look (<c>Act</c>) runs after combat's, reading only the last tick's positions.
@@ -147,6 +152,8 @@ public static class StandardSystems
             if (Has(StandardParts.Aggro)) carry.Relations = data.Relations;
             systems.Add(carry);
         }
+        Meitou.Simulation.Construction.ConstructionSystem? construction = null;
+        if (Has(StandardParts.Construction)) systems.Add(construction = new Meitou.Simulation.Construction.ConstructionSystem(data, o.Construction));
         if (Has(StandardParts.Combat)) systems.Add(combat!);
         if (Has(StandardParts.Animation))
         {
@@ -185,6 +192,6 @@ public static class StandardSystems
             systems.Add(trade = new Meitou.Simulation.Trading.TradeSystem(data, o.Trade));
             trade.Crimes = crime;
         }
-        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime, Arrest = arrest, Locks = locks, Trade = trade, Ai = ai, Ragdolls = ragdolls };
+        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime, Arrest = arrest, Locks = locks, Trade = trade, Ai = ai, Construction = construction, Ragdolls = ragdolls };
     }
 }

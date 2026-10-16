@@ -177,6 +177,10 @@ public sealed class CharacterCold
     public bool Escaped { get; set; }
     /// <summary>The fixture this character is picking the lock of (<see cref="Locks.LockSystem"/>; null: none). Hashed only while set.</summary>
     public string? PickingLock { get; set; }
+    /// <summary>The building site the <see cref="CharacterTask.Build"/>, <see cref="CharacterTask.Dismantle"/> or <see cref="CharacterTask.DeliverMaterials"/> task works (<see cref="Construction.BuildSite.Id"/>; null: none). Serial phases only. Hashed only while set.</summary>
+    public string? BuildSite { get; set; }
+    /// <summary>The material delivery bar (0 to 1, filling at 0.2 per second, <see cref="CharacterTask.DeliverMaterials"/>). Hashed with <see cref="BuildSite"/>.</summary>
+    public float BuildBar { get; set; }
 }
 
 /// <summary>
@@ -393,6 +397,8 @@ public sealed class CharacterTable
             if (k.Recognition > 0) { hasher.Add(0x5265636F); hasher.Add(k.Recognition); }
             if (k.Escaped) hasher.Add(0x45736361);
             if (k.PickingLock is { } pick) { hasher.Add(0x5069636B); hasher.Add(Rng.StableHash(pick)); }
+            // A builder's site, bar and the task it goes back to add to the hash only while it works one, so worlds without sites hash as before.
+            if (k.BuildSite is { } site) { hasher.Add(0x4275696C); hasher.Add(Rng.StableHash(site)); hasher.Add(k.BuildBar); hasher.Add((int)k.ResumeTask); }
         }
         hasher.Add(free.Count);
         foreach (int slot in free) hasher.Add(slot);

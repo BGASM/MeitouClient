@@ -66,7 +66,8 @@ public sealed partial class World
             });
         }
         PreviousSnapshot = Snapshot;
-        Snapshot = new WorldSnapshot(Tick, list) { Projectiles = projectiles?.PublishProjectiles() ?? [], Trade = trades?.PublishTrade(), Towns = Player.Towns, Camps = Player.Camps };
+        Snapshot = new WorldSnapshot(Tick, list) { Projectiles = projectiles?.PublishProjectiles() ?? [], Trade = trades?.PublishTrade(), Towns = Player.Towns, Camps = Player.Camps,
+            Buildings = Buildings.Published(), BuildingsRevision = Buildings.Revision, UnlockedBuildings = Research.Unlocked };
     }
 
     /// <summary>The sneaker's watchers of the last <see cref="AggroSystem.WatcherSeconds"/> that are still about, where they stand now.</summary>

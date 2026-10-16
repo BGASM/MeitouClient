@@ -1,0 +1,216 @@
+using System.Numerics;
+using Meitou.Data;
+using Meitou.Data.Fcs;
+using Meitou.Data.Gameplay;
+using Meitou.Data.Gameplay.Bodies;
+using Meitou.Data.Gameplay.Construction;
+using Meitou.Data.World;
+using Meitou.Simulation;
+using Meitou.Simulation.Bodies;
+using Meitou.Simulation.Construction;
+using Meitou.Simulation.Items;
+using static Meitou.Tests.Bodies.BodyFixtures;
+using SimWorld = Meitou.Simulation.World;
+
+namespace Meitou.Tests.Simulation;
+
+/// <summary>Player construction (docs/simulation.md "Buildings", docs/game/buildings-production.md "Construction"): sites, builders, materials, dismantling.</summary>
+public class ConstructionTests
+{
+    const string Plank = "70-t", Iron = "71-t", Hut = "80-t", Shed = "81-t", Research = "90-t";
+    /// <summary>Engineering 41.17647: lerp(0.3, 2, e/100) is 1, the factor the build window's estimate leaves out.</summary>
+    const float Unit = 100 * 0.7f / 1.7f;
+
+    /// <summary>The base game's build speed (6) and refund fraction (0.6), which the shared constants fixture lacks.</summary>
+    static readonly GameConstants Constants = BaseGame with { BuildSpeed = 6, MinDismantleMaterialsFraction = 0.6f };
+
+    static FcsRecord Rec(string id, FcsRecordType type, string name) => new() { StringId = id, Flags = 0x10, Name = name, RecordType = type };
+
+    /// <summary>Two items, a hut (3 planks, 2 iron, build speed mult 2) and a shed (4 Building Materials), unlocked by one research.</summary>
+    static GameDatabase Database()
+    {
+        FcsRecord Item(string id, string name)
+        {
+            var r = Rec(id, FcsRecordType.ITEM, name);
+            r.Floats["weight kg"] = 1;
+            return r;
+        }
+        var hut = Rec(Hut, FcsRecordType.BUILDING, "Test Hut");
+        hut.References["construction"] = [new FcsReference(Plank, 3, 0, 0), new FcsReference(Iron, 2, 0, 0)];
+        hut.Floats["build speed mult"] = 2;
+        var shed = Rec(Shed, FcsRecordType.BUILDING, "Test Shed");
+        shed.Ints["build materials"] = 4;
+        var research = Rec(Research, FcsRecordType.RESEARCH, "Test Research");
+        research.References["enable buildings"] = [new FcsReference(Hut, 0, 0, 0), new FcsReference(Shed, 0, 0, 0)];
+        var file = new FcsFile();
+        file.Records.AddRange([Item(Plank, "Plank"), Item(Iron, "Iron"), Item(BuildingBuildData.BuildingMaterialsItem, "Building Materials"), hut, shed, research]);
+        var db = new GameDatabase();
+        db.Apply(file, "test.mod");
+        return db;
+    }
+
+    sealed class Rig : IDisposable
+    {
+        public const int PlayerFaction = 2;
+        public SimWorld World { get; }
+        public ItemFactory Items { get; }
+        public List<CharacterId> Ids { get; } = [];
+
+        public Rig(int threads = 1, bool snapshots = false, ulong seed = 6)
+        {
+            var db = Database();
+            Items = new ItemFactory(db, Constants);
+            var walk = new OpenGroundWalkability(SyntheticTown.Ground);
+            var systems = new List<ITickSystem>
+            {
+                new PlayerSystem(), new MovementSystem(new PathService(walk, true)),
+                new ConstructionSystem(db, Constants, BodyOptions.Default, Items, [], "", new ConstructionSettings()),
+            };
+            World = new SimWorld(new WorldSettings { Seed = seed, Threads = threads, PublishSnapshots = snapshots, MinPartitionSize = 1 }, walk, systems);
+            World.Player.Faction = PlayerFaction;
+            World.Research.Set(db, [Research]);
+        }
+
+        /// <summary>A player character at a spot with an engineering level and what it carries.</summary>
+        public CharacterId Add(float x, float z, float engineering, params (string Item, int Count)[] carried)
+        {
+            var inventory = new Inventory();
+            foreach (var (item, count) in carried) inventory.Add(Items.Create(item, count)!);
+            var stats = new CharacterStats();
+            stats[StatsEnumerated.Engineering] = engineering;
+            var cold = new CharacterCold { Name = "builder" + Ids.Count, Race = Human, Stats = stats, Medical = MedicalState.Create(Human, 50), Inventory = inventory, IsPlayer = true, Faction = PlayerFaction };
+            var id = World.Characters.Spawn(new CharacterHot { Position = new Vector3(x, 300, z), MaxSpeed = 40, WalkSpeed = 15, Task = (byte)CharacterTask.Idle }, cold, 0);
+            Ids.Add(id);
+            return id;
+        }
+
+        public CharacterCold Cold(CharacterId id) => World.Characters.Cold(id.Slot)!;
+        public void Say(SimCommand c) => World.Commands.Enqueue(c);
+        public int Carried(CharacterId id, string item) => Cold(id).Inventory!.All().Where(i => i.Record == item).Sum(i => i.Quantity);
+        public void Dispose() => World.Dispose();
+    }
+
+    static string SiteId(int n, Vector3 at) => BuildingRegistry.IdOf(n, WorldLayout.ZoneOf(at.X, at.Z));
+
+    static readonly Vector3 HutAt = new(1060, 300, 2000), ShedAt = new(1100, 300, 2040);
+
+    // ------------------------------------------------------------------ determinism (the golden hash)
+
+    /// <summary>
+    /// A hut and a shed are placed; one builder carries the hut's materials, another the shed's. The first finishes the hut, then (its auto-job) helps with the shed, the
+    /// shed is paused for a while, and the hut is taken apart. Hashes at eight checkpoints.
+    /// </summary>
+    internal static List<ulong> Scripted(int threads)
+    {
+        using var rig = new Rig(threads, seed: 9);
+        var a = rig.Add(1000, 2000, 60, (Plank, 3), (Iron, 2));
+        var b = rig.Add(1010, 2000, 20, (BuildingBuildData.BuildingMaterialsItem, 4));
+        string hut = SiteId(1, HutAt), shed = SiteId(2, ShedAt);
+        rig.Say(new PlaceBuildings([new PlannedBuilding(Hut, HutAt, Quaternion.Identity), new PlannedBuilding(Shed, ShedAt, Quaternion.Identity)]) { Tick = 2 });
+        rig.Say(new BuildOrder([a], hut) { Tick = 5 });
+        rig.Say(new BuildOrder([b], shed) { Tick = 5 });
+        rig.Say(new PauseSite(shed, true) { Tick = 1200 });
+        rig.Say(new PauseSite(shed, false) { Tick = 1600 });
+        rig.Say(new DismantleOrder([a], hut) { Tick = 2300 });
+        var hashes = new List<ulong>();
+        foreach (int target in new[] { 1, 5, 60, 600, 1500, 2000, 2400, 3200 })
+        {
+            rig.World.RunTicks(target - (int)rig.World.Tick);
+            hashes.Add(rig.World.StateHash());
+        }
+        return hashes;
+    }
+
+    // ------------------------------------------------------------------ a site built, a building taken apart
+
+    [Fact]
+    public void A_builder_completes_a_site_with_the_documented_rates_and_dismantling_refunds_60_to_100_percent()
+    {
+        using var rig = new Rig(snapshots: true);
+        var builder = rig.Add(1000, 2000, Unit, (Plank, 3), (Iron, 2));
+        rig.Say(new PlaceBuildings([new PlannedBuilding(Hut, HutAt, Quaternion.Identity), new PlannedBuilding("999-t", HutAt, Quaternion.Identity)]) { Tick = 0 });
+        rig.World.RunTick();
+        // The unknown record is dropped with the message; the hut is a site of 5 units, nothing delivered, and the snapshot has it with the research's building list.
+        var site = Assert.Single(rig.World.Buildings.All);
+        Assert.Equal(SiteId(1, HutAt), site.Id);
+        Assert.Equal(5, site.Target);
+        Assert.Contains(rig.World.TakeMessages(), m => m == PlacementRules.Message(PlacementFailure.NotAvailable));
+        var published = Assert.Single(rig.World.Snapshot.Buildings);
+        Assert.False(published.Complete);
+        Assert.Equal(3, published.Materials[0].Required);
+        Assert.True(rig.World.Snapshot.BuildingsRevision > 0);
+        Assert.Contains(Hut, rig.World.Snapshot.UnlockedBuildings);
+
+        // One builder, engineering factor 1: three 5 s deliveries (planks and iron one unit per action) and 5 units of work at
+        // build speed mult 2 x build speed 6 / (1200/11) = 0.11 units per second, i.e. 1364 ticks.
+        rig.Say(new BuildOrder([builder], site.Id) { Tick = rig.World.Tick });
+        long started = rig.World.Tick;
+        for (int t = 0; t < 4000 && !site.Complete; t++) rig.World.RunTick();
+        long ticks = rig.World.Tick - started;
+        Assert.True(site.Complete);
+        Assert.InRange(ticks, 3 * 150 + 1364 - 12, 3 * 150 + 1364 + 12);
+        Assert.Equal(5, site.Progress);
+        Assert.All(site.Materials, m => Assert.Equal(m.Required, m.Delivered));
+        Assert.Equal(0, rig.Carried(builder, Plank) + rig.Carried(builder, Iron));
+        Assert.Contains(rig.World.TakeMessages(), m => m == "Building 'Test Hut' construction complete.");
+        Assert.True(rig.World.Snapshot.Buildings[0].Complete);
+        Assert.True(rig.Cold(builder).Stats![StatsEnumerated.Engineering] > Unit);   // building trains engineering
+
+        // Taking it apart: from target - 1 down at dt x lerp(0.05, 4, e) x 4 x rate = 0.123 per second (976 ticks), then the site is gone and the refund is in the dismantler's inventory.
+        rig.Say(new DismantleOrder([builder], site.Id) { Tick = rig.World.Tick });
+        started = rig.World.Tick;
+        for (int t = 0; t < 3000 && rig.World.Buildings.Count > 0; t++) rig.World.RunTick();
+        Assert.Empty(rig.World.Buildings.All);
+        Assert.InRange(rig.World.Tick - started, 960, 1000);
+        foreach (var (item, delivered) in new[] { (Plank, 3), (Iron, 2) })
+        {
+            int back = rig.Carried(builder, item);
+            Assert.InRange(back, Math.Max(1, (int)(0.6f * delivered)), delivered);
+        }
+        Assert.DoesNotContain(rig.World.Snapshot.Buildings, b => b.Id == site.Id);
+    }
+}
+
+/// <summary>The build data over the installed game's records: the build window's estimated hours and the new game's research. Skipped without the game.</summary>
+[Slow]
+public class ConstructionInstallTests(ITestOutputHelper output)
+{
+    [Fact]
+    public void Base_game_buildings_give_the_documented_build_hours_and_a_new_game_unlocks_the_default_start_buildings()
+    {
+        Assert.SkipWhen(InstallData.BaseGame is null, "Kenshi install not found");
+        var db = InstallData.BaseGame!;
+        var constants = GameConstants.FromDatabase(db);
+        Assert.Equal(6f, constants.BuildSpeed);   // CONSTANTS build speed, Verified in the base game
+
+        // hours = materials / (build speed mult x 6 x option 1), the materials the sum of the `construction` first values, else `build materials`.
+        var all = BuildingBuildData.LoadAll(db);
+        Assert.True(all.Count > 500);
+        foreach (var b in all)
+        {
+            var record = db.Find(b.Id)!;
+            var list = record.GetReferences("construction");
+            float materials = list.Count > 0 ? list.Sum(r => r.Values.Value0) : record.GetInt("build materials");
+            float mult = record.GetFloat("build speed mult", 1);
+            if (materials <= 0 || mult <= 0) continue;
+            Assert.Equal(materials / (mult * 6), b.EstimatedHours(constants.BuildSpeed), 4);
+        }
+
+        // A few known ones, worked out by hand from their records.
+        var byName = all.GroupBy(b => b.Name).ToDictionary(g => g.Key, g => g.First());
+        foreach (var (name, hours) in new (string, float)[] { ("Harpoon Turret", 13 / 6f), ("Small Generator", 8 / 9f), ("Hemp Farm L", 30 / 120f), ("Well", 5 / 12f) })
+        {
+            output.WriteLine($"{name}: {byName[name].EstimatedHours(constants.BuildSpeed):F4} h");
+            Assert.Equal(hours, byName[name].EstimatedHours(constants.BuildSpeed), 3);
+        }
+
+        // The Wanderer start has no research of its own; the default start research unlocks the first buildings (Small Shack, Campfire, Well...).
+        var wanderer = NewGameStart.Find(NewGameStart.LoadAll(db), NewGameStart.DefaultName)!;
+        var start = ResearchGate.StartResearch(db, wanderer);
+        Assert.Equal([ResearchGate.DefaultStartId], start);
+        var unlocked = ResearchGate.Unlocked(db, start);
+        output.WriteLine("unlocked at the start: " + string.Join(", ", unlocked.Select(id => db.Find(id)!.Name).Order()));
+        Assert.Equal(11, unlocked.Count);
+        Assert.Contains(byName["Campfire"].Id, unlocked);
+    }
+}

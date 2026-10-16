@@ -289,11 +289,16 @@ Player construction contract (Faithful UI). Facts: [construction](game/buildings
 snapping, outposts/town creation (`creates player town` only blocks), the door x3 rule, production/power/storage,
 research progress, fetching from storage (task 247).
 
-**Shared types** (stub commit f4cb78c; the simulation track owns and fills them):
+**Shared types** (stubs f4cb78c, filled by the simulation track):
 - `Meitou.Data/Gameplay/Construction/BuildingBuildData.cs`: `BuildingBuildData.From/LoadAll` (build fields, material
-  entries), `MaterialCost`.
+  entries), `MaterialCost`, `Target` (sum of required), `Rate` (`build speed mult` / (1200/11)), `EstimatedHours(buildSpeed)`
+  (the build window's estimate, **Verified** algebra: materials / (`build speed mult` x CONSTANTS `build speed` x option)).
+- `.../ResearchGate.cs`: `StartResearch(db, start)` (the default start research, then the start-off's `research`),
+  `Unlocked(db, completed)` (union of `enable buildings`, BUILDING targets only), `DefaultStartId`.
 - `.../PlacementRules.cs`: `PlacementFailure` (one value per original message), `PlacementTown`,
-  `TownBlock(BuildingBuildData, Vector2 at, IReadOnlyList<PlacementTown>, string playerFactionId)`, `Message(PlacementFailure)`.
+  `TownBlock(BuildingBuildData, Vector2 at, IReadOnlyList<PlacementTown>, string playerFactionId)`, `Message(PlacementFailure)`
+  (the original's texts; `InvalidFloor` is "Invalid placing floor number." because the rest of that text is not in the
+  docs, `NotAvailable` is the engine's "That building is not available yet.").
 - `Meitou.Simulation/Construction/ConstructionCommands.cs`: `PlannedBuilding(Record, Position, Rotation, Floor, Parent)`;
   `PlaceBuildings(Plans)` (Confirm), `BuildOrder(Characters, Site, Repair)` (orders 2/95), `DismantleOrder(Characters, Site)`
   (96), `CancelSite(Site)` (engine: only a site with nothing delivered), `PauseSite(Site, Paused)`. Sites are named by instance id.
@@ -301,31 +306,64 @@ research progress, fetching from storage (task 247).
   `Rotation`, `Floor`, `Parent`, `Owner` faction index, `Progress`/`Target` in material units, `Materials` (item,
   required, delivered), `Complete`, `Paused`, `Dismantling`), `BuildingsRevision`, `UnlockedBuildings`.
 
-**Simulation state.** `World.Buildings` (`Construction.BuildingRegistry`): player-built sites in creation order, by id,
-holding the snapshot's fields plus rate, builder counter and destroyed. Base-game placements are not in it. Ids
-`<n>-zone<X>.<Y>-INGAME`, n from a hashed registry counter started above every id in that zone's level file and the
-loaded save. `World.Research` (`Construction.ResearchState`): completed RESEARCH ids from the start-off's `research`
-(`PopulationSystem.Player`) and the save; unlocked = union of their `enable buildings`; static this milestone, not hashed.
+**Simulation state.** `World.Buildings` (`Construction.BuildingRegistry`, sites as `BuildSite`): player-built sites in
+creation order, by id, holding the snapshot's fields plus rate, builder counter and the destroyed flags. Base-game
+placements are not in it. Ids `<n>-zone<X>.<Y>-INGAME`, n from a per-zone counter (hashed) that starts above every such id
+in the loaded save (generated interiors share the pattern; `Reserve(id)`). The 106 `-zoneX.Y-INGAME` ids of the level data
+are not reserved by the simulation (**engine gap**, the host may call `World.Buildings.Reserve`); a collision with a base
+placement is the host's to avoid. `World.Research` (`Construction.ResearchState`): completed RESEARCH ids and the
+`Unlocked` set (replaced, never changed in place). A new game completes the default start research
+(`ResearchGate.DefaultStartId`, [build menu](game/buildings-production.md#build-menu)) and the start-off's `research`
+(`PopulationSystem.StartPlayer`); a load takes the save's. Static this milestone, not hashed.
 
-**ConstructionSystem** (`StandardParts.Construction`, in `All`) runs after Carry, before Combat; all of it is serial.
-- `Inputs`: commands. `PlaceBuildings` re-checks only the data half (record is a BUILDING, unlocked, `TownBlock`); a
-  failing plan is dropped with `World.Post(Message)`. `PlaceBuildings`, `CancelSite` and `PauseSite` also apply while
-  paused (`ApplyPausedInterfaceCommands`). Orders set the new `CharacterTask`s `Build`, `Dismantle`, `DeliverMaterials`
-  and `CharacterCold.BuildSite`; movement walks the character to the site (work distance **Unknown**; engine:
-  footprint edge + 20).
-- AI `Think` gives the auto-job (researched scoring) to idle player characters with Jobs, as for medic work.
-- `SlowWorld`: arrived characters in slot order deliver (5 s bar, one unit per missing type, inventory then backpack),
-  build or dismantle by the researched formulas with dt = `TickSeconds`, `Building speed` option 1, CONSTANTS
-  `build speed` and `min dismantle materials percentage` via `GameConstants`. The 0.75^k counter resets each tick
-  (engine reading of the **Unknown** reset), so k = builders already applied to the site this tick. Completion sets
-  `Complete` and posts the message for the player faction; dismantling to 0 refunds and removes the site.
-- Refund count of entry i rolls `Rng.Hash(seed, StableHash(id), RngPurpose.Build, i)`. Engine (no ground items yet):
-  the items go to the dismantler's inventory, then backpack; the rest is lost with a message.
-- `BuildingsRevision` bumps on add, complete, destroyed and remove.
+**ConstructionSystem** (`StandardParts.Construction`, in `All`; `StandardSystemSet.Construction`) runs after Carry, before
+Combat; all of it is serial. `ConstructionSettings`: `BuildingSpeed` (the option, 1), `Reach` 20, `SettleReach` 150,
+`Footprint` (record -> radius, optional), `AutoEveryTicks` 15.
+- `Inputs`: `PlaceBuildings` re-checks only the data half (a BUILDING, unlocked, `TownBlock`); a failing plan is dropped
+  with `World.Post(Message)`. A total of 0 completes at once, so a free building is complete from the first snapshot.
+  `BuildOrder` (player characters, awake, not carried or caged; a complete site is ignored, repair needs building health
+  and does nothing) and `DismantleOrder` set the `CharacterTask`s `Build` / `Dismantle` and `CharacterCold.BuildSite`
+  (the selection when the list is empty). Dismantling is refused with the original's texts while a site stands in the
+  site ("I have to dismantle the furniture first." for interior furniture and nodes, else "I have to unmount the
+  buildings first."). `CancelSite` removes an incomplete site with nothing delivered, else posts "Dismantle it to get the
+  materials back."; `PauseSite` sets `Paused` (only the auto-job skips it). `PlaceBuildings`, `CancelSite` and `PauseSite`
+  also apply while paused (`ApplyPausedInterfaceCommands`).
+- `Schedule`: a worker walks to the site like a medic to a patient (goal = site XZ, free speed, asked again after a wait
+  when the path failed). It has arrived within `Reach` + footprint of the site, or once its path has ended within
+  `SettleReach` more (**Unknown**: the original's work distance; a site that is a navmesh obstacle cannot be walked
+  into). Work ends when the site is gone, complete (building), the character is down, fighting, carried, carrying or caged,
+  or another order replaced the task.
+- `SlowWorld`: arrived workers in slot order. *Build*: a stalled site (`sum(min(delivered, required)) <= progress`) turns
+  into *DeliverMaterials* if the builder carries a missing item, else the work ends (fetching, task 247, is not built);
+  otherwise progress += rate x `lerp(0.3, 2, e/100)` x dt x `BuildingSpeed` x CONSTANTS `build speed` x 0.75^k, e the
+  engineering stat times its injury multiplier (engine choice), dt = `TickSeconds`, k the builders that already worked
+  the site this tick (the 0.75 counter resets each tick: the engine reading of the **Unknown** reset; capped at 15, above
+  100 it restarts), engineering XP (`XpService.Engineering`); a rate of 0 or less completes at once; at
+  `progress >= target` the site completes (`Complete`, message "Building '<name>' construction complete." for the player's
+  faction). *DeliverMaterials*: the bar fills at 0.2 per second (`CharacterCold.BuildBar`); full, it hands over one unit
+  of each missing type (inventory first, then backpack) and the task returns to *Build* (whether the original repeats
+  deliveries before building is **Unknown**; fetching aside, the two alternate). *Dismantle*: a complete site first
+  becomes incomplete with progress at most target - 1; then progress -= dt x `lerp(0.05, 4, e/100)` x 4 x rate (no option
+  or constant), XP as building; at 0 the delivered materials come back and the site is removed. The `medic` clip plays
+  for building and delivering, `stonemine` for dismantling (`AnimationSystem.HeldClip`).
+- Refund: entry i with something delivered gives `max(1, trunc(U x delivered))`, U = m + (1 - m) x
+  `Rng.Float(Rng.Hash(seed, StableHash(id), RngPurpose.Build, i))`, m = CONSTANTS `min dismantle materials percentage` /
+  100. Engine (no ground items yet): the items go to the dismantler's inventory, then backpack; what does not fit is lost
+  with a message. A destroyed flag (a save's; nothing sets it in play) turns a building into a ruin on the next tick
+  (**Verified** rule: progress 0.4 x target, delivered floor(delivered x U[0.3, 0.5) + 0.5)).
+- Auto-job (not in `AiSystem`: player characters have no AI mind): every `AutoEveryTicks` an idle, wandering or following
+  player character with the Jobs order, a race and stats takes the site with the best score `max(2 (1 - d^2/9000^2),
+  0.0001) / (n + 1)` (n workers on it); not complete, paused, destroyed or being dismantled, and not stalled unless the
+  character carries a missing item (the original's planner cost is **Unknown**; this avoids a walk to a site it cannot
+  work). It goes back to its wander or follow task afterwards.
+- `BuildingsRevision` bumps on add, complete, a complete building becoming a site (dismantling started), destroyed and
+  remove. `Version` (progress, delivery, pause) only rebuilds the published list.
 
-**Hash and determinism.** The registry hashes (counter, then each site's fields in creation order) only once non-empty,
-like `Fixtures`; `BuildSite` hashes only when set; existing goldens stay. Decisions read only world state and command
-order, never collision or navmesh readiness (paths stay the usual asynchronous input).
+**Hash and determinism.** `World.StateHash` adds the registry (per-zone counters, then each site's fields in creation
+order) only once it holds a site, like `Fixtures`; `CharacterCold.BuildSite` with its bar and resume task hashes only
+when set. Existing golden hashes are unchanged while there are no sites; the `build` scenario pins one with sites.
+Decisions read only world state and command order, never collision or navmesh readiness (paths stay the usual
+asynchronous input).
 
 **Host seam: snapshot diff.** The host keeps the last `BuildingsRevision` it acted on (-1 after `ReplaceWorld`) and,
 when it differs, diffs `Buildings` by id: added → render overlay (and navmesh if it qualifies), removed → out of both,
@@ -335,8 +373,8 @@ ticks and loads; the diff does not. Navmesh membership (engine reading of the Ob
 `PathMode != 0` and (`Complete` or `BuildThreshold == 0`). After each rebuilt zone publishes, the host enqueues
 `RepathCommand`.
 - Overlay type: the existing `BuildingPlacement` (`StateId` null, `WorldY` = absolute Y, zone of the position).
-- Rendering: `WorldObjects.AddRuntime/RemoveRuntime(BuildingPlacement)` merged into `BuildZone`; the streamer reloads
-  that zone; per-instance `constructionState` drives the scaffold.
+- Rendering: `WorldObjects.AddRuntime/RemoveRuntime(BuildingPlacement)` merged into `BuildZone`. Engine choice: a loaded
+  zone takes the placement incrementally (no reload); the scaffold is an approximation ([render-objects](render-objects.md#player-buildings-and-the-placement-ghost)).
 - Navigation: one thread-safe overlay store shared by every `ZoneGeometryGatherer` (`NearBuildings` and `BuildingHash`
   see it, so the cache key changes), `NavSystem.AddRuntimeBuilding/RemoveRuntimeBuilding` and `RebuildZone(zone)` for
   each zone within `BuildingReach`.
@@ -346,16 +384,36 @@ pure over the query (build data, transform, floor, queued ghosts, snapshot chara
 (heightmap, collision cache, water level). It calls `PlacementRules.TownBlock` first and returns the first failure in
 the original's order. The geometric half depends on asynchronously loaded collision, so the simulation trusts it and
 re-checks only the data half. Ghost controls, tilt and the unconfirmed ghost queue (Undo) are host UI state.
+Implemented host-side, in the original's order: town block, site under the ghost, static building under it, interior
+rule, footprint overlap with static buildings, sites and queued ghosts (convex hulls of the collision shape, SAT),
+characters within 2.5 of the hull, LAND parts below the water level 98, slope (four rotated bounding-box corners, `max slope`,
+`match slope` tilts fully) and normal.y < 0.2. **Not decided** (never fail, so the ghost may show valid where the original
+refuses): resource/crop yield, snap nodes, usage nodes, blocked use nodes, indoor floors and ceilings, vertical margins,
+the 5 deg object-surface rule. Messages: `PlacementRules.Message`, else the original's text table in `PlacementCheck`.
 
-**Saves.** Simulation track: `Saving/BuildingSave.cs` writes each site as a GAMESTATE_BUILDING plus its building-list
-entry in its zone file (keys per [zones](formats/zones.md#placement-keys)) and reads player-faction `-INGAME` buildings
-absent from the level data back into the registry; `Saving/ResearchSave.cs` reads and writes the completed RESEARCH.
+Build mode (B, `Kenshi_BuildWindow`, Faithful UI only): categories and groups list `WorldSnapshot.UnlockedBuildings` in
+database order (the original's order is **Unknown**); the window estimates hours as materials / (`build speed mult` x 6),
+rounded up (rounding **Unknown**). Left click or Space queues a valid ghost, Backspace or Undo drops the last, Confirm sends
+`PlaceBuildings`; leaving build mode drops the queue. The HUD panels the window covers are hidden meanwhile. Right click
+on a site with characters selected gives `BuildOrder` (held 0.2 s: menu with Build, Dismantle -> `DismantleOrder`, Cancel
+Construction -> `CancelSite` while nothing is delivered); the pointer is `build` over a site.
+
+**Saves.** `Saving/BuildingSave.cs` writes each site as a GAMESTATE_BUILDING (`<id>-S23`) plus its entry in the zone
+file's `0-buildinglist` (keys per [zones](formats/zones.md#placement-keys)); a zone without a file gets one, the slot
+list and the handle (`C` = zone container, `CS` 11111, next free `I`) follow, and player-built entries the world no
+longer has (a dismantled building) are removed. The instance Y is the absolute one, as in all game-made
+`-zoneX.Y-INGAME` buildings of the samples (**Observed**); a load prefers `world Y pos`. `is complete` is written
+explicitly. The parent is `isInsideBuilding` plus Meitou's `meitou parent` (instance id, wins on load). On load it
+reserves every `-zoneX.Y-INGAME` id of the save and reads the player faction's such buildings back, in zone and list
+order (the player's start has none, base placements use other container names). `town` and `residents` are written as
+null handles (outposts are out of scope). `Saving/ResearchSave.cs` reads and writes the RESEARCH record's `finished<k>`
+and `num finished`. Not compared with a real file that has a player-built building (the sample saves have none).
 The first snapshot after a load carries every site, so the host seam needs nothing extra.
 
-**Files.** Simulation track: `Meitou.Data/Gameplay/Construction/*`, `Gameplay/GameConstants.cs`, `Meitou.Data/Save/*`
-if needed; `Meitou.Simulation/Construction/*`, `StandardSystems.cs`, `World.cs`, `World.Interface.cs`,
-`WorldPublish.cs`, `WorldSnapshot.cs`, `Movement.cs`, `CharacterTable.cs` (cold fields), `Rng.cs`, `SeedSalts.cs`,
-`PopulationSystem.Player.cs`, `Ai/AiSystem.cs`, `Ai/TaskBehaviours.cs`, `Saving/*`. Host track:
+**Files.** Simulation track: `Meitou.Data/Gameplay/Construction/*`, `Meitou.Simulation/Construction/*`,
+`StandardSystems.cs`, `World.cs`, `World.Interface.cs`, `WorldPublish.cs`, `Movement.cs`, `CharacterTable.cs` (cold fields),
+`Rng.cs`, `PopulationSystem.Player.cs`, `AnimationSystem.cs` (held clips), `Saving/*`, `Meitou.Data/Save/SaveBuilder.cs`
+(a comment). Host track:
 `Meitou.Game/GameHost.Building.cs` (diff, overlays, rebuilds, repath), `PlayerInterface.Build.cs` (Kenshi_BuildWindow,
 ghost, commands), `Building/PlacementCheck.cs`, `Building/BuildMenu.cs` (categories and groups from
 `BuildingBuildData` and `UnlockedBuildings`), `KeyMap.cs` (build map), `PlayerInterface.ContextMenu.cs` and
