@@ -124,6 +124,8 @@ public sealed class CharacterCold
     public Meitou.Simulation.Combat.Fighter? Fighter { get; set; }
     /// <summary>The patient of the <see cref="CharacterTask.Treat"/> task (itself for self-treatment); meaningful only while the task is set (<see cref="FirstAid.FirstAidSystem"/>).</summary>
     public CharacterId TreatTarget { get; set; } = CharacterId.None;
+    /// <summary>The treatment splints instead of bandaging (the original's <c>SPLINT_ORDER</c>, task "Splinting").</summary>
+    public bool TreatSplint { get; set; }
     /// <summary>The task a self-started treatment goes back to when it ends (<see cref="CharacterTask.Wander"/>, <see cref="CharacterTask.Follow"/> or Idle).</summary>
     public CharacterTask ResumeTask { get; set; }
     /// <summary>The medic job (the original's <c>medic</c> toggle): an idle character with a kit treats hurt squad mates by itself. NPCs with a kit do so without it (an engine rule until the AI).</summary>
@@ -374,7 +376,7 @@ public sealed class CharacterTable
             if (k.Animation is { } anim) anim.Hash(ref hasher); else hasher.Add(-1);
             hasher.Add(k.Name.Length);
             // First aid state adds to the hash only while it is set, so worlds that never use it hash as before.
-            if (c.Task == (byte)CharacterTask.Treat) { hasher.Add(k.TreatTarget); hasher.Add((int)k.ResumeTask); }
+            if (c.Task == (byte)CharacterTask.Treat) { hasher.Add(k.TreatTarget); hasher.Add((int)k.ResumeTask); if (k.TreatSplint) hasher.Add(0x53706C74); }
             if (k.MedicJob) hasher.Add(true);
             if (k.Fleeing) hasher.Add(0x466C6565);   // only while set, so worlds without fleeing hash as before
             if (k.StealthExposureTick != long.MinValue) { hasher.Add((int)k.StealthExposure); hasher.Add(k.StealthExposureTick); }   // likewise, once a sneaker was exposed

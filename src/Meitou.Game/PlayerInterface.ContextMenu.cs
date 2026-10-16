@@ -45,8 +45,10 @@ sealed partial class PlayerInterface
             if (target.StealthKoChance is { } chance)
                 verbs.Add(($"Stealth KO ({Math.Clamp(chance, 0, 100):0}%)", () => Say(new Meitou.Simulation.Carrying.StealthKoOrder(selection, id) { Tick = session.World.Tick })));
         }
-        if (target.Body is { Dead: false, NeedsAid: true } && !selection.Contains(id))
+        if (target.Body is { Dead: false, NeedsAid: true })
             verbs.Add(("First Aid", () => Say(new Meitou.Simulation.FirstAid.TreatOrder(selection, id) { Tick = session.World.Tick })));
+        if (target.Body is { Dead: false, NeedsSplint: true })
+            verbs.Add(("Splint Injuries", () => Say(new Meitou.Simulation.FirstAid.SplintOrder(selection, id) { Tick = session.World.Tick })));
         // A caged character: pick its cage's lock (the prisoner its own, a mate from outside), and once it is open the prisoner may get out (an escape unless served).
         if (target.Prison is { } prison && !down)
         {

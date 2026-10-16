@@ -60,6 +60,21 @@ Weapon inventory weight multiplier0.5; backpack effect scales contents.
 for shots. Gear/container/map/crossbow/limb item types cap1. Other stacks use
 trunc(max(base,section-min)*section-mult); a section flag forces base1 (flag scope unknown).
 
+### Splints
+
+**Verified** (disassembly of `FUN_140646400`, `FUN_140649d50`, `FUN_1405988e0`; Splint Kit records in gamedata.base). A splint kit is an
+ITEM with `item function` 2 (Splint Kit q20, rebirth.mod q25; Advanced Splint Kit q50; 100 charges). A splint raises a part's rig, which
+counts as health in the fraction, the down (h-s+rig<0) and sever tests, so a splinted broken leg walks again (leg speed reads the fraction).
+- `needsSplint`(X): patient not dead, race not `is robot`, some non-vital part with rig<b, (h-s+rig)*1.05<50 and rig+1<trunc(X). The
+  menu asks with X=50 (verb "Splint Injuries", task 249 "Splinting"), a medic with min(medic, kit quality). Robotic limbs are not excluded.
+- Update: t=min(medic skill, kit quality)*0.01, cap=1+trunc(t*100). The first non-vital part in part order with h-s+rig<50, rig<s+b,
+  rig<cap gets rig+=lerp(1,15,t)*medic speed mult*dt, clamped to s+b and cap; so only bandaged or stunned damage can be splinted.
+  The kit drains like a medkit only when rig was added; medic XP (stat 9) each update. Ends when no part qualifies.
+- No time decay and hits do not touch rig. **Observed** (`FUN_14064f5c0`): once h-s+rig>50, rig=max(0, 50-(h-s)).
+- Order 249 refuses without a kit ("I don't have a splint kit."). The job 250 "Splint Rigging" (target finder `FUN_14099e240`, may pick
+  the medic itself) is not implemented; how it hands off to task 249 is **Unknown**.
+- Meitou: `SplintOrder` (the Treat task with `TreatSplint`), `MedicalState.NeedsSplint` / `Splint`; dt in game seconds as for first aid.
+
 ### The stat list
 
 **Verified.** Three independent places agree on the numbering: the editor's `StatsEnumerated` enum (names), the
@@ -214,7 +229,7 @@ Stomach, two arms, two legs, two forelegs):
 | +0x40 | flesh HP **h** (may go negative, down to -3 M) |
 | +0x44 | **stun** s (blunt damage lands here) |
 | +0x48 | **bandaged pool** b: damage that has been treated and is waiting to be healed |
-| +0x4c | extra buffer used only by the health fraction |
+| +0x4c | **rig** (save key `rig`): the splint, added to h - s by the fraction, the collapse and the sever tests ([Splints](#splints)) |
 | +0x50 | **wear** w (permanent loss of maximum, robots) |
 | +0x54 / +0x58 / +0x5c | base HP (ref value 1; forced to 5 for a stump) / multiplier (set by the constructor and rewritten each tick from the character slot-0x390 factor) / body scale (character slot 0x238) |
 | +0x60 | health fraction `((h - s) + extra) / M` |

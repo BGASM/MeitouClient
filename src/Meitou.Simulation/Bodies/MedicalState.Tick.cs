@@ -70,6 +70,43 @@ public sealed partial class MedicalState
         return (c.MedkitDrain99 + (c.MedkitDrain1 - c.MedkitDrain99) * t) * dt * (robotKit ? c.RobotMedicSpeedMult : 1);
     }
 
+    // ------------------------------------------------------------------ splints
+
+    /// <summary>Effective HP (h - s + rig, absolute) under which a part can take a splint, and to which healing wears the splint down (<c>FUN_140649d50</c>, <c>FUN_14064f5c0</c>).</summary>
+    public const float SplintLimit = 50;
+
+    /// <summary>
+    /// Whether a splint would help (<c>needsSplint</c>, <c>FUN_140646400</c>): some non-vital part has rig &lt; b, (h - s + rig) x 1.05 &lt; 50 and rig + 1 &lt; trunc(<paramref name="skill"/>).
+    /// The menu asks with skill 50, a medic with min(medic, kit quality). Robot races never need one; a dead patient neither.
+    /// </summary>
+    public bool NeedsSplint(RaceData race, float skill)
+    {
+        if (Dead || race.IsRobot) return false;
+        float cap = MathF.Truncate(skill);
+        foreach (var p in Parts)
+            if (!p.IsVital && p.Rig < p.Bandage && (p.Flesh - p.Stun + p.Rig) * 1.05f < SplintLimit && p.Rig + 1 < cap) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// One update of splinting (<c>FUN_140649d50</c>): with t = min(skill, kit quality) x 0.01, the first non-vital part (in part order) with h - s + rig &lt; 50, rig &lt; s + b and
+    /// rig &lt; cap = 1 + trunc(t x 100) gets rig += the first aid rate x dt, clamped to s + b and the cap. Returns the rig added (0: nothing left to splint).
+    /// </summary>
+    public float Splint(float dt, float skill, float kitQuality, in MedicalContext ctx)
+    {
+        if (Dead || ctx.Race.IsRobot) return 0;
+        float t = Math.Clamp(MathF.Min(skill, kitQuality) * 0.01f, 0, 1);
+        float cap = 1 + MathF.Truncate(t * 100);
+        foreach (var p in Parts)
+        {
+            if (p.IsVital || p.Flesh - p.Stun + p.Rig >= SplintLimit || p.Rig >= p.Stun + p.Bandage || p.Rig >= cap) continue;
+            float before = p.Rig;
+            p.Rig = MathF.Min(p.Rig + TreatmentRate(ctx.Constants, skill, kitQuality, false) * dt, MathF.Min(p.Stun + p.Bandage, cap));
+            return p.Rig - before;
+        }
+        return 0;
+    }
+
     // ------------------------------------------------------------------ the tick
 
     /// <summary>

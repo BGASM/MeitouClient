@@ -168,9 +168,9 @@ public sealed class XpService(GameConstants constants, BodyOptions options)
     /// <c>XP rate medic 99</c> (at skill 99). The interpolation argument is hidden in the decompile (<b>Unknown</b>); here t = (skill - 1) / 98. The
     /// stat trained is the patient's race's <c>heal stat</c>.
     /// </summary>
-    public float Medic(CharacterStats stats, RaceData patientRace, RaceData medicRace, float dtSeconds)
+    public float Medic(CharacterStats stats, RaceData patientRace, RaceData medicRace, float dtSeconds, StatsEnumerated? healStat = null)
     {
-        var stat = patientRace.HealStat;
+        var stat = healStat ?? patientRace.HealStat;
         float skill = stats[stat];
         float t = Math.Clamp((skill - 1) / 98, 0, 1);
         float secondsPerPoint = constants.XpRateMedic1 + (constants.XpRateMedic99 - constants.XpRateMedic1) * t;

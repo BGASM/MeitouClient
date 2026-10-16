@@ -7,6 +7,12 @@ namespace Meitou.Simulation.FirstAid;
 /// </summary>
 public sealed record TreatOrder(IReadOnlyList<CharacterId> Medics, CharacterId Patient) : SimCommand;
 
+/// <summary>
+/// Orders the medics (the selection when the list is empty) to splint <see cref="Patient"/> with a splint kit (the original's verb "Splint", <c>SPLINT_ORDER</c>): walk to it, then splint
+/// part after part until none is left or the kit is used up. A patient among the medics splints itself; a medic without a kit refuses.
+/// </summary>
+public sealed record SplintOrder(IReadOnlyList<CharacterId> Medics, CharacterId Patient) : SimCommand;
+
 /// <summary>Orders the characters (the selection when the list is empty) to sit down and rest. Any other order ends it.</summary>
 public sealed record RestOrder(IReadOnlyList<CharacterId> Characters) : SimCommand;
 

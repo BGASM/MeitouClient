@@ -47,6 +47,8 @@ public sealed record ItemInfo(string Id, string Name, FcsRecordType Type)
 
     /// <summary>An ordinary first aid kit (<c>item function</c> 1): bandages organic body parts (<b>Observed</b>, character-stats.md).</summary>
     public const int FirstAidKitFunction = 1;
+    /// <summary>A splint kit (<c>item function</c> 2, <b>Verified</b>: <c>hasSplintKit</c> and the Splint Kit records): splints limbs (character-stats.md "Splints").</summary>
+    public const int SplintKitFunction = 2;
     /// <summary>A robot repair kit (<c>item function</c> 12): repairs robotic parts.</summary>
     public const int RobotKitFunction = 12;
 

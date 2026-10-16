@@ -52,6 +52,13 @@ public sealed class FirstAidSystem(GameConstants constants, BodyOptions options,
                         if (table.TryResolveNext(id, out int slot) && table.Cold(slot) is { Race: not null, Stats: not null } cold && CanAct(cold))
                             Begin(table, slot, order.Patient, CharacterTask.Idle);
                     break;
+                case SplintOrder splint:
+                    if (!table.TryResolveNext(splint.Patient, out int splinted) || table.Cold(splinted)!.Medical is not { Dead: false }) break;
+                    foreach (var id in Who(world, splint.Medics))
+                        if (table.TryResolveNext(id, out int slot) && table.Cold(slot) is { Race: not null, Stats: not null } cold && CanAct(cold)
+                            && FindKit(world, slot, cold, ItemInfo.SplintKitFunction) is not null)   // "I don't have a splint kit."
+                            Begin(table, slot, splint.Patient, CharacterTask.Idle, splint: true);
+                    break;
                 case RestOrder rest:
                     foreach (var id in Who(world, rest.Characters))
                     {
@@ -59,6 +66,7 @@ public sealed class FirstAidSystem(GameConstants constants, BodyOptions options,
                         MovementSystem.Stop(table, slot);
                         table.Next[slot].Task = (byte)CharacterTask.Rest;
                         cold.TreatTarget = CharacterId.None;
+                        cold.TreatSplint = false;
                         cold.ResumeTask = CharacterTask.Idle;
                     }
                     break;
@@ -77,7 +85,7 @@ public sealed class FirstAidSystem(GameConstants constants, BodyOptions options,
     static bool CanAct(CharacterCold cold) => cold.Medical is { Incapacitated: false } && !cold.InCombat;
 
     /// <summary>Starts a treatment (serial phases): the medic stands, then walks to the patient. <paramref name="resume"/> is the task to go back to afterwards (kept if already treating).</summary>
-    static void Begin(CharacterTable table, int slot, CharacterId patient, CharacterTask resume)
+    static void Begin(CharacterTable table, int slot, CharacterId patient, CharacterTask resume, bool splint = false)
     {
         var cold = table.Cold(slot)!;
         ref var n = ref table.Next[slot];
@@ -87,6 +95,7 @@ public sealed class FirstAidSystem(GameConstants constants, BodyOptions options,
         n.Mode = SpeedMode.Free;
         n.TaskTime = 0;
         cold.TreatTarget = patient;
+        cold.TreatSplint = splint;
         cold.ResumeTask = keep;
     }
 
@@ -102,6 +111,7 @@ public sealed class FirstAidSystem(GameConstants constants, BodyOptions options,
             n.TaskTime = 0;
         }
         cold.TreatTarget = CharacterId.None;
+        cold.TreatSplint = false;
         cold.ResumeTask = CharacterTask.Idle;
     }
 
@@ -199,6 +209,11 @@ public sealed class FirstAidSystem(GameConstants constants, BodyOptions options,
             End(table, m);
             return;
         }
+        if (medicCold.TreatSplint)
+        {
+            Splint(world, m, medicCold, medical, stats, medicRace, body, race);
+            return;
+        }
         // Ordinary kits first; a robotic part is treated once the organic ones are done. Treatment runs until the last bit is bandaged (the start threshold is MedicalState.FirstAidThreshold).
         bool robot = body.BandageRoom(race, false) <= Done;
         if (robot && body.BandageRoom(race, true) <= Done)
@@ -206,7 +221,7 @@ public sealed class FirstAidSystem(GameConstants constants, BodyOptions options,
             End(table, m);   // nothing left to bandage
             return;
         }
-        if (FindKit(world, m, medicCold, robot) is not { } kit)
+        if (FindKit(world, m, medicCold, FunctionOf(robot)) is not { } kit)
         {
             End(table, m);   // no kit of the right kind within reach
             return;
@@ -226,6 +241,33 @@ public sealed class FirstAidSystem(GameConstants constants, BodyOptions options,
         item.Charges -= MedicalState.KitDrain(Constants, skill, dt, robot);
         if (item.Charges <= 0) owner.RemoveOne(item);   // a used-up kit is gone
         xp.Medic(stats, race, medicRace, dt);
+    }
+
+    /// <summary>
+    /// One update of a splint (task "Splinting", <c>FUN_140649d50</c>, docs/game/character-stats.md "Splints"): the medic's <c>medic</c> skill and the kit's quality set the rate and the cap;
+    /// the kit drains as first aid's only when a part took rig; medic XP every update. Ends when no part is left to splint or no splint kit is in reach.
+    /// </summary>
+    void Splint(World world, int m, CharacterCold medicCold, MedicalState medical, CharacterStats stats, RaceData medicRace, MedicalState body, RaceData race)
+    {
+        var table = world.Characters;
+        if (FindKit(world, m, medicCold, ItemInfo.SplintKitFunction) is not { } kit)
+        {
+            End(table, m);
+            return;
+        }
+        var (item, owner) = kit;
+        float dt = world.TickSeconds;
+        float skill = stats[StatsEnumerated.Medic] * medical.StatMultiplier(StatsEnumerated.Medic);
+        float quality = Items.Info(item.Record)?.Quality ?? 0;
+        float added = body.Splint(dt, skill, quality, new MedicalContext(Constants, bodyOptions, race));
+        if (added <= 0)
+        {
+            End(table, m);   // nothing left to splint
+            return;
+        }
+        item.Charges -= MedicalState.KitDrain(Constants, skill, dt, false);
+        if (item.Charges <= 0) owner.RemoveOne(item);
+        xp.Medic(stats, race, medicRace, dt, StatsEnumerated.Medic);
     }
 
     // ------------------------------------------------------------------ kits
@@ -251,10 +293,9 @@ public sealed class FirstAidSystem(GameConstants constants, BodyOptions options,
 
     static int FunctionOf(bool robot) => robot ? ItemInfo.RobotKitFunction : ItemInfo.FirstAidKitFunction;
 
-    /// <summary>The medic's own best kit, else a squad mate's within <see cref="FirstAidSettings.KitReach"/> (an engine choice).</summary>
-    (ItemInstance Item, Inventory Owner)? FindKit(World world, int slot, CharacterCold cold, bool robot)
+    /// <summary>The medic's own best kit of an <c>item function</c>, else a squad mate's within <see cref="FirstAidSettings.KitReach"/> (an engine choice).</summary>
+    (ItemInstance Item, Inventory Owner)? FindKit(World world, int slot, CharacterCold cold, int function)
     {
-        int function = FunctionOf(robot);
         if (cold.Inventory is { } own && Best(own, function) is { } mine) return (mine, own);
         if (cold.SquadId < 0 || world.Squads.Find(cold.SquadId) is not { } squad) return null;
         var table = world.Characters;

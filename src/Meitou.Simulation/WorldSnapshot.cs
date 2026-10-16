@@ -11,9 +11,11 @@ public enum CareKind { None, Treating, Resting }
 
 /// <summary>
 /// The health the interface shows: blood (0..1 of capacity), the worst body part (fraction of its maximum HP), hunger (3 fed .. 0 starving) and whether it is out cold or dead; for the player's
-/// characters also whether first aid has anything to bandage (<see cref="NeedsAid"/>), what the character is doing (<see cref="Care"/>) and its medic job switch.
+/// characters also whether first aid has anything to bandage (<see cref="NeedsAid"/>) or a limb to splint (<see cref="NeedsSplint"/>, the menu's test with skill 50), what the character is
+/// doing (<see cref="Care"/>) and its medic job switch.
 /// </summary>
-public readonly record struct BodyStatus(float Blood, float WorstPart, float Hunger, bool Unconscious, bool Dead, bool NeedsAid = false, CareKind Care = CareKind.None, bool MedicJob = false, bool RescueJob = false);
+public readonly record struct BodyStatus(float Blood, float WorstPart, float Hunger, bool Unconscious, bool Dead, bool NeedsAid = false, CareKind Care = CareKind.None, bool MedicJob = false, bool RescueJob = false,
+    bool NeedsSplint = false);
 public sealed record HealthPartView(string Id, string Name, float Flesh, float Stun, float Bandage, float Rig, float Maximum, bool Robotic);
 /// <summary>A line of the HUD's stats panel: the label, the value the character fights with and the value it would have unhurt (docs/game/ui-screens.md section 4).</summary>
 public readonly record struct HudStatLine(string Label, float Value, float Base);
