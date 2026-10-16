@@ -442,9 +442,15 @@ straight run to the cursor (end snapped to a start, or an end for a backwards li
 as a `WallPiece` (own pitch for slope; `Ignore` skips connectors, wedges and walls at a snapped joint). The next click
 queues every piece as its own ghost and chains a line from the far end; right click or Backspace drops the line. Each
 piece becomes its own site; `ConstructionSystem` allows a subsection when a BUILDING listing it in `wall subsections`
-is unlocked. **Engine gaps**: level (NPC town) walls are not snap candidates; indoor lines (radius 25), the steep-climb
-straight extension, the offset clamp and the arrows are not built; the stretch is recomputed each frame from the signed
-overshoot; attached subsections are not children (each costs its own materials).
+is unlocked. `ConstructionSystem.AttachWalls` (after placing, and at the end of `BuildingSave.Read`) gives each short,
+connector or wedge without parent or children a `WallParent`: the root of the first wall site, with the same complete
+flag, that has a link point within sqrt 10 of one of the piece's link points or its middle (engine choice: the middle
+catches crest shorts; a normal/single root wins over a subsection root; gates never parent). Orders, builders and the
+auto-job act on the root; its progress sets the children's (`min(p/target, 1) x child target`) and completes them; its
+removal removes them. So an attached piece costs nothing; the link is not saved or hashed. A destroyed attached piece
+just follows its wall again (original **Unknown**). **Engine gaps**: level (NPC town) walls are not snap candidates;
+indoor lines (radius 25), the steep-climb straight extension, the offset clamp and the arrows are not built; the stretch
+is recomputed each frame from the signed overshoot; the host still lists an attached piece's own materials.
 
 **Saves.** `Saving/BuildingSave.cs` writes each site as a GAMESTATE_BUILDING (`<id>-S23`) plus its entry in the zone
 file's `0-buildinglist` (keys per [zones](formats/zones.md#placement-keys)); a zone without a file gets one, the slot

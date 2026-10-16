@@ -144,12 +144,13 @@ public sealed class ConstructionSystem : ITickSystem
                     foreach (var plan in place.Plans)
                         if (Place(world, plan) is { } site) placed.Add(site);
                     TownForWalls(world, placed);
+                    AttachWalls(world.Buildings, Data, placed);
                     break;
                 }
                 case BuildOrder order:
                 {
                     // A complete building has nothing to build; repairing one (order 95) needs the building health, which is not modelled.
-                    if (reg.Find(order.Site) is not { Complete: false } site) break;
+                    if (Root(reg, reg.Find(order.Site)) is not { Complete: false } site) break;
                     foreach (var id in Who(world, order.Characters))
                         if (table.TryResolveNext(id, out int slot) && table.Cold(slot) is { IsPlayer: true } cold && Able(cold))
                             Begin(world, slot, site, CharacterTask.Build, CharacterTask.Idle);
@@ -157,7 +158,7 @@ public sealed class ConstructionSystem : ITickSystem
                 }
                 case DismantleOrder order:
                 {
-                    if (reg.Find(order.Site) is not { } site) break;
+                    if (Root(reg, reg.Find(order.Site)) is not { } site) break;
                     if (Blocker(reg, site) is { } text)
                     {
                         world.Post(text);
@@ -169,12 +170,12 @@ public sealed class ConstructionSystem : ITickSystem
                     break;
                 }
                 case CancelSite cancel:
-                    if (reg.Find(cancel.Site) is not { Complete: false } cancelled) break;
+                    if (Root(reg, reg.Find(cancel.Site)) is not { Complete: false } cancelled) break;
                     if (cancelled.Deliverable > 0) world.Post("Dismantle it to get the materials back.");
                     else Remove(world, cancelled);
                     break;
                 case PauseSite pause:
-                    if (reg.Find(pause.Site) is { } paused && paused.Paused != pause.Paused)
+                    if (Root(reg, reg.Find(pause.Site)) is { } paused && paused.Paused != pause.Paused)
                     {
                         paused.Paused = pause.Paused;
                         reg.Touch();
@@ -339,10 +340,90 @@ public sealed class ConstructionSystem : ITickSystem
         return MathF.Sqrt(dx * dx + dz * dz);
     }
 
+    /// <summary>Removes a site and the wall pieces attached to it (slot 73 forwards a dismantle to the children).</summary>
     void Remove(World world, BuildSite site)
     {
-        world.Buildings.Remove(site);
+        var reg = world.Buildings;
+        if (IsWall(site))
+            foreach (var child in reg.All.Where(s => s.WallParent == site.Id).ToList()) reg.Remove(child);
+        reg.Remove(site);
         sweep = true;
+    }
+
+    // ------------------------------------------------------------------ attached wall pieces
+
+    bool IsWall(BuildSite site) => Data(site.Record) is { LinksTogether: true };
+
+    /// <summary>The site that takes a site's work and orders: the root of its <see cref="BuildSite.WallParent"/> chain, else the site itself (a child's slot 69 forwards to its parent's).</summary>
+    public static BuildSite? Root(BuildingRegistry reg, BuildSite? site)
+    {
+        for (int guard = 0; guard < 64 && site?.WallParent is { } up && reg.Find(up) is { } parent; guard++) site = parent;
+        return site;
+    }
+
+    /// <summary>Two link points closer than the square root of this are joined (<b>Verified</b>; <c>WallLine.JoinDistanceSquared</c>).</summary>
+    public const float JoinDistanceSquared = 10;
+
+    /// <summary>
+    /// Attaches each short piece, connector or wedge (<c>link type</c> 4, 1, 2) of <paramref name="sites"/> without a parent or children to a nearby wall site (<b>Observed</b>, <c>FUN_14029ac50</c>
+    /// on Confirm and zone load; its check <c>FUN_14029a890</c>: another building, the same complete flag, the candidate's root taken). Nearby: one of the piece's link points or its middle within
+    /// sqrt(<see cref="JoinDistanceSquared"/>) of a link point of the candidate (the original finder's radius is <b>Unknown</b>; the middle catches a crest short centred on a joint). Engine choice:
+    /// a root that is a normal wall or single wins over one that is itself a subsection; gates are never parents (not WallBuildings).
+    /// </summary>
+    public static void AttachWalls(BuildingRegistry reg, Func<string, BuildingBuildData?> data, IEnumerable<BuildSite> sites)
+    {
+        foreach (var child in sites)
+        {
+            if (child.WallParent is not null || data(child.Record) is not { LinksTogether: true, LinkType: 1 or 2 or 4 } cd || reg.Find(child.Id) != child) continue;
+            if (reg.All.Any(s => s.WallParent == child.Id)) continue;
+            var (c0, c1) = LinkEnds(cd, child);
+            var mid = (c0 + c1) / 2;
+            BuildSite? pick = null, fallback = null;
+            foreach (var w in reg.All)
+            {
+                if (w == child || data(w.Record) is not { LinksTogether: true } wd) continue;
+                var (w0, w1) = LinkEnds(wd, w);
+                if (!Joined(c0, w0, w1) && !Joined(c1, w0, w1) && !Joined(mid, w0, w1)) continue;
+                var root = Root(reg, w)!;
+                if (root == child || root.Complete != child.Complete || data(root.Record) is not { IsWallGate: false } rd) continue;
+                if (rd.LinkType is 0 or 3)
+                {
+                    pick = root;
+                    break;
+                }
+                fallback ??= root;
+            }
+            if ((pick ?? fallback) is not { } parent) continue;
+            child.WallParent = parent.Id;
+            child.Progress = Share(parent, child);
+            reg.Touch();
+        }
+    }
+
+    static bool Joined(Vector3 p, Vector3 a, Vector3 b) => Vector3.DistanceSquared(p, a) < JoinDistanceSquared || Vector3.DistanceSquared(p, b) < JoinDistanceSquared;
+
+    // A wall's start (its position) and end (position + rotation x (0, 0, link length)), as WallLine.Ends.
+    static (Vector3 Start, Vector3 End) LinkEnds(BuildingBuildData wall, BuildSite site) =>
+        (site.Position, site.Position + Vector3.Transform(new Vector3(0, 0, wall.LinkLength), Quaternion.Normalize(site.Rotation)));
+
+    /// <summary>An attached piece's progress (<b>Verified</b>, parent slot 71): <c>min(parent progress / parent target, 1) x child target</c>.</summary>
+    static float Share(BuildSite parent, BuildSite child) =>
+        (parent.Target > 0 ? MathF.Min(parent.Progress / parent.Target, 1) : 1) * child.Target;
+
+    /// <summary>Sets the attached pieces' progress and complete flag from their wall's (slots 71, 72).</summary>
+    void SyncChildren(World world, BuildSite parent)
+    {
+        if (!IsWall(parent)) return;
+        var reg = world.Buildings;
+        foreach (var c in reg.All)
+        {
+            if (c.WallParent != parent.Id) continue;
+            c.Progress = Share(parent, c);
+            if (c.Complete == parent.Complete) continue;
+            c.Complete = parent.Complete;
+            if (c.Complete) c.Destroyed = c.Ruined = false;
+            reg.Changed();
+        }
     }
 
     // ------------------------------------------------------------------ builders
@@ -425,7 +506,7 @@ public sealed class ConstructionSystem : ITickSystem
                 cold.BuildBar = 0;
                 continue;
             }
-            var site = reg.Find(id);
+            var site = Root(reg, reg.Find(id));
             if (site is null || !Able(cold) || (n.Task != (byte)CharacterTask.Dismantle && site.Complete))
             {
                 End(table, i);
@@ -470,7 +551,18 @@ public sealed class ConstructionSystem : ITickSystem
                 s.Dismantling = false;
                 reg.Touch();
             }
-            if (s is { Destroyed: true, Ruined: false }) Ruin(world, s);
+            if (s is { Destroyed: true, Ruined: false })
+            {
+                Ruin(world, s);
+                if (s.WallParent is null) SyncChildren(world, s);
+                else if (reg.Find(s.WallParent) is { } wall)
+                {
+                    // A destroyed attached piece follows its wall again (what the original does with it is Unknown).
+                    s.Destroyed = s.Ruined = false;
+                    s.Complete = wall.Complete;
+                    s.Progress = Share(wall, s);
+                }
+            }
         }
         var table = world.Characters;
         var next = table.Next;
@@ -481,7 +573,7 @@ public sealed class ConstructionSystem : ITickSystem
             if (!n.Alive || !IsWork(n.Task)) continue;
             var cold = table.Cold(i)!;
             if (cold.BuildSite is not { } id) continue;
-            var site = reg.Find(id);
+            var site = Root(reg, reg.Find(id));
             if (site is null || !Able(cold))
             {
                 End(table, i);
@@ -533,6 +625,7 @@ public sealed class ConstructionSystem : ITickSystem
         world.Buildings.Touch();
         if (cold.Stats is { } stats && cold.Race is { } race) xp.Engineering(stats, race, dt);
         if (site.Progress >= site.Target) Finish(world, site);
+        else SyncChildren(world, site);
     }
 
     void Finish(World world, BuildSite site)
@@ -542,6 +635,7 @@ public sealed class ConstructionSystem : ITickSystem
         site.Destroyed = false;
         site.Ruined = false;
         world.Buildings.Changed();
+        SyncChildren(world, site);
         if (site.Owner == world.Player.Faction) world.Post($"Building '{site.Name}' construction complete.");
     }
 
@@ -623,9 +717,12 @@ public sealed class ConstructionSystem : ITickSystem
         site.Progress = site.Rate > 0 ? site.Progress - amount * site.Rate : 0;
         site.Dismantling = true;
         world.Buildings.Touch();
+        SyncChildren(world, site);
         if (cold.Stats is { } stats && cold.Race is { } race) xp.Engineering(stats, race, dt);
         if (site.Progress > 0) return;
         Refund(world, cold, site);
+        foreach (var c in world.Buildings.All)
+            if (c.WallParent == site.Id) Refund(world, cold, c);   // nothing unless a save from before the link gave it materials
         Remove(world, site);
     }
 
@@ -670,7 +767,7 @@ public sealed class ConstructionSystem : ITickSystem
             float bestScore = 0;
             foreach (var site in reg.All)
             {
-                if (site.Complete || site.Paused || site.Destroyed || site.Dismantling || site.Owner != cold.Faction) continue;
+                if (site.Complete || site.Paused || site.Destroyed || site.Dismantling || site.WallParent is not null || site.Owner != cold.Faction) continue;
                 if (site.Stalled && !Carries(cold, site)) continue;
                 float dx = n.Position.X - site.Position.X, dz = n.Position.Z - site.Position.Z;
                 float d2 = dx * dx + dz * dz;

@@ -30,6 +30,11 @@ public sealed class BuildSite
     public int Floor { get; init; }
     /// <summary>The instance id of the building this one stands in (null outdoors).</summary>
     public string? Parent { get; set; }
+    /// <summary>
+    /// The id of the wall this short piece, connector or wedge is attached to (the original's WallBuilding+0x368): work, deliveries and orders go to that wall and its progress sets this
+    /// one's (<see cref="ConstructionSystem.AttachWalls"/>). Rebuilt when placed or loaded; not saved, not hashed.
+    /// </summary>
+    public string? WallParent { get; set; }
     /// <summary>The <see cref="PlayerTown.Number"/> of the player town it belongs to (the save's <c>town</c> handle); 0 for none.</summary>
     public int Town { get; set; }
     /// <summary>The owning faction, a position in the world's faction list.</summary>

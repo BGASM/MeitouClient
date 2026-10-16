@@ -84,6 +84,11 @@ public static class BuildingSave
                 made++;
             }
         }
+        // Wall subsection links are not saved; zone load rebuilds them (docs/game/buildings-production.md "Walls").
+        var wallData = new Dictionary<string, BuildingBuildData?>(StringComparer.Ordinal);
+        BuildingBuildData? DataOf(string id) =>
+            wallData.TryGetValue(id, out var d) ? d : wallData[id] = db.Find(id) is { Type: FcsRecordType.BUILDING } r ? BuildingBuildData.From(r) : null;
+        ConstructionSystem.AttachWalls(reg, DataOf, reg.All.ToList());
         return made;
     }
 
