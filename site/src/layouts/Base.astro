@@ -42,6 +42,7 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
           GitHub
         </a>
       </header>
+      {video && <a class="brand is-corner" href="/">Meitou<span>Client</span></a>}
       <main>
         <slot />
       </main>
@@ -104,6 +105,8 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
     text-decoration: none;
   }
   .brand span { font-weight: 400; }
+  /* On the video page the wordmark sits at the bottom right of the first view. */
+  .brand.is-corner { position: absolute; z-index: 1; right: var(--edge); top: calc(100svh - var(--edge) - 36px); margin: 0; }
   .gh { display: inline-flex; align-items: center; gap: var(--space-4); color: #fff; font: 600 16px/21px var(--font-exo); text-decoration: none; opacity: .85; transition: opacity .16s ease; }
   .gh:hover { color: #fff; opacity: 1; }
   main { padding: 0 var(--edge); }
