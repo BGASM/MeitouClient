@@ -1,4 +1,5 @@
 ---
+import '@fontsource/exo-2/400.css';
 import '@fontsource/exo-2/600.css';
 import '../styles/meitou.css';
 
@@ -30,7 +31,7 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
         </div>
       )}
       <header class="top">
-        <a class="brand" href="/">Meitou</a>
+        <a class="brand" href="/">Meitou<span>Client</span></a>
       </header>
       <main>
         <slot />
@@ -48,7 +49,7 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
 </html>
 
 <style>
-  /* First view: the video under the vignette, fading into the page ground below. */
+  /* First view: the video behind the header and hero. */
   .bg {
     position: absolute;
     inset: 0 0 auto;
@@ -57,14 +58,6 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
     pointer-events: none;
   }
   .bg video { display: block; width: 100%; height: 100%; object-fit: cover; }
-  .bg::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background:
-      radial-gradient(ellipse 900px 640px at 4% 80%, rgba(8, 6, 5, .85) 20%, rgba(8, 6, 5, .45) 55%, transparent 80%),
-      linear-gradient(rgba(8, 6, 5, .55), rgba(8, 6, 5, .1) 22%, rgba(8, 6, 5, .2) 60%, var(--vignette));
-  }
   .top, main, .foot { position: relative; }
   .top {
     display: flex;
@@ -77,12 +70,11 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
   }
   .brand {
     margin-right: auto;
-    color: var(--paper-light);
+    color: #fff;
     font: 600 24px/30px var(--font-exo);
-    letter-spacing: .12em;
-    text-transform: uppercase;
     text-decoration: none;
   }
+  .brand span { font-weight: 400; }
   main {
     max-width: 1080px;
     margin: 0 auto;
