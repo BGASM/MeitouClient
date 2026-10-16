@@ -345,6 +345,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             liftTime = task == CharacterTask.PickUp ? MathF.Min(cold.LiftTime, length) : MathF.Max(length - cold.LiftTime, 0);
             wanted.Clear();
             wanted.Add((lift, 1));
+            legs = 0;   // the lift is the whole body: no walking clips left to synch
             a.Idle = -1;
         }
         // A stealth knock-out swing (the carry system's timing): the whole-body knockout clip at x1.2.
@@ -354,6 +355,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             liftTime = MathF.Min(cold.LiftTime * Carrying.CarrySystem.KnockoutPlaySpeed, Lengths.Of(Library.Definitions[KnockoutClip].Clip));
             wanted.Clear();
             wanted.Add((lift, 1));
+            legs = 0;   // the lift is the whole body: no walking clips left to synch
             a.Idle = -1;
         }
 
@@ -573,7 +575,6 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         return stance with { LeftLeg = left, RightLeg = right };
     }
 
-    /// <summary>Starts a one-shot clip from its first frame (nothing when the data has no such clip).</summary>
     /// <summary>
     /// A character lying in its ragdoll keeps the layers it had when it went down, unchanged (engine choice): the ragdoll starts from that pose on the tick it goes down, and
     /// the bones without a body (hands, feet, clavicles) keep it. One without layers yet (just loaded) takes the lying clip instead.
@@ -586,6 +587,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         return true;
     }
 
+    /// <summary>Starts a one-shot clip from its first frame (nothing when the data has no such clip).</summary>
     static void StartAction(CharacterAnimation a, int clip, bool stumble)
     {
         if (clip < 0) return;
