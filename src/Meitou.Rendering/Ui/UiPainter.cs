@@ -100,8 +100,10 @@ public sealed class UiPainter : IDisposable
                 float v0 = source.Y / loaded.Texture.Desc.Height, v1 = (source.Y + source.Height) / loaded.Texture.Desc.Height;
                 if (flip) (v0, v1) = (v1, v0);
                 var tint = Colour(c.Properties.GetValueOrDefault("Colour"), Vector4.One) * new Vector4(1, 1, 1, Alpha(c.Properties));
-                if (!flip && float.TryParse(c.Properties.GetValueOrDefault("ImageBorder"), System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, out float border) && border > 0)
+                float border = 0;
+                bool bordered = !flip && float.TryParse(c.Properties.GetValueOrDefault("ImageBorder"), System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out border) && border > 0;
+                if (bordered)
                 {
                     float borderScale = float.TryParse(c.Properties.GetValueOrDefault("ImageBorderScale"), System.Globalization.NumberStyles.Float,
                         System.Globalization.CultureInfo.InvariantCulture, out float parsed) ? Math.Max(0, parsed) : 1;
@@ -120,7 +122,7 @@ public sealed class UiPainter : IDisposable
                 else
                     overlay.Image(loaded.Sampled, new(b.X, b.Y, b.X + b.Width, b.Y + b.Height),
                         new(source.X / loaded.Texture.Desc.Width, v0, (source.X + source.Width) / loaded.Texture.Desc.Width, v1), tint);
-                if (tint.W >= 1 && masks.TryGetValue(image.Texture, out var imageMask) && imageMask.Covers(source)) opaqueRects.Add(b.Intersect(clip));
+                if (tint.W >= 1 && masks.TryGetValue(image.Texture, out var imageMask)) AddOpaque(imageMask, source, b, clip, allowCore: !flip && !bordered);
                 overlay.Flush(width, height, clip);
             }
             if (resources.Skins.TryGetValue(c.Skin, out var skin) && textures.TryGetValue(skin.Texture, out var atlas))
@@ -164,7 +166,7 @@ public sealed class UiPainter : IDisposable
                         (source.Y + (y0 - dest.Y) / dest.Height * source.Height) / th,
                         (source.X + (x1 - dest.X) / dest.Width * source.Width) / tw,
                         (source.Y + (y1 - dest.Y) / dest.Height * source.Height) / th), tint);
-                    if (tint.W >= 1 && atlasMask?.Covers(source) == true) opaqueRects.Add(new UiRect(x0, y0, x1 - x0, y1 - y0).Intersect(clip));
+                    if (tint.W >= 1 && atlasMask is not null) AddOpaque(atlasMask, source, dest, clip, allowCore: true);
                 }
                 overlay.Flush(width, height, clip);
             }
@@ -269,6 +271,15 @@ public sealed class UiPainter : IDisposable
         opaqueRects.Clear();
     }
 
+    /// <summary>Records the part of <paramref name="dest"/> that is opaque: all of it when every texel of <paramref name="source"/> is, else (when <paramref name="allowCore"/>) the stretched image of the slice's largest opaque core, so ragged panel edges do not disqualify the solid middle.</summary>
+    void AddOpaque(OpacityMask mask, UiRect source, UiRect dest, UiRect clip, bool allowCore)
+    {
+        if (mask.Covers(source)) { opaqueRects.Add(dest.Intersect(clip)); return; }
+        if (!allowCore || source.Width <= 0 || source.Height <= 0 || mask.Core(source) is not { } core) return;
+        float fx = dest.Width / source.Width, fy = dest.Height / source.Height;
+        opaqueRects.Add(new UiRect(dest.X + (core.X - source.X) * fx, dest.Y + (core.Y - source.Y) * fy, core.Width * fx, core.Height * fy).Intersect(clip));
+    }
+
     /// <summary>The area of the union of <paramref name="rects"/> (overlaps once): the cells of the grid their edges make, each in or out.</summary>
     internal static double UnionArea(List<UiRect> rects)
     {
@@ -294,6 +305,7 @@ public sealed class UiPainter : IDisposable
         readonly ulong[] bits;
         readonly int width, height;
         readonly Dictionary<(int X0, int Y0, int X1, int Y1), bool> answers = new();
+        readonly Dictionary<(int X0, int Y0, int X1, int Y1), UiRect?> cores = new();
 
         public OpacityMask(RgbaImage image)
         {
@@ -316,6 +328,43 @@ public sealed class UiPainter : IDisposable
                     if ((bits[i >> 6] & 1UL << (i & 63)) == 0) { opaque = false; break; }
                 }
             return answers[key] = opaque;
+        }
+
+        /// <summary>The largest rectangle of opaque texels inside <paramref name="source"/>, inset one texel so bilinear taps never reach a translucent neighbour; null when none is left.</summary>
+        public UiRect? Core(UiRect source)
+        {
+            (int X0, int Y0, int X1, int Y1) key = (Math.Max(0, (int)MathF.Floor(source.X)), Math.Max(0, (int)MathF.Floor(source.Y)), Math.Min(width, (int)MathF.Ceiling(source.X + source.Width)), Math.Min(height, (int)MathF.Ceiling(source.Y + source.Height)));
+            if (cores.TryGetValue(key, out var known)) return known;
+            int w = key.X1 - key.X0, h = key.Y1 - key.Y0;
+            UiRect? best = null;
+            if (w > 2 && h > 2)
+            {
+                var heights = new int[w];
+                var stack = new Stack<int>();
+                long bestArea = 0;
+                for (int row = 0; row < h; row++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        int i = (key.Y0 + row) * width + key.X0 + x;
+                        heights[x] = (bits[i >> 6] & 1UL << (i & 63)) != 0 ? heights[x] + 1 : 0;
+                    }
+                    stack.Clear();
+                    for (int x = 0; x <= w; x++)
+                    {
+                        int at = x == w ? 0 : heights[x];
+                        while (stack.Count > 0 && heights[stack.Peek()] >= at)
+                        {
+                            int top = heights[stack.Pop()], left = stack.Count > 0 ? stack.Peek() + 1 : 0;
+                            long area = (long)top * (x - left);
+                            if (area > bestArea) { bestArea = area; best = new UiRect(key.X0 + left, key.Y0 + row - top + 1, x - left, top); }
+                        }
+                        stack.Push(x);
+                    }
+                }
+                if (best is { } found) best = found.Width > 2 && found.Height > 2 ? new UiRect(found.X + 1, found.Y + 1, found.Width - 2, found.Height - 2) : null;
+            }
+            return cores[key] = best;
         }
     }
 

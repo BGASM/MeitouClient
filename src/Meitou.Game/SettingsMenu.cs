@@ -121,6 +121,9 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
             result.Add(new("UI style", "Choose original Kenshi skins or Meitou materials.", Choice: new(() => ["Faithful", "Meitou"],
                 () => (int)player.UiMode, i => player.SetUiMode((UiMode)i))));
         if (page == 2)
+            result.Add(new("Speed units", "The unit of the run speed in the character's information panel (the game: mph).", Choice: new(() => ["mph", "km/h"],
+                () => (int)config.SpeedUnit, i => player.SpeedUnit = config.SpeedUnit = (SpeedUnit)i)));
+        if (page == 2)
             result.Add(new("Hardware mouse", "Use the Windows cursor instead of the game's drawn pointer (no hover pointers).",
                 Toggle: new("Hardware mouse", () => config.HardwareMouse, v => config.HardwareMouse = v)));
         if (page == 3)
@@ -349,6 +352,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         config.HardwareMouse = false;
         config.HoverOutline = true;
         player.SetUiMode(UiMode.Faithful);
+        player.SpeedUnit = config.SpeedUnit = SpeedUnit.Mph;
         bindings.ResetToDefaults();
         resetPending = false;
         notice = "Default settings restored.";

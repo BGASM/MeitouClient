@@ -175,6 +175,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         LoadingStep("interface");
         player = new PlayerInterface(session, heights.HeightAt, DrawnPosition);
         player.LoadUi(g.UiMode ?? config.UiMode, assets.Find);
+        player.SpeedUnit = config.SpeedUnit;
         player.MoveMarker = gpu.MoveMarker ??= MoveMarkerRenderer.Create(context, assets.Find);
         gpu.HoverOutline ??= new HoverOutlineRenderer(context);
         player.Floor = (() => viewedFloor, StepFloor);
