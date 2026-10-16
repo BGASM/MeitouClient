@@ -20,6 +20,7 @@ namespace Meitou.Tests.Simulation;
 public class ConstructionTests
 {
     const string Plank = "70-t", Iron = "71-t", Hut = "80-t", Shed = "81-t", Outpost = "82-t", Research = "90-t";
+    const string WallRecord = "83-t", ShortRecord = "84-t", GateRecord = "85-t", ConnectorRecord = "86-t";
     /// <summary>Engineering 41.17647: lerp(0.3, 2, e/100) is 1, the factor the build window's estimate leaves out.</summary>
     const float Unit = 100 * 0.7f / 1.7f;
 
@@ -46,9 +47,25 @@ public class ConstructionTests
         var outpost = Rec(Outpost, FcsRecordType.BUILDING, "Test Camp Hut");
         outpost.Ints["build materials"] = 2;
         outpost.Bools["creates player town"] = true;
-        research.References["enable buildings"] = [new FcsReference(Hut, 0, 0, 0), new FcsReference(Shed, 0, 0, 0), new FcsReference(Outpost, 0, 0, 0)];
+        FcsRecord Wall(string id, string name, int linkType, float length, int materials)
+        {
+            var r = Rec(id, FcsRecordType.BUILDING, name);
+            r.Bools["links together"] = true;
+            r.Ints["link type"] = linkType;
+            r.Floats["link length"] = length;
+            r.Ints["build materials"] = materials;
+            return r;
+        }
+        var wall = Wall(WallRecord, "Test Wall", 0, 100, 2);
+        wall.References["wall subsections"] = [new FcsReference(ShortRecord, 0, 0, 0), new FcsReference(ConnectorRecord, 0, 0, 0)];
+        var gate = Wall(GateRecord, "Test Gate", 3, 100, 2);
+        gate.Bools["is wall gate"] = true;
+        gate.References["wall subsections"] = [new FcsReference(ConnectorRecord, 0, 0, 0)];
+        research.References["enable buildings"] = [new FcsReference(Hut, 0, 0, 0), new FcsReference(Shed, 0, 0, 0), new FcsReference(Outpost, 0, 0, 0),
+            new FcsReference(WallRecord, 0, 0, 0), new FcsReference(GateRecord, 0, 0, 0)];
         var file = new FcsFile();
-        file.Records.AddRange([Item(Plank, "Plank"), Item(Iron, "Iron"), Item(BuildingBuildData.BuildingMaterialsItem, "Building Materials"), hut, shed, outpost, research]);
+        file.Records.AddRange([Item(Plank, "Plank"), Item(Iron, "Iron"), Item(BuildingBuildData.BuildingMaterialsItem, "Building Materials"), hut, shed, outpost, research,
+            wall, gate, Wall(ShortRecord, "Test Wall Short", 4, 50, 1), Wall(ConnectorRecord, "Test Wall Connector", 1, 20, 1)]);
         var db = new GameDatabase();
         db.Apply(file, "test.mod");
         return db;
@@ -219,6 +236,59 @@ public class ConstructionTests
             BuildingSave.Write(again.Game, back.World, PlayerFactionId, 7);
             Assert.Equal(entry.Id, Assert.Single(again.Game.TownInstanceList!.Instances).Id);
             Assert.Equal(Hand.Read(state, "hand"), Hand.Read(Assert.Single(again.Game.Towns).Record, "hand"));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    // ------------------------------------------------------------------ walls
+
+    /// <summary>
+    /// A short piece laid at a wall's end attaches to it (<c>FUN_14029ac50</c>): a build order on the short builds the wall, and the wall's completion completes the short with nothing
+    /// delivered to it. The link is not saved; reading the save attaches it again. A connector at a gate's start stays on its own (a gate is not a WallBuilding).
+    /// </summary>
+    [Fact]
+    public void A_short_at_a_wall_end_is_built_by_its_wall_and_reattaches_after_a_save_while_a_gate_takes_no_connector()
+    {
+        const string PlayerFactionId = "204-gamedata.base";
+        var wallAt = new Vector3(2000, 300, 3000);
+        var gateAt = new Vector3(2600, 300, 3000);
+        using var rig = new Rig();
+        var builder = rig.Add(2000, 2980, Unit, (BuildingBuildData.BuildingMaterialsItem, 2));
+        rig.Say(new PlaceBuildings([
+            new PlannedBuilding(WallRecord, wallAt, Quaternion.Identity), new PlannedBuilding(ShortRecord, wallAt + new Vector3(0, 0, 100), Quaternion.Identity),
+            new PlannedBuilding(GateRecord, gateAt, Quaternion.Identity), new PlannedBuilding(ConnectorRecord, gateAt, Quaternion.Identity)]) { Tick = 0 });
+        rig.World.RunTick();
+        var sites = rig.World.Buildings.All;
+        var wall = sites.Single(s => s.Record == WallRecord);
+        var piece = sites.Single(s => s.Record == ShortRecord);
+        Assert.Equal(wall.Id, piece.WallParent);
+        Assert.Null(sites.Single(s => s.Record == ConnectorRecord).WallParent);
+
+        rig.Say(new BuildOrder([builder], piece.Id) { Tick = rig.World.Tick });
+        for (int t = 0; t < 20000 && !wall.Complete; t++) rig.World.RunTick();
+        Assert.True(wall.Complete);
+        Assert.True(piece.Complete);
+        Assert.Equal(piece.Target, piece.Progress);
+        Assert.All(piece.Materials, m => Assert.Equal(0, m.Delivered));
+        Assert.Equal(0, rig.Carried(builder, BuildingBuildData.BuildingMaterialsItem));
+
+        var save = new SaveBuilder(1);
+        save.AddFaction(PlayerFactionId, "Nameless", true, 1000, []);
+        save.AddEmptyWorldState();
+        BuildingSave.Write(save.Game, rig.World, PlayerFactionId, 5);
+        string dir = Path.Combine(Path.GetTempPath(), "meitou-wall-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            save.Game.Write(dir);
+            using var back = new Rig();
+            Assert.Equal(4, BuildingSave.Read(SaveGame.Load(dir), back.World, back.Db, PlayerFactionId, Rig.PlayerFaction));
+            var read = back.World.Buildings.Find(piece.Id)!;
+            Assert.Equal(wall.Id, read.WallParent);
+            Assert.True(read.Complete);
+            Assert.Null(back.World.Buildings.All.Single(s => s.Record == ConnectorRecord).WallParent);
         }
         finally
         {
