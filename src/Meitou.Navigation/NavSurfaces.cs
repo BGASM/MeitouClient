@@ -49,27 +49,66 @@ public sealed class NavSurfaces
     int Col(float x) => Math.Clamp((int)((x - min.X) / Cell), 0, columns - 1);
     int Row(float z) => Math.Clamp((int)((z - min.Y) / Cell), 0, rows - 1);
 
-    /// <summary>The height of the surface at (x, z) nearest to <paramref name="y"/>, when one is within <paramref name="range"/>.</summary>
+    /// <summary>
+    /// How far (units) beside a surface's edge its edge height still counts (engine choice: two Recast cells). The mesh reaches a cell or two past the
+    /// edge of a raised floor (Observed: the landing at the Hub bar's door), where nothing but the terrain far below is under it.
+    /// </summary>
+    public const float EdgeReach = 4;
+
+    /// <summary>
+    /// The height of the surface at (x, z) nearest to <paramref name="y"/>, when one is within <paramref name="range"/>. A surface beside the point within
+    /// <see cref="EdgeReach"/> counts with its edge height, its distance added to the difference (a steep side under the point loses to the top beside it).
+    /// </summary>
     public bool TryNear(float x, float z, float y, float range, out float height)
     {
         height = y;
         if (cells.Length == 0) return false;
-        int cx = (int)MathF.Floor((x - min.X) / Cell), cz = (int)MathF.Floor((z - min.Y) / Cell);
-        if (cx < 0 || cz < 0 || cx >= columns || cz >= rows) return false;
-        float best = range;
-        bool found = false;
-        foreach (int t in cells[cz * columns + cx])
+        float best = range, bestEdge = range, edgeHeight = y;
+        bool found = false, foundEdge = false;
+        int x0 = Math.Max(0, (int)MathF.Floor((x - EdgeReach - min.X) / Cell)), x1 = Math.Min(columns - 1, (int)MathF.Floor((x + EdgeReach - min.X) / Cell));
+        int z0 = Math.Max(0, (int)MathF.Floor((z - EdgeReach - min.Y) / Cell)), z1 = Math.Min(rows - 1, (int)MathF.Floor((z + EdgeReach - min.Y) / Cell));
+        for (int cz = z0; cz <= z1; cz++)
+            for (int cx = x0; cx <= x1; cx++)
+                foreach (int t in cells[cz * columns + cx])
+                {
+                    var a = Corners[t * 3]; var b = Corners[t * 3 + 1]; var c = Corners[t * 3 + 2];
+                    if (NavGeometry.Barycentric(x, z, a, b, c, out float l1, out float l2, out float l3) && l1 >= -1e-4f && l2 >= -1e-4f && l3 >= -1e-4f)
+                    {
+                        float h = l1 * a.Y + l2 * b.Y + l3 * c.Y;
+                        float d = MathF.Abs(h - y);
+                        if (d > best) continue;
+                        best = d;
+                        height = h;
+                        found = true;
+                    }
+                    else if (EdgeHeight(a, b, c, x, z, out float reach) is { } e && MathF.Abs(e - y) + reach <= bestEdge)
+                    {
+                        bestEdge = MathF.Abs(e - y) + reach;
+                        edgeHeight = e;
+                        foundEdge = true;
+                    }
+                }
+        if (foundEdge && (!found || bestEdge < best)) height = edgeHeight;
+        return found || foundEdge;
+    }
+
+    /// <summary>The height of the triangle's edge point nearest to (x, z) seen from above, when it is within <see cref="EdgeReach"/>.</summary>
+    static float? EdgeHeight(Vector3 a, Vector3 b, Vector3 c, float x, float z, out float reach)
+    {
+        float bestD = EdgeReach * EdgeReach;
+        float? h = null;
+        reach = EdgeReach;
+        foreach (var (p, q) in ((Vector3, Vector3)[])[(a, b), (b, c), (c, a)])
         {
-            var a = Corners[t * 3]; var b = Corners[t * 3 + 1]; var c = Corners[t * 3 + 2];
-            if (!NavGeometry.Barycentric(x, z, a, b, c, out float l1, out float l2, out float l3) || l1 < -1e-4f || l2 < -1e-4f || l3 < -1e-4f) continue;
-            float h = l1 * a.Y + l2 * b.Y + l3 * c.Y;
-            float d = MathF.Abs(h - y);
-            if (d > best) continue;
-            best = d;
-            height = h;
-            found = true;
+            float dx = q.X - p.X, dz = q.Z - p.Z, len2 = dx * dx + dz * dz;
+            float t = len2 < 1e-9f ? 0 : Math.Clamp(((x - p.X) * dx + (z - p.Z) * dz) / len2, 0, 1);
+            float ex = p.X + t * dx - x, ez = p.Z + t * dz - z, d = ex * ex + ez * ez;
+            if (d > bestD) continue;
+            bestD = d;
+            reach = MathF.Sqrt(d);
+            h = p.Y + t * (q.Y - p.Y);
         }
-        return found;
+        return h;
     }
 
     /// <summary>The walkable non-terrain triangles of gathered geometry (buildings and foliage) whose box touches the zone box grown by <paramref name="margin"/>.</summary>
