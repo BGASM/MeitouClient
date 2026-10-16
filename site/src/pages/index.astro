@@ -16,12 +16,14 @@ import Base from '../layouts/Base.astro';
     </a>
   </section>
 
-  <section id="about" class="about">
-    <div class="about-text">
-      <h2>Subsection Title</h2>
-      <p>Placeholder text for this section.</p>
+  <section id="about" class="band">
+    <div class="about">
+      <div class="about-text">
+        <h2>Subsection Title</h2>
+        <p>Placeholder text for this section.</p>
+      </div>
+      <img class="about-image" src="/bgvideo.jpg" alt="" width="1920" height="1080" loading="lazy" />
     </div>
-    <img class="about-image" src="/bgvideo.jpg" alt="" width="1920" height="1080" loading="lazy" />
   </section>
 </Base>
 
@@ -37,10 +39,23 @@ import Base from '../layouts/Base.astro';
   .lede { max-width: 620px; margin: 0; font-size: 18px; line-height: 27px; text-shadow: 0 1px 8px rgba(8, 6, 5, .8); }
   /* The name set like the wordmark: Meitou semibold, Client regular. */
   .name > span { font-weight: 400; }
-  /* Below the video: Learn More scrolls here. */
-  /* Text left, image right, at most 1600px wide and centred. */
-  .about { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; max-width: 1600px; margin: 0 auto; padding: 72px 0; }
-  .about h2 { margin: 0 0 var(--space-5); color: #fff; font: 600 32px/40px var(--font-exo); }
+  /* Below the video, where Learn More scrolls: a worn paper band framed like the video (the kit's paper drawn in CSS,
+     with a fine grain standing in for the texture). */
+  .band {
+    margin: 0 calc(var(--frame) - var(--edge));
+    padding: 0 calc(var(--edge) - var(--frame));
+    border-radius: calc(4 * var(--radius-card));
+    background:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .24 0 0 0 0 .14 0 0 0 0 .08 0 0 0 .22 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+      radial-gradient(ellipse at 15% 20%, rgba(217, 206, 184, .35), transparent 60%),
+      radial-gradient(ellipse at 85% 90%, rgba(60, 35, 20, .3), transparent 55%),
+      var(--paper);
+    box-shadow: var(--paper-border);
+    color: var(--secondary);
+  }
+  /* Text left, image right, at most 1280px wide and centred. */
+  .about { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; max-width: 1280px; margin: 0 auto; padding: 72px 0; }
+  .about h2 { margin: 0 0 var(--space-5); color: var(--secondary); font: 600 32px/40px var(--font-exo); }
   .about p { max-width: 620px; margin: 0; font-size: 18px; line-height: 27px; }
   .about-image { display: block; width: 100%; height: auto; border-radius: calc(2 * var(--radius-card)); }
   @media (max-width: 800px) { .about { grid-template-columns: 1fr; } }
