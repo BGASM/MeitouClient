@@ -6,24 +6,39 @@ import Base from '../layouts/Base.astro';
     <div class="stack">
       <h1>Run Kenshi on a new engine</h1>
       <p class="lede">
-        <span class="name">Meitou<span>Client</span></span> is an open-source reimplementation of the original engine.
+        <span class="name">Meitou<span>Client</span></span> is an open-source reimplementation of the Kenshi engine.
         Fully compatible with FCS mods and vanilla save games. Requires original copy to run
       </p>
     </div>
-    <a class="mt-btn mt-btn-primary more" href="https://github.com/VlcekM/MeitouClient#readme">Learn More</a>
+    <a class="mt-btn more" href="#about">
+      <svg class="more-icon" viewBox="0 0 24 20" width="24" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M9 5l5 5-5 5"/></svg>
+      <span>Learn More</span>
+    </a>
+  </section>
+
+  <section id="about" class="about">
+    <h2>Section Title</h2>
+    <p>Placeholder text for this section.</p>
   </section>
 </Base>
 
 <style>
   /* Fills the first view, stack at the top left in place of the wordmark. */
   .hero { position: relative; display: flex; align-items: flex-start; min-height: 100svh; padding: var(--edge) 0; }
-  /* The one paper action, at the bottom left, level with the wordmark at the bottom right. */
-  .more { position: absolute; left: 0; bottom: var(--edge); }
+  /* A main menu plate button (320 x 38, icon column 24 at 12, label at 48), bottom left, level with the wordmark. */
+  .more { position: absolute; left: 0; bottom: var(--edge); width: 320px; max-width: 100%; justify-content: flex-start; padding: 0 12px; }
+  .more-icon { position: relative; flex: none; opacity: .8; transition: opacity .16s ease; }
+  .more:hover .more-icon { opacity: 1; }
   .stack { min-width: 0; }
   h1 { margin: 0 0 var(--space-6); color: #fff; text-shadow: 0 2px 12px rgba(8, 6, 5, .6); white-space: nowrap; font: 600 clamp(32px, 6vw, 52px)/1.1 var(--font-exo); }
   .lede { max-width: 620px; margin: 0; font-size: 18px; line-height: 27px; text-shadow: 0 1px 8px rgba(8, 6, 5, .8); }
   /* The name set like the wordmark: Meitou semibold, Client regular. */
   .name > span { font-weight: 400; }
+  /* Below the video: Learn More scrolls here. */
+  .about { min-height: 60vh; padding: 72px 0; }
+  .about h2 { margin: 0 0 var(--space-5); color: #fff; font: 600 32px/40px var(--font-exo); }
+  .about p { max-width: 620px; margin: 0; font-size: 18px; line-height: 27px; }
+  @media (prefers-reduced-motion: no-preference) { :global(html) { scroll-behavior: smooth; } }
   /* Narrow screens: drop the stack below the links at the top right. */
   @media (max-width: 900px) { .hero { padding-top: calc(var(--edge) + 48px); } }
   @media (max-width: 640px) { h1 { white-space: normal; } }
