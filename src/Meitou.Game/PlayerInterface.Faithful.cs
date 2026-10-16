@@ -209,6 +209,41 @@ sealed partial class PlayerInterface
         if (lead is not null) b.Properties["SpeedPanel"] = new Dictionary<string, string> { ["ImageName"] = RunSpeedIcons[Math.Min((int)lead.RunSpeed, RunSpeedIcons.Length - 1)] };
     }
 
+    /// <summary>
+    /// The jobs list (<c>JobsPanel</c>, docs/game/ui-screens.md section 4): the lead's jobs, one row each with an X that removes it from that character; with none, the
+    /// layout's hint. Meitou's jobs are the medic and rescue jobs, named as their buttons, in that order (the original's row text and order are <b>Unknown</b>).
+    /// </summary>
+    void BindJobs(UiBindings b, Meitou.Simulation.CharacterSnapshot? lead)
+    {
+        var jobs = new List<UiListItem>();
+        if (lead?.Body is { MedicJob: true }) jobs.Add(new("medic", "Medic"));
+        if (lead?.Body is { RescueJob: true }) jobs.Add(new("rescue", "Rescue"));
+        b.Lists["JobsPanel"] = jobs;
+        // A few rows never overflow the box, and MyGUI shows an ItemBox's scroll bars only on overflow.
+        foreach (var bar in faithfulHud.Find("JobsPanel")?.Children.Where(w => w.Type == "ScrollBar") ?? []) b.HiddenWidgets.Add(bar);
+        if (jobs.Count > 0) b.Hidden.Add("JobsPanelInfo");
+        else b.Text["JobsPanelInfo"] = "[No jobs assigned]\n[To add jobs, hold shift key when giving an order]";
+    }
+
+    /// <summary>The X at the right end of each jobs row (the original's remove button, its tutorial: "remove a job at any time by pressing the X button").</summary>
+    static void AddJobRemoveButtons(List<UiControl> controls)
+    {
+        foreach (var row in controls.Where(c => c.Properties.GetValueOrDefault("ListOwner") == "JobsPanel").ToArray())
+        {
+            float size = row.Bounds.Height - 4;
+            controls.Add(new($"{row.Name}-remove", "Button", new(row.Bounds.X + row.Bounds.Width - size - 2, row.Bounds.Y + 2, size, size), "", "meitou:job-remove",
+                "Kenshi_CloseButtonSkin", true, new Dictionary<string, string>(), Vector4.Zero, Argument: row.Argument, Clip: row.Clip));
+        }
+    }
+
+    /// <summary>Takes a job (the jobs list's row id) off the lead whose list shows it.</summary>
+    void RemoveJob(string job)
+    {
+        if (Lead() is not { IsPlayer: true } lead) return;
+        if (job == "medic") Say(new Meitou.Simulation.FirstAid.MedicJobCommand([lead.Id], false) { Tick = session.World.Tick });
+        else if (job == "rescue") Say(new Meitou.Simulation.Carrying.RescueJobCommand([lead.Id], false) { Tick = session.World.Tick });
+    }
+
     /// <summary>The speed icon per mode: the <c>Kenshi_CharacterSpeedSet</c> image names, in mode order.</summary>
     static readonly string[] RunSpeedIcons = ["Walk", "Jog", "Run", "Group"];
 

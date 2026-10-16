@@ -50,7 +50,13 @@ public static class MyGuiPresentation
                     : w.Position.RelativeTo(parent, false);
             if (bindings.Progress.TryGetValue(w.Name, out float fraction)) bounds = bounds with { Width = bounds.Width * Math.Clamp(fraction, 0, 1) };
             string caption = bindings.Text.GetValueOrDefault(w.Name) ?? props.GetValueOrDefault("Caption") ?? "";
-            if (props.TryGetValue("CaptionOwner", out string? owner)) caption = bindings.Text.GetValueOrDefault(owner) ?? layout.Find(owner)?.Properties.GetValueOrDefault("Caption") ?? "";
+            if (props.TryGetValue("CaptionOwner", out string? owner))
+            {
+                caption = bindings.Text.GetValueOrDefault(owner) ?? layout.Find(owner)?.Properties.GetValueOrDefault("Caption") ?? "";
+                // An EditBox's WordWrap is its text's, which the template's client draws.
+                if (!props.ContainsKey("WordWrap") && ((bindings.Properties.GetValueOrDefault(owner)?.GetValueOrDefault("WordWrap")) ?? layout.Find(owner)?.Properties.GetValueOrDefault("WordWrap")) is { } wrap)
+                    props["WordWrap"] = wrap;
+            }
             if (props.GetValueOrDefault("SkipCaption") == "true") caption = "";
             string action = bindings.Actions.GetValueOrDefault(w.Name) ?? "";
             if (props.TryGetValue("TemplateEvent", out string? ev) && props.TryGetValue("TemplateOwner", out var target))

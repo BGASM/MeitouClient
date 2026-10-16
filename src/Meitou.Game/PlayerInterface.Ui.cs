@@ -122,7 +122,7 @@ sealed partial class PlayerInterface
         b.Actions["OrdersMedicButton"] = "meitou:medic";
         b.Actions["OrdersRescueButton"] = "meitou:rescue";
         BindOrders(b, lead);
-        foreach (string name in new[] { "LoadingPanel", "TownPanel", "TooltipPanel", "MessagePanel", "BiomeTextPanel", "JobsPanel" }) b.Hidden.Add(name);
+        foreach (string name in new[] { "LoadingPanel", "TownPanel", "TooltipPanel", "MessagePanel", "BiomeTextPanel" }) b.Hidden.Add(name);
         // The viewed floor (the exe's "Floor {1,num}", docs/game/ui-screens.md section 4; docs/formats/zones.md "Interior view"); the arrows step it as PageUp / PageDown do.
         b.Text["FloorText"] = $"Floor {Floor?.Get() ?? 0}";
         b.Actions["FloorArrowUp"] = "meitou:floor-up";
@@ -139,7 +139,7 @@ sealed partial class PlayerInterface
         b.Actions["ExtendedStatsButton"] = "meitou:extendedstats";
         if (session.Simulation.Speed != 0) b.Hidden.Add("PausedPanel");
         BindMedicalBars(b, lead);
-        b.Hidden.Add("JobsPanelInfo");
+        BindJobs(b, lead);
         // The squad bar has one tab per squad of the player's; Meitou has one squad, so the first page shows, captioned with its name.
         foreach (var widget in faithfulHud.Find("SquadPanel")?.Children.Where(w => w.Type == "TabItem").Skip(1) ?? []) b.HiddenWidgets.Add(widget);
         b.Text["SquadPanel@tab0"] = SquadTabCaption(lead);
@@ -179,6 +179,7 @@ sealed partial class PlayerInterface
         if (!TitleOpen) controls.AddRange(uiHost.Arrange(UiMode, Width, Height, b, slots));
         if (controls.FirstOrDefault(c => c.Name == "SquadPanel") is { } squadPanel) AddSquadPortraits(controls, squadPanel.Bounds);
         AddHudText(controls);
+        AddJobRemoveButtons(controls);
         foreach (var screen in faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent))
         {
             controls.AddRange(screen.Controls.Where(c => UiMode == UiMode.Faithful ||
@@ -247,6 +248,7 @@ sealed partial class PlayerInterface
         else if (action == "stop") Say(new StopCommand(SelectedIds()) { Tick = session.World.Tick });
         else if (action == "medic") Say(new Meitou.Simulation.FirstAid.MedicJobCommand(SelectedIds()) { Tick = session.World.Tick });
         else if (action == "rescue") Say(new Meitou.Simulation.Carrying.RescueJobCommand(SelectedIds()) { Tick = session.World.Tick });
+        else if (action == "job-remove") RemoveJob(argument);
         else if (action is "buy" or "sell" or "trade.close" or "trade.page") TradeAction(action, argument);
         else if (action.StartsWith("order.", StringComparison.Ordinal) && Enum.TryParse(action[6..], out CharacterOrders order))
             Say(new OrdersCommand(SelectedIds(), order) { Tick = session.World.Tick });
