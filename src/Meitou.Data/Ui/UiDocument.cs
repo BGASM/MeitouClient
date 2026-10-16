@@ -20,6 +20,8 @@ public sealed class UiBindings
     public HashSet<string> Disabled { get; } = new(StringComparer.Ordinal);
     public HashSet<MyGuiWidget> HiddenWidgets { get; } = [];
     public Dictionary<string, UiRect> Positions { get; } = new(StringComparer.Ordinal);
+    /// <summary>Parent-relative runtime geometry, including anonymous layout panels.</summary>
+    public Dictionary<MyGuiWidget, UiRect> RelativePositions { get; } = [];
     public Dictionary<string, int> SelectedTabs { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, float> Progress { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, string> States { get; } = new(StringComparer.Ordinal);
@@ -40,7 +42,8 @@ public static class MyGuiPresentation
             var props = new Dictionary<string, string>(w.Properties, StringComparer.Ordinal);
             if (bindings.Properties.TryGetValue(w.Name, out var overrides)) foreach (var p in overrides) props[p.Key] = p.Value;
             if (props.GetValueOrDefault("Visible") == "false") return;
-            var bounds = bindings.Positions.TryGetValue(w.Name, out var positioned) ? positioned : w.RealPosition ? w.Position.RelativeTo(parent, true)
+            var bounds = bindings.Positions.TryGetValue(w.Name, out var positioned) ? positioned
+                : bindings.RelativePositions.TryGetValue(w, out var relative) ? relative.RelativeTo(parent, true) : w.RealPosition ? w.Position.RelativeTo(parent, true)
                 : props.TryGetValue("TemplateReferenceWidth", out var rw) && props.TryGetValue("TemplateReferenceHeight", out var rh)
                     ? new UiRect(w.Position.X * bindings.TemplateScale, w.Position.Y * bindings.TemplateScale, w.Position.Width * bindings.TemplateScale, w.Position.Height * bindings.TemplateScale)
                         .AlignTo(parent, float.Parse(rw, System.Globalization.CultureInfo.InvariantCulture) * bindings.TemplateScale, float.Parse(rh, System.Globalization.CultureInfo.InvariantCulture) * bindings.TemplateScale, w.Align)

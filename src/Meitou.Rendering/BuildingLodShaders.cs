@@ -30,12 +30,14 @@ static class BuildingLodShaders
             uniform vec3 uFadeEye;
             uniform vec4 uFadeRange;
             out vec2 vRange;
+            flat out float vInterior;
             #define uModel mat4(vec4(aInstance0.xyz, 0.0), vec4(aInstance1.xyz, 0.0), vec4(aInstance2.xyz, 0.0), vec4(aInstance3.xyz, 1.0))
             """);
         v = Replace(v, @"void\s+main\s*\(\s*\)\s*\{", """
             void main()
             {
                 vRange = vec2(aInstance0.w, aInstance1.w);
+                vInterior = aInstance2.w;
                 if (uFadeMode == 1)
                 {
                     float fd = length((uModel * vec4(aPosition, 1.0)).xyz - uFadeEye);
@@ -53,6 +55,7 @@ static class BuildingLodShaders
         f = Replace(f, @"#version\s+330\s+core", """
             #version 330 core
             in vec2 vRange;
+            flat in float vInterior;
             float ditherValue() { return fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))); }
             """);
         if (solid) f = Replace(f, @"if\s*\(\s*uAlphaThreshold\s*>\s*0\.0\s*&&\s*alpha\s*<\s*uAlphaThreshold\s*\)\s*discard\s*;", "");
@@ -81,6 +84,7 @@ static class BuildingLodShaders
             """, """
             vec3 v = normalize(uEye - vWorld);
             vec3 colour;
+            giInterior = vInterior > 0.5;
             if (uFogDistance > 0.0 && uAtmoParams.x > 0.5) colour = kenshiLight(albedo, n, v, glossLit, vWorld);
             else
             {

@@ -132,7 +132,7 @@ sealed partial class GameHost
         readingFolder = folder;
         Task<SaveGame>? read = null;
         string summary = "";
-        StartSceneLoad(
+        StartSceneLoad(player.TitleOpen,
             Stage("read", () => read = Task.Run(() => SaveGame.Load(folder))),
             Stage("build", () => SwapInSave(read!, interactive: true, out summary)),
             Stage("finishing", () => { SettleNewWorld(); FinishLoadNotice(summary); return null; }));
@@ -158,7 +158,15 @@ sealed partial class GameHost
             built = BuildSystems(interactive);
             var data = popData!;
             // A world that fails to load leaves the old one running (ReplaceWorld drops the half-made one).
-            session.ReplaceWorld(built.Systems, world => loaded = SaveLoader.Load(world, read.Result, data, new SaveLoadOptions { Appearances = data.Appearances }));
+            session.ReplaceWorld(built.Systems, world =>
+            {
+                loaded = SaveLoader.Load(world, read.Result, data, new SaveLoadOptions { Appearances = data.Appearances });
+                if (world.Squads.Find(world.Player.Squad) is { Members.Count: > 0 } squad)
+                {
+                    world.Player.Selection.Clear();
+                    world.Player.Selection.Add(squad.Members[0]);
+                }
+            });
         }
         catch (Exception e) when (e is not SceneLoadFailed)
         {

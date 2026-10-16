@@ -36,6 +36,9 @@ internal sealed unsafe partial class CharacterRenderer
     /// <summary>The fog cull (set once by the world frame; the colour and motion passes use it, not the shadow cascades): characters wholly hidden by the fog the eye is in are skipped.</summary>
     internal FogVolumes? FogCull { get; set; }
 
+    /// <summary>Room masks used to give indoor characters the same indirect-light gain as their surroundings.</summary>
+    internal WorldObjectRenderer? InteriorObjects { get; set; }
+
     /// <summary>Draws the characters seen from <paramref name="eye"/> through <paramref name="frustum"/> into the open pass.</summary>
     public void Draw(Matrix4x4 viewProjection, Vector3 eye, Vector4[] frustum, Vector3 light, Vector3 fogColour, float fogDistance) =>
         DrawView(new ViewConstants { ViewProjection = viewProjection, Eye = eye, LightDir = light, FogColour = fogColour, FogDistance = fogDistance }, eye, frustum);
@@ -73,6 +76,7 @@ internal sealed unsafe partial class CharacterRenderer
             if (portraitLive < 0 && (l.PortraitOnly || !FrustumTests.SphereVisible(frustum, l.Centre, l.Radius))) continue;
             if (!depthPass && portraitLive < 0 && FogCull?.Hidden(l.Centre, l.Radius, FogVolumes.CullKind.Characters) == true) continue;
             DrawnCharacters++;
+            bool interior = portraitLive < 0 && InteriorObjects?.InteriorAt(l.Centre) is not null;
             foreach (var part in l.Asset.Parts)
             {
                 if (!part.ShowsWith(l.WeaponDrawn)) continue;
@@ -87,7 +91,7 @@ internal sealed unsafe partial class CharacterRenderer
                 int level = MeshLod.Select(mesh.Distances, value);
                 if (depthPass && part.ShadowDistances is { } shadowLevels && MeshLod.Select(shadowLevels, value) is int k && k > 0) level = part.ShadowFirst + k - 1;   // the body's shadow-only levels
                 bool twoSided = part.Material.DoubleSided;
-                var instance = new CharInstance { Model = model, BoneBase = (uint)l.BoneBase, Material = (uint)part.MaterialSlot, MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
+                var instance = new CharInstance { Model = model, BoneBase = (uint)l.BoneBase, Material = (uint)part.MaterialSlot, Flags = interior ? 1u : 0u, MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
                 if (motionPass)
                 {
                     var previousWorld = Relative(l.State.PreviousWorld, origin);

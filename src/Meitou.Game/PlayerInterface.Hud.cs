@@ -13,7 +13,7 @@ sealed partial class PlayerInterface
     static readonly double[] ButtonSpeeds = [0, .. SimulationClock.Speeds];
     const float Margin = 10, Pad = 6;
 
-    public float HudBottom => UiMode == Meitou.Data.Ui.UiMode.Meitou ? 0 : 48;
+    public float HudBottom => 48;
 
     // ---- notices ----
 

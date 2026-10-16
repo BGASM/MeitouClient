@@ -23,6 +23,10 @@ internal sealed unsafe class GiProbes : IDisposable
     public const int ProbesPerCascade = Columns * Columns * Layers, Probes = ProbesPerCascade * Cascades;
     /// <summary>Per cascade: the spacing across, the spacing up, the rays' length.</summary>
     static readonly (float Spacing, float SpacingY, float RayLength)[] Grid = [(128, 96, 4000), (512, 384, 16000)];
+    bool interiorGrid;
+    int interiorLevel;
+    (float Spacing, float SpacingY, float RayLength) Layout(int cascade) =>
+        cascade == 0 && interiorGrid ? (32, 24, Grid[0].RayLength) : Grid[cascade];
 
     readonly GpuContext ctx;
     readonly ShaderProgram invalidateProgram;
@@ -67,8 +71,14 @@ internal sealed unsafe class GiProbes : IDisposable
     /// <summary>How much the probes replace the sky's light (1: fully, 0: not at all; <c>--gi-strength</c>).</summary>
     public float Strength { get; set; } = 1;
 
-    /// <summary>What the shaders read: x 1 while the probes are on and filled, y <see cref="Strength"/>, w the hysteresis.</summary>
-    Vector4 Params => new(Enabled && Active && Shade && !InReflection && updated ? 1 : 0, Strength, Resolve ? 1 : 0, Hysteresis);
+    /// <summary>Indoor surface indirect-light gain; applied once at display, without amplifying probe feedback.</summary>
+    public float InteriorGain { get; set; } = 4;
+
+    /// <summary>False: indoor surfaces keep the original ambient while outdoor surfaces still use GI.</summary>
+    public bool InteriorEnabled { get; set; } = true;
+
+    /// <summary>Render globals: x on/filled, y strength, z resolve, w indoor gain (0 bypasses indoor GI). The compute block carries hysteresis.</summary>
+    Vector4 Params => new(Enabled && Active && Shade && !InReflection && updated ? 1 : 0, Strength, Resolve ? 1 : 0, InteriorEnabled ? MathF.Max(1, InteriorGain) : 0);
     /// <summary>True: the lit fragments write their albedo and the post pass adds the probes' light (<c>--gi-resolve</c>, docs/render-gi.md "Resolve").</summary>
     public bool Resolve { get; set; }
     /// <summary>True while the water reflection draws: the mirrored scene keeps the flat ambient (the frame block is re-read per segment).</summary>
@@ -107,7 +117,7 @@ internal sealed unsafe class GiProbes : IDisposable
         Variant(Rays);
         int rows = Cascades * Columns * Layers;
         irradiance = Texture.Create(ctx, new TextureDesc(Format.R16G16B16A16Sfloat, Columns * (IrradianceTexels + 2), rows * (IrradianceTexels + 2),
-            Use: TextureUse.Storage | TextureUse.Sampled | TextureUse.TransferDst, Name: "gi probe irradiance"));
+            Use: TextureUse.Storage | TextureUse.Sampled | TextureUse.TransferDst | TextureUse.TransferSrc, Name: "gi probe irradiance"));
         distance = Texture.Create(ctx, new TextureDesc(Format.R16G16Sfloat, Columns * (DistanceTexels + 2), rows * (DistanceTexels + 2),
             Use: TextureUse.Storage | TextureUse.Sampled | TextureUse.TransferDst, Name: "gi probe distance"));
         // One per frame slot: the CPU writes the base heights of the frame being recorded while the one before may still read its own.
@@ -164,7 +174,7 @@ internal sealed unsafe class GiProbes : IDisposable
                 float nearest = MathF.Min(now.Radius > 0 ? now.Radius : float.MaxValue, now.Weather > 0 ? now.Weather : float.MaxValue);
                 for (int c = 0; c < Cascades; c++)
                 {
-                    var (s, sy, _) = Grid[c];
+                    var (s, sy, _) = Layout(c);
                     float across = s + GiFogHide.LookupOffset * MathF.Min(s, sy) + 2 * HiddenSlack;
                     float x0 = grid[c * 2].X, z0 = grid[c * 2].Y;
                     int offX = (int)grid[c * 2 + 1].X, offZ = (int)grid[c * 2 + 1].Y;
@@ -237,21 +247,26 @@ internal sealed unsafe class GiProbes : IDisposable
     /// Places the grids around <paramref name="eye"/> (bases from <paramref name="heights"/>) and records this frame's probe trace and blend against
     /// <paramref name="scene"/>'s structure, after its <see cref="GiScene.Update"/>.
     /// </summary>
-    public void Update(GiScene scene, Vector3 eye, HeightSnapshot heights, WorldLamps? lamps = null, FogVolumes? fog = null)
+    public void Update(GiScene scene, Vector3 eye, HeightSnapshot heights, WorldLamps? lamps = null, FogVolumes? fog = null, Vector3? interiorFocus = null)
     {
         if (scene.Top is null) return;
         slot = ctx.Frame.Slot;
         var variant = Variant(Rays);
         int phases = Phases is 1 or 2 or 4 or 8 ? Phases : 4, phase = (int)(Updates % phases);
         bool moved = false;
+        int level = interiorFocus is { } focus ? (int)MathF.Floor(focus.Y / 96) : 0;
+        bool layoutChanged = interiorGrid != interiorFocus.HasValue || interiorLevel != level;
+        interiorGrid = interiorFocus.HasValue;
+        interiorLevel = level;
         for (int c = 0; c < Cascades; c++)
         {
-            var (s, sy, _) = Grid[c];
-            int ox = (int)MathF.Floor(eye.X / s) - Columns / 2, oz = (int)MathF.Floor(eye.Z / s) - Columns / 2;
+            var (s, sy, _) = Layout(c);
+            var centre = c == 0 ? interiorFocus ?? eye : eye;
+            int ox = (int)MathF.Floor(centre.X / s) - Columns / 2, oz = (int)MathF.Floor(centre.Z / s) - Columns / 2;
             grid[c * 2] = new Vector4(ox * s, oz * s, s, sy);
             grid[c * 2 + 1] = new Vector4(Mod(ox, Columns), Mod(oz, Columns), 2 * s, 0);
             // The bases only change when the grid scrolls or the terrain's fine window is swapped.
-            bool sameHeights = ReferenceEquals(placedHeights, heights.Fine);
+            bool sameHeights = ReferenceEquals(placedHeights, heights.Fine) && (c != 0 || !layoutChanged);
             if (placed[c] == (ox, oz) && sameHeights) continue;
             // A column that stays in the window keeps its tile (toroidal) and its height (the snapshot is immutable): only the columns that scrolled in are sampled.
             var (oldX, oldZ) = placed[c];
@@ -268,6 +283,7 @@ internal sealed unsafe class GiProbes : IDisposable
                     float h = heights.HeightAt(x, z);
                     h = MathF.Min(h, MathF.Min(heights.HeightAt(x + s * 0.4f, z), heights.HeightAt(x - s * 0.4f, z)));
                     h = MathF.Min(h, MathF.Min(heights.HeightAt(x, z + s * 0.4f), heights.HeightAt(x, z - s * 0.4f)));
+                    if (c == 0 && interiorGrid) h = MathF.Max(h, (interiorLevel - 1) * 96);
                     baseHeights[(c * Columns + Mod(oz + k, Columns)) * Columns + Mod(ox + i, Columns)] = h;
                 }
         }
@@ -432,7 +448,7 @@ internal sealed unsafe class GiProbes : IDisposable
 
     static int Mod(int a, int n) => ((a % n) + n) % n;
 
-    public string Describe() => $"{Cascades} cascades of {Columns}×{Layers}×{Columns} probes ({Grid[0].Spacing:0} and {Grid[1].Spacing:0} apart), {Rays} rays each, 1/{Phases} a frame, {(Enabled ? "lighting" : "not lighting")}" + (hiddenValid ? $"; fog hides {Hidden[0]} + {Hidden[1]} probes (each updated every {HiddenPeriod}th round; solved {Solves} times, {SolveMs / Math.Max(Solves, 1):0.00} ms each), {Listed} listed this frame" : "");
+    public string Describe() => $"{Cascades} cascades of {Columns}×{Layers}×{Columns} probes ({Layout(0).Spacing:0} and {Grid[1].Spacing:0} apart), {Rays} rays each, 1/{Phases} a frame, {(Enabled ? "lighting" : "not lighting")}" + (hiddenValid ? $"; fog hides {Hidden[0]} + {Hidden[1]} probes (each updated every {HiddenPeriod}th round; solved {Solves} times, {SolveMs / Math.Max(Solves, 1):0.00} ms each), {Listed} listed this frame" : "");
 
     public void Dispose()
     {

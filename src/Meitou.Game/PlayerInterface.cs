@@ -55,6 +55,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     public bool MouseDown(MouseButton button, Vector2 p, bool shift, bool ctrl = false, bool alt = false)
     {
         mouse = p;
+        if (button == MouseButton.Right && CancelInventoryDrag()) return true;
         if (button == MouseButton.Left)
         {
             if (UiMouseDown(p)) return true;
@@ -106,7 +107,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     {
         mouse = p;
         if (MapPointerMove(p)) return;
-        if (UiVisible && UseScreenInput && faithfulScreens.PointerMove(p)) return;
+        if (UiVisible && faithfulScreens.PointerMove(p)) return;
         if (dragFrom is { } from && !dragging && Vector2.Distance(from, p) >= DragThreshold) dragging = true;
     }
 

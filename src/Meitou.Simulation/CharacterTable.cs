@@ -128,7 +128,7 @@ public sealed class CharacterCold
     /// <summary>The rescue job (the original's <c>rescue</c> toggle, NUM8): an idle character picks up a downed member of its faction by itself.</summary>
     public bool RescueJob { get; set; }
     /// <summary>The orders panel's toggles (<see cref="Simulation.Orders"/>); the player's characters only.</summary>
-    public CharacterOrders Orders { get; set; }
+    public CharacterOrders Orders { get; set; } = CharacterOrders.Jobs;
     /// <summary>The speed mode the character's move orders use (the original's saved <c>speed mode</c>: walk, run or no cap); no cap by default.</summary>
     public byte RunSpeed { get; set; } = SpeedMode.Free;
     /// <summary>

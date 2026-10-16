@@ -285,7 +285,7 @@ public sealed class FirstAidSystem(GameConstants constants, BodyOptions options,
             if (!next[i].Alive || next[i].Task is not ((byte)CharacterTask.Idle or (byte)CharacterTask.Wander or (byte)CharacterTask.Follow)) continue;
             var cold = table.Cold(i)!;
             if (cold.Medical is not { Incapacitated: false } || cold.Race is null || cold.Stats is null || cold.Inventory is null || cold.InCombat) continue;
-            if (cold.IsPlayer ? !cold.MedicJob : !Settings.AutoNpcs) continue;
+            if (cold.IsPlayer ? !cold.MedicJob || !Orders.Has(cold, CharacterOrders.Jobs) : !Settings.AutoNpcs) continue;
             bool organic = Best(cold.Inventory, ItemInfo.FirstAidKitFunction) is not null, robotic = Best(cold.Inventory, ItemInfo.RobotKitFunction) is not null;
             if (!organic && !robotic) continue;
             var squad = cold.SquadId >= 0 ? world.Squads.Find(cold.SquadId) : null;

@@ -62,6 +62,7 @@ Foliage logs report layout hits/misses and settle/busy times. The layout key has
 source rather than module/build-path identity; see [formats/foliage.md](formats/foliage.md).
 OS file-cache state is separate. GPU setup, biome texture uploads, river-map generation and
 streamer settling remain costs with warm caches. Separate start-up from steady-state frames.
+The game's `--quit-after` log reports exposed-menu FPS, longest frame and stalls over 100ms separately from covered loading work.
 
 The game/viewer disable tiered compilation and tiered PGO. Experiments can use
 `DOTNET_TieredCompilation` / `DOTNET_TieredPGO`; record these settings. ReadyToRun and tiering

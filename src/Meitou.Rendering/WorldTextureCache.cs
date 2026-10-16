@@ -117,6 +117,16 @@ public sealed unsafe class WorldTextureCache : IDisposable
 
     public List<string> Messages { get; } = [];
     public int PendingCount => pending.Count + (steps.Count > 0 ? 1 : 0);
+    /// <summary>Recently used textures whose initial load is still deferred (e.g. by memory pressure).
+    /// Includes the once-per-second range marking; unused deferred foliage textures do not hold up a scene.</summary>
+    public int UnresidentUsedCount
+    {
+        get
+        {
+            long now = Environment.TickCount64;
+            return cache.Values.Count(t => t.State == WorldTexture.Residency.Unloaded && now - t.LastUsed <= 2000);
+        }
+    }
 
     /// <summary>GPU memory of the resident textures (all levels, RGBA8) and how many there are.</summary>
     public long ResidentBytes { get; private set; }

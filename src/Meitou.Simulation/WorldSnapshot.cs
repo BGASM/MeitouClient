@@ -68,6 +68,7 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     /// <summary>A selected character's trained stats (the host formats them); null for the others and for a character without stats.</summary>
     public SkillSummary? Skills { get; init; }
     public IReadOnlyList<float> AllSkills { get; init; } = [];
+    public IReadOnlyList<float> SkillXpMultipliers { get; init; } = [];
     public IReadOnlyList<HealthPartView> HealthParts { get; init; } = [];
     /// <summary>The HUD's numbers for a selected character (null for the others).</summary>
     public HudView? Hud { get; init; }

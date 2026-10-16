@@ -28,20 +28,25 @@ sealed partial class GameHost
     bool warming;
     double smoothSeconds;
     double warmSeconds;
-    /// <summary>A smooth frame for the warm-up, and how long a run of them ends it; it ends after <see cref="WarmLimit"/> seconds anyway.</summary>
+    double readySeconds;
+    double nextWarmReport;
+    bool titleWarmFinalized;
+    /// <summary>After content is ready, gameplay's smooth-frame target and pacing limit; the title requires <see cref="TitleSmoothRun"/>.</summary>
     const double SmoothFrame = 0.04, SmoothRun = 0.5, WarmLimit = 5;
+    const double TitleSmoothRun = 1;
 
-    /// <summary>The loading screen covers the world: a scene load runs, or the world warms up under it.</summary>
-    bool Covered => sceneLoad is not null || warming || skyArrival is not null;
+    /// <summary>Loading, warm-up, arrival or the loading overlay's final reveal still blocks input.</summary>
+    bool Covered => sceneLoad is not null || warming || skyArrival is not null || loading is { Exiting: true };
 
     static (string Step, Func<Task?> Run, bool DuringAscent) Stage(string step, Func<Task?> run, bool duringAscent = false) => (step, run, duringAscent || step == "read");
 
-    void StartSceneLoad(params (string Step, Func<Task?> Run, bool DuringAscent)[] stages)
+    void StartSceneLoad(bool mainMenuTransition, params (string Step, Func<Task?> Run, bool DuringAscent)[] stages)
     {
         if (sceneLoad is not null) return;
         sceneLoad = new();
-        if (player.UiMode == Meitou.Data.Ui.UiMode.Meitou)
-            skyArrival = new(camera, presentationHour ?? (TitleVisible ? TitleHour : (float)session.Clock.HourOfDay));
+        if (player.UiMode == Meitou.Data.Ui.UiMode.Meitou && (mainMenuTransition ? config.MainMenuTransitions : config.InGameTransitions))
+            skyArrival = new(camera, presentationHour ?? (TitleVisible ? TitleHour : (float)session.Clock.HourOfDay),
+                mainMenuTransition ? config.MainMenuTransitionSpeed : config.InGameTransitionSpeed);
         foreach (var stage in stages) sceneLoad.Stages.Enqueue(stage);
         loading?.Restart();
         loadingSteps = SceneSteps;
@@ -82,7 +87,9 @@ sealed partial class GameHost
     void BeginWarm()
     {
         if (loading is null) { skyArrival?.Arrive(); return; }
-        (warming, smoothSeconds, warmSeconds) = (true, 0, 0);
+        (warming, smoothSeconds, warmSeconds, readySeconds) = (true, 0, 0, 0);
+        nextWarmReport = 5;
+        titleWarmFinalized = false;
         SetLoadingStep("view");
     }
 
@@ -95,10 +102,36 @@ sealed partial class GameHost
         if (seconds * 1000 > longestGap.Ms) longestGap = (seconds * 1000, currentStep);
         if (!warming) return;
         warmSeconds += seconds;
+        // A ready character mesh alone is insufficient: finish terrain, scenery and deferred textures too.
+        // Content readiness has no pacing timeout that can expose missing NPCs or white stand-ins.
+        bool populationReady = TitleVisible || session.World.PreparePopulation(session.Camera.Current.Target);
+        bool charactersReady = gpu.Characters is not { } characters || !characters.ContentPending &&
+            session.CurrentSnapshot.Characters.All(c => c.Appearance is null || characters.IsPrepared(c.Appearance));
+        bool sceneReady = TitleVisible ? TitleSceneReady : populationReady && charactersReady &&
+            gpu.Streamer is not { Idle: false } && !(gpu.Objects?.Pending > 0) && !(gpu.Foliage?.Pending > 0);
+        if (!sceneReady)
+        {
+            smoothSeconds = readySeconds = 0;
+            if (warmSeconds >= nextWarmReport)
+            {
+                nextWarmReport = warmSeconds + 5;
+                Console.WriteLine($"loading   {(TitleVisible ? "menu" : "game")} still preparing: terrain {(gpu.Streamer?.Idle == false ? "pending" : "ready")}, objects {gpu.Objects?.Pending ?? 0}, foliage {gpu.Foliage?.Pending ?? 0}, population {(populationReady ? "ready" : "pending")}, characters {((TitleVisible ? TitleCharactersReady : charactersReady) ? "ready" : "pending")}");
+            }
+            return;
+        }
+        if (TitleVisible && !titleWarmFinalized && loadingDisplay is { } display)
+        {
+            // Streaming allocates after Boot's collection: retire its uploads and compact before exposing the menu.
+            titleWarmFinalized = true;
+            Meitou.Rendering.WorldFrame.FinishLoading(display.Context);
+            smoothSeconds = 0;
+            return;
+        }
+        readySeconds += seconds;
         smoothSeconds = seconds < SmoothFrame ? smoothSeconds + seconds : 0;
-        if (TitleVisible && (gpu.Objects?.Pending > 0 || gpu.Foliage?.Pending > 0 || gpu.Characters?.Assets == 0) && warmSeconds < WarmLimit) return;
-        if (smoothSeconds < SmoothRun && warmSeconds < WarmLimit) return;
+        if (TitleVisible ? smoothSeconds < TitleSmoothRun : smoothSeconds < SmoothRun && readySeconds < WarmLimit) return;
         warming = false;
+        loading?.Finish();
         skyArrival?.Arrive();
         ReportLoading($"the view warmed up in {warmSeconds:0.0} s");
     }

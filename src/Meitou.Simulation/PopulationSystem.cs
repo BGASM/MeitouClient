@@ -90,6 +90,12 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
     public void SlowWorld(World world)
     {
         if (world.Tick % settings.CheckEveryTicks != 0) return;
+        RefreshZones(world);
+        StepRoaming(world);
+    }
+
+    void RefreshZones(World world)
+    {
         // The player's characters activate the zones round them (game-loop.md "Zones": the player's faction); the camera focus does only without a player.
         foci.Clear();
         if (world.Player.Exists)
@@ -99,11 +105,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
                 if (prev[i].Alive && world.Characters.Cold(i) is { IsPlayer: true }) foci.Add(prev[i].Position);
         }
         if (foci.Count == 0 && focus is { } camera) foci.Add(camera);
-        if (foci.Count == 0)
-        {
-            StepRoaming(world);
-            return;
-        }
+        if (foci.Count == 0) return;
         (active, spareActive) = (spareActive, active);
         active.Clear();
         foreach (var f in foci) ZoneActivation.AddZonesAround(f, settings.FastZoneHopping ? 1 : 0, active);
@@ -127,7 +129,6 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
             }
         }
         StepWild(world, grace);
-        StepRoaming(world);
     }
 
     /// <summary>Whether a zone may be loaded now: the host holds a town back until its navmesh is ready, so residents are not placed inside buildings of an open-ground stand-in (null: always).</summary>
@@ -226,6 +227,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
                 Role = (int)plan.Role,
                 FormationOffset = plan.Offset - (leaderPlan?.Offset ?? Vector2.Zero),
                 IsPlayer = player,
+                Orders = player ? Orders.PlayerDefaults : CharacterOrders.None,
                 FootprintRadius = race?.GetFloat("pathfind footprint radius") ?? 0,
             };
             assembly.Attach(table.PeekNextId(), cold, ref hot, record, race, world.Seed, plan.IsAnimal ? plan.Age : 1);

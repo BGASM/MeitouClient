@@ -119,7 +119,7 @@ public static class StandardSystems
         MovementSystem? movement = null;
         CombatSystem? combat = null;
         if (Has(StandardParts.Population)) systems.Add(population = new PopulationSystem(data, o.Population));
-        if (Has(StandardParts.Player)) systems.Add(new PlayerSystem());
+        if (Has(StandardParts.Player)) systems.Add(new PlayerSystem(data));
         Meitou.Simulation.Ai.AiSystem? ai = null;
         if (Has(StandardParts.Ai)) systems.Add(ai = new Meitou.Simulation.Ai.AiSystem(data, o.Ai));
         if (Has(StandardParts.Pursuit | StandardParts.Combat | StandardParts.Retaliation | StandardParts.Flee))

@@ -40,6 +40,7 @@ diaries, asset dumps or decompiled output. Current choices: [DECISIONS](../DECIS
 - [dds](formats/dds.md)
 - [fcs-mod](formats/fcs-mod.md)
 - [fogfeatures](formats/fogfeatures.md)
+- [gettext](formats/gettext.md)
 - [foliage](formats/foliage.md)
 - [lighting](formats/lighting.md)
 - [lights](formats/lights.md)

@@ -1,0 +1,263 @@
+using System.Numerics;
+using System.Globalization;
+using Meitou.Data.Ui;
+using Meitou.Engine.Input;
+
+namespace Meitou.Game;
+
+sealed partial class SettingsMenu
+{
+    static readonly Vector4 MainInk = new(175 / 255f, 166 / 255f, 139 / 255f, 1);
+    static readonly Vector4 LightInk = new(217 / 255f, 206 / 255f, 184 / 255f, 1);
+    static readonly Vector4 MutedInk = new(0.52f, 0.49f, 0.43f, 1);
+    static readonly Vector4 Brass = new(196 / 255f, 160 / 255f, 98 / 255f, 1);
+    bool Meitou => player.UiMode == UiMode.Meitou;
+
+    UiRect R(float x, float y, float w, float h) => new(MathF.Round(bounds.X + x * scale), bounds.Y + y * scale, MathF.Round(w * scale), MathF.Round(h * scale));
+
+    void Rect(UiRect at, Vector4 colour, UiRect? clip = null) => controls.Add(new("settings-fill", "Panel", at, "", "", "", true, new Dictionary<string, string>(), colour, Clip: clip, Pickable: false));
+
+    void Text(string caption, UiRect at, float size = 16, Vector4? colour = null, string align = "Left VCenter", UiRect? clip = null)
+        => controls.Add(new("settings-text", "TextBox", at, caption, "", "", true,
+            new Dictionary<string, string> { ["TextAlign"] = align, ["FontName"] = "Kenshi_StandardFont", ["FontPixels"] = ((int)MathF.Round(size * scale)).ToString(System.Globalization.CultureInfo.InvariantCulture) }, Vector4.Zero,
+            colour ?? MainInk, Clip: clip, Pickable: false, TextScale: size * scale / 16));
+
+    void Surface(UiRect at, string kind, bool selected = false, bool hover = false, UiRect? clip = null)
+    {
+        if (Meitou)
+        {
+            string texture = kind switch { "window" => "window", "primary" or "paper" => hover ? "paper-hover" : "paper", _ => selected ? "button-selected" : hover ? "button-hover" : "button" };
+            float margin = kind == "window" ? 16 * scale : 0;
+            var properties = new Dictionary<string, string> { ["ImageTexture"] = SettingsMenuArt.SurfacePrefix + texture };
+            if (kind == "window" && player.SettingsPainter is { } painter)
+                properties["ImageTexture"] = art.WindowTexture(painter, at.Width / scale, at.Height / scale);
+            else
+            {
+                properties["ImageBorder"] = "12";
+                properties["ImageBorderScale"] = scale.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            controls.Add(new("settings-surface", "ImageBox", new(at.X - margin, at.Y - margin, at.Width + margin * 2, at.Height + margin * 2), "", "", "", true,
+                properties, Vector4.Zero, Clip: clip, Pickable: false));
+        }
+        else
+            controls.Add(new("settings-surface", "Panel", at, "", "", kind == "window" ? "Kenshi_GenericWindowSkin" : kind == "paper" ? "Kenshi_GenericTextBoxSkin" : "Kenshi_Button1Skin", true,
+                new Dictionary<string, string> { ["State"] = selected ? "pushed" : hover ? "highlighted" : "normal" },
+                kind == "window" ? new(0.12f, 0.11f, 0.09f, 1) : Vector4.Zero, Clip: clip, Pickable: false));
+    }
+
+    void Button(string label, UiRect at, Action action, bool selected = false, bool primary = false, UiRect? clip = null)
+    {
+        bool hovered = at.Contains(pointer.X, pointer.Y) && (clip is null || clip.Value.Contains(pointer.X, pointer.Y));
+        float hover = Hover(label, hovered);
+        var drawn = at with { Y = at.Y + (hovered && pointerDown ? scale : 0) };
+        bool pressed = hovered && pointerDown;
+        Surface(drawn, primary ? "primary" : "button", selected || pressed, false, clip);
+        if (hover > 0)
+        {
+            int first = controls.Count;
+            Surface(drawn, primary ? "primary" : "button", selected || pressed, true, clip);
+            Opacity(first, hover);
+        }
+        var ink = primary && Meitou ? new Vector4(20 / 255f, 8 / 255f, 6 / 255f, 1) : System.Numerics.Vector4.Lerp(MainInk, LightInk, selected ? 1 : hover);
+        if (primary && label == "Save")
+        {
+            float x = drawn.X + drawn.Width / 2 - 36 * scale, y = drawn.Y + (drawn.Height - 24 * scale) / 2;
+            controls.Add(new("settings-save-icon", "ImageBox", new(x, y, 24 * scale, 24 * scale), "", "", "", true,
+                new Dictionary<string, string> { ["ImageTexture"] = SettingsMenuArt.SaveIcon },
+                Vector4.Zero, Clip: clip, Pickable: false));
+            Text(label, new(x + 30 * scale, drawn.Y, 44 * scale, drawn.Height), 15, ink, "Center", clip);
+        }
+        else Text(label, new(drawn.X + 10 * scale, drawn.Y, drawn.Width - 20 * scale, drawn.Height), primary ? 15 : 13, ink, "Center", clip);
+        if (clip is null || at.Intersect(clip.Value).Height >= at.Height - 1)
+            hits.Add(new(at, action));
+    }
+
+    void Navigate(int next)
+    {
+        page = next; scroll = scrollTarget = 0; contentProgress = 0; focus = -1; openChoice = null; rebinding = null; notice = "";
+    }
+
+    public void Draw(int width, int height)
+    {
+        if (!Visible || player.SettingsPainter is not { } painter) return;
+        AdvanceMotion();
+        art.Ensure(painter, Meitou, player.SettingsResolve);
+        scale = Math.Max(0.35f, Math.Min(1.25f, Math.Min(height / 900f, width / 1280f)));
+        bounds = new(MathF.Round((width - 1120 * scale) / 2), MathF.Round((height - 720 * scale) / 2), MathF.Round(1120 * scale), MathF.Round(720 * scale));
+        bounds = bounds with { Y = bounds.Y + (1 - Ease(menuProgress)) * 8 * scale };
+        controls.Clear(); hits.Clear();
+        animationScope = "chrome";
+        Rect(new(0, 0, width, height), new(8 / 255f, 6 / 255f, 5 / 255f, 0.64f));
+        Surface(bounds, "window");
+        if (!Meitou)
+            controls.Add(new("settings-header", "Panel", R(6, 4, 1108, 36), "", "", "Kenshi_GenericWindowHeaderSkin", true, new Dictionary<string, string>(), Vector4.Zero, Pickable: false));
+        Text("Settings", R(20, 4, 650, 32), 22, LightInk);
+        var close = R(1069, 6, 31, 32);
+        controls.Add(new("settings-close", "Button", close, "", "settings:close", "Kenshi_CloseButtonSkin", true,
+            new Dictionary<string, string>(), Vector4.Zero));
+        hits.Add(new(close, () => Visible = false));
+        Rect(R(20, 44, 1080, 1), MainInk with { W = 0.12f });
+        Rect(R(192, 56, 1, 610), MainInk with { W = 0.12f });
+
+        for (int i = 0; i < Pages.Length; i++)
+        {
+            int index = i;
+            Button(Pages[i], R(20, 58 + i * 38, 156, 32), () => Navigate(index), page == i);
+        }
+        Text(Meitou ? "MEITOU" : "FAITHFUL", R(28, 610, 148, 18), 11, MutedInk);
+        Text(BuildVersion.Tag, R(28, 630, 148, 16), 11, MutedInk);
+        Text(BuildVersion.Commit, R(28, 646, 148, 16), 11, MutedInk);
+        int contentStart = controls.Count;
+        Surface(R(212, 56, 888, 34), "paper");
+        Text(Pages[page], R(224, 56, 864, 34), 18, new(20 / 255f, 8 / 255f, 6 / 255f, 1));
+        float top = 98;
+        if (page == 1)
+        {
+            for (int i = 0; i < GraphicsPages.Length; i++)
+            {
+                int index = i;
+                Button(GraphicsPages[i], R(212 + i * 224, 98, 216, 30), () => { graphicsPage = index; scroll = scrollTarget = 0; contentProgress = 0; focus = -1; }, graphicsPage == i);
+            }
+            top = 134;
+        }
+        viewport = R(212, top, 888, 666 - top);
+        var entries = Entries();
+        maxScroll = Math.Max(0, entries.Sum(EntryHeight) * scale - viewport.Height);
+        AdvanceScroll();
+        float entryY = top - scroll / scale;
+        foreach (var entry in entries)
+        {
+            float row = EntryHeight(entry);
+            animationScope = entry.Label;
+            if (entryY + row >= top && entryY <= 666) DrawEntry(entry, entryY);
+            entryY += row;
+        }
+        animationScope = "chrome";
+        if (maxScroll > 0)
+        {
+            float track = viewport.Height, thumb = Math.Max(24 * scale, track * track / (track + maxScroll));
+            Rect(new(viewport.X + viewport.Width + 12 * scale, viewport.Y, 3 * scale, track), MainInk with { W = 0.1f });
+            Rect(new(viewport.X + viewport.Width + 12 * scale, viewport.Y + (track - thumb) * scroll / maxScroll, 3 * scale, thumb), Brass with { W = 0.75f });
+        }
+        Opacity(contentStart, Ease(contentProgress));
+        Rect(R(20, 676, 1080, 1), MainInk with { W = 0.12f });
+        Button("Restore defaults", R(20, 686, 150, 28), () => { resetPending = true; openChoice = null; focus = -1; });
+        if (notice.Length > 0) Text(notice, R(188, 686, 744, 28), 11, Brass);
+        Button("Save", R(960, 684, 140, 32), () => Visible = false, primary: true);
+        if (openChoice is { } choice) DrawChoice(choice);
+        else animatedChoice = null;
+        if (rebinding is { } binding) DrawMessage("Assign a control", notice.Length > 0 ? notice : $"{ActionLabel(binding)}: press a key or mouse button.\nDelete clears the binding. Esc cancels.", () => rebinding = null);
+        if (resetPending || pendingAction is not null)
+            DrawMessage(resetPending ? "Restore defaults?" : "Clear cached files?", resetPending ? "Restore all preferences and controls to their defaults?" : confirmation,
+                () => { resetPending = false; pendingAction = null; }, () =>
+                {
+                    if (resetPending) Reset();
+                    else if (pendingAction is { } action) { notice = action(); pendingAction = null; }
+                });
+        Opacity(0, Ease(menuProgress));
+        painter.Draw(controls, width, height, pointer, null);
+    }
+
+    static float EntryHeight(Entry entry) => entry.Hint.Length > 0 ? 42 : 36;
+
+    void DrawEntry(Entry entry, float y)
+    {
+        float row = EntryHeight(entry), buttonY = y + (row - 26) / 2;
+        Rect(R(212, y + row - 1, 888, 1), MainInk with { W = 0.075f }, viewport);
+        Text(entry.Label, R(212, y + 2, 456, entry.Hint.Length > 0 ? 20 : 32), 14, clip: viewport);
+        if (entry.Hint.Length > 0) Text(entry.Hint, R(212, y + 19, 456, 17), 11, MutedInk, clip: viewport);
+        if (entry.Toggle is { } toggle)
+            Button(toggle.Get() ? "On" : "Off", R(976, buttonY, 124, 26), () => toggle.Set(!toggle.Get()), toggle.Get(), clip: viewport);
+        else if (entry.Choice is { } choice)
+        {
+            var options = choice.Options();
+            int index = choice.Current();
+            string current = index >= 0 && index < options.Count ? options[index] : "Unavailable";
+            var at = R(688, buttonY, 412, 26);
+            Button(current + "   v", at, () =>
+            {
+                openChoice = choice; choiceSelection = Math.Clamp(choice.Current(), 0, Math.Max(0, options.Count - 1));
+                choiceScroll = Math.Max(0, choiceSelection - 3); choiceAnchor = at; focus = -1;
+            }, clip: viewport);
+        }
+        else if (entry.Slider is { } slider)
+        {
+            var valueAt = R(908, y, 192, 20);
+            bool editing = ReferenceEquals(editingNumber, slider);
+            if (editing)
+            {
+                numberBounds = valueAt;
+                Rect(valueAt, new(0.06f, 0.05f, 0.04f, 0.95f), viewport);
+                var textAt = valueAt with { X = valueAt.X + 6 * scale, Width = valueAt.Width - 12 * scale };
+                controls.Add(new("settings-number", "EditBox", textAt, numberText, "", "", true,
+                    new Dictionary<string, string>
+                    {
+                        ["Focused"] = "true", ["Numeric"] = "true", ["TextAlign"] = "Right VCenter",
+                        ["FontPixels"] = ((int)MathF.Round(13 * scale)).ToString(CultureInfo.InvariantCulture),
+                        ["SelectionStart"] = Math.Min(numberCaret, numberAnchor).ToString(CultureInfo.InvariantCulture),
+                        ["SelectionLength"] = Math.Abs(numberCaret - numberAnchor).ToString(CultureInfo.InvariantCulture),
+                        ["CaretIndex"] = numberCaret.ToString(CultureInfo.InvariantCulture),
+                    }, Vector4.Zero, LightInk, Clip: viewport, Pickable: false));
+            }
+            else
+            {
+                if (valueAt.Contains(pointer.X, pointer.Y))
+                {
+                    Rect(valueAt, MainInk with { W = 0.06f }, viewport);
+                    Rect(valueAt with { Y = valueAt.Y + valueAt.Height - scale, Height = scale }, MainInk with { W = 0.4f }, viewport);
+                }
+                Text(slider.Display, R(688, y, 412, 20), 13, LightInk, "Right VCenter", viewport);
+            }
+            var track = R(696, y + row - 9, 396, 3);
+            Rect(track, new(0.10f, 0.08f, 0.07f, 1), viewport);
+            Rect(track with { Width = track.Width * slider.Fraction }, Brass with { W = 0.75f }, viewport);
+            var knob = new UiRect(track.X + slider.Fraction * track.Width - 3 * scale, track.Y - 4 * scale, 6 * scale, 11 * scale);
+            Rect(knob, LightInk, viewport);
+            var hit = R(688, y + row - 16, 412, 16);
+            if (hit.Intersect(viewport).Height >= hit.Height - 1) hits.Add(new(hit, () => { }, slider, track));
+            if (valueAt.Intersect(viewport).Height >= valueAt.Height - 1) hits.Add(new(valueAt, () => BeginNumber(slider, valueAt)));
+        }
+        else if (entry.Binding is { } binding)
+        {
+            string label = string.Join(" / ", bindings.Get(binding));
+            Button(label.Length > 0 ? label : "Unbound", R(688, buttonY, 412, 26), () => { rebinding = binding; notice = ""; }, clip: viewport);
+        }
+        else if (entry.Run is { } run) Button("Clear cache", R(944, buttonY, 156, 26), run, clip: viewport);
+    }
+
+    UiRect choiceAnchor;
+    void DrawChoice(Choice choice)
+    {
+        if (!ReferenceEquals(animatedChoice, choice)) { animatedChoice = choice; choiceProgress = 0; }
+        choiceProgress = Math.Min(1, choiceProgress + frameDelta / 0.1f);
+        int first = controls.Count;
+        hits.Clear();
+        var options = choice.Options();
+        int count = Math.Min(6, options.Count);
+        choiceScroll = Math.Clamp(choiceScroll, 0, Math.Max(0, options.Count - count));
+        float h = (count * 28 + 12) * scale;
+        float y = Math.Min(choiceAnchor.Y + choiceAnchor.Height + 6 * scale, bounds.Y + bounds.Height - 24 * scale - h);
+        var at = new UiRect(choiceAnchor.X, y, choiceAnchor.Width, h);
+        Surface(at, "window");
+        for (int i = 0; i < count; i++)
+        {
+            int index = choiceScroll + i;
+            Button(options[index], new(at.X + 6 * scale, at.Y + (6 + i * 28) * scale, at.Width - 12 * scale, 24 * scale),
+                () => { choice.Choose(index); openChoice = null; focus = -1; }, index == choiceSelection);
+        }
+        Opacity(first, Ease(choiceProgress));
+    }
+
+    void DrawMessage(string title, string body, Action cancel, Action? confirm = null)
+    {
+        hits.Clear();
+        Rect(bounds, new(8 / 255f, 6 / 255f, 5 / 255f, 0.8f));
+        var at = R(290, 250, 540, 220);
+        Surface(at, "window");
+        Text(title, R(316, 264, 488, 30), 20, LightInk);
+        controls.Add(new("settings-message", "TextBox", R(316, 306, 488, 94), body, "", "", true,
+            new Dictionary<string, string> { ["WordWrap"] = "true", ["FontPixels"] = ((int)MathF.Round(14 * scale)).ToString(System.Globalization.CultureInfo.InvariantCulture) }, Vector4.Zero, MainInk, Pickable: false, TextScale: scale));
+        Button("Cancel", R(500, 420, 138, 32), cancel);
+        if (confirm is not null) Button("Confirm", R(650, 420, 154, 32), confirm, primary: true);
+    }
+}

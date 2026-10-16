@@ -61,6 +61,7 @@ sealed class WorldOptions
     public int GiDebug;
     /// <summary>The probe GI, on unless <c>--no-gi</c> (it needs ray queries: without them it is off, with a note); <see cref="GiProbes"/> is its Faithful / Meitou switch (<c>gi</c>).</summary>
     public bool Gi = true, GiProbes = true;
+    public bool InteriorGi = true;
     /// <summary>Whether the device must be made with ray queries (<c>VulkanDisplay.RayTracing</c>).</summary>
     public bool WantsRayTracing => Gi || GiDebug > 0;
     public float? ShadowRange;   // --shadow-range as given (null: the default of the shadows switch's mode, see ShadowRangeFor)
@@ -215,7 +216,7 @@ sealed class WorldOptions
           --no-vsync               start with vsync off (uncapped; Tab slider)
           --grass-density <x>      grass blades x this (0.1-2, default 1; Tab slider)
           --camera-code <hex>      start at a camera code (Ctrl+C in the viewer copies one), the world loaded round it
-          --faithful <all|ao,dither,haze,aa,shadows,range,impostors,reach,water,particles,lod,gi,tonemap,shafts,heathaze,night,planetshine,stars,nightgrade,clouds,cloudshadows>   the game's look instead of Meitou's enhancements (default: all Meitou; --meitou <...> turns them back on; these ids also name the --ab switches)
+          --faithful <all|ao,dither,haze,aa,shadows,range,impostors,reach,water,particles,lod,gi,tonemap,shafts,heathaze,night,planetshine,stars,nightgrade,clouds,cloudshadows,interiorgi>   the game's look instead of Meitou's enhancements (default: all Meitou; --meitou <...> turns them back on; these ids also name the --ab switches)
           --show-keys              start with the key list overlay open (toggle with F10)
           --play-shots             start flying the saved camera keys (the F2 timeline) on a loop
           --log-spikes             print a line for every frame whose GPU time is over 1.5 x the median: stage times (GPU, render thread) and what it uploaded or rebuilt
@@ -260,7 +261,8 @@ sealed class WorldOptions
         () => o.NightAir, v => o.NightAir = v, () => o.Planetshine, v => o.Planetshine = v,
         () => o.MeitouStars, v => o.MeitouStars = v,
         () => o.MeitouClouds, v => o.MeitouClouds = v,
-        () => o.CloudShadows, v => o.CloudShadows = v);
+        () => o.CloudShadows, v => o.CloudShadows = v,
+        () => o.InteriorGi, v => o.InteriorGi = v);
 
     public static WorldOptions? Parse(string[] args)
     {
@@ -775,11 +777,11 @@ static class WorldFrame
         }
         if (scene.Database is { } lampDb && scene.Heightmap is { } lampMap)
         {
-            // The lamps (docs/render-lights.md): the outdoor lights of every placed building, read on a worker.
+            // The lamps (docs/render-lights.md), including room lights, read on a worker.
             gpu.Lamps = new WorldLamps(context, () =>
             {
                 var levels = WorldLevelData.Load(install, includeInteriors: true);
-                return WorldLights.ForWorld(lampDb, levels, lampMap.HeightAt, new BuildingLayouts(lampDb, levels.Interiors), includeInteriors: false);
+                return WorldLights.ForWorld(lampDb, levels, lampMap.HeightAt, new BuildingLayouts(lampDb, levels.Interiors));
             });
         }
         if (scene.Heightmap is not null) gpu.Streamer = new TerrainStreamer(install, terrain, textures, scene.Window.Step) { MaterialDistance = o.MaterialDistance };
@@ -845,7 +847,7 @@ static class WorldFrame
                 }
                 if (o.Gi)
                 {
-                    gpu.Probes = new Gi.GiProbes(context) { Enabled = o.GiProbes };
+                    gpu.Probes = new Gi.GiProbes(context) { Enabled = o.GiProbes, InteriorEnabled = o.InteriorGi };
                     Console.WriteLine($"gi        {gpu.Probes.Describe()}");
                 }
             }
@@ -919,7 +921,8 @@ static class WorldFrame
             () => gpu()?.Sky.Planetshine ?? o.Planetshine, v => { o.Planetshine = v; if (gpu() is { } g) g.Sky.Planetshine = v; },
             () => gpu()?.Sky.MeitouStars ?? o.MeitouStars, v => { o.MeitouStars = v; if (gpu() is { } stars) stars.Sky.MeitouStars = v; },
             () => gpu()?.Sky.LitClouds ?? o.MeitouClouds, v => { o.MeitouClouds = v; if (gpu() is { } g) g.Sky.LitClouds = v; },
-            () => gpu()?.Sky.CloudShadows ?? o.CloudShadows, v => { o.CloudShadows = v; if (gpu() is { } g) g.Sky.CloudShadows = v; });
+            () => gpu()?.Sky.CloudShadows ?? o.CloudShadows, v => { o.CloudShadows = v; if (gpu() is { } g) g.Sky.CloudShadows = v; },
+            () => gpu()?.Probes?.InteriorEnabled ?? o.InteriorGi, v => { o.InteriorGi = v; if (gpu()?.Probes is { } p) p.InteriorEnabled = v; });
 
     public static SettingsPanel CreateSettingsPanel(DebugOverlay ui, Gpu g, WorldRenderOptions r, Func<float>? getHour = null, Action<float>? setHour = null,
         Func<bool>? getVSync = null, Action<bool>? setVSync = null, IReadOnlyList<Enhancement>? switches = null,
@@ -1209,15 +1212,15 @@ static class WorldFrame
         gpu.Shadow?.SetFogHide(gpu.FogVolumes?.ShadowHideDistance, gpu.FogVolumes?.ShadowHidePending == true);   // or where the placed fog block the eye is in hides the whole view
         if (gpu.Shadow is not null) { gpu.Shadow.Temporal = gpu.Post?.Temporal == true; DrawShadows(gpu, camera, render, light, rw, rh, gpu.Sky.ShadowSunHeight); }
         StageClock.Lap(12);
-        gpu.Lamps?.Update(eye);
+        gpu.Lamps?.Update(eye, gpu.Objects);
         // The traced scene of the global illumination: its acceleration structures for this eye (docs/render-gi.md).
         if (gpu.Probes is { } probesActive) probesActive.Active = gpu.GiActive;
         if (gpu.Gi is { } gi && gpu.GiActive)
         {
             var heights = gpu.Terrain.Snapshot();
-            gi.Update(eye, heights, render.Objects ? gpu.Objects : null, gpu.Foliage is { Enabled: true } giFoliage ? giFoliage : null);
+            gi.Update(eye, heights, render.Objects ? gpu.Objects : null, gpu.Foliage is { Enabled: true } giFoliage ? giFoliage : null, gpu.Lamps);
             StageClock.Sub("gi scene");
-            gpu.Probes?.Update(gi, eye, heights, gpu.Lamps, gpu.FogVolumes);
+            gpu.Probes?.Update(gi, eye, heights, gpu.Lamps, gpu.FogVolumes, gpu.Objects?.GiInteriorFocus(camera.Target));
             StageClock.Sub("gi blend");
         }
         StageClock.Lap(14);
@@ -1326,7 +1329,7 @@ static class WorldFrame
             gpu.Terrain.DrawDeferred();   // the terrain colour where nothing nearer covers it (the depth is in from the draw above)
             StageClock.Lap(6);
             // Characters after the opaque geometry: they alone write the scene's alpha (SSAO's character mask), so nothing drawn later may cover them but water.
-            if (gpu.Characters is { } fogCharacters) fogCharacters.FogCull = fogCull;
+            if (gpu.Characters is { } fogCharacters) { fogCharacters.FogCull = fogCull; fogCharacters.InteriorObjects = gpu.Objects; }
             if (nearSlice) post.CharactersDrawn = false;   // none this frame unless the near slice draws some below
             if (nearSlice && gpu.Characters is { } characters)
             {

@@ -1,0 +1,339 @@
+using System.Numerics;
+using System.Globalization;
+using System.Text.RegularExpressions;
+using Meitou.Data.Ui;
+using Meitou.Engine.Input;
+using Meitou.Rendering;
+
+namespace Meitou.Game;
+
+/// <summary>Shared settings layout and interaction; the current UI mode selects only its presentation.</summary>
+sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBindings bindings, Action save, Slider frameLimit, UserConfig config)
+{
+    static readonly string[] Pages = ["Display", "Graphics", "Interface", "Controls", "Advanced"];
+    static readonly string[] GraphicsPages = ["World", "Lighting", "Water", "Effects"];
+    readonly float[] defaults = values.Sliders.Select(s => s.Get()).ToArray();
+    readonly bool[] toggleDefaults = values.Toggles.Select(t => t.Get()).ToArray();
+    readonly Slider mainMenuTransitionSpeed = new("Main menu transition speed", SkyArrival.MinSpeed, SkyArrival.MaxSpeed,
+        () => config.MainMenuTransitionSpeed, v => config.MainMenuTransitionSpeed = v, "0.00'x'");
+    readonly Slider inGameTransitionSpeed = new("In-game transition speed", SkyArrival.MinSpeed, SkyArrival.MaxSpeed,
+        () => config.InGameTransitionSpeed, v => config.InGameTransitionSpeed = v, "0.00'x'");
+    readonly List<Hit> hits = [];
+    readonly List<UiControl> controls = [];
+    readonly SettingsMenuArt art = new();
+    bool visible, resetPending;
+    int page, graphicsPage, focus = -1;
+    float scroll, maxScroll, scale = 1;
+    Vector2 pointer;
+    UiRect viewport, bounds;
+    Hit? dragging;
+    InputAction? rebinding;
+    Choice? openChoice;
+    int choiceSelection, choiceScroll;
+    string notice = "";
+    Slider? editingNumber;
+    string numberText = "";
+    int numberCaret, numberAnchor;
+    UiRect numberBounds;
+
+    sealed record Choice(Func<IReadOnlyList<string>> Options, Func<int> Current, Action<int> Choose);
+    sealed record Entry(string Label, string Hint = "", Slider? Slider = null, Toggle? Toggle = null, Choice? Choice = null,
+        InputAction? Binding = null, Action? Run = null);
+    sealed record Hit(UiRect Bounds, Action Activate, Slider? Slider = null, UiRect? Track = null);
+
+    public IReadOnlyList<Slider> Sliders => values.Sliders;
+    public IReadOnlyList<Toggle> Toggles => values.Toggles;
+    public Func<string>? UpscalerStatus { get; init; }
+    public bool Visible
+    {
+        get => visible || menuProgress > 0;
+        set
+        {
+            if (visible == value) return;
+            visible = value;
+            dragging = null; rebinding = null; openChoice = null; resetPending = false; focus = -1; notice = "";
+            editingNumber = null;
+            if (value) { lastFrameAt = 0; player.SetSettingsOpen(true); }
+            if (!value) save();
+        }
+    }
+
+    static string Label(string label) => Regex.Replace(label.Split('(')[0].Trim(), @"\s+0-\d+.*$", "")
+        .Replace(" x", " multiplier", StringComparison.Ordinal).Replace(": error px", "", StringComparison.Ordinal);
+
+    static string Section(Slider s)
+    {
+        string label = s.Label;
+        if (label is "Time of day" or "Time speed") return "Advanced";
+        if (label is "VSync" or "Full screen" || WorldFrame.UpscalerSliders.Contains(label) || label == WorldFrame.FilteringSlider || label == WorldFrame.TextureQualitySlider) return "Display";
+        if (label.Contains("water", StringComparison.OrdinalIgnoreCase) || label.Contains("Reflection", StringComparison.Ordinal)) return "Water";
+        if (label.StartsWith("Shadow", StringComparison.Ordinal) || label.StartsWith("Light shafts", StringComparison.Ordinal) || label.StartsWith("Planetshine", StringComparison.Ordinal) || label.StartsWith("Haze", StringComparison.Ordinal)) return "Lighting";
+        if (label.Contains("Tone", StringComparison.OrdinalIgnoreCase) || label.Contains("Grading", StringComparison.OrdinalIgnoreCase) || label.StartsWith("Heat", StringComparison.Ordinal) || WorldFrame.ParticleSliders.Contains(label)) return "Effects";
+        return "World";
+    }
+
+    static string ToggleSection(Toggle toggle) => toggle.Label switch
+    {
+        "Foliage ranges" or "Far impostors" or "Draw distances" or "Foliage levels" => "World",
+        "Water" => "Water",
+        "Haze" or "Shadows" or "Indirect light" or "Indoor GI" or "Light shafts" or "Night air" or "Planetshine" or "Night sky" or "Clouds" or "Cloud shadows" => "Lighting",
+        _ when toggle.Label.StartsWith("Shadow", StringComparison.Ordinal) => "Lighting",
+        _ => "Effects",
+    };
+
+    Entry SliderEntry(Slider slider)
+    {
+        string key = slider.Label;
+        if (key is "VSync" or "Full screen" || key.StartsWith("Grading (", StringComparison.Ordinal))
+            return new(key == "Full screen" ? "Borderless full screen" : key == "VSync" ? "Vertical sync" : "Colour grading",
+                SliderHint(slider), Toggle: new(key, () => slider.Get() >= 0.5f, v => slider.Set(v ? 1 : 0)));
+        string[]? options = key == WorldFrame.UpscalerSliders[0] ? ["Off", "FXAA", "TAA", "FSR", "DLSS"]
+            : key == WorldFrame.TextureQualitySlider ? global::Meitou.Data.Textures.TextureQuality.Labels
+            : key == WorldFrame.ParticleSliders[0] ? ["Off", "Quarter resolution", "Half resolution", "Automatic", "Full resolution"]
+            : key.StartsWith("Tone map", StringComparison.Ordinal) ? ["Original", "Shoulder", "ACES", "Hybrid"]
+            : key.StartsWith("Shadow map", StringComparison.Ordinal) ? ["Low · 1024", "Medium · 2048", "High · 4096"]
+            : key.StartsWith("Water reflection", StringComparison.Ordinal) ? ["Off", "Landscape", "Characters", "Buildings", "Everything"]
+            : key == WorldFrame.FilteringSlider ? ["1x", "2x", "4x", "8x", "16x"] : null;
+        string label = key == WorldFrame.UpscalerSliders[0] ? "Anti-aliasing" : key == WorldFrame.ParticleSliders[0] ? "Weather particles"
+            : key == WorldFrame.TextureQualitySlider ? "Texture quality" : key == WorldFrame.FilteringSlider ? "Texture filtering" : Label(key);
+        string hint = key == WorldFrame.UpscalerSliders[0] ? "Smooths edges. Active: " + (UpscalerStatus?.Invoke() ?? "unavailable") : SliderHint(slider);
+        return options is { } items ? new(label, hint, Choice: new(() => items, () => (int)MathF.Round(slider.Get()), i => slider.Set(i)))
+            : new(label, hint, Slider: slider);
+    }
+
+    List<Entry> Entries()
+    {
+        string section = page == 1 ? GraphicsPages[graphicsPage] : Pages[page];
+        var result = values.Sliders.Where(s => s.Label is not ("Time of day" or "Time speed") && Section(s) == section).Select(SliderEntry).ToList();
+        if (page == 1)
+            result.InsertRange(0, values.Toggles.Where(toggle => ToggleSection(toggle) == section)
+                .Select(toggle => new Entry(Label(toggle.Label), ToggleHint(toggle.Label), Toggle: toggle)));
+        if (page == 0) result.Insert(2, new("Frame limit", "Used while vertical sync is off; 0 is unlimited.", Slider: frameLimit));
+        if (page == 2)
+            result.Add(new("UI style", "Choose original Kenshi skins or Meitou materials.", Choice: new(() => ["Faithful", "Meitou"],
+                () => (int)player.UiMode, i => player.SetUiMode((UiMode)i))));
+        if (page == 3)
+            foreach (var action in Enum.GetValues<InputAction>().Where(a => a != InputAction.Quit && a != InputAction.ToggleFps))
+                result.Add(new(ActionLabel(action), BindingHint(action), Binding: action));
+        if (page == 4)
+        {
+            result.Add(new("Main menu scene transitions", "Sky flight to/from the main menu (Meitou UI).",
+                Toggle: new("Main menu scene transitions", () => config.MainMenuTransitions, v => config.MainMenuTransitions = v)));
+            result.Add(new(mainMenuTransitionSpeed.Label, "Higher values make the camera ascend and descend faster.", Slider: mainMenuTransitionSpeed));
+            result.Add(new("In-game scene transitions", "Sky flight for save loads/new games during play (Meitou UI).",
+                Toggle: new("In-game scene transitions", () => config.InGameTransitions, v => config.InGameTransitions = v)));
+            result.Add(new(inGameTransitionSpeed.Label, "Higher values make the camera ascend and descend faster.", Slider: inGameTransitionSpeed));
+            foreach (var action in values.Actions)
+                result.Add(new(action.Label, "Delete cached billboards; they are rebuilt when needed.", Run: () =>
+                {
+                    pendingAction = action.Run; confirmation = action.Question(); focus = -1;
+                }));
+        }
+        return result;
+    }
+
+    static string ActionLabel(InputAction action) => Regex.Replace(action.ToString(), "([a-z0-9])([A-Z])", "$1 $2");
+    Func<string>? pendingAction;
+    string confirmation = "";
+
+    public bool Contains(Vector2 _) => Visible;
+
+    public bool MouseDown(Vector2 at, MouseButton button = MouseButton.Left)
+    {
+        if (!Visible) return false;
+        pointer = at;
+        pointerDown = button == MouseButton.Left;
+        scrollTarget = scroll;
+        if (rebinding is { } action)
+        {
+            if (button == MouseButton.Left && hits.LastOrDefault(h => h.Bounds.Contains(at.X, at.Y)) is { } cancel)
+            { cancel.Activate(); return true; }
+            SetBinding(action, button);
+            return true;
+        }
+        if (button != MouseButton.Left) return true;
+        if (editingNumber is not null)
+        {
+            if (numberBounds.Contains(at.X, at.Y)) return true;
+            if (!CommitNumber()) return true;
+        }
+        var hit = hits.LastOrDefault(h => h.Bounds.Contains(at.X, at.Y));
+        if (hit is null) { openChoice = null; return true; }
+        focus = hits.IndexOf(hit);
+        if (hit.Slider is not null) { dragging = hit; MouseMove(at); }
+        else hit.Activate();
+        return true;
+    }
+
+    public bool MouseMove(Vector2 at)
+    {
+        pointer = at;
+        if (!Visible) return false;
+        if (dragging is { Slider: { } slider, Track: { } track }) slider.SetFraction((at.X - track.X) / track.Width);
+        return true;
+    }
+
+    public bool MouseUp() { bool had = dragging is not null; dragging = null; pointerDown = false; return had; }
+
+    public bool Scroll(float steps)
+    {
+        if (!Visible) return false;
+        if (editingNumber is not null || rebinding is not null || resetPending || pendingAction is not null) return true;
+        if (openChoice is { } choice) choiceScroll = Math.Clamp(choiceScroll - (int)steps, 0, Math.Max(0, choice.Options().Count - 6));
+        else scrollTarget = Math.Clamp(scrollTarget - steps * 60 * scale, 0, maxScroll);
+        return true;
+    }
+
+    public bool KeyDown(Key key, bool shift)
+    {
+        if (!Visible) return false;
+        if (rebinding is { } action)
+        {
+            if (key == Key.Escape) rebinding = null;
+            else if (key == Key.Delete || key == Key.Backspace) { bindings.Set(action); rebinding = null; notice = "Binding cleared."; }
+            else SetBinding(action, key);
+            return true;
+        }
+        if (key == Key.Escape)
+        {
+            if (pendingAction is not null || resetPending) { pendingAction = null; resetPending = false; }
+            else if (openChoice is not null) openChoice = null;
+            else Visible = false;
+            return true;
+        }
+        if (openChoice is { } choice)
+        {
+            if (key is Key.Up or Key.Down)
+            {
+                choiceSelection = Math.Clamp(choiceSelection + (key == Key.Up ? -1 : 1), 0, choice.Options().Count - 1);
+                choiceScroll = Math.Clamp(choiceSelection - 3, 0, Math.Max(0, choice.Options().Count - 6));
+            }
+            if (key == Key.Enter) { choice.Choose(choiceSelection); openChoice = null; }
+            return true;
+        }
+        if (key is Key.PageDown or Key.PageUp) Scroll(key == Key.PageUp ? 5 : -5);
+        if (hits.Count == 0) return true;
+        if (key is Key.Tab or Key.Up or Key.Down)
+            focus = (focus + (key == Key.Up || key == Key.Tab && shift ? -1 : 1) + hits.Count) % hits.Count;
+        else if (focus >= 0 && focus < hits.Count)
+        {
+            var hit = hits[focus];
+            if (hit.Slider is { } slider && key is Key.Left or Key.Right)
+                slider.SetFraction(slider.Fraction + (key == Key.Left ? -1 : 1) * (slider.Max - slider.Min <= 4 ? 1 / (slider.Max - slider.Min) : 0.02f));
+            else if (key is Key.Enter or Key.Space) hit.Activate();
+        }
+        return true;
+    }
+
+    public bool KeyDown(Key key, bool shift, bool ctrl)
+    {
+        if (editingNumber is null) return KeyDown(key, shift);
+        switch (key)
+        {
+            case Key.Escape: editingNumber = null; notice = ""; break;
+            case Key.Enter: CommitNumber(); break;
+            case Key.Tab:
+                if (CommitNumber()) KeyDown(key, shift);
+                break;
+            case Key.A when ctrl: numberAnchor = 0; numberCaret = numberText.Length; break;
+            case Key.Home: numberCaret = 0; if (!shift) numberAnchor = numberCaret; break;
+            case Key.End: numberCaret = numberText.Length; if (!shift) numberAnchor = numberCaret; break;
+            case Key.Left:
+                numberCaret = !shift && numberCaret != numberAnchor ? Math.Min(numberCaret, numberAnchor) : Math.Max(0, numberCaret - 1);
+                if (!shift) numberAnchor = numberCaret;
+                break;
+            case Key.Right:
+                numberCaret = !shift && numberCaret != numberAnchor ? Math.Max(numberCaret, numberAnchor) : Math.Min(numberText.Length, numberCaret + 1);
+                if (!shift) numberAnchor = numberCaret;
+                break;
+            case Key.Backspace:
+            case Key.Delete:
+                if (numberCaret == numberAnchor)
+                {
+                    if (key == Key.Backspace && numberCaret > 0) numberAnchor--;
+                    if (key == Key.Delete && numberCaret < numberText.Length) numberAnchor++;
+                }
+                ReplaceNumberSelection("");
+                break;
+        }
+        return true;
+    }
+
+    public void TextInput(char value)
+    {
+        if (editingNumber is null || !Visible) return;
+        if (value is >= '0' and <= '9' or '.' or ',' or '-' or '+' or 'e' or 'E')
+            ReplaceNumberSelection(value == ',' ? "." : value.ToString());
+    }
+
+    void BeginNumber(Slider slider, UiRect at)
+    {
+        editingNumber = slider;
+        numberText = slider.Get().ToString("G", CultureInfo.InvariantCulture);
+        numberAnchor = 0;
+        numberCaret = numberText.Length;
+        numberBounds = at;
+        scrollTarget = scroll;
+        dragging = null;
+        notice = "";
+    }
+
+    void ReplaceNumberSelection(string replacement)
+    {
+        int start = Math.Min(numberCaret, numberAnchor), end = Math.Max(numberCaret, numberAnchor);
+        if (numberText.Length - (end - start) + replacement.Length > 24) return;
+        numberText = numberText[..start] + replacement + numberText[end..];
+        numberCaret = numberAnchor = start + replacement.Length;
+        notice = "";
+    }
+
+    bool CommitNumber()
+    {
+        if (editingNumber is not { } slider) return true;
+        if (!float.TryParse(numberText, NumberStyles.Float, CultureInfo.InvariantCulture, out float value) || !float.IsFinite(value))
+        {
+            notice = "Enter a valid number, or press Esc to cancel.";
+            return false;
+        }
+        slider.Set(Math.Clamp(value, slider.Min, slider.Max));
+        editingNumber = null;
+        notice = "";
+        return true;
+    }
+
+    void SetBinding(InputAction action, Binding binding)
+    {
+        if (binding.IsMouse && binding.Button is MouseButton.Left or MouseButton.Right ||
+            !binding.IsMouse && binding.Key is Key.Escape or Key.F6 or Key.F7 or Key.I or Key.C or Key.M or Key.T or Key.Y or Key.LeftAlt or Key.RightAlt or Key.LeftControl or Key.RightControl or Key.LeftShift or Key.RightShift)
+        {
+            notice = "That key is reserved. Choose another key, or Esc to cancel.";
+            return;
+        }
+        var conflicts = Enum.GetValues<InputAction>().Where(a => a != action && bindings.Get(a).Contains(binding)).ToArray();
+        if (conflicts.Length > 0)
+        {
+            notice = $"{binding} is assigned to {ActionLabel(conflicts[0])}. Choose another key, or Esc to cancel.";
+            return;
+        }
+        bindings.Set(action, binding);
+        rebinding = null;
+        notice = $"{ActionLabel(action)} bound to {binding}.";
+    }
+
+    void Reset()
+    {
+        for (int i = 0; i < values.Sliders.Count; i++)
+            if (values.Sliders[i].Label is not ("Time of day" or "Time speed")) values.Sliders[i].Set(defaults[i]);
+        for (int i = 0; i < values.Toggles.Count; i++)
+            if (values.Toggles[i].Get() != toggleDefaults[i]) values.Toggles[i].Set(toggleDefaults[i]);
+        frameLimit.Set(240);
+        config.MainMenuTransitions = true;
+        config.InGameTransitions = true;
+        config.MainMenuTransitionSpeed = 1;
+        config.InGameTransitionSpeed = 1;
+        player.SetUiMode(UiMode.Faithful);
+        bindings.ResetToDefaults();
+        resetPending = false;
+        notice = "Default settings restored.";
+    }
+}

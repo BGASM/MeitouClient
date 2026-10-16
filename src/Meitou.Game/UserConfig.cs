@@ -16,6 +16,10 @@ sealed class UserConfig
     public int FpsLimit { get; set; } = 240;
     public bool VSync { get; set; }
     public Meitou.Data.Ui.UiMode UiMode { get; set; } = Meitou.Data.Ui.UiMode.Faithful;
+    public bool MainMenuTransitions { get; set; } = true;
+    public bool InGameTransitions { get; set; } = true;
+    public float MainMenuTransitionSpeed { get; set; } = 1;
+    public float InGameTransitionSpeed { get; set; } = 1;
     /// <summary>Borderless full screen (the Tab panel, Alt+Enter); <c>--windowed</c> starts in a window for one run.</summary>
     public bool FullScreen { get; set; } = true;
     public int TickRate { get; set; } = 30;

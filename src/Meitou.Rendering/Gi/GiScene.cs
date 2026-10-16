@@ -18,7 +18,8 @@ public struct GeometryRecord
     /// <summary>For a cut-out geometry (not opaque in its structure: leaves): the map whose alpha cuts it and the threshold (a hit below it is passed through).</summary>
     public uint AlphaTexture;
     public float AlphaThreshold;
-    public uint Pad0, Pad1, Pad2;
+    /// <summary>The frame's interior lamp owner (0: no emitter), excluded from its own lamp's shadow query.</summary>
+    public uint Emitter, Pad1, Pad2;
     public const int Size = 48;
     /// <summary><see cref="Kind"/>: what the geometry is (the debug views colour by it; a terrain hit takes the ground colour map).</summary>
     public const uint Terrain = 0, Object = 1, Foliage = 2;
@@ -142,7 +143,7 @@ internal sealed unsafe class GiScene : IDisposable
     /// top-level structure over the terrain and the objects of <paramref name="objects"/> near <paramref name="eye"/>. Ends with a barrier to the
     /// tracing shaders.
     /// </summary>
-    public void Update(Vector3 eye, HeightSnapshot heights, WorldObjectRenderer? objects, FoliageRenderer? foliage = null)
+    public void Update(Vector3 eye, HeightSnapshot heights, WorldObjectRenderer? objects, FoliageRenderer? foliage = null, WorldLamps? lamps = null)
     {
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
         frame++;
@@ -203,6 +204,7 @@ internal sealed unsafe class GiScene : IDisposable
                 {
                     var record = entry.Records[k];
                     record.Texture = objects.RayTexture(inst.Materials!, entry.Parts[k]);
+                    record.Emitter = lamps?.Emitter(inst.Placed.PlacementId) ?? 0;
                     records.Add(record);
                 }
             }

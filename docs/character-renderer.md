@@ -20,8 +20,10 @@ pass preserves alpha coverage. Face morphs and body shape precede skinning.
 `CharacterContent` owns buffers/textures/morph arena; worker fetching/preparation precedes render
 uploads. Reuse appearances/content; replace only after ready and retire after GPU consumers.
 `CharacterTextureBudget` shares mip/VRAM pressure policy; unavailable content uses a stand-in.
+Loading readiness includes used textures deferred by memory pressure, not just queued decodes/uploads.
 Generated four-level reductions are always enabled; pose updates stagger by distance:120/300/600
-units every2/4/8 frames, animal scale by radius/16. Shadow LOD doubles choice with cascade floors.
+units every2/4/8 frames, animal scale by radius/16. `CharacterInstance.FullRateAnimation` bypasses
+distance throttling for presentation actors and the player's characters. Shadow LOD doubles choice with cascade floors.
 Clamp stored bounds to real mesh extent. Animation rendering does not independently integrate
 walk-loop root movement; simulation owns relocation. Quads/morph and motion buffers retain
 correct previous-frame data across skipped poses and content changes.
@@ -31,6 +33,8 @@ correct previous-frame data across skipped poses and content changes.
 Animal race/body/mesh/fur/clips/size use shared assembly with animal inputs, not human fallback.
 Portraits use the same content/shading with a dedicated camera/render target; avoid mutating
 world draw state. Asset/appearance failure must not corrupt another instance or portrait.
+Portrait cells redraw only when their character, appearance, size, camera serial or streamed
+texture images/swizzle change; animation and frame counts do not invalidate the cached still.
 Item icons (`CharacterRenderer.Icons.cs`) are the same: an item's mesh drawn through the item shader into a texture of its own, as a pseudo-instance that the world and shadow views skip;
 the camera, lighting and sizes are in [game/ui-screens.md](game/ui-screens.md) "Item icons".
 Harness `--crowd` exercises instance scaling; compare pose/upload/draw/shadow separately.

@@ -84,6 +84,7 @@ public sealed partial class PopulationSystem
         world.Player.Money = start.Money;
         world.Player.Squad = squad.Id;
         world.Player.Selection.Clear();
+        if (squad.Members.Count > 0) world.Player.Selection.Add(squad.Members[0]);
         return squad;
     }
 }

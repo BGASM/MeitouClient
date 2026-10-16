@@ -10,25 +10,16 @@ namespace Meitou.Game;
 
 sealed partial class PlayerInterface
 {
-    string selectedStat = "";
-    public bool UiCapturesPointer => UiVisible && UseScreenInput && (faithfulScreens.CapturesPointer || mapDrag is not null || inventoryDrag is not null || tradeDrag is not null);
+    string selectedStat = ((int)StatsEnumerated.Katanas).ToString(CultureInfo.InvariantCulture);
+    public bool UiCapturesPointer => UiVisible && (faithfulScreens.CapturesPointer || mapDrag is not null || inventoryDrag is not null || tradeDrag is not null);
     /// <summary>Keys the host keeps for itself (the sandbox's letters), so the faithful window shortcuts leave them alone.</summary>
     public HashSet<Key> ReservedKeys { get; } = [];
-    void UpdateMenuPause() => session.Simulation.RequestedPause = menuOpen || (UseScreenInput && faithfulScreens.HasModal);
+    void UpdateMenuPause() => session.Simulation.RequestedPause = settingsOpen || faithfulScreens.HasModal;
     public bool UiKey(Key key, bool ctrl = false, bool shift = false)
     {
         if (!UiVisible) return false;
+        if (key == Meitou.Engine.Input.Key.Escape && CancelInventoryDrag()) return true;
         if (key == Meitou.Engine.Input.Key.Escape && CloseContextMenu()) return true;
-        // The Meitou mode: Esc closes an open panel, else opens or closes the game menu (it no longer quits at once).
-        if (UiMode == UiMode.Meitou && !FrontendActive)
-        {
-            if (!ReservedKeys.Contains(key) && key is Meitou.Engine.Input.Key.I or Meitou.Engine.Input.Key.C)
-            { ExecuteUiAction(key == Meitou.Engine.Input.Key.I ? "inventory" : "stats", ""); return true; }
-            if (key != Meitou.Engine.Input.Key.Escape) return false;
-            if (InventoryScreensOpen) faithfulScreens.Escape();
-            else if (openPanel is not null && !menuOpen) openPanel = null; else ToggleMenu();
-            return true;
-        }
         if (key == Meitou.Engine.Input.Key.Escape)
         {
             if (faithfulScreens.IsOpen("title") && faithfulScreens.OpenScreens.Count == 1) return true;
@@ -64,10 +55,10 @@ sealed partial class PlayerInterface
         }
         return false;
     }
-    public void UiText(char value) { if (UiVisible && UseScreenInput) faithfulScreens.TextInput(value); }
+    public void UiText(char value) { if (UiVisible) faithfulScreens.TextInput(value); }
     public bool UiScroll(Vector2 p, float steps)
     {
-        if (!UiVisible || !UseScreenInput) return false;
+        if (!UiVisible) return false;
         ArrangeUi();
         if (InventoryWheel(p, steps)) return true;
         if (MapWheel(p, steps)) return true;
@@ -79,6 +70,7 @@ sealed partial class PlayerInterface
         { ScrollInventory(e.Screen, float.Parse(e.Action[17..], CultureInfo.InvariantCulture)); return; }
         if (HandleFrontendAction(e)) UpdateMenuPause();
         else if (e.Screen == "stats" && e.Action == "select") selectedStat = e.Text;
+        else if (e.Screen == "stats" && e.Action.StartsWith("stat:", StringComparison.Ordinal)) selectedStat = e.Action[5..];
         else if (e.Screen == "overview") MapAction(e.Widget);
         else if (e.Screen is "inventory" or "bag")
         {
@@ -97,7 +89,7 @@ sealed partial class PlayerInterface
         else if (id == "trader") BindTraderScreen(b);
         else if (id is "inventory" or "stats" or "bag" or "limbs")
         {
-            b.Text["Root"] = id == "stats" ? "CHARACTER STATS - " + (lead?.Name ?? "No character selected")
+            b.Text["Root"] = id == "stats" ? lead?.Name.ToUpperInvariant() ?? "CHARACTER STATS"
                 : id == "bag" ? lead?.ItemGrid?.Items.FirstOrDefault(i => i.Section == "backpack_attach")?.Name.ToUpperInvariant() ?? "BACKPACK"
                 : id == "limbs" ? "LIMBS" : lead?.Name.ToUpperInvariant() ?? "INVENTORY";
             if (id is "inventory" or "bag" or "limbs")
@@ -119,14 +111,7 @@ sealed partial class PlayerInterface
             }
             else
             {
-                UiListItem Skill(StatsEnumerated s) => new(((int)s).ToString(CultureInfo.InvariantCulture), $"{StatLabel(s)}  {(lead?.AllSkills.ElementAtOrDefault((int)s) ?? 0):0}");
-                b.Lists["AttributesPanel"] = StatPanels[0].Select(Skill).ToArray();
-                for (int i = 1; i < StatPanels.Length; i++) b.Lists[$"Skills{i}Panel"] = StatPanels[i].Select(Skill).ToArray();
-                if (int.TryParse(selectedStat, out int stat) && stat > 0 && stat < StatsInfo.Count)
-                    b.Text["Description1Panel"] = $"{StatLabel((StatsEnumerated)stat)}\nCurrent level: {(lead?.AllSkills.ElementAtOrDefault(stat) ?? 0):0.00}";
-                b.Text["Description2Panel"] = lead?.Body is { } body ? $"Blood {body.Blood * 100:0}%\nHunger {body.Hunger:0.00}\n{(body.Dead ? "Dead" : body.Unconscious ? "Unconscious" : "Conscious")}" : "";
-                foreach (string name in new[] { "Description1Panel", "Description2Panel" }) b.Properties[name] = new Dictionary<string, string> { ["WordWrap"] = "true", ["TextAlign"] = "Left Top", ["TextColour"] = MyGuiColours.InkText, ["TextPadding"] = "8 8 8 8" };
-                b.Properties["AttributesPanel"] = new Dictionary<string, string> { ["TextColour"] = "0.92 0.92 0.88" };
+                BindStatsGeometry(layout, b);
             }
         }
         else if (id == "overview")
@@ -147,18 +132,16 @@ sealed partial class PlayerInterface
         return b;
     }
     /// <summary>
-    /// The 33 record stats by panel: the attributes, then Skills1..4. The groups are the STATS record's field groups (docs/game/character-stats.md: attributes;
-    /// attack, defence, dodge, unarmed; athletics, swimming; engineer, medic, robotics, science; the thief four; the six trades; the nine weapons), with the weapons
-    /// split into melee and ranged. Which group goes in which of the four panels, and the order inside one, are <b>engine choices</b> (the layout's panel captions are not read).
+    /// The attributes and four skill columns, ordered as observed in the supplied original-game screenshot.
     /// </summary>
     internal static readonly StatsEnumerated[][] StatPanels =
     [
-        [StatsEnumerated.Strength, StatsEnumerated.Dexterity, StatsEnumerated.Toughness, StatsEnumerated.Perception],
+        [StatsEnumerated.Strength, StatsEnumerated.Toughness, StatsEnumerated.Dexterity, StatsEnumerated.Perception],
+        [StatsEnumerated.Katanas, StatsEnumerated.Sabres, StatsEnumerated.Hackers, StatsEnumerated.HeavyWeapons, StatsEnumerated.Blunt, StatsEnumerated.Polearms],
         [StatsEnumerated.MeleeAttack, StatsEnumerated.MeleeDefence, StatsEnumerated.Dodge, StatsEnumerated.MartialArts,
-            StatsEnumerated.Katanas, StatsEnumerated.Sabres, StatsEnumerated.Hackers, StatsEnumerated.HeavyWeapons, StatsEnumerated.Blunt, StatsEnumerated.Polearms],
-        [StatsEnumerated.Crossbows, StatsEnumerated.Turrets, StatsEnumerated.FriendlyFire, StatsEnumerated.Athletics, StatsEnumerated.Swimming],
-        [StatsEnumerated.Stealth, StatsEnumerated.Lockpicking, StatsEnumerated.Thieving, StatsEnumerated.Assassination],
-        [StatsEnumerated.Science, StatsEnumerated.Engineering, StatsEnumerated.Robotics, StatsEnumerated.Medic,
+            StatsEnumerated.Turrets, StatsEnumerated.Crossbows, StatsEnumerated.FriendlyFire],
+        [StatsEnumerated.Stealth, StatsEnumerated.Lockpicking, StatsEnumerated.Thieving, StatsEnumerated.Assassination, StatsEnumerated.Athletics, StatsEnumerated.Swimming],
+        [StatsEnumerated.Medic, StatsEnumerated.Engineering, StatsEnumerated.Robotics, StatsEnumerated.Science,
             StatsEnumerated.SmithingWeapon, StatsEnumerated.SmithingArmour, StatsEnumerated.SmithingBow, StatsEnumerated.Labouring, StatsEnumerated.Farming, StatsEnumerated.Cooking],
     ];
 
@@ -166,14 +149,15 @@ sealed partial class PlayerInterface
     {
         StatsEnumerated.Thieving => "Thievery", StatsEnumerated.HeavyWeapons => "Heavy weapons",
         StatsEnumerated.MeleeAttack => "Melee attack", StatsEnumerated.MeleeDefence => "Melee defence",
-        StatsEnumerated.SmithingWeapon => "Weapon smithing", StatsEnumerated.SmithingArmour => "Armour smithing",
-        StatsEnumerated.SmithingBow => "Crossbow smithing", StatsEnumerated.FriendlyFire => "Precision shooting",
+        StatsEnumerated.SmithingWeapon => "Weapon smith", StatsEnumerated.SmithingArmour => "Armour smith",
+        StatsEnumerated.SmithingBow => "Crossbow smith", StatsEnumerated.FriendlyFire => "Precision shooting",
         StatsEnumerated.MartialArts => "Martial arts",
-        StatsEnumerated.Medic => "Field medic", _ => stat.ToString(),
+        StatsEnumerated.Medic => "Field medic", StatsEnumerated.Engineering => "Engineer", _ => stat.ToString(),
     };
     void AddFaithfulContent(string id, List<UiControl> controls)
     {
         if (id == "title" && UiMode == UiMode.Meitou) { MeitouTitleMenu(controls); return; }
+        if (id == "stats") { AddStatsContent(controls); return; }
         AddMapContent(id, controls);
         if (id == "trader") { ArrangeContainerGrid(id, controls, session.CurrentSnapshot.Trade?.StockWidth ?? 0, session.CurrentSnapshot.Trade?.StockHeight ?? 0); AddTraderContent(controls); return; }
         if (id is not ("inventory" or "bag" or "limbs") || Selected().FirstOrDefault() is not { ItemGrid: { } grid } lead) return;
@@ -184,6 +168,7 @@ sealed partial class PlayerInterface
         if (id == "inventory") AddInventorySummary(controls, lead);
         foreach (var item in grid.Items.Where(i => id == "bag" ? i.Section == "backpack_content" : id == "limbs" ? i.Section.EndsWith("_replace", StringComparison.Ordinal) : i.Section != "backpack_content"))
         {
+            if (inventoryDrag is { } drag && drag.Character == lead.Id && drag.Item.Index == item.Index) continue;
             if (controls.FirstOrDefault(c => c.Name == item.Section) is not { } slot) continue;
             var area = slot.Bounds;
             if (item.Section == gridSection && columns > 0 && rows > 0) area = new(area.X + item.X * area.Width / columns, area.Y + item.Y * area.Height / rows, item.Width * area.Width / columns, item.Height * area.Height / rows);
@@ -194,12 +179,13 @@ sealed partial class PlayerInterface
     readonly List<string> uiMessages = [];
     /// <summary>
     /// The orders panel's toggles by the words in their widget names (the layout names only <c>OrdersChaseButton</c>, <c>OrdersMedicButton</c> and <c>OrdersRescueButton</c>
-    /// for certain, docs/game/ui-screens.md section 4; the rest are matched by the button's word, so a differently spelt name still binds). Jobs and Prospect have no backend.
+    /// for certain, docs/game/ui-screens.md section 4; the rest are matched by the button's word, so a differently spelt name still binds). Prospect has no backend.
     /// </summary>
     static readonly (string Word, CharacterOrders Order)[] OrderWords =
     [
-        ("Block", CharacterOrders.Block), ("Hold", CharacterOrders.Hold), ("Chase", CharacterOrders.Chase), ("Passive", CharacterOrders.Passive),
+        ("Block", CharacterOrders.Block), ("Hold", CharacterOrders.Hold), ("Chase", CharacterOrders.Jobs), ("Passive", CharacterOrders.Passive),
         ("Ranged", CharacterOrders.Ranged), ("Taunt", CharacterOrders.Taunt), ("Sneak", CharacterOrders.Sneak), ("Stealth", CharacterOrders.Sneak),
+        ("Jobs", CharacterOrders.Jobs),
     ];
 
     /// <summary>Binds the order toggles (checked while the lead selected character has the order) and the speed arrows of the HUD.</summary>

@@ -83,6 +83,7 @@ public sealed class WorldSession : IDisposable
     {
         int n = Simulation.Advance(realSeconds);
         for (int i = 0; i < n; i++) SimulationTick();
+        if (Simulation.Speed == 0 && !Simulation.RequestedPause) World.ApplyPausedInterfaceCommands();
         return n;
     }
 

@@ -1,5 +1,6 @@
 using System.Numerics;
 using Meitou.Data.Fcs;
+using Meitou.Data.Gameplay;
 
 namespace Meitou.Data.Characters;
 
@@ -122,7 +123,7 @@ public static class CharacterGenerator
         AppearanceLimits? limits = null;
         if (race.GetPath("editor limits") is { Length: > 0 } limitsPath)
         {
-            try { limits = AppearanceLimits.Read(Resolve(installRoot, limitsPath), female, DefaultDeviation(db)); }
+            try { limits = AppearanceLimits.Read(Resolve(installRoot, limitsPath), female, GameConstants.FromDatabase(db).AppearanceRandomDeviation); }
             catch (Exception e) when (e is IOException or System.Xml.XmlException or UnauthorizedAccessException) { notes.Add($"editor limits {limitsPath}: {e.Message}"); }
             if (limits is null) notes.Add($"editor limits {limitsPath}: no {g} config");
         }
@@ -157,6 +158,9 @@ public static class CharacterGenerator
                 else a.Floats[range.Target!] = v * 0.01f;
             }
         }
+        // Randomization restores the appearance template's posture (docs/characters.md, "Random appearance").
+        // Keep the rolls above: posture still consumes its random draw before the template value replaces it.
+        a.Floats["Posture"] = 20;
         a.Strings["idle stance"] = "idle_stand_normal";
         return (new AppearanceFile { Record = a }, morph);
     }
@@ -169,10 +173,6 @@ public static class CharacterGenerator
         else if (!groups.TryGetValue(group, out r)) groups[group] = r = rng.Unit();
         return Round(variation * (r * 2 - 1) + mid);
     }
-
-    static float DefaultDeviation(GameDatabase db) =>
-        db.OfType(FcsRecordType.CONSTANTS).Select(c => c.Floats.TryGetValue("appearance random deviation percentage", out var f) ? f : (float?)null)
-            .FirstOrDefault(f => f is not null) ?? 0.5f;
 
     // ---- Equipment ---------------------------------------------------------------------------------------------
 

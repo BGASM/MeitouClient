@@ -77,7 +77,7 @@ sealed partial class GameHost
     {
         if (gpu.Characters is not { } characters) return;
         characters.PortraitRequests.Clear();
-        if (!player.UiVisible || player.UiMode != Meitou.Data.Ui.UiMode.Faithful) return;
+        if (!player.UiVisible || player.TitleOpen) return;
         var members = player.SquadBarMembers();
         // The serial turns each portrait's camera (the original uses a number of the character's; this is the id's, stable for the character).
         for (int i = 0; i < members.Count; i++)
@@ -118,7 +118,7 @@ sealed partial class GameHost
                         }
                 poses[i] = new CharacterPose(layer.Name, time, weight);
             }
-            list.Add(new CharacterInstance(DrawKey(c.Id), c.Appearance, position, yaw, poses) { WeaponDrawn = c.WeaponDrawn, Scale = c.Scale, Hidden = aboveFloor.Contains(c.Id) });
+            list.Add(new CharacterInstance(DrawKey(c.Id), c.Appearance, position, yaw, poses) { WeaponDrawn = c.WeaponDrawn, Scale = c.Scale, Hidden = aboveFloor.Contains(c.Id), FullRateAnimation = c.IsPlayer });
         }
     }
 

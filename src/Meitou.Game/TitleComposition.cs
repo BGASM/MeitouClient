@@ -8,8 +8,8 @@ using Meitou.Rendering;
 namespace Meitou.Game;
 
 /// <summary>
-/// The Meitou title's view: a spot of the real world in the Okran's Pride region, drawn by the world's own renderers, with a lone wanderer
-/// staged in it (never a simulation character or a save record) and the sun turned to the right of the frame (<see cref="SkyClock.SunTurn"/>).
+/// The Meitou title's view: a spot of the real world in the Okran's Pride region, drawn by the world's own renderers, with a wanderer
+/// and a road fight staged in it, and the sun turned to the right of the frame (<see cref="SkyClock.SunTurn"/>).
 /// </summary>
 sealed class TitleComposition
 {
@@ -48,7 +48,7 @@ sealed class TitleComposition
         ("bush01.mesh", Part.OnPlateau, new(0.03f, 0.715f), 0, 0, 1.5f, 0.05f), ("shrub.mesh", Part.OnPlateau, new(0.2f, 0.715f), 30, 0, 0.45f, 0.05f),
         ("shrubs&grass.mesh", Part.OnPlateau, new(0.12f, 0.72f), 60, 0, 1.6f, 0.1f),
         // a watchtower (the buildable one) at the far right, as on the original poster, on the valley floor this far ahead
-        ("Watchtower", Part.Building, new(0.88f, 0.5f), 235, 2600, 1, 0),
+        ("Watchtower", Part.Building, new(0.88f, 0.5f), 145, 2600, 1, 0),
     ];
     /// <summary>The ghost-town ruin under the logo (houses and scrap piles the foliage system places round this x, z), and how far left across the view it is moved.</summary>
     static readonly Vector3 RuinCentre = new(-52860, 0, -22715);
@@ -61,6 +61,8 @@ sealed class TitleComposition
     public Vector3 Wanderer { get; }
     public float WandererYaw { get; }
     public CharacterAppearance Appearance { get; }
+    /// <summary>The road's three fight centres, projected onto the actual valley floor.</summary>
+    public IReadOnlyList<Vector3> Fights { get; }
     /// <summary>The ruin moved left of the logo, for the title only (<see cref="FoliageRenderer.Shift"/>).</summary>
     public FoliageShift Ruins { get; }
     /// <summary>The staged ridge (<see cref="WorldObjectRenderer.Staged"/>), empty when the cliff feature or the outcrop mesh is missing.</summary>
@@ -73,6 +75,7 @@ sealed class TitleComposition
         var (pieces, plateau, top) = Ridge(install, database, view, ground);
         Staged = pieces;
         Wanderer = OnPlateau(view, top, plateau, WandererOnScreen) ?? GroundUnder(view, WandererOnScreen, ground);
+        Fights = [GroundUnder(view, new(0.70f, 0.85f), ground), GroundUnder(view, new(0.755f, 0.89f), ground), GroundUnder(view, new(0.81f, 0.93f), ground)];
         // His back to the camera, looking out over the valley.
         var facing = Vector3.Normalize(view.Forward with { Y = 0 }) * MathF.Cos(WandererBearing) + Vector3.Normalize(Vector3.Cross(view.Forward, Vector3.UnitY)) * MathF.Sin(WandererBearing);
         WandererYaw = MathF.Atan2(facing.X, facing.Z);   // the characters' yaw: 0 faces +Z (MovementSystem)
@@ -225,7 +228,7 @@ sealed class TitleComposition
     /// <summary>How far the moons are nudged from where the game puts them: left by about 15% of the big moon's size, up by a tenth.</summary>
     const float MoonsLeft = 2.4f * MathF.PI / 180, MoonsUp = 1.6f * MathF.PI / 180;
     /// <summary>The clouds' drift on the title (world units per second, right to left across the view): several times a windy day's.</summary>
-    const float CloudSpeed = 250;
+    const float CloudSpeed = 125;
 
     /// <summary>The turn that moves the planets <see cref="MoonsLeft"/> and <see cref="MoonsUp"/> in <paramref name="camera"/>'s view (<see cref="SkyRenderer.PlanetTurn"/>).</summary>
     public static Quaternion MoonTurn(WorldCamera camera)

@@ -31,6 +31,7 @@ sealed partial class PlayerInterface
         var trade = session.CurrentSnapshot.Trade;
         if (trade is null)
         {
+            tradeDrag = null;
             if (!shownTrader.IsNone && faithfulScreens.IsOpen("trader")) faithfulScreens.Close("trader");
             shownTrader = CharacterId.None;
             tradeCloseSent = false;
@@ -38,6 +39,7 @@ sealed partial class PlayerInterface
         }
         if (trade.Trader != shownTrader)
         {
+            tradeDrag = null;
             shownTrader = trade.Trader;
             tradeCloseSent = false;
             if (!faithfulScreens.IsOpen("inventory")) faithfulScreens.Open("inventory");
@@ -84,9 +86,12 @@ sealed partial class PlayerInterface
         };
         var area = slot.Bounds;
         foreach (var item in trade.Stock)
+        {
+            if (tradeDrag?.Item.Index == item.Index) continue;
             AddItemCell(controls, $"trade-item-{item.Index}",
                 new(area.X + item.X * area.Width / columns, area.Y + item.Y * area.Height / rows, item.Width * area.Width / columns, item.Height * area.Height / rows),
                 item.Record, item.Material, item.Name, item.Quantity, $"c.{Money(item.Price)}", "TradeItem", item.Index, slot.Clip);
+        }
     }
 
     /// <summary>While trading, what one of the customer's items fetches (null: no trade, or another character's grid).</summary>

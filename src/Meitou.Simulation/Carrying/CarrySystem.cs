@@ -470,6 +470,7 @@ public sealed class CarrySystem(GameConstants constants, BodyOptions options, fl
         {
             if (!Free(table, i) || !table.Cold(i)!.RescueJob) continue;
             var cold = table.Cold(i)!;
+            if (cold.IsPlayer && !Orders.Has(cold, CharacterOrders.Jobs)) continue;
             if (cold.SquadId >= 0 && world.Squads.Find(cold.SquadId) is { } squad && Fighting(table, squad)) continue;
             float range = AggroSystem.RangeOf(cold, Settings.Sight), best2 = range * range;
             int best = -1;

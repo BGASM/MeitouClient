@@ -15,7 +15,7 @@ sealed partial class PlayerInterface
 
     bool InventoryPointerDown(Vector2 p)
     {
-        if (!UiVisible || !UseScreenInput || faithfulScreens.HitTest(p) is not { } picked) return false;
+        if (!UiVisible || faithfulScreens.HitTest(p) is not { } picked || !picked.Control.Enabled) return false;
         var bounds = picked.Control.Bounds;
         Vector2 Grab() => (p - new Vector2(bounds.X, bounds.Y)) / new Vector2(bounds.Width, bounds.Height);
         if (picked.Control.Properties.TryGetValue("TradeItem", out var stockIndex))
@@ -26,7 +26,7 @@ sealed partial class PlayerInterface
         }
         if (!picked.Control.Properties.TryGetValue("InventoryItem", out var index) || Selected().FirstOrDefault() is not { ItemGrid: { } grid } lead) return false;
         var item = grid.Items.FirstOrDefault(i => i.Index == int.Parse(index, CultureInfo.InvariantCulture));
-        if (item is null || item.Section is not ("main" or "backpack_content")) return false;
+        if (item is null || !InventoryCommands.IsMovableSection(item.Section)) return false;
         inventoryDrag = (lead.Id, item, Grab());
         return true;
     }
@@ -37,7 +37,7 @@ sealed partial class PlayerInterface
         var moving = inventoryDrag;
         tradeDrag = null;
         inventoryDrag = null;
-        if ((buying is null && moving is null) || !UiVisible || !UseScreenInput) return;
+        if ((buying is null && moving is null) || !UiVisible) return;
         ArrangeUi();
         if (faithfulScreens.HitTest(p) is not { } hit) return;
         var trade = session.CurrentSnapshot.Trade;
@@ -69,6 +69,25 @@ sealed partial class PlayerInterface
         }
         if (hit.Screen is not ("inventory" or "bag") || Selected().FirstOrDefault(c => c.Id == drag.Character)?.ItemGrid is not { } own) return;
         string target = hit.Screen == "bag" ? "backpack_content" : "main";
+        if (hit.Screen == "inventory")
+        {
+            var controls = faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent).First(f => f.Id == hit.Screen).Controls;
+            var equipment = controls.LastOrDefault(c => InventoryCommands.IsEquipmentSection(c.Name) && c.Bounds.Contains(p.X, p.Y) && (c.Clip?.Contains(p.X, p.Y) ?? true));
+            if (equipment is not null) target = equipment.Name;
+        }
+        if (InventoryCommands.IsEquipmentSection(target))
+        {
+            var size = InventoryCommands.SectionSize(target);
+            // Clothing and bags occupy one slot; weapon sections retain their grid rows.
+            if (target is not ("back" or "hip"))
+            {
+                Say(new MoveInventoryItem(drag.Character, token, target, 0, 0) { Tick = session.World.Tick });
+                return;
+            }
+            if (DropCell(p, hit.Screen, target, size.Width, size.Height, drag.Grab, item.Width, item.Height, out int wx, out int wy))
+                Say(new MoveInventoryItem(drag.Character, token, target, wx, wy) { Tick = session.World.Tick });
+            return;
+        }
         int cols = target == "main" ? own.Width : own.BagWidth, rws = target == "main" ? own.Height : own.BagHeight;
         if (!DropCell(p, hit.Screen, target, cols, rws, drag.Grab, item.Width, item.Height, out int tx, out int ty)) return;
         Say(new MoveInventoryItem(drag.Character, token, target, tx, ty) { Tick = session.World.Tick });
@@ -88,10 +107,36 @@ sealed partial class PlayerInterface
 
     void AddInventoryDrag(List<UiControl> controls)
     {
-        string? name = inventoryDrag?.Item.Name ?? tradeDrag?.Item.Name;
-        var grab = inventoryDrag?.Grab ?? tradeDrag?.Grab;
-        if (name is null || grab is not { } g) return;
-        controls.Add(new("drag-item", "TextBox", new(mouse.X - g.X * 120, mouse.Y - g.Y * 40, 120, 40), name, "", "", true,
-            new Dictionary<string, string> { ["TextAlign"] = "Center", ["WordWrap"] = "true" }, new(0.25f, 0.3f, 0.25f, 0.85f), Pickable: false));
+        if (inventoryDrag is { } drag)
+            Preview(drag.Item.Record, drag.Item.Material, drag.Item.Name, drag.Item.Quantity, drag.Item.Width, drag.Item.Height, drag.Grab);
+        else if (tradeDrag is { } stock)
+            Preview(stock.Item.Record, stock.Item.Material, stock.Item.Name, stock.Item.Quantity, stock.Item.Width, stock.Item.Height, stock.Grab);
+
+        void Preview(string record, string material, string name, int quantity, int columns, int rows, Vector2 grab)
+        {
+            float width = columns * InventoryCell, height = rows * InventoryCell;
+            AddItemCell(controls, "drag-item", new(mouse.X - grab.X * width, mouse.Y - grab.Y * height, width, height),
+                record, material, name, quantity, null, "DragItem", 0, null, pickable: false);
+        }
+    }
+
+    bool CancelInventoryDrag()
+    {
+        bool captured = inventoryDrag is not null || tradeDrag is not null;
+        inventoryDrag = null;
+        tradeDrag = null;
+        return captured;
+    }
+
+    void ValidateInventoryDrag()
+    {
+        if (faithfulScreens.HasModal) { CancelInventoryDrag(); return; }
+        if (faithfulScreens.IsOpen("bag") && Selected().FirstOrDefault()?.ItemGrid is not { BagWidth: > 0, BagHeight: > 0 }) faithfulScreens.Close("bag");
+        if (inventoryDrag is { } drag &&
+            (!faithfulScreens.IsOpen(drag.Item.Section == "backpack_content" ? "bag" : "inventory") ||
+             Selected().FirstOrDefault()?.Id != drag.Character ||
+             Selected().FirstOrDefault()?.ItemGrid?.Items.FirstOrDefault(i => i.Index == drag.Item.Index) != drag.Item)) inventoryDrag = null;
+        if (tradeDrag is { } stock && (!faithfulScreens.IsOpen("trader") ||
+            session.CurrentSnapshot.Trade?.Stock.FirstOrDefault(i => i.Index == stock.Item.Index) != stock.Item)) tradeDrag = null;
     }
 }

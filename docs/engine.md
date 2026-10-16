@@ -29,14 +29,27 @@ bridges Navigation; never let UI/rendering duplicate simulation state.
 GUI executable attaches a caller's console; folder prompt creates its own when necessary.
 Native splash precedes Vulkan; worker loading and render-thread GPU steps keep the window
 responsive. Scene transitions draw loading between stages, wait on asynchronous results, and
-preserve world on failure. Warm-up hides streaming/first-frame work until <40ms for0.5s,
-max5s. Cancel on window close. Helpers/services dispose/join with their owning scene/session.
+preserve world on failure. Gameplay warm-up waits for nearby population, terrain, scenery, character
+assets and used textures (including deferred loads), then <40ms frames for0.5s (max5s for frame pacing).
+Population builds are queued/applied at frame boundaries without advancing game time, AI or movement;
+navmesh-gated spawns are retried while loading. Warm-up and the flight hold the simulation paused.
+The Meitou title waits for terrain, scenery, character assets and used textures (including deferred loads), then
+one full second of <40ms frames without a timeout. Its menu artwork/fonts/pipelines warm under the opaque cover too;
+streaming uploads retire and a compacting GC completes before that final smooth run.
+Cancel on window close. Helpers/services dispose/join with their owning scene/session.
+After warm-up, loading panels ease off the left/right edges over 0.7s while the loading image fades to the live scene and UI.
+Input remains blocked through this reveal. Sky loads dismiss only panels that were shown, keeping the sky flight visible.
 
 Meitou UI mode presents title controls over a live view of the real world; Faithful retains
-the original title image and loading screen. Scene loads in Meitou use `SkyArrival`: 4s ascent
-about a fixed eye (lighting takes the shorter way to midnight, so the dawn title rewinds), a midnight
-sky hold, then 4.8s descent at the destination. Speed ramps smoothly over the first and last 40%
-of each pan, with a short constant-speed cruise between them. Integrated smoothstep velocity brings
+the original title image and loading screen. Advanced settings persist two independent scene-transition
+toggles in `meitou.user.json`, both on by default: `mainMenuTransitions` covers entering a new game/save
+from the main menu and returning to it; `inGameTransitions` covers save loads/new games during play.
+Each has a persisted speed slider (`mainMenuTransitionSpeed` / `inGameTransitionSpeed`, 0.25–4x, default1x).
+Disabling either uses the regular loading screen and warm-up. Enabled scene loads in Meitou use `SkyArrival`: 3.4s ascent
+about a fixed eye (lighting takes the shorter way to midnight by halfway up, so the dawn title rewinds), a midnight
+sky hold, then 2.4s descent at the destination, both durations divided by the selected speed.
+Ascent ramps speed over its first/last40%; descent ramps up over30% and brakes over15%, keeping
+its cruising speed later into the reveal. Integrated smoothstep velocity brings
 angular velocity and acceleration to zero at both ends of each flight. Save reads and
 new-game system preparation overlap the ascent; world replacement waits until terrain is outside
 the view. Escape/Space skips the flight, never pending load work. Progress appears after 2s.
@@ -48,10 +61,14 @@ given as a viewer camera code (`TitleComposition.Spot`, 50° lens), just after s
 the sun peeking over the hill right of the valley; clear weather, cloud coverage 0.38). The host's renderers stream round that camera as
 round any other; booting to the title starts the world there. Everything below is presentation only, set
 while the title draws or shows and cleared when it closes; simulation and saves never see it:
-- `SkyClock.SunTurn` turns the sun path about the vertical (height unchanged) to ~26° right of the heading.
+- `SkyClock.SunTurn` turns the sun path about the vertical (height unchanged) to ~26° right of the heading;
+  stars use the unturned path so their orientation stays continuous into the loading sky.
 - The sky renderer's `PlanetFill` (0.8; 0 in play) lights the moons from the viewer's side so their whole face reads,
   and `PlanetTurn` (identity in play) moves them ~1.6° up and ~2.4° left in the view.
-- The clouds drift right to left across the view at 250 units/s (`CloudWind`), faster than the game's wind.
+  Moon and character fill fade smoothly with sun height from the title's morning level to zero at the horizon.
+- The clouds drift right to left across the view at 125 units/s (`CloudWind`), faster than the game's wind.
+- Menu dust uses a separate particle renderer with the installed `kenshi_weather_dust1` system at 0.3 density,
+  warm tint and 24s wind gusts; it runs while paused and fades out as the camera tilts to the stars.
 - The shafts' air layer is raised to 2x and their strength to 1, so the hill the sun peeks over casts
   visible rays through the haze; `FogVolumes.HidePlaced` leaves out the placed `fogfeatures.dat` volumes
   (one stood as a dark dome where the sun is). `PostOptions.Balance` (1.1, 0.98, 0.88; 1 in play), a white balance
@@ -61,7 +78,7 @@ while the title draws or shows and cleared when it closes; simulation and saves 
   frame and the block moved 125 units left, so its sheer right side drops to the valley just right of him; on that top, a
   little scree and a stone scaled to pebbles, desert shrubs on its left and a tiny one at its right edge (FOLIAGE_MESH records
   drawn as staged meshes), a few more on the far hill; and the
-  buildable `Watchtower` building on the valley floor ~2600 units ahead at the far right, turned 35°, laid out as a placed
+  buildable `Watchtower` building on the valley floor ~2600 units ahead at the far right, yaw 145° from the view, laid out as a placed
   building (setting or clearing it lays their zones out again). The object streamer reads a staged FOLIAGE_MESH's TERRAIN
   texturing from `material type` (a map feature's from `texture mode`); without it the mesh loses its level indices and
   draws white (**Observed** on this title).
@@ -71,9 +88,13 @@ while the title draws or shows and cleared when it closes; simulation and saves 
   muscle and broader shoulders, frame, chest, arms and neck) stands on the plateau's top where the ray through his screen point
   (x 0.337, y 0.93) meets it, close to the eye, lit by a warm fill (`CharacterRenderer.Fill`, 0 in play: added ambient,
   three times as strong at the silhouette) so his back, turned to the sun, is not a flat silhouette, ~300 px tall at 900 p, his back to the camera looking
-  10° left of the heading, in a frozen `idle_stand_confident` pose; the character renderer draws him
-  alone. The camera's `MaxNear` is lowered to 20 for
+  10° left of the heading, in a frozen `idle_stand_confident` pose. The camera's `MaxNear` is lowered to 20 for
   the title (the near plane is a quarter of the eye's ~350-unit clearance, ~87, which clipped him).
+- Three Paladin–Dust Bandit pairs fight on the foreground road in `TitleBattle`'s separate world, using the regular combat and
+  animation systems with zero damage and no medical tick. Real time advances them while gameplay is paused; their pair centres
+  stay at the authored road points despite animation root motion. Bodies and pair spacing render at 2.5× scale for visibility,
+  grounded on the road; combat keeps its normal dimensions. Their poses update every frame, exempt from distance throttling.
+  They start three seconds into combat.
 The title menu is the [Meitou UI kit](meitou-ui.md)'s main menu (`MeitouTitleMenu`): its stack, save card and plate buttons at the kit's
 1600×900 sizes scaled with the height, over the kit's vignette. The card (paper, edge, rounded corners, drop shadow), the plates (Button1Skin
 9-slice at 70%, pushed skin at 85% under the mouse) and the chips are baked on the CPU from crops of `Kenshi_UI.png` and uploaded as
@@ -83,10 +104,10 @@ same bounds, so input is the faithful screen's. Lettering is Exo 2 from the pain
 or a 48 px bake past 1.25x, so it stays sharp.
 The Meitou wordmark, top right, is `assets/branding/kenshi-logo.png` (Lo-Fi's logo, embedded; see THIRD_PARTY_NOTICES),
 because the game ships none as a file ([ui-screens](game/ui-screens.md#title-artwork-and-location)).
-No actor enters simulation or save data; the normal camera lens and character source
+No title actor enters gameplay or save data; the normal camera lens and character source
 are restored when leaving the title.
-Warm-up waits for objects (the ridge included), foliage and character assets before exposing the menu (subject to the normal 5s limit).
-`--title-preview --screenshot <path>` captures it for visual QA. Save arrival still uses the
+Title character preparation starts ahead of ordinary streaming during boot; the complete scene uses the readiness contract above.
+`--title-preview --screenshot <path>` captures it for visual QA; `--ticks` advances the fight. Save arrival still uses the
 loader's leader-focused camera contract; saved camera pose restoration remains unimplemented.
 
 ## Rendering and upscaling

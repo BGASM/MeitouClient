@@ -58,6 +58,12 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     public double LastPoseMs { get; private set; }
     public double LastDrawCpuMs { get; private set; }
     public int Assets => assets.Count(a => a.Value is not null);
+    /// <summary>Current appearances still being prepared/uploaded, or textures still being loaded. Failed assets count as finished.</summary>
+    public bool ContentPending => Draws.Items.Any(c => !assets.ContainsKey(c.Appearance)) || content.Textures.PendingCount > 0 || content.Textures.UnresidentUsedCount > 0;
+    /// <summary>The appearance was uploaded or failed with a diagnostic; either completes its loading request.</summary>
+    public bool IsPrepared(CharacterAppearance appearance) => assets.ContainsKey(appearance);
+    /// <summary>Start preparing a scene's essential characters ahead of the world streaming queue (render thread).</summary>
+    public void Prefetch(CharacterAppearance appearance) => content.Fetched(appearance, urgent: true);
     public List<string> Messages => content.Messages;
 
     /// <summary>One character in range this frame.</summary>
@@ -204,7 +210,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             l.State = state;
             state.PreviousWorld = state.HasWorld ? state.World : l.World;
             (state.World, state.HasWorld) = (l.World, true);
-            l.Repose = state.Posed < 0 || state.Bones.Length != asset.Rig.BoneCount || (updateStamp + inst.Key) % PoseInterval(Vector3.Distance(eye, centre) / MathF.Max(1, l.Radius / HumanRadius)) == 0;
+            l.Repose = inst.FullRateAnimation || state.Posed < 0 || state.Bones.Length != asset.Rig.BoneCount || (updateStamp + inst.Key) % PoseInterval(Vector3.Distance(eye, centre) / MathF.Max(1, l.Radius / HumanRadius)) == 0;
             l.LayerStart = layerCount;
             var rig = asset.Rig;
             if (inst.Poses is { } poses)
@@ -241,7 +247,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                 var state = l.State;
                 if (l.Repose)
                 {
-                    if (state.Bones.Length != rig.BoneCount) { state.Bones = new Matrix4x4[rig.BoneCount]; state.Previous = new Matrix4x4[rig.BoneCount]; state.Attach = new Matrix4x4[asset.AttachCount]; state.PreviousAttach = new Matrix4x4[asset.AttachCount]; state.Posed = -1; }
+                    if (state.Bones.Length != rig.BoneCount || state.Attach.Length != asset.AttachCount) { state.Bones = new Matrix4x4[rig.BoneCount]; state.Previous = new Matrix4x4[rig.BoneCount]; state.Attach = new Matrix4x4[asset.AttachCount]; state.PreviousAttach = new Matrix4x4[asset.AttachCount]; state.Posed = -1; }
                     (state.Bones, state.Previous) = (state.Previous, state.Bones);
                     state.Attach.CopyTo(state.PreviousAttach, 0);
                     var scratch = rig.Rent();

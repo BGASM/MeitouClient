@@ -16,7 +16,7 @@ namespace Meitou.Game;
 /// </summary>
 sealed partial class PlayerInterface
 {
-    const string MenuCard = "meitou:menu:card", MenuCardHover = "meitou:menu:card-hover", MenuPlate = "meitou:menu:plate", MenuPlateHover = "meitou:menu:plate-hover",
+    const string MenuCard = "meitou:menu:card", MenuCardHover = "meitou:menu:card-hover", MenuPlate = "meitou:menu:plate", MenuPlateHover = "meitou:menu:plate-hover:v2",
         MenuChip = "meitou:menu:chip", MenuKey = "meitou:menu:key", MenuVignette = "meitou:menu:vignette";
     /// <summary>The kit's numbers at 1600×900.</summary>
     const float MenuLeft = 56, MenuBottom = 36, MenuWidth = 320, MenuButton = 38, MenuGap = 6, MenuExitGap = 4, MenuCardGap = 8, MenuCardHeight = 78, MenuShadow = 22;
@@ -31,10 +31,22 @@ sealed partial class PlayerInterface
     Func<string, string?>? uiResolve;
     RgbaImage? uiAtlas;
     float menuArtScale;
+    Dictionary<string, (float Progress, long At)>? menuHover;
     (string Folder, DateTime Modified, SaveSlotInfo? Info) continueInfo;
 
     /// <summary>The kit's scale for this frame: 1 at 900 pixels high.</summary>
     float MenuScale => Height / 900f;
+
+    float TitleHover(string name, bool hovered)
+    {
+        var states = menuHover ??= [];
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+        states.TryGetValue(name, out var previous);
+        float dt = previous.At == 0 ? 0 : Math.Clamp((float)System.Diagnostics.Stopwatch.GetElapsedTime(previous.At, now).TotalSeconds, 0, 0.05f);
+        float progress = Math.Clamp(previous.Progress + dt / (hovered ? 0.16f : -0.16f), 0, 1);
+        states[name] = (progress, now);
+        return progress * progress * (3 - 2 * progress);
+    }
 
     /// <summary>Where each title button goes (the card first when there is a save), for the bindings and the drawing alike.</summary>
     Dictionary<string, UiRect> MenuLayout(bool card)
@@ -73,10 +85,14 @@ sealed partial class PlayerInterface
             if (c.Type != "Button") continue;
             var b = c.Bounds;
             bool hover = c.Enabled && b.Contains(mouse.X, mouse.Y);
+            float hoverAmount = TitleHover(c.Name, hover);
             if (c.Name == "ContinueButton")
             {
                 float m = MenuShadow * s;
-                art.Add(Image("MeitouMenuCard", new(b.X - m, b.Y - m, b.Width + 2 * m, b.Height + 2 * m), hover ? MenuCardHover : MenuCard));
+                var cardBounds = new UiRect(b.X - m, b.Y - m, b.Width + 2 * m, b.Height + 2 * m);
+                art.Add(Image("MeitouMenuCard", cardBounds, MenuCard));
+                if (hoverAmount > 0) art.Add(Image("MeitouMenuCardHover", cardBounds, MenuCardHover,
+                    colour: FormattableString.Invariant($"1 1 1 {hoverAmount}")));
                 var (squad, line, meta) = ContinueText();
                 art.Add(Image("MeitouMenuChip", new(b.X + 16 * s, b.Y + 15 * s, 48 * s, 48 * s), MenuChip));
                 art.Add(Text("MeitouMenuChipLetter", new(b.X + 16 * s, b.Y + 15 * s, 48 * s, 48 * s), squad.Length > 0 ? squad[..1].ToUpperInvariant() : "?", 22, InkMain, "Center"));
@@ -90,13 +106,15 @@ sealed partial class PlayerInterface
             }
             if (Array.FindIndex(MenuButtons, m => m.Widget == c.Name) is not (>= 0 and var index)) continue;
             var (_, caption, icon) = MenuButtons[index];
-            art.Add(Image("MeitouMenuPlate" + index, b, hover ? MenuPlateHover : MenuPlate, colour: c.Enabled ? null : "0.7 0.7 0.7 1"));
+            art.Add(Image("MeitouMenuPlate" + index, b, MenuPlate, colour: c.Enabled ? null : "0.7 0.7 0.7 1"));
+            if (hoverAmount > 0) art.Add(Image("MeitouMenuPlateHover" + index, b, MenuPlateHover,
+                colour: FormattableString.Invariant($"1 1 1 {hoverAmount}")));
             // The icon in a 24-wide column 12 in from the edge, fitted inside 24×20 (kit .mt-icon), dimmed until hovered.
             float fit = Math.Min(24 / icon.Width, 20 / icon.Height) * s;
             float iconX = b.X + 12 * s + (24 * s - icon.Width * fit) / 2, iconY = b.Y + (b.Height - icon.Height * fit) / 2;
             art.Add(Image("MeitouMenuIcon" + index, new(iconX, iconY, icon.Width * fit, icon.Height * fit), "Kenshi_UI.png",
-                FormattableString.Invariant($"{icon.X} {icon.Y} {icon.Width} {icon.Height}"), hover ? null : "1 1 1 0.8"));
-            var ink = !c.Enabled ? Hex(119, 119, 119) : hover ? c.Name == "ExitButton" ? InkDanger : InkLight : InkMain;
+                FormattableString.Invariant($"{icon.X} {icon.Y} {icon.Width} {icon.Height}"), FormattableString.Invariant($"1 1 1 {0.8f + 0.2f * hoverAmount}")));
+            var ink = !c.Enabled ? Hex(119, 119, 119) : Vector4.Lerp(InkMain, c.Name == "ExitButton" ? InkDanger : InkLight, hoverAmount);
             art.Add(Text("MeitouMenuLabel" + index, new(b.X + 48 * s, b.Y, b.Width - 60 * s, b.Height), caption, 14, ink));
             controls[i] = Hollow(c);
         }
@@ -130,7 +148,7 @@ sealed partial class PlayerInterface
     {
         if (uiPainter is not { } painter) return false;
         float s = MenuScale;
-        if (menuArtScale == s && painter.HasTexture(MenuCard)) return true;
+        if (menuArtScale == s && painter.HasTexture(MenuPlateHover)) return true;
         if (uiResolve?.Invoke("Kenshi_UI.png") is not { } path) return false;
         try { uiAtlas ??= TextureLoader.LoadFile(path, allMips: false).Levels[0]; }
         catch (Exception e) when (e is IOException or InvalidDataException or NotSupportedException) { return false; }
@@ -139,7 +157,7 @@ sealed partial class PlayerInterface
         painter.SetImage(MenuCard, MenuArt.Card(uiAtlas, paper, W(MenuWidth), W(MenuCardHeight), s, MenuShadow * s, 1), srgb: false);
         painter.SetImage(MenuCardHover, MenuArt.Card(uiAtlas, paper, W(MenuWidth), W(MenuCardHeight), s, MenuShadow * s, 1.1f), srgb: false);
         painter.SetImage(MenuPlate, MenuArt.Plate(uiAtlas, new(612, 766, 118, 45), W(MenuWidth), W(MenuButton), s, 0.7f), srgb: false);      // Button1Skin
-        painter.SetImage(MenuPlateHover, MenuArt.Plate(uiAtlas, new(741, 766, 118, 45), W(MenuWidth), W(MenuButton), s, 0.85f), srgb: false); // its pushed state
+        painter.SetImage(MenuPlateHover, MenuArt.Plate(uiAtlas, new(612, 766, 118, 45), W(MenuWidth), W(MenuButton), s, 0.85f), srgb: false);
         painter.SetImage(MenuChip, MenuArt.Chip(W(48), W(48), 4 * s, Hex(20, 8, 6, 0.72f), Hex(175, 166, 139, 0.12f)), srgb: false);
         painter.SetImage(MenuKey, MenuArt.Chip(W(44), W(16), 4 * s, Hex(20, 8, 6, 0.6f), null), srgb: false);
         painter.SetImage(MenuVignette, MenuArt.Vignette(256, 160), srgb: false);
@@ -149,7 +167,7 @@ sealed partial class PlayerInterface
 }
 
 /// <summary>The Meitou menu's surfaces, baked on the CPU as sRGB images with straight alpha (docs/meitou-ui.md, "Surfaces").</summary>
-static class MenuArt
+static partial class MenuArt
 {
     /// <summary>
     /// The paper card (kit .mt-save): the paper crop stretched whole, brightened by <paramref name="bright"/>, with its edge drawn inside (2px dark line,

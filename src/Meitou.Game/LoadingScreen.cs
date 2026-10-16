@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Numerics;
 using Meitou.Data.Ui;
 using Meitou.Rendering;
@@ -25,6 +26,18 @@ sealed class LoadingScreen : IDisposable
     string label = "";
     double from, to, expected = 1, stepStart;
     float shown;
+    const double ExitSeconds = 0.7;
+    double? exitStart;
+    bool drawn;
+
+    float ExitProgress => exitStart is { } start ? (float)Math.Clamp((clock.Elapsed.TotalSeconds - start) / ExitSeconds, 0, 1) : 0;
+    public bool Exiting => exitStart is not null && ExitProgress < 1;
+
+    /// <summary>Reveal the ready scene while the panels slide out. A fast sky load that never showed panels has nothing to dismiss.</summary>
+    public void Finish()
+    {
+        if (drawn) exitStart ??= clock.Elapsed.TotalSeconds;
+    }
 
     LoadingScreen(DebugOverlay overlay, UiPainter? painter, MyGuiResources? resources, MyGuiLayout? layout, string? picture, string tip)
     {
@@ -80,32 +93,42 @@ sealed class LoadingScreen : IDisposable
     }
 
     /// <summary>Starts the bar again (a new load between scenes).</summary>
-    public void Restart() { shown = 0; from = to = 0; }
+    public void Restart() { shown = 0; from = to = 0; exitStart = null; drawn = false; }
 
     public void Draw(int width, int height, bool background = true)
     {
+        float t = ExitProgress;
+        if (t >= 1) return;
+        drawn = true;
+        float departure = t * t * (3 - 2 * t), opacity = 1 - departure;
         if (background)
         {
-            overlay.Rect(0, 0, width, height, new Vector4(0.02f, 0.02f, 0.018f, 1));
+            overlay.Rect(0, 0, width, height, new Vector4(0.02f, 0.02f, 0.018f, opacity));
             overlay.Flush(width, height);
         }
-        float progress = Progress;
+        float progress = exitStart is null ? Progress : 1;
         // Two panels along the bottom (engine choice): the loading panel on the left (LOADING..., the spinner, the bar, the step), the layout's own panel on the
         // right, made small and holding only the tip. Sizes at 1080 rows, scaled with the height.
         float s = height / 1080f, margin = 40 * s, panelHeight = 120 * s, top = height - margin - panelHeight;
         float half = Math.Max(width / 2f - 1.5f * margin, 1);
         var box = new UiRect(margin, top, Math.Min(480 * s, half), panelHeight);
         var tipBox = new UiRect(width - margin - Math.Min(480 * s, half), top, Math.Min(480 * s, half), panelHeight);
+        float slide = (box.Width + margin + 8 * s) * departure;
+        box = box with { X = box.X - slide };
+        tipBox = tipBox with { X = tipBox.X + slide };
         if (painter is not null && layout is not null && resources is not null)
         {
             var b = new UiBindings();
             if (!background) b.Hidden.Add("BackgroundImage");
-            if (picture is not null) b.Properties["BackgroundImage"] = new Dictionary<string, string> { ["ImageTexture"] = picture };
+            var image = new Dictionary<string, string> { ["Alpha"] = opacity.ToString(CultureInfo.InvariantCulture) };
+            if (picture is not null) image["ImageTexture"] = picture;
+            b.Properties["BackgroundImage"] = image;
             b.Positions["LoadingPanel"] = tipBox;
             b.Positions["MessageText"] = new UiRect(tipBox.X + 8 * s, tipBox.Y + 8 * s, tipBox.Width - 16 * s, tipBox.Height - 16 * s);
             b.Hidden.Add("LoadingText");
             b.Text["MessageText"] = tip;
-            b.Properties["MessageText"] = new Dictionary<string, string> { ["Static"] = "true", ["WordWrap"] = "true", ["TextAlign"] = "Center", ["FontName"] = "Kenshi_FloaterFont_Large" };
+            b.Properties["MessageText"] = new Dictionary<string, string> { ["Static"] = "true", ["WordWrap"] = "true", ["TextAlign"] = "Center",
+                ["FontName"] = "Kenshi_StandardFont_Medium", ["FontPixels"] = Math.Max(8, (int)MathF.Round(16 * s)).ToString(CultureInfo.InvariantCulture) };
             var controls = MyGuiPresentation.Arrange(layout, width, height, b, resources.Layers).ToList();
             // The loading panel in the tip panel's frame (Kenshi_FloatingPanelSkin, the layout's LoadingPanel skin).
             controls.Add(new UiControl("LoadingBox", "Widget", box, "", "", "Kenshi_FloatingPanelSkin", true, new Dictionary<string, string>(), Vector4.Zero));

@@ -63,7 +63,7 @@ sealed class CharacterAssembly(PopulationData data)
             foreach (var item in inventory.Items.Where(i => i.Section == section && i.Type == FcsRecordType.WEAPON))
                 if (weapon is null && combat.Weapon(item.Record) is { } w)
                     weapon = WeaponInstance.Create(item.Level * 0.01f, w, combat.Manufacturer(item.CompanyId), combat.WeaponMaterial(item.MaterialId), combat.Constants);
-        var armour = inventory.Items.Where(i => i.Type == FcsRecordType.ARMOUR && combat.Armour(i.Record) is not null)
+        var armour = inventory.Items.Where(i => i.Type == FcsRecordType.ARMOUR && Items.InventoryCommands.IsEquipmentSection(i.Section) && combat.Armour(i.Record) is not null)
             .Select(i => ArmourPiece.Create(combat.Armour(i.Record)!, i.Quality * 0.01f));
         // The crossbow: the first CROSSBOW in the weapon sections (back, then hip), its quality the level x 0.01 like a weapon's.
         CrossbowInstance? crossbow = null;
@@ -93,6 +93,20 @@ sealed class CharacterAssembly(PopulationData data)
     }
 
     Fighter FighterOf(GameRecord? record, Inventory inventory) => AnimalData.From(record) is { } animal ? MakeAnimalFighter(animal) : MakeFighter(inventory);
+
+    public void RefreshEquipment(CharacterCold cold)
+    {
+        if (cold.Inventory is not { } inventory) return;
+        var fighter = FighterOf(data.Db.Find(cold.RecordId), inventory);
+        fighter.Guarding = cold.Fighter?.Guarding ?? false;
+        fighter.EncumbranceFactor = cold.Fighter?.EncumbranceFactor ?? 1;
+        cold.Fighter = fighter;
+        if (cold.Appearance is not { } look || look.Animal is not null) return;
+        var body = look.Loadout?.Appearance.Record ?? look.Body?.Record;
+        if (Saving.SavedKit.LoadoutOf(body, Saving.SavedKit.FromInventory(inventory), data.Db, look.Loadout?.Seed ?? 0) is { } kit &&
+            data.Appearances?.Create(cold.RecordId, kit) is { } updated)
+            cold.Appearance = updated;
+    }
 
     /// <summary>
     /// <see cref="Attach"/> for a character loaded from a save: the race, stats and medical state are the saved ones (not rolled), the inventory and the fighter are

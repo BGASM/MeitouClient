@@ -54,24 +54,22 @@ internal sealed unsafe partial class CharacterRenderer
         foreach (var r in PortraitRequests) portraitKeys.Add(r.Key);
     }
 
-    /// <summary>What each cell last showed: the character's key and appearance.</summary>
-    readonly Dictionary<int, (long Key, CharacterAsset Asset)> portraitShown = [];
-    /// <summary>A shown portrait is drawn again (the same still) every this many frames, one cell at a time, so textures that streamed in since show.</summary>
-    const int PortraitRefresh = 30;
-    long portraitFrame;
+    sealed record ShownPortrait(long Key, uint Serial, CharacterAsset Asset, float Radius,
+        (Texture? Image, bool Swizzled)[] Textures);
+    /// <summary>The character, appearance and streamed texture images each cell last showed.</summary>
+    readonly Dictionary<int, ShownPortrait> portraitShown = [];
     Matrix4x4[] portraitBones = [], portraitAttach = [];
     readonly List<ActiveLayer> portraitLayers = [];
 
     /// <summary>
     /// Draws the requested portraits into their cells (after <see cref="Update"/>, outside any pass). Like the original's, a portrait is a still: the character in its
     /// idle stance at its start and its posture layers, not its live animation. A cell is posed and drawn anew when its character or appearance (equipment) changes,
-    /// else redrawn as the same still now and then (<see cref="PortraitRefresh"/>); a
+    /// or its size, camera serial or streamed textures change; a
     /// character not posed this frame (not in the list) keeps what its cell last showed.
     /// </summary>
     public void DrawPortraits()
     {
         if (PortraitRequests.Count == 0) return;
-        portraitFrame++;
         var (atlas, _) = PortraitAtlas;
         liveByKey.Clear();
         for (int i = 0; i < liveCount; i++) liveByKey[live[i].Key] = i;
@@ -90,7 +88,8 @@ internal sealed unsafe partial class CharacterRenderer
             if (!Due(request, out int index)) continue;
             ref var l = ref live[index];
             var head = PosePortrait(in l);
-            portraitShown[request.Cell] = (request.Key, l.Asset);
+            portraitShown[request.Cell] = new ShownPortrait(request.Key, request.Serial, l.Asset, l.Radius,
+                l.Asset.Parts.SelectMany(p => p.Material.Tex).Select(t => (t?.Native, t?.Swizzled ?? false)).ToArray());
             int x = request.Cell % PortraitColumns * PortraitSize, y = request.Cell / PortraitColumns * PortraitSize;
             var rect = new Rect2D(new Offset2D(x, y), new Extent2D(PortraitSize, PortraitSize));
             Gpu.Clear(cmd, true, default, true, 1, rect);
@@ -121,12 +120,22 @@ internal sealed unsafe partial class CharacterRenderer
     }
 
     /// <summary>Whether <paramref name="request"/>'s cell needs drawing this frame: its character is in the list and the cell shows someone else or another
-    /// appearance, or it is the cell's turn to be refreshed.</summary>
+    /// appearance, size, camera serial or streamed texture images.</summary>
     bool Due(PortraitRequest request, out int index)
     {
         index = -1;
         if (request.Cell < 0 || request.Cell >= PortraitColumns * PortraitRows || !liveByKey.TryGetValue(request.Key, out index)) return false;
-        return !portraitShown.TryGetValue(request.Cell, out var shown) || shown.Key != request.Key || shown.Asset != live[index].Asset || (portraitFrame + request.Cell) % PortraitRefresh == 0;
+        ref var l = ref live[index];
+        if (!portraitShown.TryGetValue(request.Cell, out var shown) || shown.Key != request.Key ||
+            shown.Serial != request.Serial || shown.Asset != l.Asset || shown.Radius != l.Radius) return true;
+        int texture = 0;
+        foreach (var part in l.Asset.Parts)
+            foreach (var t in part.Material.Tex)
+            {
+                if (texture >= shown.Textures.Length || shown.Textures[texture] != (t?.Native, t?.Swizzled ?? false)) return true;
+                texture++;
+            }
+        return texture != shown.Textures.Length;
     }
 
     /// <summary>Poses <paramref name="l"/> still for its portrait (its idle stance at time 0 and its posture layers) into <see cref="portraitBones"/> and

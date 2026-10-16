@@ -26,6 +26,8 @@ public enum CharacterOrders : ushort
     Taunt = 32,
     /// <summary>Sneaking: slower, harder to see and to hear (docs/game/perception.md sections 3 and 5, docs/game/pathfinding.md "Sneaking").</summary>
     Sneak = 64,
+    /// <summary>Enables automatic assigned jobs; direct player orders remain available.</summary>
+    Jobs = 128,
 }
 
 /// <summary>Turns an order on, off (<paramref name="On"/>) or over (null) for the characters, or for the player's selection when the list is empty.</summary>
@@ -51,6 +53,9 @@ public static class Orders
     ];
 
     public const string SpeedModeKey = "speed mode";
+    // Meitou extension: the original's jobs-switch save key is not established.
+    public const string JobsKey = "meitou jobs enabled";
+    public const CharacterOrders PlayerDefaults = CharacterOrders.Jobs | CharacterOrders.Ranged;
 
     public static bool Has(CharacterCold? cold, CharacterOrders order) => cold is not null && (cold.Orders & order) != 0;
 
@@ -58,14 +63,16 @@ public static class Orders
     public static void Write(FcsRecord state, CharacterCold cold)
     {
         foreach (var (order, key) in SaveKeys) state.Bools[key] = (cold.Orders & order) != 0;
+        state.Bools[JobsKey] = Has(cold, CharacterOrders.Jobs);
         state.Ints[SpeedModeKey] = cold.RunSpeed;
     }
 
-    /// <summary>Reads them back; absent keys leave the defaults (no orders, no cap).</summary>
+    /// <summary>Reads them back; absent keys leave the character's defaults.</summary>
     public static void Read(FcsRecord state, CharacterCold cold)
     {
         foreach (var (order, key) in SaveKeys)
-            if (state.Bools.TryGetValue(key, out bool on) && on) cold.Orders |= order;
+            if (state.Bools.TryGetValue(key, out bool on)) cold.Orders = on ? cold.Orders | order : cold.Orders & ~order;
+        if (state.Bools.TryGetValue(JobsKey, out bool jobs)) cold.Orders = jobs ? cold.Orders | CharacterOrders.Jobs : cold.Orders & ~CharacterOrders.Jobs;
         if (state.Ints.TryGetValue(SpeedModeKey, out int mode) && mode is >= 0 and <= SpeedMode.Free) cold.RunSpeed = (byte)mode;
     }
 

@@ -8,6 +8,10 @@ not original-game lighting rules. Original ambient: [formats/lighting.md](format
 
 Ray-query setup is requested by default unless `--no-gi`; unsupported hardware prints GI off.
 The `gi` Enhancement/`--faithful gi` selects probe lighting versus unchanged flat ambient.
+Graphics > Lighting > **Indoor GI** (`interiorgi`, default on) switches room surfaces, indoor
+furniture and characters between GI and the original ambient; it requires **Indirect light**.
+The preference is saved with the other graphics toggles and applies immediately. Bypassing
+indoor GI leaves outdoor sampling, probe updates and direct sun/lamps unchanged.
 Require acceleration_structure/ray_query/deferred_host_operations and core buffer-device-address.
 RayInput buffers carry address/build-input usage; no copied geometry required. Compile GLSL460
 ray-query shaders with explicit descriptor bindings. The feature is optional for device support.
@@ -32,21 +36,40 @@ light at hits, enabling bounce lighting.
 ## Probes
 
 Two toroidal cascades,32x32 columns of8 probes: horizontal/vertical spacing128/96 and512/384,
-ray lengths4000/16000. Ground bases use five height samples, updated incrementally on scroll.
-Invalidate relocated tiles before sampling; reset history for changed positions.
+ray lengths4000/16000. With the camera target in/beside a viewed interior, the near grid uses32/24
+spacing around it (1024 across) and follows its height in96-unit steps; the far grid stays unchanged.
+The near grid fades to the far cascade above its top layer, rather than extending that layer's light upwards.
+Ground bases use five height samples, updated incrementally on scroll and resampled on density/height
+changes. Invalidate relocated tiles before sampling; reset history for changed positions.
 Irradiance:8² octahedral texels plus border RGBA16F (alpha valid); distance moments:16² plus
 border RG16F. Seam borders copy opposite edges.
 
 32 spherical-Fibonacci rays/probe with rotated directions (64 for comparison). Misses sample
 sky ambient; hits combine albedo, shadowed sun, lamp light and previous probe irradiance.
-Negative backface distances mark interiors; >25% backface rays invalidates a probe.
-Cosine-weight irradiance, cosine^50 distance moments; hysteresis adjusts with ray count/cadence.
+Interior lamps with loaded owner masks cast visibility rays at bounce hits; furniture/walls
+between a hit and the lamp block that source, while openings can let light outside. [Lamps](render-lights.md).
+Negative backface distances mark solid occupancy; >=25% backface rays lowers probe validity.
+Blend validity with the irradiance's hysteresis: noisy occupancy cannot toggle a probe's full
+contribution each update. A moved/new probe starts without history; persistently invalid probes
+fade to zero (snap below0.001). Cosine-weight irradiance, cosine^50 distance moments; hysteresis
+adjusts with ray count/cadence.
 Four-phase round robin; far probes every second round, fog-hidden probes slower. Preserve the
 same effective history when updates slow; a newly invalid tile cannot contribute stale light.
 
 Eight neighbouring probes use trilinear, facing and Chebyshev visibility weights. Near cascade
-wins, far fills outside near, sky outside both. GI replaces envDiffuse; per-fragment path also
+wins, far fills outside near, sky outside both. A point whose near probes are all invalid looks
+up again one cell along its normal before falling back to the far cascade.
+**Observed** (Hub bar, debug colouring): at the 32-unit room grid every probe round wall/corner/floor
+points can sit in walls, the raised floor or furniture; the far cascade then painted them near black. GI replaces envDiffuse; per-fragment path also
 scales specular ambient by luminance ratio clamped0..1. Reflection probe use is a separate switch.
+
+Interior meshes, furniture inside building masks, and indoor characters take indirect light of
+luminance max(GI, original ambient); its hue mixes ambient to GI hue by smoothstep(0.1, 0.25, GI/ambient)
+(Hub bar, **Observed**: GI/ambient 0.15-0.3 round lamps, 0.05-0.15 elsewhere, nowhere above 0.3).
+Direct sun/lamps and the probe feedback remain unscaled. `GiProbes.InteriorGain` <= 1 disables it.
+**Observed** (Hub bar): corners/upper walls read under a quarter of the ambient (dark probe-cell
+blotches under the former 4x gain capped at ambient); full GI hue at ambient luminance reads
+saturated yellow on unlit walls; a linear GI-share mix nearly matches GI off.
 
 ## Fog and resolve
 
@@ -56,6 +79,8 @@ Resolve divisor2: scene writes flagged normal/albedo into an extra RGBA16UI targ
 resolve reconstructs position from near/far depth; full-res apply depth-weights four neighbours.
 Unflagged/background surfaces must remain unchanged. Resolved surfaces currently lose the
 per-fragment specular-occlusion term. Strong depth/normal discontinuities need rejection.
+Surface bit9 marks interiors; signed low-resolution depth preserves that class (0 empty, negative
+interior). Upsampling rejects the other class so the gain cannot bleed onto outdoor surfaces.
 
 ## Performance and verification
 
@@ -65,6 +90,15 @@ differently; compare both settled and cold lighting. GPU GI cost includes scene 
 trace/blend and barriers; resolve/apply may be accounted in post. Fixed camera results do not
 predict moving-camera rebuilds. **Observed checks:** zero GI-off mean screenshot
 change in Hub/swamp; moving-scene synchronization validation checks structure/address lifetime.
+**Observed indoor check:** Hub bar (`4933-Newwworld-INGAME`),32/24 grid:47 of63 probes within
+the mask valid (irradiance-atlas alpha readback), nonzero bounced light. Settled gain1/4 captures
+show brighter walls/stairs/furniture at gain4; resolve2 and per-fragment paths retain shadows and
+lamp colour. These are manual checks, not image regressions.
+Indoor GI off/on captures through the live switch confirm ambient bypass in both resolve2 and
+per-fragment paths while the main GI switch stays enabled.
+**Observed temporal check:** same fixed Hub bar camera,256 warmup then96 frames: blending
+validity reduced the worst count of pixels changing by >16/255 per frame from2447 to187.
+Random-ray occupancy previously replaced alpha with0/1 each update, causing visible flashing.
 
 ## Open
 

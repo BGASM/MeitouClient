@@ -82,17 +82,19 @@ sealed partial class PlayerInterface
     }
 
     /// <summary>Adds a text panel's lines over the arranged widget <paramref name="panel"/>: one row per line, the label from 3 % of the width, the value right-aligned to 96 %.</summary>
-    static void AddLines(List<UiControl> controls, string panel, IReadOnlyList<HudLine> lines, float rowHeight)
+    static void AddLines(List<UiControl> controls, string panel, IReadOnlyList<HudLine> lines, float rowHeight, float? fontPixels = null)
     {
         if (controls.FirstOrDefault(c => c.Name == panel) is not { } host) return;
         var area = host.Bounds;
+        var properties = new Dictionary<string, string> { ["FontName"] = "Kenshi_StandardFont_Medium" };
+        if (fontPixels is { } pixels) properties["FontPixels"] = Math.Max(8, (int)MathF.Round(pixels)).ToString(CultureInfo.InvariantCulture);
         for (int i = 0; i < lines.Count; i++)
         {
             var row = new UiRect(area.X + area.Width * 0.03f, area.Y + i * rowHeight, area.Width * 0.93f, rowHeight);
             foreach (var (part, text, colour, align) in new[] { ("label", lines[i].Label, lines[i].LabelColour, "Left Top"), ("value", lines[i].Value, lines[i].ValueColour, "Right Top") })
                 if (text.Length > 0)
                     controls.Add(new($"{panel}-{part}-{i}", "TextBox", row, text, "", "Kenshi_TextboxStandardText", true,
-                        new Dictionary<string, string> { ["TextAlign"] = align, ["TextColour"] = colour ?? MyGuiColours.InkText }, Vector4.Zero, Pickable: false, Clip: host.Clip));
+                        new Dictionary<string, string>(properties) { ["TextAlign"] = align, ["TextColour"] = colour ?? MyGuiColours.InkText }, Vector4.Zero, Pickable: false, Clip: host.Clip));
         }
     }
 
@@ -100,20 +102,32 @@ sealed partial class PlayerInterface
     void AddHudText(List<UiControl> controls)
     {
         if (Lead() is not { } lead) return;
-        float row = 20 * Height / 1080f;   // the panels' font, Exo2 SemiBold 20, at the 1080-line reference
+        float row = 20 * Height / 1080f, sidePixels = 16 * Height / 1080f;
         string faction = FactionName?.Invoke(lead.Faction) ?? "";
-        AddLines(controls, "NameText", [new(lead.Name, faction, TitleColour, TitleColour)], row);
-        AddLines(controls, "StateText", StateLines(lead), row);
-        AddLines(controls, "StatsText", StatsLines(lead), row);
-        if (infoExpanded) AddLines(controls, "ExtendedStatsText", ExtendedLines(lead), row);
+        AddLines(controls, "NameText", [new(lead.Name, faction, TitleColour, TitleColour)], row, sidePixels);
+        AddLines(controls, "StateText", StateLines(lead), row, sidePixels);
+        AddLines(controls, "StatsText", StatsLines(lead), row, sidePixels);
+        if (infoExpanded) AddLines(controls, "ExtendedStatsText", ExtendedLines(lead).Select(line => line with
+            { Label = line.Label.ToUpperInvariant(), LabelColour = MainColour }).ToArray(), row, sidePixels);
         foreach (var (bar, name, arrows) in medicalRows)
         {
             if (controls.FirstOrDefault(c => c.Name == bar + "Datapanel") is not { } host) continue;
-            controls.Add(new($"{bar}-name", "TextBox", host.Bounds, name, "", "Kenshi_TextboxStandardText", true,
-                new Dictionary<string, string> { ["TextAlign"] = "Center", ["TextColour"] = MyGuiColours.InkText }, Vector4.Zero, Pickable: false, Clip: host.Clip));
+            var fullBar = controls.FirstOrDefault(c => c.Name == bar)?.Bounds ?? host.Bounds;
+            var textBounds = new UiRect(host.Bounds.X, fullBar.Y, host.Bounds.Width, fullBar.Height);
+            string pixels = Math.Max(8, (int)MathF.Round(16 * Height / 1080f)).ToString(CultureInfo.InvariantCulture);
+            controls.Add(new($"{bar}-name", "TextBox", textBounds, name, "", "", true,
+                new Dictionary<string, string> { ["FontPixels"] = pixels, ["TextAlign"] = "Center", ["TextColour"] = MyGuiColours.InkText }, Vector4.Zero, Pickable: false, Clip: host.Clip));
             if (arrows.Length > 0)
-                controls.Add(new($"{bar}-arrows", "TextBox", host.Bounds, arrows, "", "Kenshi_TextboxStandardText", true,
-                    new Dictionary<string, string> { ["TextAlign"] = "Right VCenter", ["TextColour"] = AlertColour }, Vector4.Zero, Pickable: false, Clip: host.Clip));
+                controls.Add(new($"{bar}-arrows", "TextBox", textBounds, arrows, "", "", true,
+                    new Dictionary<string, string> { ["FontPixels"] = pixels, ["TextAlign"] = "Right VCenter", ["TextColour"] = AlertColour }, Vector4.Zero, Pickable: false, Clip: host.Clip));
+            int valueIndex = controls.FindIndex(c => c.Name == bar + "Value");
+            if (valueIndex >= 0)
+            {
+                var value = controls[valueIndex];
+                float height = Math.Max(value.Bounds.Height, 20 * Height / 1080f);
+                controls[valueIndex] = value with { Bounds = value.Bounds with { Y = value.Bounds.Y + (value.Bounds.Height - height) / 2, Height = height },
+                    Properties = new Dictionary<string, string>(value.Properties) { ["FontPixels"] = pixels } };
+            }
         }
     }
 

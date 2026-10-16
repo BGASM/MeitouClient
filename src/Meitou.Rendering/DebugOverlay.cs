@@ -69,6 +69,9 @@ public sealed unsafe class DebugOverlay : IDisposable
     SampledTexture? imageBatch;
     readonly SamplerSlot samplerAtlas;
     readonly StbTrueType.stbtt_bakedchar[] glyphs = new StbTrueType.stbtt_bakedchar[CharCount];
+    readonly StbTrueType.stbtt_packedchar[]? packedGlyphs;
+    readonly float[]? kerning;
+    readonly float baselineOffset;
     readonly List<float> batch = [];
     const int Stride = 8;
 
@@ -80,17 +83,50 @@ public sealed unsafe class DebugOverlay : IDisposable
     /// <summary>What <see cref="Flush"/> draws into: the frame's final picture (the window's backbuffer, or an offscreen texture). Set by the host.</summary>
     public Texture? Target { get; set; }
 
-    DebugOverlay(GpuContext gpu, byte[] font, float pixelHeight = 16)
+    DebugOverlay(GpuContext gpu, byte[] font, float pixelHeight = 16) : this(gpu, font, pixelHeight, false) { }
+
+    DebugOverlay(GpuContext gpu, byte[] font, float pixelHeight, bool uiFont)
     {
         Gpu = gpu;
-        (PixelHeight, AtlasSize) = (pixelHeight, pixelHeight > 32 ? 2048 : 512);
+        (PixelHeight, AtlasSize) = (pixelHeight, pixelHeight > 32 ? 2048 : uiFont ? 1024 : 512);
         var pixels = new byte[AtlasSize * AtlasSize];
-        fixed (byte* f = font)
-        fixed (byte* p = pixels)
-        fixed (StbTrueType.stbtt_bakedchar* g = glyphs)
-            StbTrueType.stbtt_BakeFontBitmap(f, 0, PixelHeight, p, AtlasSize, AtlasSize, FirstChar, CharCount, g);
+        if (uiFont)
+        {
+            packedGlyphs = new StbTrueType.stbtt_packedchar[CharCount];
+            kerning = new float[CharCount * CharCount];
+            fixed (byte* f = font)
+            fixed (byte* p = pixels)
+            fixed (StbTrueType.stbtt_packedchar* g = packedGlyphs)
+            {
+                var pack = new StbTrueType.stbtt_pack_context();
+                if (StbTrueType.stbtt_PackBegin(pack, p, AtlasSize, AtlasSize, 0, 1, null) == 0)
+                    throw new InvalidOperationException("Could not create the UI font atlas.");
+                try
+                {
+                    StbTrueType.stbtt_PackSetOversampling(pack, 2, 2);
+                    // Negative sizes specify em pixels, matching UI/CSS font sizes, rather than ascender-to-descender height.
+                    if (StbTrueType.stbtt_PackFontRange(pack, f, 0, -PixelHeight, FirstChar, CharCount, g) == 0)
+                        throw new InvalidOperationException("The UI font atlas is too small.");
+                }
+                finally { StbTrueType.stbtt_PackEnd(pack); }
+                var info = new StbTrueType.stbtt_fontinfo();
+                if (StbTrueType.stbtt_InitFont(info, f, 0) == 0) throw new InvalidDataException("Invalid UI font.");
+                float em = StbTrueType.stbtt_ScaleForMappingEmToPixels(info, PixelHeight);
+                int ascent, descent, gap;
+                StbTrueType.stbtt_GetFontVMetrics(info, &ascent, &descent, &gap);
+                baselineOffset = (PixelHeight * 1.25f - (ascent - descent) * em) / 2 + ascent * em;
+                for (int left = 0; left < CharCount; left++)
+                    for (int right = 0; right < CharCount; right++)
+                        kerning[left * CharCount + right] = StbTrueType.stbtt_GetCodepointKernAdvance(info, FirstChar + left, FirstChar + right) * em;
+            }
+        }
+        else
+            fixed (byte* f = font)
+            fixed (byte* p = pixels)
+            fixed (StbTrueType.stbtt_bakedchar* g = glyphs)
+                StbTrueType.stbtt_BakeFontBitmap(f, 0, PixelHeight, p, AtlasSize, AtlasSize, FirstChar, CharCount, g);
         LineHeight = PixelHeight * 1.25f;
-        CharWidth = glyphs['M' - FirstChar].xadvance;
+        CharWidth = packedGlyphs is { } packed ? packed['M' - FirstChar].xadvance : glyphs['M' - FirstChar].xadvance;
 
         // The glyphs (R8), sampled as the GL texture was: linear, repeating, no mips.
         using (var upload = gpu.Uploads.Begin())
@@ -117,14 +153,19 @@ public sealed unsafe class DebugOverlay : IDisposable
     /// <param name="pixelHeight">The size the glyphs are baked at: about the size the face is drawn at keeps it sharp.</param>
     public static DebugOverlay FromFont(GpuContext gpu, string path, float pixelHeight = 16) => new(gpu, File.ReadAllBytes(path), pixelHeight);
 
+    public static DebugOverlay FromUiFont(GpuContext gpu, string path, float pixelHeight) => new(gpu, File.ReadAllBytes(path), pixelHeight, true);
+
     public float MeasureText(string text, float scale = 1)
     {
         float width = 0;
+        int previous = -1;
         foreach (char c in text)
         {
             int index = c - FirstChar;
             if (index < 0 || index >= CharCount) index = '?' - FirstChar;
-            width += glyphs[index].xadvance * scale;
+            if (previous >= 0 && kerning is { } pairs) width += pairs[previous * CharCount + index] * scale;
+            width += (packedGlyphs is { } packed ? packed[index].xadvance : glyphs[index].xadvance) * scale;
+            previous = index;
         }
         return width;
     }
@@ -268,11 +309,22 @@ public sealed unsafe class DebugOverlay : IDisposable
     public float TextScaled(string s, float x, float top, Vector4 colour, float scale)
     {
         if (imageBatch is not null) throw new InvalidOperationException("Flush UI images before queuing text.");
-        float start = x, baseline = top + PixelHeight * scale;
+        float start = x, baseline = top + (packedGlyphs is null ? PixelHeight : baselineOffset) * scale;
+        int previous = -1;
         foreach (char c in s)
         {
             int index = c - FirstChar;
             if (index < 0 || index >= CharCount) index = '?' - FirstChar;
+            if (previous >= 0 && kerning is { } pairs) x += pairs[previous * CharCount + index] * scale;
+            previous = index;
+            if (packedGlyphs is { } packed)
+            {
+                var pg = packed[index];
+                Quad(x + pg.xoff * scale, baseline + pg.yoff * scale, x + pg.xoff2 * scale, baseline + pg.yoff2 * scale,
+                    pg.x0 / (float)AtlasSize, pg.y0 / (float)AtlasSize, pg.x1 / (float)AtlasSize, pg.y1 / (float)AtlasSize, colour);
+                x += pg.xadvance * scale;
+                continue;
+            }
             var g = glyphs[index];
             float x0 = MathF.Round(x + g.xoff * scale), y0 = MathF.Round(baseline + g.yoff * scale);
             Quad(x0, y0, x0 + (g.x1 - g.x0) * scale, y0 + (g.y1 - g.y0) * scale,

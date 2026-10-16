@@ -6,15 +6,19 @@ not feature parity. This ledger describes the implementation, not verified claim
 about undocumented original behaviour. Original-file facts are in
 [MyGUI](formats/mygui.md) and [UI screens](game/ui-screens.md).
 
+Both UI modes share this in-game HUD, windows, Escape menu and input. Meitou keeps
+its custom title, transitions and settings ([native-ui](native-ui.md)); sharing
+the implementation does not resolve the fidelity gaps below.
+
 ## UI implementation and gaps
 
 | Area | Implemented | Remaining UI work |
 | --- | --- | --- |
-| MyGUI resources | Layout/resource lists, skin atlas pieces including tiled slots, text colours and text client insets, ResourceLayout expansion, ImageTexture and first-frame image sets | Animated image sets, pointer resources, complete font sizing/Unicode, localisation, exact resize rounding |
+| MyGUI resources | Layout/resource lists, skin atlas pieces including tiled slots, text colours and text client insets, ResourceLayout expansion, ImageTexture and first-frame image sets; font resource source/size/resolution | Animated image sets, pointer resources, native font hinting/Unicode, localisation, exact resize rounding |
 | Window/input | Original frames, caption, close, pin, drag, modality, tab selection, editable caret/selection, Tab between edit fields, Enter default action, dynamic lists with scrolling and clipping | Resize, clipboard, button focus traversal, list columns, scrollbars, sliders, combo boxes, tooltips, sounds |
 | HUD | Clock, money, speed/pause, selection, squad bar portraits (still picture, name, selection frame; click selects, double click centres), one squad tab, medic/rescue, order toggles (Block, Hold, Chase, Passive, Ranged, Taunt, Sneak; checked state) and move speed arrows, inventory/stats/map/tech/squad shortcuts; name and faction, State / Goal / Encumbrance, the stats lines, the health word, medical rows in the original order with their numbers, layers and arrows; the information panel collapsed with its ^ toggle; Floor 0 and the build button | Jobs and Prospect buttons, the behaviour slider, a move speed caption, more squads and portrait scrolling, extended stats lines, the rarer health words and states (sleeping, caged, eaten, crippled, bleeding...), splints and pending healing on the bars, floor switching and building, town/biome information, jobs list, tooltips; the context menu has only the verbs Meitou can give (see ui-input.md section 7) |
-| Inventory | Original equipment/pocket, bag and limb windows in both UI modes; square cells, equipment footprints, empty clothing slot states, name captions and weight rows; bags sized to their contents; item icons (static files, the game's `data/icons` cache, else drawn from the item's mesh; the name box while loading); pocket/bag drag and Arrange commands | Building icons, the instance colour of an icon, full tooltip details, stacking/splitting, equipment changes and constraints; exact original resizing; disguise/slavery data bindings |
-| Stats | Original window/panels; all record stats; selecting a stat shows its current level | Original descriptions, XP/race modifiers, all derived stats, exact stat grouping and row skins |
+| Inventory | Original equipment/pocket, bag and limb windows in both UI modes; square cells, equipment footprints, pale empty cells and translucent black item backings, name captions and weight rows; bags sized to their contents; item icons (static files, the game's `data/icons` cache, else drawn from the item's mesh; the name box while loading); pocket/bag/equipment dragging with an icon preview, paused moves and Arrange commands | Building icons, the instance colour of an icon, disabled slot conditions, full tooltip details, stacking/splitting, equipment swaps/race constraints and prosthetics; exact original resizing; disguise/slavery data bindings |
+| Stats | Original frame/panels sized to the supplied reference; category headings, ordered rows, separate values, painted attributes; installed descriptions, affected-stat and training text; fractional-level progress and racial XP bonus | Numeric affected-stat readouts, derived stats where applicable, exact row skins and help spacing |
 | Overview | All original tabs; live messages and squad names; installed map image, pan/zoom/centre, player/camera markers and right-click move orders | Original map projection/zoom equivalence, settlement discovery/markers, faction data, squad editing, research/crafting/AI data bindings |
 | Escape menu | Original layout, pause/resume, Options via Tab settings, exit confirmation, new game, original named save/load dialogs | Original options window content; menu and dialog keyboard shortcuts beyond defaults |
 | Frontend | Original title image/buttons and credits; start selection and Begin using existing spawn backend; save metadata/slot selection/name editing and overwrite confirmation; load confirmation | Splash, advanced option bindings, character creation, loading/progress, continue-slot persistence (currently newest listed slot, disabled if unreadable) |
@@ -39,8 +43,6 @@ Brought in line with a documented fact:
 
 Engine choices that remain; the original is **Unknown** for each:
 
-- Stats window: skills are grouped by the STATS record's field groups (combat, melee weapons; ranged weapons, athletics; thief; science, trades) across
-  `Skills1..4Panel`; which group goes in which panel, the order inside, and the row labels are guesses until the installed layout's captions and the locale msgids are read.
 - Message box captions (YES / CANCEL), window titles ("INVENTORY - name"), confirmation texts other than "Are you sure you want to exit?".
 - Overview faction name shows "Player"; the original shows the player faction's name.
 - The hover label is a plain text box; the original uses the HUD's `TooltipPanel`, whose children are not mapped.
@@ -64,7 +66,7 @@ found the front end, inventory, bag and limb windows sharing one set of bindings
 | Construction/prospecting | No complete placement/construction or prospecting backend |
 | Squad editing/faction identity | Selection exists; splitting/merging/dismissal and faction naming commands need implementation |
 | Orders/AI policy | Medic/rescue/stop, Block, Passive, Hold, Sneak and the move speed act ([Order toggles](simulation.md#order-toggles)); Chase, Ranged and Taunt are stored only; editable jobs need commands |
-| Inventory mutations | Storage and validated move/arrange commands exist; stack/split/equip/transfer commands and render appearance refresh remain |
+| Inventory mutations | Validated pocket/bag/equipment moves and arrangement, paused interface commands, worn appearance/combat refresh; stack/split, swaps, race constraints, prosthetics and character transfers remain |
 | Advanced new-game options | Start records/spawning exist; per-session option overrides need integration |
 | Character creation | Race/appearance data exist; player editor changes need validated commands |
 | Import/reset squad positions | Save loading exists; import/reset rules need a separate backend |
@@ -82,7 +84,7 @@ renderer's lower-left targets, with synchronization validation enabled.
 `FaithfulInteractionTests` clicks installed title/confirmation/inventory controls:
 frontend requests go to the host, and inventory drags only mutate at a simulation
 tick. `InventoryCommandTests` checks stale drags, occupied cells, stack limits,
-equipment rejection and failed-arrangement rollback. `SaveCatalogTests` checks
+incompatible-equipment rejection and failed-arrangement rollback. `SaveCatalogTests` checks
 source identity, header metadata, and named-slot validation. `UiStateTests` covers
 editing, map zoom/pan and runtime visibility overrides; `MyGuiColourTests` covers
 skin state text colours and dark parchment list text.

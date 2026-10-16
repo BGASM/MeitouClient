@@ -14,6 +14,8 @@ public sealed class ItemInstance
     public required string Record { get; init; }
     public string Name { get; init; } = "";
     public FcsRecordType Type { get; init; }
+    /// <summary>The armour section allowed by the record's slot; empty for other items.</summary>
+    public string EquipmentSection { get; init; } = "";
     public string MaterialId { get; set; } = "";
     public string CompanyId { get; set; } = "";
     /// <summary>Where it is: <c>main</c>, <c>shirt</c>, <c>head</c>, <c>boots</c>, <c>armour</c>, <c>legs</c>, <c>hip</c>, <c>back</c>, <c>backpack_attach</c> (a worn backpack), <c>backpack_content</c> (inside it).</summary>
@@ -51,7 +53,7 @@ public sealed class ItemInstance
     /// <summary>A copy of this item with another quantity (a stack split off; never used for a backpack, whose contents are not copied).</summary>
     public ItemInstance WithQuantity(int quantity) => new()
     {
-        Record = Record, Name = Name, Type = Type, MaterialId = MaterialId, CompanyId = CompanyId, Section = Section, X = X, Y = Y, Quantity = quantity, Level = Level,
+        Record = Record, Name = Name, Type = Type, EquipmentSection = EquipmentSection, MaterialId = MaterialId, CompanyId = CompanyId, Section = Section, X = X, Y = Y, Quantity = quantity, Level = Level,
         ItemFunction = ItemFunction, Quality = Quality, Charges = Charges, MaxCharges = MaxCharges, Width = Width, Height = Height, UnitWeight = UnitWeight, StackLimit = StackLimit,
         IsFood = IsFood, ContentsFactor = ContentsFactor, StolenFrom = StolenFrom,
     };

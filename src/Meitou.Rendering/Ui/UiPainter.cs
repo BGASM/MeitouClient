@@ -13,6 +13,8 @@ public sealed class UiPainter : IDisposable
     readonly MyGuiResources resources;
     readonly Func<string, string?> resolve;
     DebugOverlay? standardFont, paintedFont, titleFont;
+    Dictionary<int, DebugOverlay>? pixelFonts;
+    readonly Dictionary<(string Source, int Pixels), DebugOverlay> resourceFonts = [];
     /// <summary>The standard and painted faces baked at <see cref="LargePixels"/>: lettering scaled well past the 16 px atlases is drawn from these, so it stays sharp.</summary>
     DebugOverlay? standardLarge, paintedLarge;
     const float LargePixels = 48;
@@ -69,7 +71,7 @@ public sealed class UiPainter : IDisposable
         catch { Dispose(); throw; }
     }
 
-    public void Draw(IReadOnlyList<UiControl> controls, int width, int height, Vector2 mouse, string? active)
+    public void Draw(IReadOnlyList<UiControl> controls, int width, int height, Vector2 mouse, string? active, float minimumTextPixels = 0)
     {
         for (int uploads = 0; uploads < IconUploadsPerFrame && decodedIcons.TryDequeue(out var icon); uploads++) Upload(icon.Name, icon.Image);
         foreach (var c in controls)
@@ -84,6 +86,7 @@ public sealed class UiPainter : IDisposable
                 var colour = c.Type == "Button" && c.Action == active ? c.ActiveColour ?? new Vector4(0.25f, 0.5f, 0.4f, c.Background.W)
                     : c.Type == "Button" && b.Contains(mouse.X, mouse.Y) ? c.HoverColour ?? c.Background : c.Background;
                 if (!c.Enabled) colour = c.DisabledColour ?? colour * new Vector4(0.6f, 0.6f, 0.6f, 1);
+                colour.W *= Alpha(c.Properties);
                 overlay.Rect(b.X, b.Y, b.X + b.Width, b.Y + b.Height, colour);
                 if (colour.W >= 1) opaqueRects.Add(b.Intersect(clip));
             }
@@ -96,11 +99,28 @@ public sealed class UiPainter : IDisposable
                 bool flip = c.Properties.GetValueOrDefault("ImageFlipV") == "true";
                 float v0 = source.Y / loaded.Texture.Desc.Height, v1 = (source.Y + source.Height) / loaded.Texture.Desc.Height;
                 if (flip) (v0, v1) = (v1, v0);
-                var imageTint = Colour(c.Properties.GetValueOrDefault("Colour"), Vector4.One) * new Vector4(1, 1, 1, Alpha(c.Properties));
-                overlay.Image(loaded.Sampled, new(b.X, b.Y, b.X + b.Width, b.Y + b.Height),
-                    new(source.X / loaded.Texture.Desc.Width, v0,
-                        (source.X + source.Width) / loaded.Texture.Desc.Width, v1), imageTint);
-                if (imageTint.W >= 1 && masks.TryGetValue(image.Texture, out var imageMask) && imageMask.Covers(source)) opaqueRects.Add(b.Intersect(clip));
+                var tint = Colour(c.Properties.GetValueOrDefault("Colour"), Vector4.One) * new Vector4(1, 1, 1, Alpha(c.Properties));
+                if (!flip && float.TryParse(c.Properties.GetValueOrDefault("ImageBorder"), System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out float border) && border > 0)
+                {
+                    float borderScale = float.TryParse(c.Properties.GetValueOrDefault("ImageBorderScale"), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out float parsed) ? Math.Max(0, parsed) : 1;
+                    float bx = Math.Min(border, source.Width / 2), by = Math.Min(border, source.Height / 2);
+                    float dx = Math.Min(bx * borderScale, b.Width / 2), dy = Math.Min(by * borderScale, b.Height / 2);
+                    Span<float> xs = [b.X, b.X + dx, b.X + b.Width - dx, b.X + b.Width];
+                    Span<float> ys = [b.Y, b.Y + dy, b.Y + b.Height - dy, b.Y + b.Height];
+                    Span<float> us = [source.X, source.X + bx, source.X + source.Width - bx, source.X + source.Width];
+                    Span<float> vs = [source.Y, source.Y + by, source.Y + source.Height - by, source.Y + source.Height];
+                    for (int row = 0; row < 3; row++)
+                        for (int column = 0; column < 3; column++)
+                            overlay.Image(loaded.Sampled, new(xs[column], ys[row], xs[column + 1], ys[row + 1]),
+                                new(us[column] / loaded.Texture.Desc.Width, vs[row] / loaded.Texture.Desc.Height,
+                                    us[column + 1] / loaded.Texture.Desc.Width, vs[row + 1] / loaded.Texture.Desc.Height), tint);
+                }
+                else
+                    overlay.Image(loaded.Sampled, new(b.X, b.Y, b.X + b.Width, b.Y + b.Height),
+                        new(source.X / loaded.Texture.Desc.Width, v0, (source.X + source.Width) / loaded.Texture.Desc.Width, v1), tint);
+                if (tint.W >= 1 && masks.TryGetValue(image.Texture, out var imageMask) && imageMask.Covers(source)) opaqueRects.Add(b.Intersect(clip));
                 overlay.Flush(width, height, clip);
             }
             if (resources.Skins.TryGetValue(c.Skin, out var skin) && textures.TryGetValue(skin.Texture, out var atlas))
@@ -156,13 +176,54 @@ public sealed class UiPainter : IDisposable
             var textArea = UiTextLayout.ContentRect(resources, c);
             if (textArea.Width <= 0 || textArea.Height <= 0) continue;
             var textClip = clip.Intersect(textArea);
-            string fontName = c.Properties.GetValueOrDefault("FontName") ?? "";
+            string fontName = c.Properties.GetValueOrDefault("FontName")
+                ?? (resources.Templates.TryGetValue(c.Skin, out var template)
+                    ? template.Descendants("Property").FirstOrDefault(p => (string?)p.Attribute("key") == "FontName")?.Attribute("value")?.Value : null)
+                ?? "Kenshi_StandardFont_Medium";
             var font = fontName == "Meitou_TitleFont" ? titleFont ?? paintedFont ?? overlay :
                 fontName.Contains("Painted", StringComparison.Ordinal) || fontName.Contains("Banner", StringComparison.Ordinal) ? paintedFont ?? standardFont ?? overlay : standardFont ?? overlay;
             var textColour = MyGuiColours.Text(resources, c, widgetState, c.Enabled ? DebugOverlay.TextColour : new(0.45f, 0.43f, 0.38f, 1));
+            textColour.W *= Alpha(c.Properties);
             font.Target = overlay.Target;
             float scale = c.TextScale ?? (c.Skin.Length > 0 ? Math.Clamp(height / 1080f, 0.5f, 1.5f) : 1);
-            scale = Math.Min(scale, textArea.Height / font.LineHeight);
+            // Settings request a font baked at its physical pixel size rather than scaling the 16px atlas.
+            if (int.TryParse(c.Properties.GetValueOrDefault("FontPixels"), out int pixels) && resolve("Exo2-SemiBold.ttf") is { } fontPath)
+            {
+                pixels = Math.Clamp(Math.Max(pixels, (int)MathF.Round(minimumTextPixels)), 8, 96);
+                var fonts = pixelFonts ??= [];
+                int key = pixels + 1000; // Keep old cached atlases distinct during hot reload.
+                if (!fonts.TryGetValue(key, out var exact)) fonts[key] = exact = DebugOverlay.FromUiFont(overlay.Gpu, fontPath, pixels);
+                font = exact;
+                font.Target = overlay.Target;
+                scale = 1;
+            }
+            else if (resources.Resources.TryGetValue(fontName, out var fontResource)
+                && (string?)fontResource.Attribute("type") == "ResourceTrueTypeFont")
+            {
+                string? Property(string key) => fontResource.Elements("Property").FirstOrDefault(p => (string?)p.Attribute("key") == key)?.Attribute("value")?.Value;
+                float Number(string key, float fallback) => float.TryParse(Property(key), System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out float number) && float.IsFinite(number) && number > 0 ? number : fallback;
+                if (Property("Source") is { } source && resolve(source) is { } sourcePath)
+                {
+                    // TrueType resource sizes are points at the resource's DPI. Bake at the resulting em pixel size.
+                    int resourcePixels = Math.Clamp((int)MathF.Round(Math.Max(minimumTextPixels,
+                        Number("Size", 20) * Number("Resolution", 50) / 72 * (c.TextScale ?? height / 1080f))), 6, 192);
+                    var key = (sourcePath, resourcePixels);
+                    if (!resourceFonts.TryGetValue(key, out var exact)) resourceFonts[key] = exact = DebugOverlay.FromUiFont(overlay.Gpu, sourcePath, resourcePixels);
+                    font = exact;
+                    font.Target = overlay.Target;
+                    scale = 1;
+                }
+            }
+            if (minimumTextPixels > 0)
+            {
+                // Short captions keep the main UI's readable size. Centre the line box over
+                // its inset client and clip to the widget instead of shrinking the lettering.
+                float extra = Math.Max(0, font.LineHeight * scale - textArea.Height);
+                textArea = textArea with { Y = textArea.Y - extra / 2, Height = textArea.Height + extra };
+                textClip = clip.Intersect(new(textArea.X, b.Y, textArea.Width, b.Height));
+            }
+            else scale = Math.Min(scale, textArea.Height / font.LineHeight);
             if (scale > 1.25f && (font == standardFont ? standardLarge : font == paintedFont ? paintedLarge : null) is { } large)
             {
                 scale *= font.LineHeight / large.LineHeight;
@@ -171,21 +232,24 @@ public sealed class UiPainter : IDisposable
             }
             string text = c.Caption.Replace("\\n", "\n", StringComparison.Ordinal);
             var lines = c.Properties.GetValueOrDefault("WordWrap") == "true" ? font.WrapText(text, textArea.Width, scale) : text.ReplaceLineEndings("\n").Split('\n').Select(line => font.FitText(line, textArea.Width, scale)).ToArray();
+            if (focused && c.Properties.GetValueOrDefault("Numeric") == "true") lines = [text];
             string align = c.Properties.GetValueOrDefault("TextAlign") ?? "Left VCenter";
             float y = textArea.Y + (align.Contains("Bottom", StringComparison.Ordinal) ? Math.Max(0, textArea.Height - font.LineHeight * scale * lines.Count) : align.Split(' ').Any(a => a is "Center" or "VCenter") ? Math.Max(0, (textArea.Height - font.LineHeight * scale * lines.Count) / 2) : 0);
             if (focused)
             {
                 int Index(string key) => int.TryParse(c.Properties.GetValueOrDefault(key), out int at) ? Math.Clamp(at, 0, text.Length) : 0;
                 int selection = Index("SelectionStart"), length = Index("SelectionLength"), caret = Index("CaretIndex");
+                float textWidth = font.MeasureText(text, scale);
+                float origin = textArea.X + (align.Contains("Right", StringComparison.Ordinal) ? textArea.Width - textWidth : align.Split(' ').Any(a => a is "Center" or "HCenter") ? (textArea.Width - textWidth) / 2 : 0);
                 if (length > 0)
                 {
-                    float start = textArea.X + font.MeasureText(text[..selection], scale);
-                    float end = textArea.X + font.MeasureText(text[..Math.Min(selection + length, text.Length)], scale);
+                    float start = origin + font.MeasureText(text[..selection], scale);
+                    float end = origin + font.MeasureText(text[..Math.Min(selection + length, text.Length)], scale);
                     overlay.Rect(start, y, end, y + font.LineHeight * scale, new(0.25f, 0.4f, 0.45f, 0.8f));
                 }
                 if ((System.Diagnostics.Stopwatch.GetTimestamp() / (System.Diagnostics.Stopwatch.Frequency / 2)) % 2 == 0)
                 {
-                    float caretX = textArea.X + font.MeasureText(text[..caret], scale);
+                    float caretX = origin + font.MeasureText(text[..caret], scale);
                     overlay.Rect(caretX, y, caretX + 1, y + font.LineHeight * scale, textColour);
                 }
                 overlay.Flush(width, height, textClip);
@@ -335,6 +399,9 @@ public sealed class UiPainter : IDisposable
         foreach (var t in textures.Values) t.Texture.Dispose();
         textures.Clear();
         masks.Clear();
+        if (pixelFonts is { } fonts) { foreach (var font in fonts.Values) font.Dispose(); fonts.Clear(); }
+        foreach (var font in resourceFonts.Values) font.Dispose();
+        resourceFonts.Clear();
         standardFont?.Dispose(); paintedFont?.Dispose(); titleFont?.Dispose(); standardLarge?.Dispose(); paintedLarge?.Dispose();
         standardFont = null; paintedFont = null; titleFont = null; standardLarge = null; paintedLarge = null;
     }

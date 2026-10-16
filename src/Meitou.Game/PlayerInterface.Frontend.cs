@@ -29,15 +29,12 @@ sealed partial class PlayerInterface
     }
     public void ShowTitle() { faithfulScreens.Open("title"); RefreshSlots(); UpdateMenuPause(); }
     public bool TitleOpen => faithfulScreens.IsOpen("title");
-    bool FrontendActive => TitleOpen || faithfulScreens.IsOpen("new-game") || faithfulScreens.IsOpen("load") || faithfulScreens.IsOpen("message");
-    bool UseScreenInput => UiMode == UiMode.Faithful || FrontendActive || InventoryScreensOpen;
-    bool InventoryScreensOpen => faithfulScreens.OpenScreens.Any(id => id is "inventory" or "bag" or "limbs" or "trader");
     /// <summary>After leaving a game: title controls over the original image or the live world, according to UI mode.</summary>
     public void ShowMainMenu() => ShowTitle();
     public void CloseFrontend()
     {
         foreach (string id in new[] { "title", "menu", "new-game", "advanced", "save", "load", "message" }) faithfulScreens.Close(id);
-        confirmation = null; menuOpen = false; menuArmed = null; UpdateMenuPause();
+        confirmation = null; UpdateMenuPause();
     }
     void Confirm(string title, string text, Action action, string yes = "YES", (string Caption, Action Act)? middle = null)
     {

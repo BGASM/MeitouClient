@@ -35,6 +35,38 @@
     <RuntimeHostConfigurationOption Include="System.GC.HeapCount" Value="4" />
     <!-- The Meitou title's wordmark (TitleLogo). -->
     <EmbeddedResource Include="../../assets/branding/kenshi-logo.png" LogicalName="kenshi-logo.png" />
+    <EmbeddedResource Include="../../assets/ui/settings-save.png" LogicalName="settings-save.png" />
   </ItemGroup>
+
+  <Target Name="ReadBuildRevision" BeforeTargets="GetAssemblyAttributes">
+    <Exec Command="git rev-parse --short HEAD" WorkingDirectory="$(MSBuildProjectDirectory)"
+          ConsoleToMSBuild="true" IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true"
+          StandardOutputImportance="Low" StandardErrorImportance="Low" Condition="'$(BuildGitCommit)' == ''">
+      <Output TaskParameter="ConsoleOutput" ItemName="_BuildGitCommit" />
+      <Output TaskParameter="ExitCode" PropertyName="_BuildGitCommitExit" />
+    </Exec>
+    <Exec Command="git describe --tags --abbrev=0" WorkingDirectory="$(MSBuildProjectDirectory)"
+          ConsoleToMSBuild="true" IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true"
+          StandardOutputImportance="Low" StandardErrorImportance="Low" Condition="'$(BuildGitTag)' == ''">
+      <Output TaskParameter="ConsoleOutput" ItemName="_BuildGitTag" />
+      <Output TaskParameter="ExitCode" PropertyName="_BuildGitTagExit" />
+    </Exec>
+    <PropertyGroup>
+      <BuildGitCommit Condition="'$(BuildGitCommit)' == '' and '$(_BuildGitCommitExit)' == '0'">@(_BuildGitCommit)</BuildGitCommit>
+      <BuildGitTag Condition="'$(BuildGitTag)' == '' and '$(_BuildGitTagExit)' == '0'">@(_BuildGitTag)</BuildGitTag>
+      <BuildGitCommit Condition="'$(BuildGitCommit)' == ''">unknown commit</BuildGitCommit>
+      <BuildGitTag Condition="'$(BuildGitTag)' == ''">untagged</BuildGitTag>
+    </PropertyGroup>
+    <ItemGroup>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>GitCommit</_Parameter1>
+        <_Parameter2>$(BuildGitCommit)</_Parameter2>
+      </AssemblyAttribute>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>GitTag</_Parameter1>
+        <_Parameter2>$(BuildGitTag)</_Parameter2>
+      </AssemblyAttribute>
+    </ItemGroup>
+  </Target>
 
 </Project>

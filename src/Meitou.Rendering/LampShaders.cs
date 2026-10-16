@@ -5,11 +5,15 @@ namespace Meitou.Rendering;
 /// of <c>uLightGrid</c> (x, z of the grid's corner, its cell size, its cells per side: 0 while there are no lamps) and the samplers
 /// <c>uLightCells</c> (RG32F per cell: first entry, count), <c>uLightIndex</c> (R32F entries: lamp numbers, <see cref="WorldLamps.IndexWidth"/>
 /// per row) and <c>uLightData</c> (RGBA32F, a row per lamp: position and radius; radiance and type; spot direction and cos of the outer half
-/// angle; cos of the inner half angle and the falloff). <c>LAMP_DIFFUSE_ONLY</c> leaves the specular out.
+/// angle; cos of the inner half angle, falloff and room edge count; room heights and inward footprint planes).
+/// <c>LAMP_DIFFUSE_ONLY</c> leaves the specular out; <c>LAMP_VISIBILITY</c> supplies the trace's shadow query for interior sources.
 /// </summary>
 static class LampShaders
 {
     public const string Lighting = """
+        #ifndef LAMP_VISIBILITY
+        #define LAMP_VISIBILITY(world, n, toLamp, indoor, emitter) 1.0
+        #endif
         // The game's light attenuation (docs/formats/lights.md, WorldLights.Attenuation): not inverse-square, 1 at the lamp, 0 at its radius.
         float lampAttenuation(float d, float radius)
         {
@@ -34,6 +38,23 @@ static class LampShaders
                 vec3 toLamp = p.xyz - world;
                 float d = length(toLamp);
                 if (d >= p.w) continue;
+                vec4 s2 = texelFetch(uLightData, ivec2(3, lamp), 0);
+                int edges = int(s2.z);
+                #ifndef LAMP_DIFFUSE_ONLY
+                // Raster lamps have no shadow rays. The trace uses actual visibility instead, including light through openings.
+                if (edges > 0)
+                {
+                    vec2 height = texelFetch(uLightData, ivec2(4, lamp), 0).xy;
+                    if (world.y < height.x || world.y > height.y) continue;
+                    bool inside = true;
+                    for (int e = 0; e < edges; e++)
+                    {
+                        vec3 plane = texelFetch(uLightData, ivec2(5 + e, lamp), 0).xyz;
+                        if (dot(plane.xy, world.xz) + plane.z < 0.0) { inside = false; break; }
+                    }
+                    if (!inside) continue;
+                }
+                #endif
                 vec3 l = toLamp / max(d, 1e-4);
                 float nl = dot(n, l);
                 if (nl <= 0.0) continue;
@@ -41,11 +62,12 @@ static class LampShaders
                 vec3 radiance = c.rgb * lampAttenuation(d, p.w);
                 if (c.w > 0.5)
                 {
-                    vec4 s = texelFetch(uLightData, ivec2(2, lamp), 0), s2 = texelFetch(uLightData, ivec2(3, lamp), 0);
+                    vec4 s = texelFetch(uLightData, ivec2(2, lamp), 0);
                     float cosAngle = dot(s.xyz, -l);
                     if (cosAngle <= s.w) continue;
                     radiance *= s2.x - s.w < 1e-5 ? 1.0 : clamp(pow(clamp((cosAngle - s.w) / (s2.x - s.w), 0.0, 1.0), s2.y), 0.0, 1.0);
                 }
+                radiance *= LAMP_VISIBILITY(world, n, toLamp, edges, uint(s2.w));
                 diffuse += 3.14159265358979 * nl * radiance * LAMP_DIFFUSE;
                 #ifndef LAMP_DIFFUSE_ONLY
                 vec3 h = normalize(v + l);

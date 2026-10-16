@@ -17,9 +17,12 @@ sealed partial class PlayerInterface
     MyGuiLayout faithfulHud = null!;
     MyGuiResources uiResources = new();
     readonly UiHost uiHost = new();
-    IDisposable? nativeHudRegistration;
+    IDisposable? uiRegistration;
     UiPainter? uiPainter;
-    string? openPanel;
+    internal UiPainter? SettingsPainter => uiPainter;
+    internal Func<string, string?>? SettingsResolve => uiResolve;
+    bool settingsOpen;
+    internal void SetSettingsOpen(bool value) { settingsOpen = value; if (value) CancelInventoryDrag(); UpdateMenuPause(); }
     MyGuiScreenHost faithfulScreens = null!;
     public event Action<MyGuiEvent>? ScreenAction;
 
@@ -34,7 +37,9 @@ sealed partial class PlayerInterface
     {
         UiMode = mode;
         uiResolve = resolve;
-        uiResources = MyGuiResources.Load("kenshi_init.xml", resolve);
+        statHelp = StatHelpCatalog.Read(resolve("locale/en_GB/LC_MESSAGES/main.pot")
+            ?? (Meitou.Content.GameInstall.Locate() is { } install ? Path.Combine(install.Root, "locale/en_GB/LC_MESSAGES/main.pot") : null));
+        uiResources = MyGuiResources.Load("kenshi_init.xml", resolve, "kenshi_fonts.xml");
         faithfulHud = MyGuiTemplates.Expand(MyGuiReader.ReadLayout(resolve("Kenshi_MainPanel.layout") ?? throw new FileNotFoundException("Kenshi_MainPanel.layout not found.")), uiResources);
         faithfulScreens = new(uiResources);
         foreach (var (id, file, modal) in FaithfulScreenFiles)
@@ -42,7 +47,7 @@ sealed partial class PlayerInterface
                 centreRoot: id is "new-game" or "save" or "load");
         faithfulScreens.Activated += FaithfulAction;
         uiHost.Diagnostic += d => Console.Error.WriteLine($"ui        {d.Extension} {d.Operation}: {d.Error.Message}");
-        nativeHudRegistration = uiHost.Register(new NativeHudExtension(ExecuteUiAction));
+        uiRegistration = uiHost.Register(new PlayerUiExtension(ExecuteUiAction));
     }
 
     /// <summary>The original layouts the faithful mode opens as screens: id, layout file, modal.</summary>
@@ -61,14 +66,14 @@ sealed partial class PlayerInterface
         id == "hud" ? (faithfulHud, BindUi()) : (faithfulScreens.Layout(id), BindFaithfulScreen(id));
 
     public void CreateUiPainter(DebugOverlay overlay, Func<string, string?> resolve) => uiPainter = new(overlay, uiResources, resolve);
-    public void DisposeUi() { uiPainter?.Dispose(); uiPainter = null; nativeHudRegistration?.Dispose(); nativeHudRegistration = null; }
+    public void DisposeUi() { uiPainter?.Dispose(); uiPainter = null; uiRegistration?.Dispose(); uiRegistration = null; }
     /// <summary>Future code-mod loader entry point; disposal removes the extension's owned registrations.</summary>
     public IDisposable RegisterUiExtension(IUiExtension extension) => uiHost.Register(extension);
     public bool ContainsUi(Vector2 p)
     {
         if (!UiVisible) return false;
         var controls = ArrangeUi();
-        return UseScreenInput && faithfulScreens.Contains(p) || MyGuiPresentation.HitTest(controls, p.X, p.Y) is not null;
+        return faithfulScreens.Contains(p) || MyGuiPresentation.HitTest(controls, p.X, p.Y) is not null;
     }
 
     public void SetUiMode(UiMode mode)
@@ -78,8 +83,7 @@ sealed partial class PlayerInterface
         dragging = false;
         steering = false;
         mapDrag = null;
-        inventoryDrag = null;
-        menuOpen = false;
+        CancelInventoryDrag();
         UpdateMenuPause();
     }
 
@@ -92,7 +96,7 @@ sealed partial class PlayerInterface
         b.Text["TimeText"] = session.Clock.TimeText;
         // The exe's money format string is c.{1,num} (docs/game/ui-screens.md section 1): no space after the point.
         b.Text["MoneyAmountText"] = "c." + session.World.Player.Money.ToString("N0", CultureInfo.InvariantCulture);
-        // The Meitou HUD's title; the faithful name bar draws its own lines over the widget (PlayerInterface.HudText.cs).
+        // The name bar draws its own lines over the widget (PlayerInterface.HudText.cs).
         b.Text["NameText"] = lead?.Name ?? "No character selected";
         b.Properties["NameText"] = new Dictionary<string, string> { ["SkipCaption"] = "true" };
         b.Text["hunger"] = lead?.Body is { } hungry ? $"Hunger {hungry.Hunger:0.00} / 3" : "";
@@ -113,6 +117,7 @@ sealed partial class PlayerInterface
         for (int i = 0; i < ButtonSpeeds.Length; i++) b.Actions[$"TimeSpeedButton{i + 1}"] = $"meitou:speed.{i}";
         b.Actions["ShortcutInventoryButton"] = "meitou:inventory";
         b.Actions["ShortcutStatsButton"] = "meitou:stats";
+        b.Text["ShortcutTechButton"] = "TEC";
         foreach (string name in new[] { "ShortcutMapButton", "ShortcutTechButton", "ShortcutSquadButton" }) b.Actions[name] = "faithful:" + name;
         b.Actions["OrdersMedicButton"] = "meitou:medic";
         b.Actions["OrdersRescueButton"] = "meitou:rescue";
@@ -160,43 +165,35 @@ sealed partial class PlayerInterface
     IReadOnlyList<UiControl> ArrangeUi()
     {
         SyncTradeScreens();
+        ValidateInventoryDrag();
         var b = BindUi();
-        var controls = UiMode == UiMode.Faithful && !faithfulScreens.IsOpen("title") ? MyGuiPresentation.Arrange(faithfulHud, Width, Height, b, uiResources.Layers).ToList() : [];
+        var controls = !TitleOpen ? MyGuiPresentation.Arrange(faithfulHud, Width, Height, b, uiResources.Layers).ToList() : [];
         UiRect FaithfulSlot(string name) => controls.FirstOrDefault(c => c.Name == name)?.Bounds ?? default;
         var slots = new Dictionary<string, UiRect>
         {
             [UiSlots.Overlay] = new(0, 0, Width, Height),
-            [UiSlots.Toolbar] = UiMode == UiMode.Meitou ? new(Math.Max(16, Width - 360), Math.Max(16, Height - 204), Math.Max(0, Math.Min(344, Width - 32)), 188) : FaithfulSlot("TimeMoneyPanel"),
-            [UiSlots.Selection] = UiMode == UiMode.Meitou ? new(16, Math.Max(16, Height - 260), Math.Max(0, Math.Min(324, Width - 32)), 244) : FaithfulSlot("InformationPanel"),
-            [UiSlots.Squad] = UiMode == UiMode.Meitou ? new(352, Math.Max(16, Height - 158), Math.Max(0, Width - 724), 142) : FaithfulSlot("SquadPanel"),
+            [UiSlots.Toolbar] = FaithfulSlot("TimeMoneyPanel"),
+            [UiSlots.Selection] = FaithfulSlot("InformationPanel"),
+            [UiSlots.Squad] = FaithfulSlot("SquadPanel"),
         };
         if (!TitleOpen) controls.AddRange(uiHost.Arrange(UiMode, Width, Height, b, slots));
-        var centreText = new Dictionary<string, string> { ["TextAlign"] = "Center" };
-        if (UiMode == UiMode.Faithful)
+        if (controls.FirstOrDefault(c => c.Name == "SquadPanel") is { } squadPanel) AddSquadPortraits(controls, squadPanel.Bounds);
+        AddHudText(controls);
+        foreach (var screen in faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent))
         {
-            if (controls.FirstOrDefault(c => c.Name == "SquadPanel") is { } squadPanel) AddSquadPortraits(controls, squadPanel.Bounds);
-            AddHudText(controls);
-        }
-        if (UseScreenInput)
-        {
-            foreach (var screen in faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent))
+            controls.AddRange(screen.Controls.Where(c => UiMode == UiMode.Faithful ||
+                !c.Properties.TryGetValue("ImageResource", out var resource) || resource != "Kenshi_TitleScreen"));
+            if (screen.Id == "title" && UiMode == UiMode.Meitou && !showCredits && TitleLogoReady())
             {
-                controls.AddRange(screen.Controls.Where(c => UiMode == UiMode.Faithful ||
-                    !c.Properties.TryGetValue("ImageResource", out var resource) || resource != "Kenshi_TitleScreen"));
-                if (screen.Id == "title" && UiMode == UiMode.Meitou && !showCredits && TitleLogoReady())
-                {
-                    float logoWidth = Math.Min(Width * 0.3f, Height * 0.6f);
-                    controls.Add(new("MeitouTitle", "ImageBox", new(Width * 0.975f - logoWidth, Height * 0.04f, logoWidth, logoWidth * 0.469f), "", "", "", true,
-                        new Dictionary<string, string> { ["ImageTexture"] = TitleLogoTexture }, Vector4.Zero, Pickable: false));
-                }
-                else if (screen.Id == "title" && UiMode == UiMode.Meitou && !showCredits)
-                    controls.Add(new("MeitouTitle", "TextBox", new(Width * 0.6f, Height * 0.04f, Width * 0.37f, Height * 0.14f), "KENSHI", "", "", true,
-                        new Dictionary<string, string> { ["FontName"] = "Meitou_TitleFont", ["TextAlign"] = "Right VCenter" },
-                        Vector4.Zero, new Vector4(0.89f, 0.84f, 0.71f, 1), TextScale: Height / 720f));
+                float logoWidth = Math.Min(Width * 0.3f, Height * 0.6f);
+                controls.Add(new("MeitouTitle", "ImageBox", new(Width * 0.975f - logoWidth, Height * 0.04f, logoWidth, logoWidth * 0.469f), "", "", "", true,
+                    new Dictionary<string, string> { ["ImageTexture"] = TitleLogoTexture }, Vector4.Zero, Pickable: false));
             }
+            else if (screen.Id == "title" && UiMode == UiMode.Meitou && !showCredits)
+                controls.Add(new("MeitouTitle", "TextBox", new(Width * 0.6f, Height * 0.04f, Width * 0.37f, Height * 0.14f), "KENSHI", "", "", true,
+                    new Dictionary<string, string> { ["FontName"] = "Meitou_TitleFont", ["TextAlign"] = "Right VCenter" },
+                    Vector4.Zero, new Vector4(0.89f, 0.84f, 0.71f, 1), TextScale: Height / 720f));
         }
-        if (openPanel is not null && !FrontendActive) AddDetailsPanel(controls);
-        if (UiMode == UiMode.Meitou && menuOpen) AddMenuPanel(controls);
         AddInventoryDrag(controls);
         AddContextMenu(controls);
         AddHoverLabel(controls);
@@ -209,7 +206,7 @@ sealed partial class PlayerInterface
         var controls = ArrangeUi();
         if (InventoryPointerDown(p)) return true;
         if (MapPointerDown(p)) return true;
-        if (UseScreenInput && faithfulScreens.PointerDown(p)) { UpdateMenuPause(); return true; }
+        if (faithfulScreens.PointerDown(p)) { UpdateMenuPause(); return true; }
         if (MyGuiPresentation.HitTest(controls, p.X, p.Y) is not { } c) return false;
         if (c.Action.StartsWith("faithful:", StringComparison.Ordinal))
         {
@@ -226,21 +223,15 @@ sealed partial class PlayerInterface
         if (action.StartsWith("speed:", StringComparison.Ordinal)) PressButton(int.Parse(action[6..], CultureInfo.InvariantCulture));
         else if (action is "inventory" or "stats")
         {
-            if (UiMode == UiMode.Faithful || action == "inventory")
+            if (faithfulScreens.IsOpen(action))
             {
-                if (faithfulScreens.IsOpen(action))
-                {
-                    faithfulScreens.Close(action);
-                    if (action == "inventory") { faithfulScreens.Close("bag"); faithfulScreens.Close("limbs"); }
-                }
-                else faithfulScreens.Open(action);
+                faithfulScreens.Close(action);
+                if (action == "inventory") { faithfulScreens.Close("bag"); faithfulScreens.Close("limbs"); }
             }
-            else openPanel = openPanel == action ? null : action;
+            else faithfulScreens.Open(action);
         }
-        else if (action == "close") openPanel = null;
         else if (action == "extendedstats") infoExpanded = !infoExpanded;
         else if (action is "floor-up" or "floor-down") Floor?.Step(action == "floor-up" ? 1 : -1);
-        else if (action == "menu") MenuAction(argument);
         else if (action == "context") ContextAction(argument);
         else if (action == "squad") Select(PlayerCharacters(), false);
         else if (action == "member")
@@ -267,24 +258,23 @@ sealed partial class PlayerInterface
     }
 
     void DrawGameUi(DebugOverlay overlay, int width, int height) =>
-        uiPainter?.Draw(ArrangeUi(), width, height, mouse, $"meitou:speed.{Array.IndexOf(ButtonSpeeds, session.Simulation.Speed)}");
+        uiPainter?.Draw(ArrangeUi(), width, height, mouse, $"meitou:speed.{Array.IndexOf(ButtonSpeeds, session.Simulation.Speed)}",
+            minimumTextPixels: TitleOpen ? 0 : 16 * height / 1080f);
 
     /// <summary>For screenshot reviews: open the same panel through its registered button action.</summary>
-    public void ShowUiPanel(string? panel)
+    public void ShowUiPanel(string? panel, bool? expandInformation = null)
     {
-        openPanel = null;
-        menuOpen = false;
+        if (expandInformation is { } expanded) infoExpanded = expanded;
         faithfulScreens.CloseAll();
         UpdateMenuPause();
         if (panel is null) return;
-        if (UiMode == UiMode.Faithful && panel is "overview" or "menu" or "new-game" or "save" or "load" or "title")
+        if (panel is "overview" or "menu" or "new-game" or "save" or "load" or "title")
         {
             if (panel == "title") ShowTitle();
             else if (panel is "save" or "load") OpenSlots(panel);
             else { faithfulScreens.Open(panel); if (panel == "overview") faithfulScreens.SetTab(panel, "TabsMain", 0); }
             UpdateMenuPause(); return;
         }
-        if (panel == "menu") { ToggleMenu(); return; }
         if (panel is not ("inventory" or "stats")) throw new ArgumentException("Unknown UI panel.", nameof(panel));
         var control = ArrangeUi().First(c => c.Action == $"meitou:{panel}");
         uiHost.Dispatch(control);

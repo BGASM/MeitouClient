@@ -15,6 +15,12 @@ join merged game data, not names. Base placements/layers and save-state override
 **Observed** WorldLevelData merges fields per key/instances per ID, empty target deletes;
 flags0 may still override. Exact original zone/mod merge behaviour remains partly unknown.
 
+## Interior masks
+
+**Observed** Hub `Storm_House_01_Interior.mesh` wall triangle centres can lie about0.09 units
+outside the building's convex interior-mask hull (OgreMeshReader positions transformed into
+world space and compared with InteriorVolume footprint planes). A mask is not an exact visible-surface boundary.
+
 ## Placement files and assembly
 
 Zones indexed floor(coord/4608)+32; `.zone` contains building/loose-item instances, town and state

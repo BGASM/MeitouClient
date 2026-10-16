@@ -31,6 +31,12 @@ dotnet run -c Release --project tools/Meitou.ModelViewer -- --world --town "The 
 dotnet run -c Release --project tools/Meitou.Tools
 ```
 
+For live UI iteration, run `dotnet watch --project src/Meitou.Game -c Debug -- --ui meitou --windowed`.
+Saving supported C# edits updates the running game; Ctrl+R in the watch terminal restarts it.
+Startup code, static initializers and already-baked UI textures need a restart to show changes.
+DLSS also needs the vendor libraries beside the Debug executable, or `MEITOU_STREAMLINE_PATH`
+pointing to their directory; see [third-party notices](THIRD_PARTY_NOTICES.md).
+
 Run the full suite before committing. Slow tests require assets/GPU/long runs; Bench tests assert
 timing and need a quiet machine. Game/viewer share the rendering and data libraries. Use
 --help / viewer --world --help for options. Tab opens settings, F10 lists current keys, F11/F12
@@ -41,6 +47,8 @@ F6 cinematic camera, F7 hides UI. [Viewer guide](docs/viewer.md), [simulation](d
 Faithful follows original rendering/UI where implemented; independently selectable Meitou
 features improve quality/ranges. FSR/DLSS vendor files are runtime/packaging dependencies,
 never committed. [Third-party notices](THIRD_PARTY_NOTICES.md).
+Both UI modes currently use the original in-game HUD and windows; Meitou retains its custom
+title screen, transitions and settings. Known fidelity gaps: [UI compatibility](docs/faithful-ui-parity.md).
 
 ## Releases and license
 

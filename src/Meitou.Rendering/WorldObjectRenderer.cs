@@ -209,8 +209,8 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
                 if (inst.Gpu is not null && inst.Materials is not null && Vector3.Distance(inst.Centre, eye) - inst.Radius <= range && !InteriorHidden(inst.Placed)) yield return inst;
     }
 
-    /// <summary>Work in flight: zones being laid out, meshes decoding or uploading, textures decoding.</summary>
-    public int Pending => streamer.Pending + meshes.Pending + uploads.Count + textureCache.PendingCount + unresolvedInRange + (landmarkTask is not null ? 1 : 0);
+    /// <summary>Requested work: zone layouts, meshes and textures, including used textures deferred by memory pressure.</summary>
+    public int Pending => streamer.Pending + meshes.Pending + uploads.Count + textureCache.PendingCount + textureCache.UnresidentUsedCount + unresolvedInRange + (landmarkTask is not null ? 1 : 0);
 
     int unresolvedInRange;
     public List<string> Messages { get; } = [];
@@ -547,6 +547,31 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         return null;
     }
 
+    /// <summary>The loaded mask of a building or one of its layout objects (building id / item id).</summary>
+    internal InteriorVolume? InteriorFor(string placementId)
+    {
+        int slash = placementId.IndexOf('/');
+        var owner = slash < 0 ? placementId.AsSpan() : placementId.AsSpan(0, slash);
+        foreach (var zone in streamer.AllZones)
+            foreach (var room in zone.Interiors)
+                if (owner.SequenceEqual(room.PlacementId)) return room;
+        return null;
+    }
+
+    /// <summary>Use room-scale probes only while the camera target is in or beside a viewed building.</summary>
+    internal Vector3? GiInteriorFocus(Vector3 target)
+    {
+        if (InteriorView.Count == 0) return null;
+        foreach (var zone in streamer.AllZones)
+            foreach (var room in zone.Interiors)
+            {
+                if (!InteriorView.ContainsKey(room.PlacementId)) continue;
+                var p = new Vector3(target.X, Math.Clamp(target.Y, room.YMin, room.YMax), target.Z);
+                if (room.Contains(p, 64)) return p;
+            }
+        return null;
+    }
+
     /// <summary>Draw every floor of the buildings in the interior view (their interior parts stay as they are): the game does so in the water reflection.</summary>
     internal bool AllFloors { get; set; }
 
@@ -709,6 +734,8 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         if (gpu.MinLevel > 0 && blend.Lower < gpu.MinLevel) coarseDraws++;
         if (gpu.MinLevel > 0) blend = new LodBlend(Math.Max(blend.Lower, gpu.MinLevel), Math.Max(blend.Upper, gpu.MinLevel), blend.T);
         var m = inst.Transform;
+        // Spare instance-matrix component: room GI gain without splitting shared furniture batches.
+        m.M34 = inst.Placed.Interior || inst.Placed.ParentPlacementId is not null && InteriorAt(m.Translation) is not null ? 1 : 0;
         if (!blend.IsBlending)
         {
             Add(gpu, inst.Materials!, blend.Lower, m, 0, weight >= 0.999f ? 2 : weight, value, inst.Placed.Interior);

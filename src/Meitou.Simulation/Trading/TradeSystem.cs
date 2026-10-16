@@ -72,6 +72,7 @@ public sealed class TradeSettings
 public sealed class TradeSystem : ITickSystem, ITradeSource
 {
     readonly PopulationData data;
+    readonly CharacterAssembly assembly;
     readonly Dictionary<string, SquadTemplate?> templates = new(StringComparer.Ordinal);
     Market? market;
     CharacterId customer = CharacterId.None, trader = CharacterId.None;
@@ -82,6 +83,7 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
     public TradeSystem(PopulationData data, TradeSettings? settings = null)
     {
         this.data = data;
+        assembly = new(data);
         Settings = settings ?? new TradeSettings();
     }
 
@@ -140,8 +142,11 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
             else if (open || world.Tick >= approachUntil) Close(world);   // walked away, or never arrived
             else Hold(world, t);
         }
-        view = open && Resolve(world, out int ci, out int ti, out var shop) ? Publish(world, ci, ti, shop!) : null;
+        RefreshView(world);
     }
+
+    internal void RefreshView(World world) =>
+        view = open && Resolve(world, out int ci, out int ti, out var shop) ? Publish(world, ci, ti, shop!) : null;
 
     public TradeView? PublishTrade() => view;
 
@@ -265,7 +270,7 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
         var cold = world.Characters.Cold(c)!;
         var tc = world.Characters.Cold(t)!;
         var squad = world.Squads.Find(tc.SquadId)!;
-        if (Find(cold.Inventory!, sell.Item) is not { } item || item.Section is not ("main" or "backpack_content")) return;
+        if (Find(cold.Inventory!, sell.Item) is not { } item || !InventoryCommands.IsMovableSection(item.Section)) return;
         var m = Market(world);
         int units = Affordable(m, item, Math.Clamp(sell.Quantity, 1, item.Quantity), true, shop!.Terms, cold.Faction, squad.Money);
         if (units == 0)
@@ -290,6 +295,7 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
         }
         if (placed < units) price = m.StackPrice(item.WithQuantity(placed), true, shop.Terms, cold.Faction);
         Take(cold.Inventory!, item, placed);
+        if (InventoryCommands.IsEquipmentSection(item.Section)) assembly.RefreshEquipment(cold);
         squad.Money -= price;
         world.Player.Money += price;
         world.Post($"{cold.Name} sold {Units(placed, item.Name)} for c.{price}");
@@ -364,7 +370,7 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
         TradeItemView View(ItemInstance item, int index, bool sell, int holder) => new(index, item.Record, item.Name, item.Section, item.X, item.Y, item.Width, item.Height, item.Quantity,
             item.Quality, m.StackPrice(item, sell, shop.Terms, holder), m.UnitPrice(item.Quantity == 1 ? item : item.WithQuantity(1), sell, shop.Terms, holder), item.IsStolenFor(holder)) { Material = item.MaterialId };
         var stock = shop.Stock.All().Select((item, index) => View(item, index, false, squad.Faction)).ToArray();
-        var goods = cold.Inventory!.All().Select((item, index) => (item, index)).Where(p => p.item.Section is "main" or "backpack_content")
+        var goods = cold.Inventory!.All().Select((item, index) => (item, index)).Where(p => InventoryCommands.IsMovableSection(p.item.Section))
             .Select(p => View(p.item, p.index, true, cold.Faction)).ToArray();
         return new TradeView(customer, trader, world.Characters.Cold(t)!.Name, squad.Money, world.Player.Money, shop.Stock.Width, shop.Stock.Height, stock, goods, shop.Terms.BuysStolen);
     }

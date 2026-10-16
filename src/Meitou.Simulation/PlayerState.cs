@@ -40,8 +40,9 @@ public sealed class PlayerState
 }
 
 /// <summary>Applies the player's selection and stop commands (step 1 of the tick). Move orders are the movement system's.</summary>
-public sealed class PlayerSystem : ITickSystem
+public sealed class PlayerSystem(PopulationData? data = null) : ITickSystem
 {
+    readonly CharacterAssembly? assembly = data is null ? null : new(data);
     public void Inputs(World world, IReadOnlyList<SimCommand> commands)
     {
         var table = world.Characters;
@@ -51,11 +52,15 @@ public sealed class PlayerSystem : ITickSystem
             switch (command)
             {
                 case SelectCommand select:
+                    var selectable = select.Characters.Where(id =>
+                        table.TryResolveNext(id, out int slot) && table.Cold(slot)!.IsPlayer).ToArray();
+                    if (selectable.Length == 0) break;
                     if (!select.Additive) player.Selection.Clear();
-                    foreach (var id in select.Characters)
-                        if (table.TryResolveNext(id, out int slot) && table.Cold(slot)!.IsPlayer && !player.Selection.Contains(id)) player.Selection.Add(id);
+                    foreach (var id in selectable)
+                        if (!player.Selection.Contains(id)) player.Selection.Add(id);
                     break;
                 case InspectCommand inspect:
+                    if (!inspect.Target.IsNone) player.Selection.Clear();
                     player.Inspected = inspect.Target;
                     break;
                 case StopCommand stop:
@@ -66,8 +71,13 @@ public sealed class PlayerSystem : ITickSystem
                     }
                     break;
                 case Items.MoveInventoryItem move:
-                    if (table.TryResolveNext(move.Character, out int owner) && table.Cold(owner) is { IsPlayer: true, Inventory: { } inventory } &&
-                        !Items.InventoryCommands.Move(inventory, move.Item, move.Section, move.X, move.Y)) world.Post("Cannot move that item: the slot is occupied or the inventory changed.");
+                    if (table.TryResolveNext(move.Character, out int owner) && table.Cold(owner) is { IsPlayer: true, Inventory: { } inventory } cold)
+                    {
+                        if (!Items.InventoryCommands.Move(inventory, move.Item, move.Section, move.X, move.Y))
+                            world.Post("Cannot move that item: the slot is occupied, incompatible or the inventory changed.");
+                        else if (Items.InventoryCommands.IsEquipmentSection(move.Item.Section) || Items.InventoryCommands.IsEquipmentSection(move.Section))
+                            assembly?.RefreshEquipment(cold);
+                    }
                     break;
                 case OrdersCommand or RunSpeedCommand:
                     Orders.Apply(world, command);

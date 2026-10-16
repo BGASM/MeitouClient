@@ -65,6 +65,9 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
     // Profile of the interactive run (printed by --quit-after).
     double advanceTotal, fillTotal;
     long fillCalls;
+    // --quit-after keeps the exposed menu's frame pacing separate from covered loading work.
+    double menuFrameSeconds, menuLongestFrame;
+    long menuFrames, menuSlowFrames;
 
     public int Run()
     {
@@ -87,6 +90,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             return (Grid: grid, Parts: BootSimulation(grid, interactive));
         });
         gpu = WorldFrame.CreateGpu(context, install, scene, assets, o, interactive, LoadingStep, AwaitLoading);
+        if (!o.NoParticles) titleParticleFactory = () => ParticleRenderer.Create(context, install, gpu.Particles?.Library);
         if (gpu.Post is { } vendorPost) vendorPost.UpscalerFactory = Meitou.Rendering.Upscalers.VendorUpscalers.Factory(display.Context, streamline);
         (camera, render) = WorldFrame.Setup(scene, o);
         render.Grid = IsSandbox;
@@ -207,6 +211,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             (o.Pitch ?? Meitou.Data.World.KenshiCamera.InitialPitchDegrees) * MathF.PI / 180, o.Distance ?? Meitou.Data.World.KenshiCamera.InitialDistance);
         SendFocus();
         ApplyCamera(session.Camera.Current);
+        if (TitleVisible) ApplyTitleCamera();
         if (StartSave is { } save && g.Load is { } folder)
         {
             readingFolder = folder;

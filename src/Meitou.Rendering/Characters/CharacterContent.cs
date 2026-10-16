@@ -269,28 +269,31 @@ internal sealed class CharacterContent : IDisposable
 
     /// <summary>
     /// Whether <see cref="Build"/> will find the appearance's skeleton read and its meshes prepared, so that it only uploads. The first call starts that on a worker
-    /// (at most <see cref="FetchLimit"/> at once) and the answer is false until it is done. Render thread.
+    /// (at most <see cref="FetchLimit"/> ordinary requests at once) and the answer is false until it is done.
+    /// Essential scene actors can bypass that cap and use the urgent queue. Render thread.
     /// </summary>
-    public bool Fetched(CharacterAppearance c)
+    public bool Fetched(CharacterAppearance c, bool urgent = false)
     {
         if (fetching.TryGetValue(c, out var task)) return task.IsCompleted;
-        if (Volatile.Read(ref fetchesRunning) >= FetchLimit) return false;
+        if (!urgent && Volatile.Read(ref fetchesRunning) >= FetchLimit) return false;
         var bodyPath = FindMesh(c.BodyMesh);
         if (bodyPath is null) return true;   // Build reports it
         var parts = c.Parts.Select(p => (Path: FindMesh(p.Mesh), Shared: p.Mode == AttachMode.SharedSkeleton, Scale: PartLodScale(c, p))).Where(p => p.Path is not null).ToList();
         float pixels = LodPixelsPerRadian;
         Interlocked.Increment(ref fetchesRunning);
-        fetching[c] = BackgroundWork.Run(() =>
+        bool Fetch()
         {
             try
             {
-                if (BodySkeletonName(bodyPath) is not { } name || Rig(name) is not { } rig) return;
+                if (BodySkeletonName(bodyPath) is not { } name || Rig(name) is not { } rig) return true;
                 _ = Prepare(bodyPath, rig.BoneCount, 1, true, pixels).Value;
                 foreach (var (path, shared, scale) in parts) _ = Prepare(path!, shared ? rig.BoneCount : null, scale, false, pixels).Value;
             }
             catch (Exception) { }   // a file that cannot be read: Build meets it again on the render thread and reports it
             finally { Interlocked.Decrement(ref fetchesRunning); }
-        });
+            return true;
+        }
+        fetching[c] = urgent ? BackgroundWork.RunUrgent(Fetch) : BackgroundWork.Run(Fetch);
         return false;
     }
 

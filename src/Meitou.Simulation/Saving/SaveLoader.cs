@@ -171,6 +171,7 @@ public static class SaveLoader
                 SquadId = squad.Id,
                 Role = sc.SquadMemberType,
                 IsPlayer = faction == playerIndex,
+                Orders = faction == playerIndex ? Orders.PlayerDefaults : CharacterOrders.None,
                 FootprintRadius = race?.PathfindFootprintRadius ?? 0,
                 Save = new SavedCharacterLink
                 {

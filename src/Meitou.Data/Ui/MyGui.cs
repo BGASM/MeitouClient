@@ -69,7 +69,7 @@ public sealed class MyGuiResources
     public Dictionary<string, XElement> Documents { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Resolve every List through the caller's game/mod resource lookup. Cycles and repeats are read once.</summary>
-    public static MyGuiResources Load(string entry, Func<string, string?> resolve)
+    public static MyGuiResources Load(string entry, Func<string, string?> resolve, params string[] additionalEntries)
     {
         var result = new MyGuiResources();
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -95,6 +95,7 @@ public sealed class MyGuiResources
             }
         }
         Visit(entry);
+        foreach (string additional in additionalEntries) Visit(additional);
         return result;
     }
 }

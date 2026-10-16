@@ -124,7 +124,7 @@ public class FaithfulInteractionTests(ITestOutputHelper output)
             Assert.Equal(main.Width / 8, main.Height / 10, 3);
             var sword = ui.UiFrame.Single(c => c.Name == "inventory-item-1").Bounds;
             Assert.Equal(7, sword.Width / sword.Height, 3);
-            Assert.Equal("disabled", ui.UiFrame.Single(c => c.Name == "shirt").Properties["State"]);
+            Assert.Equal("normal", ui.UiFrame.Single(c => c.Name == "shirt").Properties["State"]);
             Click(ui, "OpenBagButton");
             var bag = ui.UiFrame.Single(c => c.Name == "backpack_content");
             Assert.Equal(bag.Bounds.Width / 10, bag.Bounds.Height / 14, 3);

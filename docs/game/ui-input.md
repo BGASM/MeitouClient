@@ -23,6 +23,10 @@ do not trigger game actions solely from a matching key. Selection ownership and 
 inspecting non-player characters updates panels without giving orders to them. Context menus
 choose verbs based on target type/state, faction, carrying and available interaction.
 
+Meitou selection commands retain the current selection when no valid player characters are
+targeted (empty ground or an empty drag box). Selecting valid members replaces or adds to it;
+inspecting another faction explicitly clears order selection (see [UI screens](ui-screens.md#4-hud-mainbargui)).
+
 Original strategy camera actions/zoom flags are in [camera](../formats/camera.md). Engine defaults:
 Space pause,F2/F3/F4=1/2/5,F5 save,F9 load,Tab settings; current complete keys in [viewer](../viewer.md)
 and [engine](../engine.md). User bindings and viewer/cinematic bindings have separate lifetimes.

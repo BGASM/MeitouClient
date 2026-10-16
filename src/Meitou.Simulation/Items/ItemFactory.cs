@@ -33,6 +33,7 @@ public sealed class ItemFactory(GameDatabase db, GameConstants constants)
             Record = info.Id,
             Name = info.Name,
             Type = info.Type,
+            EquipmentSection = info.Type == FcsRecordType.ARMOUR && Db.Find(info.Id) is { } armour ? SectionOf(armour) : "",
             Quantity = Math.Max(quantity, 1),
             Quality = quality,
             ItemFunction = info.Function,
@@ -109,7 +110,7 @@ public sealed class ItemFactory(GameDatabase db, GameConstants constants)
         inventory.Items.Add(item);
     }
 
-    /// <summary>The section a worn ARMOUR goes to by its <c>slot</c> (the save's section names; belt is <b>Unknown</b> and uses <c>main</c>).</summary>
+    /// <summary>The section a worn ARMOUR goes to by its <c>slot</c> (the save's section names).</summary>
     static string SectionOf(GameRecord armour) => (Meitou.Data.Characters.AttachSlot)armour.GetInt("slot") switch
     {
         Meitou.Data.Characters.AttachSlot.Shirt => "shirt",
@@ -117,6 +118,7 @@ public sealed class ItemFactory(GameDatabase db, GameConstants constants)
         Meitou.Data.Characters.AttachSlot.Boots => "boots",
         Meitou.Data.Characters.AttachSlot.Body => "armour",
         Meitou.Data.Characters.AttachSlot.Legs => "legs",
+        Meitou.Data.Characters.AttachSlot.Belt => "belt",
         _ => "main",
     };
 }

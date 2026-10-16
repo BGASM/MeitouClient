@@ -9,7 +9,7 @@ using Meitou.Simulation;
 namespace Meitou.Game;
 
 /// <summary>
-/// The squad bar's portraits (Faithful; docs/game/ui-screens.md): a cell per member as the original's <c>Kenshi_PortraitCharacter</c> lays it out (the
+/// The squad bar's portraits (both UI modes; docs/game/ui-screens.md): a cell per member as the original's <c>Kenshi_PortraitCharacter</c> lays it out (the
 /// background, the portrait the renderer draws into its atlas, the name along the bottom, the frame that is the button), left to right on the squad tab's page.
 /// </summary>
 sealed partial class PlayerInterface
@@ -32,7 +32,8 @@ sealed partial class PlayerInterface
         if (members.Count == 0) return;
         // The tab's page (the layout's TabItem rectangle inside SquadPanel).
         var page = new UiRect(panel.X + panel.Width * 0.0183727f, panel.Y + panel.Height * 0.206897f, panel.Width * 0.965879f, panel.Height * 0.737069f);
-        float size = Math.Min(page.Height, page.Width / members.Count), k = size / PortraitLayoutSize;
+        // The original leaves space below portraits instead of filling the tab page (docs/game/ui-screens.md).
+        float size = Math.Min(page.Height * 0.72f, page.Width / members.Count), k = size / PortraitLayoutSize;
         for (int i = 0; i < members.Count; i++)
         {
             var m = members[i];

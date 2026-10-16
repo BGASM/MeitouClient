@@ -7,15 +7,18 @@ using Silk.NET.Vulkan;
 namespace Meitou.Rendering;
 
 /// <summary>
-/// The game's point and spot lights on the world (docs/render-lights.md): the outdoor lamps of every placed building (<see cref="WorldLights"/>,
+/// The game's point and spot lights on the world (docs/render-lights.md): the lamps of every placed building (<see cref="WorldLights"/>,
 /// loaded on a worker), binned each frame into a grid of <see cref="Cells"/>² cells of <see cref="CellSize"/> around the eye and uploaded as three
-/// textures, which <c>kenshiLight</c> (<see cref="LampShaders"/>) and the probe trace read. Interior lights are left out: the game gives its
-/// lights no shadows, so they would shine through the walls. Render thread only.
+/// textures, which <c>kenshiLight</c> (<see cref="LampShaders"/>) and the probe trace read. Interior lamps are clipped to their building's
+/// mask; the probe trace also shadows their bounce contribution. Render thread only.
 /// </summary>
 internal sealed class WorldLamps : IDisposable
 {
     public const int Cells = 64, IndexWidth = 1024, IndexRows = 16, MaxLamps = 1024;
     public const float CellSize = 128;
+    internal const int MaxRoomEdges = 32, DataWidth = 5 + MaxRoomEdges;
+    // Allow for the small offset between collision masks and visible wall/floor surfaces.
+    const float RoomSurfaceMargin = 0.5f;
 
     readonly GpuContext ctx;
     readonly Task<WorldLight[]> loading;
@@ -24,8 +27,9 @@ internal sealed class WorldLamps : IDisposable
     readonly Sampler nearest;
     readonly float[] cellValues = new float[Cells * Cells * 2];
     readonly float[] indexValues = new float[IndexWidth * IndexRows];
-    readonly Vector4[] dataValues = new Vector4[MaxLamps * 4];
-    readonly List<int> near = [];
+    readonly Vector4[] dataValues = new Vector4[MaxLamps * DataWidth];
+    readonly List<(int Lamp, InteriorVolume? Room)> near = [];
+    readonly Dictionary<string, uint> emitters = new(StringComparer.Ordinal);
     readonly int[] counts = new int[Cells * Cells];
     int slot;
     Vector4 grid;
@@ -33,14 +37,14 @@ internal sealed class WorldLamps : IDisposable
 
     /// <summary>Whether the lamps light the world (the bench's <c>lights</c> switch).</summary>
     public bool Enabled { get; set; } = true;
-    /// <summary>The lamps of the world (outdoor, lit), once loaded; and those in this frame's grid.</summary>
+    /// <summary>The lamps of the world, once loaded; and those in this frame's grid.</summary>
     public int Count => lamps?.Length ?? 0;
     public int InGrid { get; private set; }
 
     public WorldLamps(GpuContext ctx, Func<IReadOnlyList<WorldLight>> load)
     {
         this.ctx = ctx;
-        loading = Task.Run(() => load().Where(l => !l.Interior && l.Intensity > 0 && l.Radius > 0).ToArray());
+        loading = Task.Run(() => load().Where(l => l.Intensity > 0 && l.Radius > 0).ToArray());
         int frames = ctx.Device.Frames.Count;
         cells = new Texture[frames];
         index = new Texture[frames];
@@ -50,7 +54,7 @@ internal sealed class WorldLamps : IDisposable
         {
             cells[i] = Texture.Create(ctx, new TextureDesc(Format.R32G32Sfloat, Cells, Cells, Use: use, Name: "lamp cells"));
             index[i] = Texture.Create(ctx, new TextureDesc(Format.R32Sfloat, IndexWidth, IndexRows, Use: use, Name: "lamp index"));
-            data[i] = Texture.Create(ctx, new TextureDesc(Format.R32G32B32A32Sfloat, 4, MaxLamps, Use: use, Name: "lamp data"));
+            data[i] = Texture.Create(ctx, new TextureDesc(Format.R32G32B32A32Sfloat, DataWidth, MaxLamps, Use: use, Name: "lamp data"));
         }
         nearest = ctx.Samplers.Get(SamplerDesc.FromGl(TextureMinFilter.Nearest, TextureMagFilter.Nearest, TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge,
             TextureWrapMode.ClampToEdge, false, DepthFunction.Lequal, false, 1, false, 0));
@@ -68,20 +72,22 @@ internal sealed class WorldLamps : IDisposable
     internal Sampler NearestSampler => nearest;
     /// <summary>This frame's <c>uLightGrid</c> (w 0: no lamps).</summary>
     internal Vector4 Grid => grid;
+    internal uint Emitter(string placementId) => emitters.GetValueOrDefault(placementId);
 
     /// <summary>Bins the lamps around <paramref name="eye"/> for this frame (the pulsing and shimmering ones at their power now).</summary>
-    public void Update(Vector3 eye)
+    public void Update(Vector3 eye, WorldObjectRenderer? objects = null)
     {
         slot = ctx.Frame.Slot;
         grid = default;
         InGrid = 0;
+        emitters.Clear();
         if (!Enabled) return;
         if (lamps is null)
         {
             if (!loading.IsCompleted) return;
             if (loading.IsFaulted) { Console.Error.WriteLine($"lamps     not loaded: {loading.Exception?.InnerException?.Message}"); lamps = []; return; }
             lamps = loading.Result;
-            Console.WriteLine($"lamps     {lamps.Length} outdoor lights");
+            Console.WriteLine($"lamps     {lamps.Length} lights ({lamps.Count(l => l.Interior)} interior)");
         }
         if (lamps.Length == 0) return;
 
@@ -92,7 +98,11 @@ internal sealed class WorldLamps : IDisposable
         {
             var l = lamps[i];
             if (l.Position.X + l.Radius < x0 || l.Position.X - l.Radius > x1 || l.Position.Z + l.Radius < z0 || l.Position.Z - l.Radius > z1) continue;
-            near.Add(i);
+            var room = l.Interior ? objects?.InteriorFor(l.PlacementId) : null;
+            // An unloaded or unrepresentable room must not turn its lights into unbounded outdoor lamps.
+            if (l.Interior && (room is null || room.Footprint.Length is < 3 or > MaxRoomEdges)) continue;
+            near.Add((i, room));
+            if (room is not null && !emitters.ContainsKey(l.PlacementId)) emitters.Add(l.PlacementId, (uint)emitters.Count + 1);
         }
         if (near.Count == 0) return;
 
@@ -100,13 +110,24 @@ internal sealed class WorldLamps : IDisposable
         float t = (float)(clock.Elapsed.TotalSeconds * 60);
         for (int k = 0; k < near.Count; k++)
         {
-            var l = lamps[near[k]];
+            var (lamp, room) = near[k];
+            var l = lamps[lamp];
             float power = l.Intensity * WorldLights.EffectFactor(l.Effect, t);
             float inner = MathF.Min(l.InnerAngle, l.OuterAngle), outer = MathF.Max(l.InnerAngle, l.OuterAngle);
-            dataValues[k * 4] = new Vector4(l.Position, l.Radius);
-            dataValues[k * 4 + 1] = new Vector4(l.Colour * power, l.Type == WorldLightType.Spot ? 1 : 0);
-            dataValues[k * 4 + 2] = new Vector4(l.Direction, MathF.Cos(outer * 0.5f));
-            dataValues[k * 4 + 3] = new Vector4(MathF.Cos(inner * 0.5f), l.Falloff > 0 ? l.Falloff : 1, 0, 0);
+            int row = k * DataWidth;
+            dataValues[row] = new Vector4(l.Position, l.Radius);
+            dataValues[row + 1] = new Vector4(l.Colour * power, l.Type == WorldLightType.Spot ? 1 : 0);
+            dataValues[row + 2] = new Vector4(l.Direction, MathF.Cos(outer * 0.5f));
+            dataValues[row + 3] = new Vector4(MathF.Cos(inner * 0.5f), l.Falloff > 0 ? l.Falloff : 1, room?.Footprint.Length ?? 0, Emitter(l.PlacementId));
+            if (room is null) continue;
+            dataValues[row + 4] = new Vector4(room.YMin - RoomSurfaceMargin, room.YMax + RoomSurfaceMargin, 0, 0);
+            for (int e = 0; e < room.Footprint.Length; e++)
+            {
+                var at = room.Footprint[e];
+                var edge = room.Footprint[(e + 1) % room.Footprint.Length] - at;
+                var inward = Vector2.Normalize(new Vector2(-edge.Y, edge.X));
+                dataValues[row + 5 + e] = new Vector4(inward, -Vector2.Dot(inward, at) + RoomSurfaceMargin, 0);
+            }
         }
 
         // Each cell lists the lamps whose reach overlaps it (counted, then placed).
@@ -126,7 +147,7 @@ internal sealed class WorldLamps : IDisposable
             }
             for (int k = 0; k < near.Count; k++)
             {
-                var l = lamps[near[k]];
+                var l = lamps[near[k].Lamp];
                 int cx0 = Math.Max((int)MathF.Floor((l.Position.X - l.Radius - x0) / CellSize), 0), cx1 = Math.Min((int)MathF.Floor((l.Position.X + l.Radius - x0) / CellSize), Cells - 1);
                 int cz0 = Math.Max((int)MathF.Floor((l.Position.Z - l.Radius - z0) / CellSize), 0), cz1 = Math.Min((int)MathF.Floor((l.Position.Z + l.Radius - z0) / CellSize), Cells - 1);
                 for (int cz = cz0; cz <= cz1; cz++)
@@ -144,12 +165,12 @@ internal sealed class WorldLamps : IDisposable
         var full = new Rect2D(new Offset2D(0, 0), new Extent2D(Cells, Cells));
         ctx.Uploads.Write(cells[slot], 0, 0, full, MemoryMarshal.AsBytes(cellValues.AsSpan()));
         ctx.Uploads.Write(index[slot], 0, 0, new Rect2D(new Offset2D(0, 0), new Extent2D(IndexWidth, IndexRows)), MemoryMarshal.AsBytes(indexValues.AsSpan()));
-        ctx.Uploads.Write(data[slot], 0, 0, new Rect2D(new Offset2D(0, 0), new Extent2D(4u, (uint)near.Count)), MemoryMarshal.AsBytes(dataValues.AsSpan(0, near.Count * 4)));
+        ctx.Uploads.Write(data[slot], 0, 0, new Rect2D(new Offset2D(0, 0), new Extent2D(DataWidth, (uint)near.Count)), MemoryMarshal.AsBytes(dataValues.AsSpan(0, near.Count * DataWidth)));
         grid = new Vector4(x0, z0, CellSize, Cells);
         InGrid = near.Count;
     }
 
-    public string Describe() => lamps is null ? "loading" : $"{lamps.Length} outdoor lamps, {InGrid} around the eye" + (Enabled ? "" : ", off");
+    public string Describe() => lamps is null ? "loading" : $"{lamps.Length} lamps, {InGrid} around the eye" + (Enabled ? "" : ", off");
 
     public void Dispose()
     {

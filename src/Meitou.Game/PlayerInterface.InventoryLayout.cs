@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Numerics;
 using Meitou.Data.Ui;
 using Meitou.Simulation;
+using Meitou.Simulation.Items;
 
 namespace Meitou.Game;
 
@@ -52,17 +53,17 @@ sealed partial class PlayerInterface
             int index = controls.FindIndex(c => c.Name == section);
             if (index < 0) continue;
             var slot = controls[index];
-            int columns = section == "main" ? grid.Width : Math.Max(1, (int)MathF.Round(slot.Bounds.Width / InventoryCell));
-            int rows = section == "main" ? grid.Height : Math.Max(1, (int)MathF.Round(slot.Bounds.Height / InventoryCell));
+            var size = InventoryCommands.SectionSize(section);
+            int columns = section == "main" ? grid.Width : size.Width;
+            int rows = section == "main" ? grid.Height : size.Height;
             var bounds = slot.Bounds with { Width = columns * InventoryCell, Height = rows * InventoryCell };
-            bool emptyClothing = section is "shirt" or "head" or "legs" or "boots" or "armour" && !grid.Items.Any(i => i.Section == section);
             controls[index] = slot with
             {
                 Bounds = bounds,
                 Properties = new Dictionary<string, string>(slot.Properties)
                 {
                     ["TileSize"] = FormattableString.Invariant($"{InventoryCell} {InventoryCell}"),
-                    ["State"] = emptyClothing ? "disabled" : "normal",
+                    ["State"] = "normal",
                 },
             };
         }

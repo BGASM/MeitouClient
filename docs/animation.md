@@ -91,6 +91,11 @@ characters/root collision and leg-health/lying/care selection belong in [simulat
 | `neck set` | `Neck position` |
 | `shoulder set` | `Shoulder set` |
 
+**Observed** (`OgreSkeletonReader` inspection of `male_skeleton.skeleton` and `female_skeleton.skeleton`):
+`postures` lasts about 0.166672 s; its 0.0333405 s key is neutral, corresponding to slider 20.
+The renderer samples at `clip length × slider / 100`; generated NPC posture follows the
+[appearance template](characters.md#random-appearance), rather than the editor range midpoint.
+
 ### The formulas (Verified, decompilation and disassembly of `@ 14052e6c0`; implemented in `CharacterShape`)
 
 | Bone | Bone size | Positional size |

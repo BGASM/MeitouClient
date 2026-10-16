@@ -19,6 +19,8 @@ public readonly record struct CharacterInstance(long Key, CharacterAppearance Ap
     public float Scale { get; init; } = 1;
     /// <summary>Not drawn in the world (still posed for its portrait): on a floor of a building that the interior view hides (docs/formats/zones.md "Interior view").</summary>
     public bool Hidden { get; init; }
+    /// <summary>Pose every frame regardless of distance, for presentation actors whose animation must stay smooth.</summary>
+    public bool FullRateAnimation { get; init; }
 }
 
 /// <summary>

@@ -81,6 +81,7 @@ public sealed class SettingsPanel(DebugOverlay overlay, string title, IReadOnlyL
     public IReadOnlyList<Slider> Sliders => sliders;
     /// <summary>The checkboxes (saved like the sliders, by label).</summary>
     public IReadOnlyList<Toggle> Toggles => toggles;
+    public IReadOnlyList<PanelChoice> Choices => choices;
 
     /// <summary>Sets every slider back to its value when the panel was made.</summary>
     public void Reset()

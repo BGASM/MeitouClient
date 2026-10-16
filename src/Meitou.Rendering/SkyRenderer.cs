@@ -1033,7 +1033,8 @@ public sealed unsafe partial class SkyRenderer : IDisposable
         bool meitou = MeitouStars;
         bool night = meitou && s.Sun.Y < 0.3f;
         p.Set(program.StarsMeitou, meitou ? (night ? 1 : -1) : 0, StarLayers, StarSeconds, StarGain);
-        var frame = CelestialSphere.Frame(Clock, Day, Hour);
+        // Staging the title's sun must not turn the stars, which stay continuous into the loading sky.
+        var frame = CelestialSphere.Frame(Clock with { SunTurn = 0 }, Day, Hour);
         p.Set(program.CelX, frame.X.X, frame.X.Y, frame.X.Z, 0);
         p.Set(program.CelY, frame.Y.X, frame.Y.Y, frame.Y.Z, 0);
         p.Set(program.CelZ, frame.Z.X, frame.Z.Y, frame.Z.Z, 0);

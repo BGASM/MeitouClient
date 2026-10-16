@@ -12,6 +12,22 @@ live stats. Record lists' weighted chances, forced equipment, quality/manufactur
 race restrictions have distinct semantics; missing references do not imply a universal item.
 NPC generation order determines random consumption; original RNG sequence is not reproduced.
 
+### Random appearance
+
+**Observed** (`data/editor/editor_data_human.xml`): race/gender limits specify `min`, `max`, optional
+`mid`, `random_variation` and `random_group`; male height, leg length and hands share group 0.
+The generator rolls `round(mid + variation × (2r − 1))`, sharing `r` within each group/category.
+Default variation uses the runtime deviation (raw CONSTANTS ×0.5; **Verified** constants-loader
+evidence in [character-stats](game/character-stats.md#constants-used-by-this-subsystem)), not the raw field.
+Base-game 0.4 therefore gives a ±20% range around the midpoint: human height 92–108, not 84–116.
+Explicit XML `random_variation` remains a percentage of the full slider range. Rolls are not
+clamped; **Unknown** whether the original applies a later clamp for extreme modded limits.
+
+**Observed** (Kenshi x64 disassembly: template initialization `@ 140073fb2`, randomizers'
+final copies `@ 14007acc2`, `@ 14007bc2d`, `@ 14007bfda`): randomization restores `Posture`
+from the appearance template, whose default is 20, rather than retaining the randomized value.
+Generated NPCs use 20; authored body files retain their posture.
+
 Parts can have different meshes/skeleton links for male/female/race and slot. Clothing layers,
 vests/backpacks, hair-hidden/part-map flags, stumps and missing limbs are not ordinary visibility
 checkboxes. Weapon inventory choice, equipped/drawn location and sheath/back/hip attach bone
@@ -87,7 +103,7 @@ checks `human_male.mesh`):
   "Body shape sliders", "Hidden body parts" above). Left: which body region each part-map colour marks, and the
   stats/nutrition fields listed in animation.md's open questions.
 - Random appearance details: the untraced part of the morph-face name, the faction flag that re-rolls the skin tone
-  (and a body file's gender), the template `Posture`; crossbow placement; extra hip copies; `RaceLimiter` rules.
+  (and a body file's gender); crossbow placement; extra hip copies; `RaceLimiter` rules.
 
 ## Expression reference
 

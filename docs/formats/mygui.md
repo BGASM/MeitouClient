@@ -25,6 +25,9 @@ Sources: the configured Kenshi install's `data/gui/`, the existing
   type="List"` document; its `List file="..."` entries resolve through the game's
   resource index. This loads skin, image, pointer, template, colour and layer files.
   `core_settings.xml` has nested `MyGUI` settings elements rather than named resources.
+- **Observed** in installed `kenshi_init.xml`: it does not list `kenshi_fonts.xml`.
+  The in-game resource loader explicitly adds that font catalog; reading only the
+  startup list leaves named fonts unresolved and silently uses the fallback atlas.
 - **Observed** in `common_skins.xml` / `kenshi_skins.xml`: `ResourceSkin` carries a
   reference `size` and a texture name; each `BasisSkin` carries `type`, `offset`,
   `align`, and named `State` elements. State offsets select atlas pixel rectangles.
@@ -34,11 +37,21 @@ Sources: the configured Kenshi install's `data/gui/`, the existing
   `Kenshi_GenericWindowSkin`, `Kenshi_GenericWindowHeaderSkin`,
   `Kenshi_Button1Skin`, `Kenshi_SquadPanelSkin` and `Kenshi_InventorySlotSkin`.
   These all refer to the `Kenshi_UI.png` atlas; no textures are copied into Meitou.
-- **Observed** in the install's `kenshi_fonts.xml`: standard font variants use
-  `Exo2-SemiBold.ttf`; painted text variants use `Sentencia_1.ttf`. The native
-  painter now bakes these installed fonts for UI text, with a system-font fallback.
-  Original hinting, point-size/resolution conversion and Unicode ranges are not
-  reproduced by this initial font renderer.
+- **Observed** in the install's `kenshi_fonts.xml`: standard variants use
+  `Exo2-SemiBold.ttf` (Small/MediumSmall/Medium/Large sizes 14/16/20/24), painted
+  variants use `Sentencia_1.ttf` (20/25/28). `Kenshi_UI_Messages` uses
+  `MailartRubberstamp-Regular.ttf`, size 110; all specify resolution 50.
+  The painter resolves each resource's source and bakes em pixels as
+  `Size * Resolution / 72`, scaled with viewport height. Native hinting,
+  monochrome rasterisation and the complete Unicode ranges remain unimplemented;
+  exact original rasterisation is **Unknown**.
+- Main in-game UI applies a user-requested minimum of 16 em pixels at 1080 lines,
+  scaled with viewport height, including resource fonts and explicit pixel sizes.
+  Larger headings retain their sizes. Short captions centre the line box and clip
+  within the widget rather than shrinking the font. Loading-screen tips use the
+  same baseline. Title, loading banners and settings retain independent typography.
+  This is a Meitou display policy, not a
+  claim about the original font resources.
 - **Verified** against all installed layouts by `AllInstalledLayoutsAndHudResourcesCanBeRead`:
   ResourceLayout expansion produces finite widget bounds. The source widgets are
   kept immutable; template Client regions receive application children, and
@@ -60,22 +73,13 @@ types. XML external entities and DTDs are disabled. No original assets are store
 in the repository. Resource lookup uses the existing `AssetLocator` and enabled
 mod resource folders; whole-mod UI parity has not been established.
 
-The game has independent `--ui faithful` / `--ui meitou` modes. Faithful reads
-`Kenshi_MainPanel.layout` and renders the install's SubSkin/MainSkin atlas pieces.
-Meitou builds a styled native control tree through the public `Meitou.Ui`
-extension API. The HTML prototype was removed following the native-UI decision.
-See [native UI](../native-ui.md) for code extension slots, registration, styles,
-actions and the remaining mod-loader work.
+Both `--ui faithful` / `--ui meitou` modes read `Kenshi_MainPanel.layout` and render
+the install's SubSkin/MainSkin atlas pieces, with the same published simulation
+snapshot and command queue. Mode differences and extension contracts:
+[native UI](../native-ui.md). Gameplay bindings and fidelity gaps:
+[Faithful parity](../faithful-ui-parity.md).
 
-Both modes use the same published simulation snapshot and command queue. The
-initial HUD provides the game clock, money, selection, aggregate health/hunger,
-pause/speeds, medic/rescue commands and read-only inventory/stats panels. Faithful
-also adds live squad member selection to the original squad area. The Tab settings
-panel's UI mode choice switches during play; it is saved in `meitou.user.json` on exit. F7 hides
-the interface and its mouse hit regions. The graphics Faithful/Meitou switches do
-not change UI mode.
-
-Faithful now uses the original inventory, stats, overview and Escape menu layouts,
+Both modes use the original inventory, stats, overview and Escape menu layouts,
 including their ResourceLayout window frames. The screen host handles modal input,
 close/pin events, window dragging, selected tabs, text entry and scrolling/selecting
 dynamic lists. Synthetic tests cover these interactions and clipping. Stats reads
@@ -90,26 +94,9 @@ The map shows the installed image and supports pan/zoom/centre, player/camera
 markers and right-click movement. Original map placement/zoom equivalence remains
 unverified. Other overview gameplay bindings are unfinished.
 
-Limitations: exact MyGUI font sizing, Unicode shaping, original medical row order
-and injury layer mapping, portraits, equipment/stack/split operations,
-and advanced controls are unfinished. Unsupported original HUD buttons are disabled.
-Pockets and backpacks support validated drag/move and arrangement commands;
-equipment changes are not simulated by those commands. Live medical rows use the
-snapshot's anatomy order, health fraction `(flesh - stun + rig) / maximum`, blood
-and hunger; this is an implementation choice, not a verified original row mapping.
-Meitou mode uses the same original inventory/trader windows as Faithful, while stats keeps its native popup. The installed HUD and
-native frontend were rendered in the sandbox at 1280x720; the styled native HUD,
-populated inventory and stats were also captured in a real Wanderer new game at
-1600x900 using `--ui-showcase`. These are rendering smoke checks, not a
-side-by-side fidelity measurement.
-
-The original Faithful HUD, inventory and full-skill stats window were captured at
-1600x900 in a real Wanderer start after template expansion. The renderer stores
-targets using a lower-left convention, so top-left UI clip rectangles are converted
-before issuing Vulkan scissors. **Verified** by `UiRenderingTests` with pixel
-readback and Vulkan synchronization validation, and by inspecting these captures.
-
-UI and gameplay gaps are tracked separately in [Faithful parity](../faithful-ui-parity.md).
+The renderer stores targets using a lower-left convention, so top-left UI clip
+rectangles are converted before issuing Vulkan scissors. **Verified** by
+`UiRenderingTests` with pixel readback and Vulkan synchronization validation.
 
 ## Additional resource observations (2026-10-14)
 

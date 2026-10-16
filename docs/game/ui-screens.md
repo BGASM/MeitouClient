@@ -80,7 +80,13 @@ which are descriptive (RTTI knows `MessageBoxManager::Box`; the constructor of a
 
 Layer Middle, per-frame update FUN_140728d50 (**Observed**):
 
-- Shortcut buttons INV, STA, MAP, TCH (research), SQD, HLP; floor panel with text "Floor {1,num}"; four speed
+**Observed** (user base-game reference): squad portrait frames occupy about 72% of the tab
+page height, leaving space below; Meitou uses this ratio, shrinking further for a full row.
+JOBS and RANGED start enabled (user-reported original defaults).
+**Verified** (`Kenshi_MainPanel.layout`): `OrdersChaseButton` is captioned JOBS; Meitou binds it
+to Jobs, independent of the saved `chase mode` flag whose relationship is **Unknown**.
+
+- Shortcut buttons INV, STA, MAP, TEC (research; user-requested caption; installed layout says TCH, **Verified** by reading `Kenshi_MainPanel.layout`), SQD, HLP; floor panel with text "Floor {1,num}"; four speed
   buttons ([game-loop.md](game-loop.md#speed-and-pause): pause, 1x, 2x, 5x); money / day / time panel (money `c.{1,num}`; the clock text is described in [game-loop.md](game-loop.md#frame-clocks), money in [economy.md](economy.md#units-stacks-and-traders)); squad tab control; medical panel; orders panel;
   information, tooltip, PAUSED, loading and build panels; town / outpost panel; biome name panel with fading text
   (biome at the camera position).
@@ -112,6 +118,10 @@ Layer Middle, per-frame update FUN_140728d50 (**Observed**):
     Crippled, Crippled arm, Critical, Limb trauma, Staying low, Starving (hunger &lt; 1), Bleeding, disguise words; else by the overall health h:
     Hungry (h ≥ 0.7 and hunger &lt; 2), Wounded (h &lt; 0.7), Slightly Injured (h &lt; 0.9), Normal. What h is exactly is **Unknown**; the worst part's
     fraction matches a screenshot (a leg at 77 % and "Slightly Injured", **Observed**).
+- Side-panel rendering follows the [main UI font policy](../formats/mygui.md),
+  with 20-pixel row spacing at 1080 lines for name, state, XP and combat stats. Extended
+  labels use the same uppercase Main colour as combat stats (**Observed** in the
+  supplied original Metaru screenshot).
 - Medical rows (**Verified**, decompile): Blood (Oil for skeletons) first, then the body parts, Hunger last; each `LifeBarNDatapanel` gets the name centred
   and an arrow string right-aligned in Alert; the number goes in `LifeBarNValue`. Layers are sized as width fractions from the left (Grey is a full-width
   background). Part (H health, S a deduction, D a pending amount, Mx its maximum): Green (H − S)/Mx, Yellow (H + D − S)/Mx, Red (Mx − S)/Mx, White
@@ -137,8 +147,41 @@ Layer Middle, per-frame update FUN_140728d50 (**Observed**):
   against the tooltip string in the exe: "gain 20 to his melee defense skill ... will not attempt to make any
   attacks"); Passive = non-combat mode (tooltip strings).
 
+### Character stats runtime layout
+
+**Observed** in the original Metaru screenshot supplied on 2026-10-15 (1920×1080):
+the window is about 980×650, titled with the character name, with no derived-statistics
+column. Attributes use grey painted uppercase labels, ordered Strength, Toughness,
+Dexterity, Perception. Four skill columns use dark standard text and right-aligned
+values, with larger red-brown category headings:
+
+| Column | Groups and row order |
+| --- | --- |
+| 1 | Weapons: Katanas, Sabres, Hackers, Heavy weapons, Blunt, Polearms |
+| 2 | Combat: Melee attack, Melee defence, Dodge, Martial arts; Ranged: Turrets, Crossbows, Precision shooting |
+| 3 | Thievery: Stealth, Lockpicking, Thievery, Assassination; Athletics: Athletics, Swimming |
+| 4 | Sciences: Field medic, Engineer, Robotics, Science; Trades: Weapon smith, Armour smith, Crossbow smith, Labouring, Farming, Cooking |
+
+The skills parchment spans the remaining width; the description parchment spans
+the full bottom width. Exact runtime resizing and race/mod variants are **Unknown**.
+
+**Observed** in the supplied Metaru references: the bottom left has the stat name,
+Stats Affected and Ways To Train headings with bullet rows. The right starts with
+a thin Next Level bar and percentage, followed by Description and wrapped prose.
+Help text is available from the installed [gettext catalog](../formats/gettext.md).
+Medical body-part labels are larger than the stats body text. Meitou uses 16 em
+pixels at 1080 lines for medical labels, arrows and values, centred over the full
+bar height; sizing text to the inset datapanel shrinks it. Exact original font
+hinting remains **Unknown**.
+
 ## 6. Inventory, trade, dialogue, build
 
+- **Observed** (user report, 2026-10-16): vanilla shows the item being dragged under
+  the pointer. Exact preview opacity and cursor anchoring remain **Unknown**.
+- **Observed** in the original Metaru screenshot supplied on 2026-10-15: inventory
+  icons have translucent black rectangular backings covering their cell footprints;
+  empty clothing cells are pale. Emptiness alone does not establish the red/disabled
+  slot state seen in the Wolf reference below; its runtime condition is **Unknown**.
 - **Observed** in the vanilla screenshot supplied on 2026-10-15 (Wolf, Thieves Backpack, Armour King): the character title is the character's name; the bag title is its item name;
   the shop title is the trader's name. The character pockets contain 8 columns by 10 rows of square cells. The bag is left of the character, stock right of it, with an independent
   vertical scrollbar. Equipment icons occupy their cell footprints; empty clothing slots are red, other empty cells pale. Stack counts are plain numbers in the lower-right corner;

@@ -42,6 +42,7 @@ sealed partial class GameHost
             UpdateNav(wait: true);
             DuelHoldClock();
             DuelFrame(false);   // the duel's laps run on in a long still too
+            if (g.TitlePreview) titleBattle?.Advance(session.Ticks.TickSeconds);
         }
         SandboxFollowCamera();
         ApplyCamera(session.Camera.Current);
@@ -66,12 +67,11 @@ sealed partial class GameHost
         for (int i = 0; i < gpu.Post.WarmupFrames; i++) { DrawWorld(w, h); display.EndFrame(); }   // a temporal upscaler converges first
         DrawWorld(w, h);
         display.EndFrame();
-        using var overlay = g.TitlePreview || playerSquad is not null || player.UiMode == Meitou.Data.Ui.UiMode.Faithful ? DebugOverlay.TryCreate(context) : null;
+        using var overlay = DebugOverlay.TryCreate(context);
         if (overlay is not null) { player.CreateUiPainter(overlay, assets.Find); ConnectItemIcons(); }
         if (gpu.Characters is { } portraits) { var (atlas, sampled) = portraits.PortraitAtlas; player.SetUiTexture(PlayerInterface.PortraitTexture, atlas, sampled); }
-        string?[] panels = g.UiShowcase ? player.UiMode == Meitou.Data.Ui.UiMode.Faithful
-            ? [null, "inventory", "stats", "overview", "menu", "new-game", "save", "load", "title"]
-            : [null, "inventory", "stats", "menu"] : [null];
+        string?[] panels = g.UiShowcase
+            ? [null, "hud-expanded", "inventory", "stats", "overview", "menu", "new-game", "save", "load", "title"] : [null];
         foreach (string? panelName in panels)
         {
             // Item icons are drawn from the frame after a cell asks for them, and their textures stream in: show the panel until they are done.
@@ -80,7 +80,7 @@ sealed partial class GameHost
                 DrawWorld(w, h);
                 overlay.Target = target;
                 UpdateView(w, h);
-                if (g.TitlePreview) player.ShowTitle(); else player.ShowUiPanel(panelName);
+                if (g.TitlePreview) player.ShowTitle(); else player.ShowUiPanel(panelName == "hud-expanded" ? null : panelName, panelName == "hud-expanded");
                 player.Draw(overlay, w, h);
                 display.EndFrame();
                 Thread.Sleep(5);
@@ -90,7 +90,7 @@ sealed partial class GameHost
             {
                 overlay.Target = target;
                 UpdateView(w, h);
-                if (g.TitlePreview) player.ShowTitle(); else player.ShowUiPanel(panelName);
+                if (g.TitlePreview) player.ShowTitle(); else player.ShowUiPanel(panelName == "hud-expanded" ? null : panelName, panelName == "hud-expanded");
                 if (IsSandbox && !g.UiShowcase) DrawSandbox(overlay, w, h);
                 player.Draw(overlay, w, h);
                 if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.IsPlayer) is { } me && player.Project(DrawnPosition(me) + new Vector3(0, 1, 0)) is { } px)

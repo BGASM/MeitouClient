@@ -12,7 +12,7 @@ sealed partial class PlayerInterface
     const float MapExtent = 147456;
     static Vector2 MapPoint(Vector3 world) => new((world.X + MapExtent) / (2 * MapExtent), (MapExtent - world.Z) / (2 * MapExtent));
     static Vector3 MapWorld(Vector2 normalized) => new(normalized.X * 2 * MapExtent - MapExtent, 0, MapExtent - normalized.Y * 2 * MapExtent);
-    bool OverMap(Vector2 p) => UiVisible && UiMode == UiMode.Faithful && faithfulScreens.IsOpen("overview") && faithfulScreens.GetTab("overview", "TabsMain") == 0 && mapViewport.Contains(p.X, p.Y) && !faithfulScreens.HasModal;
+    bool OverMap(Vector2 p) => UiVisible && faithfulScreens.IsOpen("overview") && faithfulScreens.GetTab("overview", "TabsMain") == 0 && mapViewport.Contains(p.X, p.Y) && !faithfulScreens.HasModal;
     bool MapPointerDown(Vector2 p)
     {
         if (!OverMap(p)) return false;

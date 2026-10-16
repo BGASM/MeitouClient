@@ -12,6 +12,10 @@ accumulate `realDt*speed`, speeds 0/1/2/5. Budget `6*speed` ticks per frame; exc
 to the entire frame. `WorldSession` rejects unequal world/clock tick lengths, owns snapshots,
 clocks, input and camera, and disposes systems/services.
 
+At player speed 0 (without a modal/loading pause), queued selection, inventory move/arrange
+and open-shop buy/sell/close commands apply between ticks and republish snapshots. Other
+commands stay queued; neither world ticks, game time nor simulation phases advance.
+
 **Verified** original clock: 1200/11 seconds per game hour ([game-loop.md](game/game-loop.md)).
 `BodySystem.HoursPerTick=11/36000`; medical dt units remain **Unknown**. Navmesh unload uses
 real time (30 s); population unload grace uses game time (towns 60 s, roaming 10 s).
@@ -72,6 +76,9 @@ Missing references become `SquadPlan.Problems`; world states initially false are
 choice, not a verified original default. Prisoners/cages, housemates and unique replacements
 remain incomplete. `ActiveZones` is double-buffered. Zone loading/spawn planning stays off the
 simulation thread; publish results at boundaries.
+`World.PreparePopulation` queues nearby residents/wild squads, activates existing nearby roaming
+platoons and drains completed builds during loading. It publishes matching snapshots without advancing
+ticks, game hours, AI, movement or roaming timers; readiness includes navmesh-gated sites.
 
 ## Player
 
@@ -85,6 +92,11 @@ semantics remain partly unknown. Picking/HUD are host responsibilities, never si
 Passive/Hold/Block/Taunt/Jobs/medic/rescue state belongs to the player/character and relevant
 systems. Explicit player commands and automatic retaliation have different eligibility;
 Idle players self-defend unless Passive, and Hold prevents pursuit beyond attack reach.
+New player characters start with Jobs and Ranged enabled. Jobs gates automatic medic/rescue
+work; direct orders still run. Saved toggles override defaults, including explicit false values.
+Jobs uses the Meitou-only bool `meitou jobs enabled`; the original save key is **Unknown**.
+New games select the squad's first member. The game host also selects the first member after
+loading, before publishing the initial snapshot; the save reader itself retains saved selection.
 
 ## Movement and paths
 
@@ -126,6 +138,13 @@ is explicit and uncertain; [character-stats.md](game/character-stats.md) owns or
 load and food provision. ITEM `stackable` is an integer, not boolean; gear stacks cap at one.
 Transfer/split/top-up through inventory APIs. Food/auto-eat uncertainty and container bonuses:
 [character-stats.md](game/character-stats.md), [economy.md](game/economy.md).
+
+Inventory moves validate snapshot identity, bounds, occupancy, stack limits and equipment
+type/armour slot. Weapon sections are 10×2 (back) and 7×1 (hip); other equipment slots hold
+one compatible item. These are engine constraints, not a complete original-game rule set.
+Backpacks move intact between pockets and their attachment slot; containers cannot be put
+inside a backpack. Equipment moves refresh worn appearance and combat gear; pocket armour
+does not grant worn bonuses. Race restrictions, swaps and prosthetic changes remain absent.
 
 ## Combat
 

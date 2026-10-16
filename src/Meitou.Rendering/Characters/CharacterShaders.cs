@@ -85,6 +85,7 @@ static class CharacterShaders
         out vec4 vTangent;
         out vec2 vUv;
         flat out uint vMaterial;
+        flat out uint vInterior;
         //MOTION_OUT
 
         void main()
@@ -108,6 +109,7 @@ static class CharacterShaders
             vTangent = vec4(n * aTangent.xyz, aTangent.w);
             vUv = aUv;
             vMaterial = aInstanceData.y;
+            vInterior = aInstanceData.z & 1u;
             gl_Position = view.viewProjection * p;
             //MOTION_BODY
         }
@@ -148,6 +150,7 @@ static class CharacterShaders
         in vec4 vTangent;
         in vec2 vUv;
         flat in uint vMaterial;
+        flat in uint vInterior;
         layout(location = 0) out vec4 fragColour;
 
         bool flag(uint f, uint bit) { return (f & bit) != 0u; }
@@ -245,6 +248,7 @@ static class CharacterShaders
             vec3 v = normalize(view.eye - vWorld);
             gloss = clamp(gloss, 0.0, 1.0);
             vec3 colour;
+            giInterior = vInterior != 0u;
             if (view.fogDistance > 0.0 && uAtmoParams.x > 0.5) colour = kenshiLight(albedo, n, v, gloss, vWorld);
             else if (view.fogDistance < 0.0)
             {
