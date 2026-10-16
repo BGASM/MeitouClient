@@ -186,7 +186,7 @@ and the null handle. `sentence`/`psts` are written while a sentence is set or th
 | `FUN_14036dde0`, `FUN_14036c070`, `FUN_14036e450`, `FUN_1409ffad0`, `FUN_140a0bef0` | zone save, zone file write, save all zones, zone load, zone-file check |
 | `FUN_140372a60` / `FUN_14036f2e0`, `FUN_1409c6890` / `FUN_1409c9dc0` | faction write / read, war state write / read |
 | `FUN_140372ef0` / `FUN_1407ed0f0`, `FUN_1406280a0` / `FUN_140626f50` | platoon write / read, character write / read |
-| `FUN_140552320` / `FUN_14057cc70` | building state write / read (the reader is catalogued elsewhere as `Zones_CreateDoor`: it also creates doors) |
+| `FUN_140552320` / `FUN_140552b70`, `FUN_140555650` | building state write / read ([keys](zones.md#placement-keys)); `FUN_14057cc70` (catalogued as `Zones_CreateDoor`) is the building factory |
 
 ## Unknowns
 
@@ -194,7 +194,7 @@ and the null handle. `sentence`/`psts` are written while a sentence is set or th
 - The two long slot lists (2503 and 2969 ints) at the end of `quick.save`; the `S` serial's use when a handle goes stale (what happens on a mismatch).
 - The roles of BIOMES `E<n>` instances (EffectHandler state fields), the short-key CAMERA floats and bools (`bs cod gdm ht nnm ps rs`, `bl ep`), `TI day/dat0`, `sqt`, `towntime`, `jobhr`, `ssct`, and whether MEDICAL `fed` / `KO` are the stomach buffer and the KO timer (the other MEDICAL floats are explained above).
 - Whether `loadGame` rejects or adapts to a `mods` list that differs from the current load order (nothing in the sample: single base-game save).
-- Player-built buildings, prisoners, dead characters, bounties, trade and mission state: not present in an early-game sample. Their records are the same types (GAMESTATE_BUILDING in `0-buildinglist` with `<n>-zone<X>.<Y>-INGAME` ids is presumed) but untested.
+- Prisoners, dead characters, bounties, trade and mission state, and player outposts: not present in an early-game sample. Player-built building keys are known from the code only ([zones](zones.md#placement-keys)).
 - Exactly when platoon files are written to the working folder between saves (only at save time is certain) and which zones are written on unload ("Delaying saving zone").
 - The condition list of the autosave pause, and how `Import Game` selects squads (`FUN_140378a30`, `FUN_140377710`).
 - How relations, trust and `trustNeg` change during play (only the fresh-world values are explained), and what the player faction (no relation table, but a `known` list and `global trust`) uses instead.

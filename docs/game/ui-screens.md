@@ -52,7 +52,7 @@ which are descriptive (RTTI knows `MessageBoxManager::Box`; the constructor of a
 | Splash | 140916140 (constructor), 140913720 (per-frame fade) | no layout file: widgets built in code from the image sets `Kenshi_Splash_Logos` (texture `physSplash.jpg`, 1024 x 768) and `Kenshi_Splash_LoFi` in `kenshi_images.xml` | - | logos; alpha rises at 3 per second (full in 1/3 s), a slide ends on any input after it is fully visible or after 4 s |
 | EscMenu | 1409180e0 | Kenshi_MainMenuPopupPanel | Main | New game, Save game, Load game, Options, Exit game, Resume |
 | NewGameWindow | 140917530 | Kenshi_NewGamePanel | Window | start-off title, description, Difficulty, Cash, Play Style; Begin / Advanced options / Cancel |
-| NewGameOptionsWindow | 1409151d0 | Kenshi_AdvancedOptionsWindow | Window | difficulty sliders, see [combat.md](combat.md), [character-stats.md](character-stats.md#new-game-advanced-options-that-change-these-mechanics), [buildings-production.md](buildings-production.md#construction-and-production) and [factions-squads-towns.md](factions-squads-towns.md#population-and-contents) |
+| NewGameOptionsWindow | 1409151d0 | Kenshi_AdvancedOptionsWindow | Window | difficulty sliders, see [combat.md](combat.md), [character-stats.md](character-stats.md#new-game-advanced-options-that-change-these-mechanics), [buildings-production.md](buildings-production.md#construction-tick) and [factions-squads-towns.md](factions-squads-towns.md#population-and-contents) |
 | LoadGameMenu | 140480b50 | Kenshi_LoadGamePanel | Window | save list, info panel, "Reset squad positions" |
 | SaveGameMenu | 140481ed0 | Kenshi_SaveGamePanel | Window | name edit box |
 | ImportGameMenu | 140481130 | Kenshi_ImportGamePanel | Window | ticks: positions, buildings, research, dead NPCs, relations; Advanced options; the import kind of the save request is described in [save.md](../formats/save.md#save-requests-fun_14047c310) |
@@ -290,8 +290,8 @@ decompile unless marked; Meitou's adapter is `PlayerInterface.Map.cs`.
     requires 99% silhouette agreement for the Rag Loincloth, whose transparent tears are missed by the opaque samples.
     Not done: BUILDING icons, the vertex-colour and DXT5N variants (the item shader is used), writing the pictures to disk (a readback inside the frame would stall it), bounding the icon textures
     (one per item and material seen, at most 512 x 512, colour only).
-- Build window ([buildings-production.md](buildings-production.md#construction-and-production) for the rules it enforces): groups come from BUILDING `building category` and `building group`; placement error messages in
-  FUN_1404e27e0 (**Observed**).
+- Build window: categories, groups, research gating and the stats panel are in [buildings-production](buildings-production.md#build-menu);
+  placement checks and messages (`FUN_1404e27e0`) and the build-map controls in [placement](buildings-production.md#placement).
 
 ### 7. Tutorials
 

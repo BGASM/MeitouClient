@@ -55,6 +55,43 @@ building`, `destroyed`, `foliage`, `broken`, `power on`, `gets battery`; float `
 `isInsideBuilding*`, `mounted*`, each suffix TYPE/C/CS/I/S. Strings `name`, `owner faction ID`,
 `squad template`, `residents template`. Faction58697-rebirth.mod is unresolved in28 states.
 
+Building state writer/reader (**Verified** by code, no player-built building in the sample saves): Building slot 17
+`FUN_140552320` writes, slot 18 `FUN_140552b70` and slot 112 `FUN_140555650` read; the shared part is slot 111
+`FUN_1405547f0`. Keys a writer must produce for a player-built building:
+
+| Key | Type | Value |
+|---|---|---|
+| `name` | string | building name |
+| `residents` handle, `residents template` | handle, string | null / empty for a new building |
+| `floornum` | int | floor |
+| `destroyed` | bool | +0x1a1 |
+| `town` | handle | its town (outpost), only when the building is not inside another one (**Observed** condition) |
+| `flags` | int | bit0 is outside (+0x240), bit1 foliage, bit2 +0x241 (**Unknown**); old saves use bools `is outside` / `foliage` |
+| `serialised interior` | int 1 | when not in interior edit mode, followed by the interior layout records |
+| `construction progress` | float | progress in material units |
+| `is complete` | bool | absent means complete |
+| `is public day` | bool | |
+| `pause` | bool | construction paused |
+| `<i>construction mats` | float | delivered amount of material entry i, i from 0 in entry order |
+| `owner faction ID` | string | owner FACTION id |
+| `handle` | handle | own handle |
+| `interior layout name`, `exterior layout name` | string | only with an interior |
+| `player furniture Y offset` | float | height above the parent building's origin for furniture, else 0 |
+| `version` | int | |
+| `world Y pos` | float | absolute height |
+| `foliage` | bool | |
+| `squad template` | string | |
+| `isInsideBuilding` | handle | parent building |
+| `internalbuildings-<i>` | handle | buildings inside it |
+| `is inside building` | bool | |
+| `usagenode_<i>` | | usage node state |
+
+New instance ids are `<n>-<container name>-INGAME`, n from the container's id counter (**Verified**, `FUN_140386770`;
+e.g. `19765-zone39.16-INGAME`). On import, non-player buildings are rebuilt complete
+([construction](../game/buildings-production.md#construction-tick)). A `creates player town` building makes a TOWN
+"Your Outpost" ([placement](../game/buildings-production.md#placement)); its save keys are **Unknown** (presumably a
+GAMESTATE_TOWN in `0-townlist` like base towns).
+
 `0-townlist` GAMESTATE_TOWN_INSTANCE_LIST: target TOWN, absolute XYZ, unused zero quaternion,
 GAMESTATE_TOWN state `-S5e`. **Verified**304 targets resolve;224 town states listing zones contain
 their town,80 list none. Keys `zones_count`, `zone_x_<i>`, `zone_y_<i>`, handle `hand*`, string

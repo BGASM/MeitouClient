@@ -107,6 +107,17 @@ Factory mappings grouped by identical class; each ID occurs exactly once:
 - Task_UseTrainingDummy: 97
 - Task_WorshipTarget: 236
 
+## Build tasks
+
+**Verified** (factory `FUN_14032ebd0`, order labels `FUN_14079b2d0`): player orders 2 "Build", 95 "Repair" (both
+`Task_Build`), 96 "Dismantle" (`Task_Dismantle`); 71 `Task_AddMaterialsToBuilding`; 247 `Task_EmptyMachine_BuildMats`.
+Conditions: 50 `hasBuildingMaterials` (`FUN_14059ba50`: nothing outstanding, or the character or its backpack holds
+one of an outstanding item), 51 `buildingHasBuildingMaterials` (`FUN_1405a39c0`: site not stalled), 150
+`HAVE_SOME_BUILD_MATS` (`FUN_140597530`, **Observed**: inventory holds the target's item). `Task_Build`
+(`FUN_14034a440`) plays `medic` (sounds `Character_Build_Loop_Start/Stop`), pushes build work each update and ends
+when the building is gone, the site stalls (back to the planner) or it completes. Work, delivery, auto-job scoring and
+dismantle: [buildings-production](buildings-production.md#construction-tick).
+
 ## TaskData registry
 
 **Verified** (disassembly of the table builder `FUN_140319a60`, each registration call `FUN_14060ea00(type, memberFn, ...)` parsed,
