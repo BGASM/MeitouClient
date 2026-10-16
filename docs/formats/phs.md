@@ -9,7 +9,8 @@ Sources: decompilation of `kenshi_x64.exe` (Ghidra 12.1.4): file reader `@ 1401a
 (`PhysicsActual::scytheInsert`), insert `@ 1401b1f20`, actor builder `@ 1401b1610` / `@ 1401a8be0`,
 shape-desc fill `@ 1401a7d80`, joint builder `@ 1401a81b0` (common part `@ 1401a7e90`), ragdoll start
 `@ 1405b9a10`, ragdoll actor callback `ScytheRagdollPhysicsT` slot 8 `@ 1407e2ae0`, attachment loader
-`@ 1407e3b80`. Reader in `Meitou.Data.Characters.PhysicsAttachmentFile` (attachment files only).
+`@ 1407e3b80`. Readers: `Meitou.Data.Physics.PhysicsFile` (whole file; **Verified**: reads all 86 install files to
+the end), `Meitou.Data.Characters.PhysicsAttachmentFile` (attachment points).
 
 **Verified** (throwaway parser outside the repo): every `.phs` in the install (86 files, all 1.4 except
 `meshes/crate.phs` 1.1) reads with the layout below to exactly the end of file.
