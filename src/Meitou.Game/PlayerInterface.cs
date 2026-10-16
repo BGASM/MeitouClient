@@ -97,13 +97,13 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     /// The order a quick right click on a character gives and the mouse pointer that shows it (PlayerInterface.Pointer.cs), or null when there is none (the ground
     /// under it is then a move).
     /// </summary>
-    (string Pointer, Action Do)? QuickOrder(Vector2 p)
+    (string Pointer, CharacterId Target, Action Do)? QuickOrder(Vector2 p)
     {
         if (SelectedIds() is not { Count: > 0 } selection) return null;
-        if (PickTrader(p) is { } trader) return ("talk", () => Say(new Meitou.Simulation.Trading.OpenTrade(selection[0], trader) { Tick = session.World.Tick }));
-        if (PickTarget(p) is { } victim) return ("attk", () => Say(new Meitou.Simulation.Combat.AttackOrder(selection, victim) { Tick = session.World.Tick }));
-        if (PickHurtAlly(p) is { } patient) return ("med", () => Say(new Meitou.Simulation.FirstAid.TreatOrder(selection, patient) { Tick = session.World.Tick }));
-        if (PickDowned(p, ownOnly: true) is { } ally) return ("lift", () => Say(new Meitou.Simulation.Carrying.PickUpOrder([], ally) { Tick = session.World.Tick }));
+        if (PickTrader(p) is { } trader) return ("talk", trader, () => Say(new Meitou.Simulation.Trading.OpenTrade(selection[0], trader) { Tick = session.World.Tick }));
+        if (PickTarget(p) is { } victim) return ("attk", victim, () => Say(new Meitou.Simulation.Combat.AttackOrder(selection, victim) { Tick = session.World.Tick }));
+        if (PickHurtAlly(p) is { } patient) return ("med", patient, () => Say(new Meitou.Simulation.FirstAid.TreatOrder(selection, patient) { Tick = session.World.Tick }));
+        if (PickDowned(p, ownOnly: true) is { } ally) return ("lift", ally, () => Say(new Meitou.Simulation.Carrying.PickUpOrder([], ally) { Tick = session.World.Tick }));
         return null;
     }
 

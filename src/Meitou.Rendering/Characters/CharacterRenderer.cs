@@ -398,6 +398,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         nativeFrame.Dispose();
         content.Dispose();
         DisposePortraits();
+        DisposeHover();
         DisposeIcons();
     }
 }

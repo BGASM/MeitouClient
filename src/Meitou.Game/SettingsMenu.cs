@@ -120,12 +120,17 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         if (page == 2)
             result.Add(new("UI style", "Choose original Kenshi skins or Meitou materials.", Choice: new(() => ["Faithful", "Meitou"],
                 () => (int)player.UiMode, i => player.SetUiMode((UiMode)i))));
+        if (page == 2)
+            result.Add(new("Hardware mouse", "Use the Windows cursor instead of the game's drawn pointer (no hover pointers).",
+                Toggle: new("Hardware mouse", () => config.HardwareMouse, v => config.HardwareMouse = v)));
         if (page == 3)
             foreach (var action in Enum.GetValues<InputAction>().Where(a => a != InputAction.Quit && a != InputAction.ToggleFps))
                 result.Add(new(ActionLabel(action), BindingHint(action), Binding: action));
         if (page == 4)
         {
             result.Add(new(AttackSlotsSlider.Label, "How many enemies may fight one character in melee at once (the game: 1).", Slider: AttackSlotsSlider));
+            result.Add(new("Hover outline", "Outline and tint the character under the cursor, in the colour of what a right click would do.",
+                Toggle: new("Hover outline", () => config.HoverOutline, v => config.HoverOutline = v, Remaster: true, OnOff: true)));
             result.Add(new("Main menu scene transitions", "Sky flight to/from the main menu (Meitou UI).",
                 Toggle: new("Main menu scene transitions", () => config.MainMenuTransitions, v => config.MainMenuTransitions = v)));
             result.Add(new(mainMenuTransitionSpeed.Label, "Higher values make the camera ascend and descend faster.", Slider: mainMenuTransitionSpeed));
@@ -341,6 +346,8 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         config.MainMenuTransitionSpeed = 1;
         config.InGameTransitionSpeed = 1;
         AttackSlotsSlider.Set(UserConfig.MeitouAttackSlots);
+        config.HardwareMouse = false;
+        config.HoverOutline = true;
         player.SetUiMode(UiMode.Faithful);
         bindings.ResetToDefaults();
         resetPending = false;

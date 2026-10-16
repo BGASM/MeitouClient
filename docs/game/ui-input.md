@@ -159,7 +159,18 @@ and the Esc menu hidden), 1 `med`, 2 `search`, 3 `lift`, 4 `pick_item`, 5 `attk`
 Meitou (`PlayerInterface.Pointer.cs`, engine choices): the window's own cursor is hidden and the pointer drawn last in the frame (not in
 screenshots or cinema takes). It follows the quick right-click order, so it never disagrees with the click: with a selection, over a
 trader `talk`, another living character `attk` (neutrals too: the quick order does not check hostility yet), an own hurt character `med`, an own downed one `lift`; Ctrl over a downed character
-`lift`, Alt `search`; otherwise, over the interface, the settings panel or the loading screen, `arrow`. `hardware_mouse` is not read.
+`lift`, Alt `search`; otherwise, over the interface, the settings panel or the loading screen, `arrow`. The free camera hides it (as mode 0's
+`invisible`). Interface → Hardware mouse (`HardwareMouse` in meitou.user.json, default off as the game's `hardware_mouse`; settings.cfg is
+not read) shows the Windows cursor instead, applied at once.
+
+### Hover outline
+
+Meitou only (Advanced → Hover outline, `HoverOutline`, default on; the game has none). The character under the cursor is drawn alone into a
+mask (colour pass, live pose, picture levels, own depth planes round it) right after the portraits, then after the tone map an outline
+(about 2.5 px at 1080p, fading outward) is blended round the silhouette, through walls, and its visible part tinted, visible meaning its
+linear depth within 1 % + 1 unit of the near slice's scene depth (jittered, render size). Its colour is the pointer's order: attack red,
+treat green, talk gold, carry/loot blue, else white (no selection or no order). Off in the free camera, with the interface hidden and in
+screenshots and cinema takes. Not in the Shift+F1 switch list (a game setting, like Attackers per target).
 
 ## Unknowns
 

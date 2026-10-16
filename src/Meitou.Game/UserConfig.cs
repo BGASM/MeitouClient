@@ -26,6 +26,10 @@ sealed class UserConfig
     /// <summary>How many enemies may melee one target at once (Advanced settings, 1-5): Faithful 1 (the game's CONSTANTS), Meitou 3.</summary>
     public int AttackSlots { get; set; } = MeitouAttackSlots;
     public const int FaithfulAttackSlots = 1, MeitouAttackSlots = 3;
+    /// <summary>The Windows cursor instead of the game's drawn pointer (the original's <c>hardware_mouse</c>, default off; Interface settings).</summary>
+    public bool HardwareMouse { get; set; }
+    /// <summary>Outline and tint the character under the cursor (Advanced settings; Meitou only, the game has none).</summary>
+    public bool HoverOutline { get; set; } = true;
     /// <summary>Worker threads of the simulation; null = half the cores.</summary>
     public int? SimThreads { get; set; }
     public Dictionary<string, float> Graphics { get; set; } = [];

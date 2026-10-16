@@ -125,6 +125,7 @@ sealed partial class GameHost
 
         var silkInput = Silk.NET.Input.InputWindowExtensions.CreateInput(window);
         Vector2? lastMouse = null;
+        var windowCursor = Silk.NET.Input.CursorMode.Normal;
         bool panelDrag = false, shiftDown = false;
         Vector2 Pixels(Vector2 p) => p * new Vector2(window.FramebufferSize.X / (float)Math.Max(window.Size.X, 1), window.FramebufferSize.Y / (float)Math.Max(window.Size.Y, 1));
         // The settings panel takes the mouse only while it is drawn (F7 and the cinema's clean picture hide it).
@@ -182,8 +183,6 @@ sealed partial class GameHost
         }
         foreach (var mouse in silkInput.Mice)
         {
-            // The game draws its own pointer (kenshi_pointers.xml) at the end of each frame, so Windows' arrow is hidden over the window.
-            if (overlay is not null) mouse.Cursor.CursorMode = Silk.NET.Input.CursorMode.Hidden;
             mouse.MouseDown += (m, b) =>
             {
                 if (Covered) return;
@@ -338,6 +337,18 @@ sealed partial class GameHost
             }
             var size = window.FramebufferSize;
             UpdateView(size.X, size.Y);
+            // What the mouse is over, decided once before the world is drawn: the pointer (drawn last) and the hover outline (drawn with the world) agree.
+            var pointerMouse = silkInput.Mice.FirstOrDefault();
+            var pointerAt = pointerMouse is null ? Vector2.Zero : Pixels(pointerMouse.Position);
+            bool Held(SilkKey a, SilkKey b) => silkInput.Keyboards.Any(k => k.IsKeyPressed(a) || k.IsKeyPressed(b));
+            player.CtrlHeld = Held(SilkKey.ControlLeft, SilkKey.ControlRight);
+            player.AltHeld = Held(SilkKey.AltLeft, SilkKey.AltRight);
+            bool pointerWorld = pointerMouse is not null && !Covered && !g.NoPopulation && !(PanelLive() && panel?.Visible == true) && !cinema.Contains(pointerAt);
+            bool freeLook = pointerWorld && session.Camera.IsFree;
+            // Hover outline (Advanced, Meitou only): not in the free camera, with the interface hidden, or in saved pictures.
+            bool outlined = config.HoverOutline && pointerWorld && !freeLook && !interfaceHidden && !cinema.Clean && !screenshotRequested && takeFile is null;
+            gpu.HoverKey = outlined && player.HoverTarget is { } hover ? DrawKey(hover.Id) : null;
+            if (gpu.HoverOutline is { } outline && player.HoverTarget is { } hovered) outline.Colour = hovered.Colour;
             if (display.BeginFrame(size.X, size.Y))
             {
                 long t0 = Stopwatch.GetTimestamp();
@@ -399,15 +410,13 @@ sealed partial class GameHost
                         loading.Draw(size.X, size.Y, background: false);
                 }
                 // The mouse pointer over everything, as the original's Pointer layer; never in saved pictures. What the right button would do picks it,
-                // the arrow over the settings panel, the cinema's editor and the loading screen.
-                if (!shot && !take && overlay is not null && silkInput.Mice.FirstOrDefault() is { } pointerMouse)
+                // the arrow over the settings panel, the cinema's editor and the loading screen. The free camera hides it (the original's `invisible`);
+                // Hardware mouse shows Windows' cursor instead.
+                if (!shot && !take && overlay is not null && pointerMouse is not null)
                 {
-                    var at = Pixels(pointerMouse.Position);
-                    bool Held(SilkKey a, SilkKey b) => silkInput.Keyboards.Any(k => k.IsKeyPressed(a) || k.IsKeyPressed(b));
-                    player.CtrlHeld = Held(SilkKey.ControlLeft, SilkKey.ControlRight);
-                    player.AltHeld = Held(SilkKey.AltLeft, SilkKey.AltRight);
-                    bool world = !covered && !g.NoPopulation && !(PanelLive() && panel?.Visible == true) && !cinema.Contains(at);
-                    player.DrawPointer(world ? player.PointerName : "arrow", at, size.X, size.Y);
+                    var cursorMode = config.HardwareMouse && !freeLook ? Silk.NET.Input.CursorMode.Normal : Silk.NET.Input.CursorMode.Hidden;
+                    if (cursorMode != windowCursor) pointerMouse.Cursor.CursorMode = windowCursor = cursorMode;
+                    if (!config.HardwareMouse && !freeLook) player.DrawPointer(pointerWorld ? player.PointerName : "arrow", pointerAt, size.X, size.Y);
                 }
                 display.Present();
                 profiler?.EndFrame();

@@ -590,6 +590,9 @@ static class WorldFrame
         public ParticleRenderer? Particles;
         /// <summary>The movement marker the game interface shows after a ground move order (null in the viewer, or without <c>position.mesh</c>).</summary>
         public MoveMarkerRenderer? MoveMarker;
+        /// <summary>The hover outline the game draws round the character under the mouse (null in the viewer); <see cref="HoverKey"/> picks the character by its draw-list key (null: none).</summary>
+        public HoverOutlineRenderer? HoverOutline;
+        public long? HoverKey;
         /// <summary>The Tab panel's weather particles at 0 and its particle density, given to <see cref="Particles"/> every frame (it is made only with the first weather).</summary>
         public bool WeatherParticles = true;
         public float ParticleDensity = 1;
@@ -1158,6 +1161,7 @@ static class WorldFrame
         StageClock.Lap(2);
         gpu.Characters?.Update(eye);
         gpu.Characters?.DrawPortraits();   // the squad portraits, from this update's poses
+        gpu.Characters?.DrawHoverMask(gpu.HoverOutline is null ? null : gpu.HoverKey, width, height, camera.View, camera.FieldOfView, eye);   // before the colour pass, whose statistics stand
         gpu.Characters?.DrawIcons();   // the item icons being made, from the same update
         StageClock.Lap(StageClock.UpdChars);
         float floor = gpu.Terrain.HeightAt(eye.X, eye.Z);
@@ -1406,6 +1410,12 @@ static class WorldFrame
         {
             var (markerNear, markerFar) = camera.Slices().Last();
             marker.Record(picture, width, height, markerPost.SceneDepth, markerPost.RenderWidth, markerPost.RenderHeight, view * camera.Projection(aspect, markerNear, markerFar), eye, sun);
+        }
+        // The hover outline over the finished picture too (Meitou only): the mask drawn after the portraits, sorted against the near slice.
+        if (gpu.HoverOutline is { } outline && gpu.HoverKey is not null && gpu.Characters?.HoverMask is { } hover && gpu.Post is { Target: { } hoverPicture } hoverPost)
+        {
+            var (hoverNear, hoverFar) = camera.Slices().Last();
+            outline.Record(hoverPicture, width, height, hover, hoverPost.SceneDepth, hoverPost.RenderWidth, hoverPost.RenderHeight, hoverNear, hoverFar, view * camera.Projection(aspect, hoverNear, hoverFar));
         }
         if (gpu.DebugShadows > 0 && gpu.Shadow is not null)
         {
