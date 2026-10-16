@@ -5,9 +5,11 @@ import '../styles/meitou.css';
 interface Props {
   title: string;
   description?: string;
+  /** Loop the background video behind the first view. */
+  video?: boolean;
 }
 
-const { title, description = 'MeitouClient: a .NET reimplementation of the Kenshi engine.' } = Astro.props;
+const { title, description = 'MeitouClient: a .NET reimplementation of the Kenshi engine.', video = false } = Astro.props;
 const path = Astro.url.pathname.replace(/\/$/, '') || '/';
 const nav = [
   { href: '/', label: 'Overview' },
@@ -25,6 +27,13 @@ const nav = [
   </head>
   <body>
     <div class="mt-scene">
+      {video && (
+        <div class="bg" aria-hidden="true">
+          <video autoplay muted loop playsinline preload="auto" poster="/bgvideo.jpg">
+            <source src="/bgvideo.webm" type="video/webm" />
+          </video>
+        </div>
+      )}
       <header class="top">
         <a class="brand" href="/">Meitou</a>
         <nav class="mt-tabs" aria-label="Sections">
@@ -41,10 +50,33 @@ const nav = [
         GPL-3.0-or-later · No game assets are distributed · Not affiliated with Lo-Fi Games
       </footer>
     </div>
+    {video && (
+      <script is:inline>
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) document.querySelector('.bg video')?.pause();
+      </script>
+    )}
   </body>
 </html>
 
 <style>
+  /* First view: the video under the vignette, fading into the page ground below. */
+  .bg {
+    position: absolute;
+    inset: 0 0 auto;
+    height: 100svh;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .bg video { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .bg::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 900px 640px at 4% 80%, rgba(8, 6, 5, .85) 20%, rgba(8, 6, 5, .45) 55%, transparent 80%),
+      linear-gradient(rgba(8, 6, 5, .55), rgba(8, 6, 5, .1) 22%, rgba(8, 6, 5, .2) 60%, var(--vignette));
+  }
+  .top, main, .foot { position: relative; }
   .top {
     display: flex;
     align-items: center;
