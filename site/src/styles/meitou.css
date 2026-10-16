@@ -62,14 +62,12 @@ a:focus-visible, .mt-btn:focus-visible, .mt-tab:focus-visible {
   outline-offset: 2px;
 }
 
-/* ---------- Scene: the world, darkened, with the vignette behind the stack ---------- */
+/* ---------- Scene: the page ground ---------- */
 
 .mt-scene {
   position: relative;
   min-height: 100vh;
-  background:
-    radial-gradient(ellipse 620px 470px at 4% 100%, rgba(8, 6, 5, .93) 25%, rgba(8, 6, 5, .6) 55%, transparent 80%),
-    radial-gradient(ellipse at 72% 18%, #4a3f33, var(--vignette) 72%) fixed;
+  background: var(--vignette);
 }
 
 /* ---------- Surfaces ---------- */

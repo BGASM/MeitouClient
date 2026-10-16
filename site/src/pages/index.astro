@@ -1,95 +1,66 @@
 ---
 import Base from '../layouts/Base.astro';
-
-const features = [
-  'Streamed Vulkan world with sky, weather, water and probe global illumination',
-  'Characters, animation, movement, combat and body state',
-  'NPC population, factions and partial AI',
-  'Inventory, trade, building and ragdoll physics',
-  'Original saves, native UI and a Faithful mode for the game look',
-];
 ---
 <Base title="Meitou · Kenshi engine reimplementation" video>
   <section class="hero">
     <div class="stack">
-      <p class="eyebrow mt-caption">Kenshi engine · C# / .NET 10 · Vulkan</p>
-      <h1>Run Kenshi on a new engine.</h1>
+      <h1>Run Kenshi on a new engine</h1>
       <p class="lede">
-        MeitouClient reimplements the engine to run original content, mods and saves unchanged.
-        It reads the files of your installed copy and ships none of them.
+        <span class="name">Meitou<span>Client</span></span> is an open-source reimplementation of the Kenshi engine.
+        Fully compatible with FCS mods and vanilla save games. Requires original copy to run
       </p>
-      <div class="actions">
-        <a class="mt-btn mt-btn-primary" href="https://github.com/VlcekM/MeitouClient/releases">Download</a>
-        <a class="mt-btn" href="/build"><span>Build from Source</span></a>
-      </div>
     </div>
+    <a class="mt-btn more" href="#about">
+      <svg class="more-icon" viewBox="0 0 24 20" width="24" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M9 5l5 5-5 5"/></svg>
+      <span>Learn More</span>
+    </a>
   </section>
 
-  <section class="grid">
-    <article class="mt-plate">
-      <h2>Early Playable Slice</h2>
-      <ul class="mt-list">
-        {features.map((f) => <li>{f}</li>)}
-      </ul>
-    </article>
-
-    <article class="mt-plate">
-      <h2>Requirements</h2>
-      <dl class="mt-rows">
-        <div><dt>System</dt><dd>Windows 10 / 11</dd></div>
-        <div><dt>Graphics</dt><dd>Vulkan 1.3 GPU</dd></div>
-        <div><dt>Game</dt><dd>Installed copy of Kenshi</dd></div>
-        <div><dt>Runtime</dt><dd>Included in releases</dd></div>
-      </dl>
-      <hr />
-      <p class="mt-caption">
-        Steam installs are found automatically. Otherwise pick the Kenshi folder when prompted or set <code>KENSHI_PATH</code>.
-      </p>
-    </article>
-
-    <article class="mt-plate">
-      <h2>Keys</h2>
-      <dl class="mt-rows">
-        <div><dt>Settings</dt><dd><span class="mt-key">Tab</span></dd></div>
-        <div><dt>Save · Load</dt><dd><span class="mt-key">F5</span> <span class="mt-key">F9</span></dd></div>
-        <div><dt>Speed 1 · 2 · 5</dt><dd><span class="mt-key">F2</span> <span class="mt-key">F3</span> <span class="mt-key">F4</span></dd></div>
-        <div><dt>Pause</dt><dd><span class="mt-key">Space</span></dd></div>
-        <div><dt>Cinematic Camera</dt><dd><span class="mt-key">F6</span></dd></div>
-        <div><dt>Hide Interface</dt><dd><span class="mt-key">F7</span></dd></div>
-      </dl>
-    </article>
-
-    <article class="mt-card">
-      <h3>Two Modes</h3>
-      <p>
-        Faithful follows the original rendering and interface. Meitou, the default, adds longer view
-        ranges, better lighting and its own title screen. Each feature switches on its own.
-      </p>
-    </article>
-
-    <article class="mt-plate community">
-      <h2>Community</h2>
-      <iframe
-        title="Meitou Discord server"
-        src="https://discord.com/widget?id=1560771083626487908&theme=dark"
-        width="350"
-        height="500"
-        loading="lazy"
-        sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
-      ></iframe>
-    </article>
+  <section id="about" class="band">
+    <div class="about">
+      <div class="about-text">
+        <h2>Subsection Title</h2>
+        <p>Placeholder text for this section.</p>
+      </div>
+      <img class="about-image" src="/bgvideo.jpg" alt="" width="1920" height="1080" loading="lazy" />
+    </div>
   </section>
 </Base>
 
 <style>
-  /* Fills the first view below the header, stack at the bottom left like the main menu. */
-  .hero { display: flex; align-items: flex-end; min-height: calc(100svh - 78px); padding: 72px 0 56px; }
-  .stack { max-width: 620px; }
-  .eyebrow { margin: 0 0 var(--space-4); letter-spacing: .1em; text-transform: uppercase; }
-  h1 { margin: 0 0 var(--space-6); color: var(--paper-light); text-shadow: 0 2px 12px rgba(8, 6, 5, .6); font: 600 clamp(32px, 6vw, 52px)/1.1 var(--font-exo); }
-  .lede { margin: 0 0 var(--space-7); font-size: 18px; line-height: 27px; }
-  .actions { display: flex; flex-wrap: wrap; gap: var(--space-5); align-items: center; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: var(--space-7); }
-  .mt-card p { margin: 0; }
-  .community iframe { display: block; width: 100%; max-width: 350px; border: 0; border-radius: var(--radius-btn); }
+  /* Fills the first view, stack at the top left in place of the wordmark. */
+  .hero { position: relative; display: flex; align-items: flex-start; min-height: 100svh; padding: var(--edge) 0; }
+  /* A main menu plate button (320 x 38, icon column 24 at 12, label at 48), bottom left, level with the wordmark. */
+  .more { position: absolute; left: 0; bottom: var(--edge); width: 320px; max-width: 100%; justify-content: flex-start; padding: 0 12px; }
+  .more-icon { position: relative; flex: none; opacity: .8; transition: opacity .16s ease; }
+  .more:hover .more-icon { opacity: 1; }
+  .stack { min-width: 0; }
+  h1 { margin: 0 0 var(--space-6); color: #fff; text-shadow: 0 2px 12px rgba(8, 6, 5, .6); white-space: nowrap; font: 600 clamp(32px, 6vw, 52px)/1.1 var(--font-exo); }
+  .lede { max-width: 620px; margin: 0; font-size: 18px; line-height: 27px; text-shadow: 0 1px 8px rgba(8, 6, 5, .8); }
+  /* The name set like the wordmark: Meitou semibold, Client regular. */
+  .name > span { font-weight: 400; }
+  /* Below the video, where Learn More scrolls: a worn paper band framed like the video (the kit's paper drawn in CSS,
+     with a fine grain standing in for the texture). */
+  .band {
+    margin: 0 calc(var(--frame) - var(--edge));
+    padding: 0 calc(var(--edge) - var(--frame));
+    border-radius: calc(4 * var(--radius-card));
+    background:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .24 0 0 0 0 .14 0 0 0 0 .08 0 0 0 .22 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+      radial-gradient(ellipse at 15% 20%, rgba(217, 206, 184, .35), transparent 60%),
+      radial-gradient(ellipse at 85% 90%, rgba(60, 35, 20, .3), transparent 55%),
+      var(--paper);
+    box-shadow: var(--paper-border);
+    color: var(--secondary);
+  }
+  /* Text left, image right, at most 1280px wide and centred. */
+  .about { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; max-width: 1280px; margin: 0 auto; padding: 72px 0; }
+  .about h2 { margin: 0 0 var(--space-5); color: var(--secondary); font: 600 32px/40px var(--font-exo); }
+  .about p { max-width: 620px; margin: 0; font-size: 18px; line-height: 27px; }
+  .about-image { display: block; width: 100%; height: auto; border-radius: calc(2 * var(--radius-card)); }
+  @media (max-width: 800px) { .about { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: no-preference) { :global(html) { scroll-behavior: smooth; } }
+  /* Narrow screens: drop the stack below the links at the top right. */
+  @media (max-width: 900px) { .hero { padding-top: calc(var(--edge) + 48px); } }
+  @media (max-width: 640px) { h1 { white-space: normal; } }
 </style>
