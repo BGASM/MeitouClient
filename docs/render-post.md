@@ -47,27 +47,15 @@ appearance/population, not just shading cost. Depth-aware reduced-resolution com
 preserve opaque intersections. Texture anisotropy caps mipmapped samplers, distinct from texture
 resolution/LOD bias. [Particle simulation](formats/particle-universe.md).
 
-## UI depth stamp
+## Tried: UI depth stamp (removed)
 
-The game host hands the frame the controls that were fully opaque and held still in the last UI
-frame (`UiPainter.StableOpaqueRects`, only while that interface is drawn again). Each depth
-slice then gets depth 0 under them (`UiDepthStamp`, one `vkCmdClearAttachments` per slice, after
-the slice's clear), so the scene's early depth test rejects every fragment there. Rectangles are
-mirrored in Y (scene targets hold the picture upside down) and inset 8 render pixels where they
-meet the scene (jitter, FXAA/TAA/FSR neighbourhoods). No inset at the picture's edge.
-The merged exposure kernel leaves out taps whose near depth is 0 (weighted mean; the unmasked
-path is unchanged), and the layers passes (`LayersHalf`, `SceneLayers`, `SceneLayersLean`)
-discard there, so neither reads the clear colour nor shades under the UI. The separate
-(non-merged) exposure passes and the other post passes, the sky and the upscaler still cover the
-stamped area.
-**Observed** (RTX 4070, 1594x896 DLSS, new-game start, 22% covered, `--no-vsync`, paused view,
-`--seed 1`, 5 samples per run, 2 runs per setting): gpu ms off 6.8 and 7.0, stamp only 7.3 and
-6.8, stamp with mask and early-outs 7.3 and 7.1: **no gain measured**; run-to-run spread is about
-0.3 ms. Earlier runs with a wandering camera showed 0.2 ms; that was the view, not the stamp.
-At this size the scene stage is not fragment-bound; a higher render resolution may differ.
-**Unknown:** that the exposure mask samples the depth at the right place (its uv is taken to
-match the colour's, as the composite's depth and colour do); darker or foggier scenes. Occlusion
-and Hi-Z from a stamped frame hide what lies behind a panel for one frame after it closes.
+Writing depth 0 under fully opaque UI (22% of the HUD screen, `UiPainter.OpaqueCoverage`) so the
+scene is not shaded there, with the exposure leaving those pixels out and the layers passes
+discarding, gave **no measurable gain** (RTX 4070, 1594x896 DLSS, paused fixed view, gpu ms off
+6.8/7.0 vs on 6.8-7.3, noise ~0.3 ms). The scene stage is probably not fragment-bound there;
+**Unknown:** whether it helps at a higher render resolution, or whether early depth rejection
+took effect (the full-screen stamp upper bound was not run). Scene targets hold the picture
+upside down, so depth rectangles must be mirrored in Y.
 
 ## Validation
 

@@ -428,13 +428,6 @@ sealed class SceneHost(GpuContext ctx)
         ctx.ClearDepth(list, 1f, new Vk.Rect2D(default, new Vk.Extent2D((uint)t.Width, (uint)t.Height)));
     }
 
-    /// <summary>Stamps depth 0 into the open rendering over <paramref name="rects"/> (the UI depth stamp): the scene's fragments there fail the depth test.</summary>
-    public void StampDepth(Vk.Rect2D[] rects)
-    {
-        if (cmd is not { } list) throw new InvalidOperationException("StampDepth without an open scene host");
-        ctx.ClearDepth(list, 0f, rects);
-    }
-
     public void Close()
     {
         if (cmd is not { } list) return;
@@ -586,9 +579,6 @@ static class WorldFrame
     {
         public required TerrainRenderer Terrain;
         public required SkyRenderer Sky;
-        /// <summary>The controls fully opaque in the last UI frame (display pixels at <see cref="UiHolesWidth"/> x <see cref="UiHolesHeight"/>) the scene is not shaded under (<see cref="UiDepthStamp"/>); the host sets it, null when nothing covers it.</summary>
-        public IReadOnlyList<Meitou.Data.Ui.UiRect>? UiHoles;
-        public int UiHolesWidth, UiHolesHeight;
         public WaterRenderer? Water;
         /// <summary>The weather's wetness, dust and rain for every surface shader (null without a game database).</summary>
         public WeatherSurfaces? Surfaces;
@@ -1293,8 +1283,6 @@ static class WorldFrame
         StageClock.Lap(5);
         gpu.Post?.SetCamera(eye, view, camera.FieldOfView, aspect);
         gpu.Terrain.BeginFrame();
-        var stamp = UiDepthStamp.Enabled && gpu.UiHoles is { } holes ? UiDepthStamp.RenderRects(holes, gpu.UiHolesWidth, gpu.UiHolesHeight, width, height, rw, rh) : [];
-        post.DepthStamped = stamp.Length > 0;
         bool first = true, foliageDrawn = false;
         Matrix4x4 particleViewProjection = default, particleNearProjection = default;
         float particleNear = 0;
@@ -1308,7 +1296,6 @@ static class WorldFrame
             if (!first && host.IsOpen) host.ClearDepth();
             host.Open(6, post.WithShadingRate(post.SceneTargets), clearDepth: !first && !host.IsOpen);
             first = false;
-            if (stamp.Length > 0 && host.IsOpen) host.StampDepth(stamp);   // under the opaque UI nothing is shaded (the water refraction's reopen below keeps the depth)
             if (nearSlice) gpu.Post?.SetNearSlice(near, far, camera.FieldOfView, aspect);
             var viewProjection = view * Jitter.Apply(camera.Projection(aspect, near, far), jitter, rw, rh);
             var frustum = WorldCamera.FrustumPlanes(viewProjection);

@@ -23,13 +23,7 @@ public sealed class UiPainter : IDisposable
     readonly Dictionary<string, (Texture Texture, SampledTexture Sampled)> external = new(StringComparer.Ordinal);
     /// <summary>Which texels of each uploaded texture are fully opaque, by name (<see cref="OpaqueCoverage"/>); textures given on the GPU have none and never count.</summary>
     readonly Dictionary<string, OpacityMask> masks = new(StringComparer.Ordinal);
-    List<UiRect> opaqueRects = new(), previousRects = new();
-    int previousWidth, previousHeight;
-
-    /// <summary>The opaque rectangles (<see cref="OpaqueCoverage"/>) of the last <see cref="Draw"/> when they are the same as the draw before's, else none (<see cref="UiDepthStamp"/>); at <see cref="StableWidth"/> x <see cref="StableHeight"/>.</summary>
-    public UiRect[] StableOpaqueRects { get; private set; } = [];
-    public int StableWidth { get; private set; }
-    public int StableHeight { get; private set; }
+    readonly List<UiRect> opaqueRects = new();
 
     /// <summary>
     /// The share of the viewport (0..1) under fully opaque pieces of the last <see cref="Draw"/>: solid backgrounds and atlas slices whose
@@ -274,13 +268,6 @@ public sealed class UiPainter : IDisposable
         }
         overlay.Flush(width, height);
         OpaqueCoverage = width > 0 && height > 0 ? (float)(UnionArea(opaqueRects) / ((double)width * height)) : 0;
-        // Published only while the set holds still between two draws: a panel that opens, closes or moves is not stamped that frame.
-        bool still = width == previousWidth && height == previousHeight && opaqueRects.SequenceEqual(previousRects);
-        if (!still) StableOpaqueRects = [];
-        else if (StableOpaqueRects.Length != opaqueRects.Count) StableOpaqueRects = [.. opaqueRects];
-        (StableWidth, StableHeight) = (width, height);
-        (previousRects, opaqueRects) = (opaqueRects, previousRects);
-        (previousWidth, previousHeight) = (width, height);
         opaqueRects.Clear();
     }
 

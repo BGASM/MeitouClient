@@ -31,8 +31,6 @@ sealed partial class PlayerInterface
     public bool UiVisible { get; set; } = true;
     /// <summary>The share of the screen under fully opaque controls in the last drawn UI frame (<see cref="UiPainter.OpaqueCoverage"/>); 0 without a painter.</summary>
     public float OpaqueUiCoverage => uiPainter?.OpaqueCoverage ?? 0;
-    /// <summary>The fully opaque controls of the last drawn UI frame that held still since the one before, and the size they were drawn at (<see cref="UiDepthStamp"/>).</summary>
-    public (IReadOnlyList<UiRect> Rects, int Width, int Height) OpaqueUiRects => uiPainter is { } painter ? (painter.StableOpaqueRects, painter.StableWidth, painter.StableHeight) : ([], 0, 0);
     internal IReadOnlyList<UiControl> UiFrame => ArrangeUi();
 
     public void LoadUi(UiMode mode, Func<string, string?> resolve)

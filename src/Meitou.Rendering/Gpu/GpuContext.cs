@@ -109,26 +109,6 @@ public sealed unsafe partial class GpuContext : IDisposable
 
     readonly JobPool<ClearJob> clearJobs = new();
 
-    /// <summary>As <see cref="ClearDepth"/> over several rectangles at once; <paramref name="rects"/> stays untouched until the frame's jobs are recorded.</summary>
-    public void ClearDepth(CommandList host, float value, Rect2D[] rects)
-    {
-        if (!Frame.Parallel.Open) { host.ClearDepth(value, rects); return; }
-        var job = clearRectsJobs.Rent();
-        (job.Owner, job.Value, job.Rects) = (this, value, rects);
-        Frame.Parallel.Add("clear depth", job);
-    }
-
-    readonly JobPool<ClearRectsJob> clearRectsJobs = new();
-
-    sealed class ClearRectsJob : RecordJob
-    {
-        public GpuContext Owner = null!;
-        public float Value;
-        public Rect2D[] Rects = [];
-        public override void Record(CommandList cmd) => cmd.ClearDepth(Value, Rects);
-        public override void Release() { Rects = []; Owner.clearRectsJobs.Return(this); }
-    }
-
     sealed class ClearJob : RecordJob
     {
         public GpuContext Owner = null!;

@@ -106,11 +106,8 @@ public sealed unsafe partial class PostProcess
     [StructLayout(LayoutKind.Sequential)]
     struct ExposurePush
     {
-        public float Blend, BandMin, BandMax, Masked;
+        public float Blend, BandMin, BandMax;
     }
-
-    /// <summary>True while the frame's depth carries the UI depth stamp (<see cref="UiDepthStamp"/>): the exposure then leaves out the pixels at depth 0, which hold no scene.</summary>
-    public bool DepthStamped { get; set; }
 
     /// <summary>
     /// The game's exposure measure and adaptation in one dispatch: <see cref="RunExposure"/>'s luminance pass, mip chain and adaptation pass. 256 workgroups of 16 x 16 make one
@@ -123,7 +120,7 @@ public sealed unsafe partial class PostProcess
             exposureProgram = Gpu.Shaders.Compute(MergedShaders.Exposure, "post exposure merged");
             exposurePipeline = Gpu.Pipelines.Get(new ComputePipelineDesc(exposureProgram, "post exposure merged"));
         }
-        exposureState ??= DeviceBuffer.Create(Gpu, 16 + 512 * 4, BufferUse.Storage | BufferUse.TransferDst, "post exposure state");
+        exposureState ??= DeviceBuffer.Create(Gpu, 16 + 256 * 4, BufferUse.Storage | BufferUse.TransferDst, "post exposure state");
         var cmd = Segment();
         if (!exposureStateZeroed)
         {
@@ -131,14 +128,12 @@ public sealed unsafe partial class PostProcess
             exposureStateZeroed = true;
         }
         var scene = Sampled(postColour);
-        var depth = Sampled(sceneDepth!);
-        var infos = stackalloc Vk.DescriptorImageInfo[4];
+        var infos = stackalloc Vk.DescriptorImageInfo[3];
         infos[0] = new Vk.DescriptorImageInfo(scene.Sampler, scene.View, Vk.ImageLayout.General);
         infos[1] = new Vk.DescriptorImageInfo(default, adaptA!.Texture.View(), Vk.ImageLayout.General);
         infos[2] = new Vk.DescriptorImageInfo(default, adaptB!.Texture.View(), Vk.ImageLayout.General);
-        infos[3] = new Vk.DescriptorImageInfo(Point(), depth.View, Vk.ImageLayout.General);
         var buffer = new Vk.DescriptorBufferInfo(exposureState.Handle, 0, exposureState.Size);
-        var writes = stackalloc Vk.WriteDescriptorSet[5];
+        var writes = stackalloc Vk.WriteDescriptorSet[4];
         for (int i = 0; i < 3; i++)
             writes[i] = new Vk.WriteDescriptorSet
             {
@@ -146,11 +141,10 @@ public sealed unsafe partial class PostProcess
                 DescriptorType = i == 0 ? Vk.DescriptorType.CombinedImageSampler : Vk.DescriptorType.StorageImage,
             };
         writes[3] = new Vk.WriteDescriptorSet { SType = Vk.StructureType.WriteDescriptorSet, DstBinding = 3, DescriptorCount = 1, DescriptorType = Vk.DescriptorType.StorageBuffer, PBufferInfo = &buffer };
-        writes[4] = new Vk.WriteDescriptorSet { SType = Vk.StructureType.WriteDescriptorSet, DstBinding = 4, DescriptorCount = 1, PImageInfo = &infos[3], DescriptorType = Vk.DescriptorType.CombinedImageSampler };
         cmd.Barrier(BarrierBatch.Full);
         cmd.BindPipeline(exposurePipeline!);
-        cmd.PushDescriptors(exposureProgram.Layout, 0, new ReadOnlySpan<Vk.WriteDescriptorSet>(writes, 5), Vk.PipelineBindPoint.Compute);
-        var push = new ExposurePush { Blend = blend, BandMin = band.Min, BandMax = band.Max, Masked = DepthStamped ? 1 : 0 };
+        cmd.PushDescriptors(exposureProgram.Layout, 0, new ReadOnlySpan<Vk.WriteDescriptorSet>(writes, 4), Vk.PipelineBindPoint.Compute);
+        var push = new ExposurePush { Blend = blend, BandMin = band.Min, BandMax = band.Max };
         cmd.PushConstants(exposureProgram.Layout, Vk.ShaderStageFlags.ComputeBit, in push);
         cmd.Dispatch(16, 16);
         cmd.Barrier(BarrierBatch.Full);
@@ -227,11 +221,9 @@ static class MergedShaders
         layout(set = 0, binding = 0) uniform sampler2D uScene;
         layout(set = 0, binding = 1, rg32f) readonly uniform image2D uLast;
         layout(set = 0, binding = 2, rg32f) writeonly uniform image2D uAdapted;
-        layout(std430, set = 0, binding = 3) coherent buffer State { uint counter; uint pad0; uint pad1; uint pad2; float tiles[256]; float counts[256]; } st;
-        layout(set = 0, binding = 4) uniform sampler2D uDepth;
-        layout(push_constant) uniform Push { float blend; float bandMin; float bandMax; float masked; } pc;
+        layout(std430, set = 0, binding = 3) coherent buffer State { uint counter; uint pad0; uint pad1; uint pad2; float tiles[256]; } st;
+        layout(push_constant) uniform Push { float blend; float bandMin; float bandMax; } pc;
         shared float tile[256];
-        shared float weight[256];
         shared uint finished;
 
         // The 2 x 2 means of the mip chain down to one value, in the tile.
@@ -249,51 +241,25 @@ static class MergedShaders
             return tile[0];
         }
 
-        // The tile reduced to (value, taps): the 2 x 2 means above (taps 1) as the mip chain does, or, with the UI depth stamp, the sums of the luminance and of the taps that hold a scene.
-        vec2 reduceAll(uvec2 l)
-        {
-            if (pc.masked == 0.0) return vec2(reduce(l), 1.0);
-            for (uint s = 8u; s >= 1u; s >>= 1u)
-            {
-                float a = 0.0, w = 0.0;
-                bool live = l.x < s && l.y < s;
-                if (live)
-                {
-                    uint i0 = (2u * l.y) * 16u + 2u * l.x;
-                    a = tile[i0] + tile[i0 + 1u] + tile[i0 + 16u] + tile[i0 + 17u];
-                    w = weight[i0] + weight[i0 + 1u] + weight[i0 + 16u] + weight[i0 + 17u];
-                }
-                barrier();
-                if (live) { tile[l.y * 16u + l.x] = a; weight[l.y * 16u + l.x] = w; }
-                barrier();
-            }
-            return vec2(tile[0], weight[0]);
-        }
-
         void main()
         {
             uvec2 l = gl_LocalInvocationID.xy;
             uint li = l.y * 16u + l.x;
             vec2 cell = vec2(1.0 / 256.0);
             vec2 centre = (vec2(gl_GlobalInvocationID.xy) + 0.5) * cell;
-            float sum = 0.0, live = 0.0;
+            float sum = 0.0;
             for (int y = 0; y < 4; y++)
                 for (int x = 0; x < 4; x++)
                 {
                     vec2 uv = centre + (vec2(x, y) - 1.5) * 0.25 * cell;
-                    // Depth 0 is the UI depth stamp: no scene was drawn there, the clear colour is not part of what the player sees.
-                    if (pc.masked != 0.0 && textureLod(uDepth, uv, 0.0).r == 0.0) continue;
                     sum += max(dot(textureLod(uScene, uv, 0.0).rgb, vec3(0.299, 0.587, 0.114)), 0.0001);
-                    live += 1.0;
                 }
-            tile[li] = pc.masked != 0.0 ? sum : sum / 16.0;
-            weight[li] = live;
+            tile[li] = sum / 16.0;
             barrier();
-            vec2 mean = reduceAll(l);
+            float mean = reduce(l);
             if (li == 0u)
             {
-                st.tiles[gl_WorkGroupID.y * 16u + gl_WorkGroupID.x] = mean.x;
-                st.counts[gl_WorkGroupID.y * 16u + gl_WorkGroupID.x] = mean.y;
+                st.tiles[gl_WorkGroupID.y * 16u + gl_WorkGroupID.x] = mean;
                 memoryBarrierBuffer();
                 finished = atomicAdd(st.counter, 1u) == 255u ? 1u : 0u;
             }
@@ -301,14 +267,12 @@ static class MergedShaders
             if (finished == 0u) return;
             memoryBarrierBuffer();
             tile[li] = st.tiles[li];
-            weight[li] = st.counts[li];
             barrier();
-            vec2 reduced = reduceAll(l);
+            float total = reduce(l);
             if (li == 0u)
             {
                 st.counter = 0u;
                 float last = imageLoad(uLast, ivec2(0)).r;
-                float total = pc.masked == 0.0 ? reduced.x : (reduced.y > 0.5 ? reduced.x / reduced.y : last);
                 float adapted = mix(last, total, pc.blend);
                 float smoothMean = mix(imageLoad(uLast, ivec2(0)).g, total, pc.blend);   // the mean smoothed without the band (the night grading reads it)
                 imageStore(uAdapted, ivec2(0), vec4(clamp(adapted, pc.bandMin, max(pc.bandMin, pc.bandMax)), smoothMean, 0.0, 1.0));

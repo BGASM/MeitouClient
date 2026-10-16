@@ -217,7 +217,6 @@ static class PostProcessShaders
         void main()
         {
             ivec2 p = min(ivec2(gl_FragCoord.xy) * 2, ivec2(uFullSize) - 1);
-            if (texelFetch(uNearDepth, p, 0).r == 0.0) discard;   // the UI depth stamp: nothing of the scene is seen here
             vec3 dir;
             bool sky;
             float waterWeight;
@@ -293,7 +292,6 @@ static class PostProcessShaders
         void main()
         {
             ivec2 p = ivec2(gl_FragCoord.xy);
-            if (texelFetch(uNearDepth, p, 0).r == 0.0) discard;   // the UI depth stamp: nothing of the scene is seen here
             vec3 dir;
             bool sky;
             float waterWeight;
@@ -334,7 +332,6 @@ static class PostProcessShaders
         void main()
         {
             ivec2 p = ivec2(gl_FragCoord.xy);
-            if (texelFetch(uNearDepth, p, 0).r == 0.0) discard;   // the UI depth stamp: nothing of the scene is seen here
             vec3 dir;
             bool sky;
             float waterWeight;
