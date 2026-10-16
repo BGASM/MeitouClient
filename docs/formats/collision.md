@@ -66,7 +66,7 @@ use every rendered triangle as collision or infer PhysX actor dynamics from appe
 
 | Group | What |
 |---|---|
-| 5 | door parts (a building with the door flag; Meitou: every part of a `doors`-list building, [pathfinding](../game/pathfinding.md#own-builder)) |
+| 5 | door parts (a building with the door flag; Meitou: any `doors`-list building) |
 | 6 | foliage collision, FOLIAGE_MESH `walkable` false (Foliage_PlaceOne FUN_1406d2410) |
 | 9, 10, 11, 12 | ordinary building parts, `building floor` 0, 1, 2, 3 (4 and up use 9, Observed in code: the switch only knows 1..3) |
 | 13 | the `interior mask` part's collision (indoor trigger hull, FUN_140553870) |

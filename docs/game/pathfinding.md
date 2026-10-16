@@ -53,29 +53,16 @@ water/door costs. Unload of in-flight builds/cache invalidation remains imperfec
 are in [simulation](../simulation.md#open-questions-and-known-gaps). Original Havok tiles are
 reference evidence, not a runtime dependency or proof of DotRecast polygon parity.
 
-**Furniture.** Building interiors' furniture comes from the building's layouts (`interiors.level`
-INSTANCE_COLLECTION, the renderer's `BuildingLayouts`), skipped when destroyed. **Verified** (Hub,
-`meitou-tools navmesh`): parts with collision 189→309, furniture cut out of Squin's interiors.
-
-**Heights.** **Observed** (Hub gate stairs, the ramp north of it): a Recast polygon is planar only
-between its corners, up to ~15 units off the real surface over stairs, ramps and steep slopes; on the
-flat ~0.5. Standing heights therefore snap each polygon's height to the nearest walkable collision
-triangle (`NavSurfaces`, within 16) or the zone's terrain samples (within 30), then take the highest
-surface at most 12 above the character (stacked floors, walkways). Walkers off the mesh by ≤2 units
-(a path hugging a corner) stand on the nearest polygon.
-
-**Long routes** (engine choice, not the original's tile routing). A goal in a zone without a loaded
-navmesh routes over `CoarseRoute`: 192-unit cells over the world, steps barred where terrain sampled
-every 36 units is steeper than 40°, water cells cost the agent's water factor, A* weight 1.2, no
-buildings. The route's start is replaced by a navmesh path to the farthest point well inside loaded
-zones; the rest is provisional (`PathResult.Exact`) and asked again as the walker reaches it or is
-blocked on it. With both ends loaded but no navmesh path, the walker goes to the reachable point
-nearest the goal, then provisionally on. **Observed**: Hub→(-36000,-6000) arrives (~22k units).
-
-**Gate doors.** Every part of a building placed from a `doors` list is a door (group 5). **Observed**
-(all 35 door records): 33 flag every part `is door`; `Defensive Gate level 4/5 Door` flag none, yet
-open in the game. Reading the flag alone made their leaves solid and sealed Squin's canyon (both its
-gates are level 4): its floor was a 1017-polygon island; with the rule it joins the 3×3 zones.
+**Furniture** comes from building layouts (`BuildingLayouts`), none when destroyed. **Verified**
+(Hub, `meitou-tools navmesh`): parts with collision 189→309.
+**Doors**: every part of a `doors`-list building is group 5. **Observed** (35 door records): only
+`Defensive Gate level 4/5 Door` lack `is door`, yet open in game; without the rule Squin was sealed.
+**Heights**: **Observed** polygons are up to ~15 off over stairs/ramps (Hub gate), so standing
+heights snap to walkable collision (`NavSurfaces`) or zone terrain; the highest surface within
+`StandRise` of the character wins.
+**Long routes** (engine choice): goals in unloaded zones use `CoarseRoute` (terrain grid, slope and
+water costs, no buildings); the navmesh part ends inside loaded zones, the rest is provisional and
+re-asked. **Observed**: Hub→(-36000,-6000) arrives.
 
 ### Generator (runtime and tool-time navmesh building)
 
