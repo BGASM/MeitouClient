@@ -281,7 +281,7 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         for (int k = spots.Count - 1; k >= 0; k--)
         {
             var p = spots[k];
-            if (!table.Next[p.Target].Alive || table.Next[p.Target].Generation != p.Generation) { spots.RemoveAt(k); continue; }
+            if (!table.Previous[p.Target].Alive || table.Previous[p.Target].Generation != p.Generation) { spots.RemoveAt(k); continue; }
             if (seen.Exists(x => x.Target == p.Target)) continue;
             p.Value -= dt / Orders.SpotForgetSeconds;
             if (p.Value <= 0) spots.RemoveAt(k);

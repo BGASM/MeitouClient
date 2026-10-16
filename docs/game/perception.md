@@ -32,7 +32,7 @@ and stealth x 5). Each looker keeps a meter per target (`SensoryData::SpottingPe
 - Not in view: the meter empties by dt / 260 (`FUN_140853aa0`) and is dropped at 0.
 - The target keeps a watcher list (+0x1f0, `FUN_140855f30`): level and time per looker; level 0 removes it.
   `FUN_1408586d0` draws, for entries younger than 4 s, a short pointer at the sneaker (12 up, length
-  clamp(d - 7, ..15) towards the looker): red 0xdd0000 detected, yellow 0xffdd00 noticing, green 0x00ff00 when a
+  min(d - 7, 15) towards the looker): red 0xdd0000 detected, yellow 0xffdd00 noticing, green 0x00ff00 when a
   looker test (vtable +0x3f0, **Unknown**) passes. The sneaker's state +0xe8 becomes 1 (any red) or 2 (any yellow).
 - Stealth XP: see [character-stats](character-stats.md#levelling-xp).
 
