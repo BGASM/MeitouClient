@@ -119,6 +119,14 @@ public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> C
     public IReadOnlyList<TownKnowledge> Towns { get; init; } = [];
     /// <summary>The camps and nests the player knows (<see cref="PlayerState.Camps"/>).</summary>
     public IReadOnlyList<CampView> Camps { get; init; } = [];
+    /// <summary>Player-built buildings and construction sites, in creation order (docs/simulation.md "Buildings").</summary>
+    public IReadOnlyList<Construction.BuildingSnapshot> Buildings { get; init; } = [];
+    /// <summary>Bumped when a building is added, completed, destroyed or removed (not on progress): the host diffs <see cref="Buildings"/> by id when it changes.</summary>
+    public long BuildingsRevision { get; init; }
+    /// <summary>BUILDING ids the player's research has unlocked (the build menu's list).</summary>
+    public IReadOnlySet<string> UnlockedBuildings { get; init; } = EmptySet;
+
+    static readonly IReadOnlySet<string> EmptySet = new HashSet<string>(StringComparer.Ordinal);
 }
 
 /// <summary>
