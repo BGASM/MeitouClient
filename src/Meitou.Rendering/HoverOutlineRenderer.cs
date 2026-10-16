@@ -6,7 +6,7 @@ namespace Meitou.Rendering;
 
 /// <summary>
 /// The hover outline (Meitou only, docs/game/ui-input.md "Hover outline"): the character under the mouse, drawn alone into a mask
-/// (<see cref="Characters.CharacterRenderer.DrawHoverMask"/>), is outlined in white and its visible part tinted in <see cref="Colour"/>, over the finished picture.
+/// (<see cref="Characters.CharacterRenderer.DrawHoverMask"/>), is outlined in <see cref="Colour"/> and its visible part tinted in it, over the finished picture.
 /// The outline shows through walls; the tint only where the scene's depth does not cover the character.
 /// </summary>
 public sealed class HoverOutlineRenderer
@@ -57,7 +57,7 @@ public sealed class HoverOutlineRenderer
             float d = sqrt(nearest);
             if (d > float(uRadius) + 0.5) discard;
             float a = uColour.a * clamp(1.0 - (d - 1.0) / (float(uRadius) + 0.5), 0.0, 1.0);
-            fragColour = vec4(vec3(a), a);   // white
+            fragColour = vec4(uColour.rgb * a, a);
         }
         """;
 
@@ -67,7 +67,7 @@ public sealed class HoverOutlineRenderer
     readonly UniformHandle depthScale, maskPlanes, scenePlanes, colour, radius;
     readonly SamplerSlot mask, maskDepth, sceneDepth;
 
-    /// <summary>The tint's colour (alpha: the tint's and the outline's strength), set by the game for what a right click would do.</summary>
+    /// <summary>The outline's and tint's colour (alpha: their strength), set by the game for what a right click would do.</summary>
     public Vector4 Colour { get; set; } = new(0.95f, 0.92f, 0.8f, 1);
 
     public HoverOutlineRenderer(GpuContext gpu)
