@@ -133,6 +133,12 @@ sale, and the same flag selects which price is computed).
 | `buy mult`, `buys stolen`, `buys illegal` | section 6 and 8 | |
 | `special items`, `special map items` | extra guaranteed stock (`read_special_items_n3` `FUN_140958740`) | not decoded |
 
+### 11.1 Ledger
+
+Per-character hash map keyed by faction (`Character+0xf0`). Entry (`FUN_1405e7ee0`): `+8` amount int, `+0xc` crime bitmask
+(`1 << code`), `+0x10` claimed byte, `+0x18` double game-hour timestamp of the last raise (**Verified**: crime add, claim marker
+`FUN_140854170`, save loader `FUN_140625e60` / writer `FUN_1406262b0` agree). Save keys: [save.md](../formats/save.md).
+
 ### 11.2 How a bounty is gained
 
 - **Crime**: `FUN_140853ec0(crimeEvent, faction)`: if the crime code is nonzero and has not been processed yet (`+0xa4` flag), and the
@@ -159,6 +165,42 @@ sale, and the same flag selects which price is computed).
 | 0xf (15) | Kidnapping | 5000 |
 | 6 | Treason | 50000 |
 | 5, 10 (Looting), 0xe (14, Crop Theft), others | Assault, Looting, Crop Theft, default | 500 |
+
+- **Spawn bounties** (`FUN_14062b210`, **Observed**): CHARACTER `bounty chance` vs an inclusive roll 0..100 (`roll < chance`);
+  amount `trunc(bounty amount + 0.5*k)`, `k` an integer in `[0, 2*bounty amount fuzz]` (the fuzz only adds), for each
+  `bounty factions` entry (else `defaultEmpireFactionSID`), added without a crime bit (`FUN_140853e20`).
+
+### 11.3 Lifetime
+
+`FUN_140851f10`: `0.04 * amount` hours below 10000, else never ("Notorious"). The character tick `FUN_1405cbb80` removes at most
+one expired entry per tick and is skipped while `Character+0x2f8 == 2` (imprisoned); each crime resets the timestamp (**Observed**).
+
+### 11.4 Claiming
+
+`FUN_140330d50` (**Observed**): a player-faction captor hands a non-player captive to a police chief (designation 8, not of the
+player's faction, not state 7); if the captive's entry for the chief's faction has an amount and is unclaimed, the player gets it
+(halved, truncated, when `captive+0x5bc` is set; flag **Unknown**), the entry is marked claimed, "Received c.{1} reward." shows and
+`Bounty_Fulfilled` plays. A claimed entry pays once.
+
+### 11.5 Bail and sentence
+
+- **Bail** (`CharacterTrading_PrisonerBailout` `FUN_1406ab890`, "Pay Bounty", **Observed**): `2 * bounty` (`FUN_140854080` with a
+  zero faction argument: which entry is **Unknown**); at least 2000 when the prisoner is not of the player's faction.
+- **Sentence** (`FUN_140854950`, the only reader of CONSTANTS `prison time` 1.0; reader **Verified**, formula **Observed**): caging a
+  prisoner with a bounty for the cage owner's faction sets `trunc(bounty * 0.02 * prison time)` (presumably game hours; 999999 above
+  25000) from now. Release and how bail ends it are not traced. `FUN_140851d10` (a lerp of 350/600 and 450/80-based values by a
+  health fraction) is a different, undecoded function.
+
+### 11.6 Booking factions and police hits (**Observed**)
+
+- **Faction `+0x40`** (FACTION loader `FUN_1407fe270`): `fundamental type` 1 (LAW_ENFORCEMENT), else `offers bounties`. Base data:
+  Police, Mercenary Police, United Cities, The Holy Nation, Shek Kingdom, Republic of Tertius (**Verified** by `CrimeInstallTests`).
+  The loader also stores `fundamental type` at `+0x34` and `not real` at `+0x1d0` (the setter's "lawless" tests).
+- **Hitting the police** (`FUN_140665fa0`): a landed blow between a police-like and a non-police character gives the non-police one a
+  pending Assault (timer 30) against the police faction, booked with it at once, whichever struck.
+- **Attack order** (`FUN_140334070`): a pending Assault against the victim's faction unless the victim has a bounty with the attacker's
+  faction, its status flag `+0x114` is set, it is a BANDIT, it has a pending crime, or `FUN_140436610(victim, 1)` (undecoded) holds.
+- **Murder**: no setter caller passes code 4 (25 checked); how a killing becomes Murder is **Unknown**.
 
 ### 12. Slaves, prisoners, animals
 
