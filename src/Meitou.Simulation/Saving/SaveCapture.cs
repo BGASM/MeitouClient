@@ -72,7 +72,9 @@ public static class SaveCapture
 
         UpdateFactions(game, data, loaded);
         WriteTownKnowledge(builder, data, world.Player);
-        var written = WritePlayerSquads(builder, world, data, loaded, options, clock);
+        var buildings = HeldSave.BuildingStates(game);
+        WriteLocks(world, buildings);
+        var written = WritePlayerSquads(builder, world, data, loaded, options, clock, buildings);
         WriteSelection(game, world, written);
         if (loaded is not null) WriteRoaming(game, world, loaded);
 
@@ -166,7 +168,8 @@ public static class SaveCapture
 
     // ------------------------------------------------------------------ the player's platoons
 
-    static Dictionary<CharacterId, SaveCharacter> WritePlayerSquads(SaveBuilder builder, World world, PopulationData data, LoadedSave? loaded, SaveCaptureOptions options, SaveClock clock)
+    static Dictionary<CharacterId, SaveCharacter> WritePlayerSquads(SaveBuilder builder, World world, PopulationData data, LoadedSave? loaded, SaveCaptureOptions options, SaveClock clock,
+        IReadOnlyDictionary<string, FcsRecord> buildings)
     {
         var game = builder.Game;
         var table = world.Characters;
@@ -234,6 +237,7 @@ public static class SaveCapture
                     g.Bools["is leader"] = squad.Leader == id;
                     BountySave.Write(g, cold.Bounties, data.Relations, clock, world.Tick, world.TickSeconds);
                     Orders.Write(g, cold);
+                    HeldSave.Write(g, cold, cold.Save, world.Fixtures, buildings);
                 }
 
                 // Body: stats and medical state, from the host, else the loaded ones, else (for a new character) defaults.
@@ -255,6 +259,9 @@ public static class SaveCapture
                 if (cold.Inventory is { } inventory) builder.SetInventory(platoon, sc, SavedKit.FromInventory(inventory));
                 written[id] = sc;
             }
+            // The platoon's `imprisoned` (meaning Observed): set while a member is in a cage, cleared when the save had it and none is.
+            bool caged = alive.Any(m => table.Cold(m.Slot)!.IsImprisoned);
+            if (caged || platoon.Record.Bools.ContainsKey("imprisoned")) platoon.Record.Bools["imprisoned"] = caged;
             platoon.CharCount = platoon.Characters.Count;
             if (platoon.Collection is { } c) c.Ints["char count"] = platoon.Characters.Count;
             platoon.Record.Ints["char count"] = platoon.Characters.Count;
@@ -272,6 +279,13 @@ public static class SaveCapture
         game.Camera.Squads = squads;
         game.Camera.Members = members;
         return written;
+    }
+
+    /// <summary>The registered buildings' locks and doors into their zones' existing state records (a building the save has no record of, or a new save without zones, is left out).</summary>
+    static void WriteLocks(World world, IReadOnlyDictionary<string, FcsRecord> buildings)
+    {
+        foreach (var b in world.Fixtures.Buildings)
+            if (buildings.TryGetValue(b, out var state)) world.Fixtures.WriteBuilding(b, state);
     }
 
     static RaceData? RaceOf(string recordId, GameDatabase db, Dictionary<string, RaceData?> cache)

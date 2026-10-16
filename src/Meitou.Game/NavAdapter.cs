@@ -8,10 +8,13 @@ namespace Meitou.Game;
 /// The simulation's <see cref="IWalkability"/> over the navmesh (<see cref="NavSystem"/>): the only place the game knows the navigation
 /// types, so the navmesh track can change its side without touching the simulation. Paths take the character's footprint radius
 /// (RACE <c>pathfind footprint radius</c>); where a zone is not loaded yet the navmesh answers with its open-ground stand-in
-/// (<see cref="NavmeshWalkability"/>). Safe from any thread.
+/// (<see cref="NavmeshWalkability"/>). Safe from any thread. It is also the world's door gate: locked buildings close their doors in the navmesh's door table.
 /// </summary>
-sealed class NavAdapter(NavmeshWalkability nav) : IAgentWalkability
+sealed class NavAdapter(NavmeshWalkability nav) : IAgentWalkability, Meitou.Simulation.Locks.IDoorGate
 {
+    /// <summary>A building whose doors are all locked is closed for every path (docs/simulation.md "Cages, beds and locks").</summary>
+    public void SetDoorsBlocked(string buildingInstance, bool blocked) => nav.Doors.Set(buildingInstance, blocked);
+    public void ResetDoors() => nav.Doors.Clear();
     public float GroundHeight(float x, float z) => nav.GroundHeight(x, z);
     public bool IsWalkable(float x, float z) => nav.IsWalkable(x, z);
     public float GroundHeight(float x, float z, float nearY) => nav.GroundHeight(x, z, nearY);

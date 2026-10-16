@@ -91,7 +91,12 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
             // An empty list orders the selection (the UI sends orders for whatever is selected when the click happens).
             var who = order.Characters.Count > 0 ? order.Characters : world.Player.Selection.ToArray();
             var slots = new List<int>();
-            foreach (var id in who) if (table.TryResolveNext(id, out int found)) slots.Add(found);
+            foreach (var id in who)
+            {
+                if (!table.TryResolveNext(id, out int found) || table.Cold(found)!.IsImprisoned) continue;   // a prisoner stays in its cage
+                if (table.Cold(found)!.InSomething == Locks.HeldState.Bed) world.Fixtures.LeaveBed(world, id);   // an order gets a sleeper up
+                slots.Add(found);
+            }
             var targets = Formation.Place([.. slots.Select(s => new Vector2(table.Next[s].Position.X, table.Next[s].Position.Z))], new Vector2(order.Target.X, order.Target.Z));
             for (int k = 0; k < slots.Count; k++)
             {
@@ -292,6 +297,14 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                 // Lying down (knocked out or dead): no steering, no pushing; the body system has already dropped the orders.
                 n.Velocity = Vector3.Zero;
                 n.Animation = 0;
+                continue;
+            }
+            if (cold.IsImprisoned)
+            {
+                // Held in its cage (put there by the fixture registry): no path, no steering, not pushed.
+                n.Velocity = Vector3.Zero;
+                n.Position = p.Position;
+                n.Flags = (ushort)(n.Flags & ~(ushort)MoveFlags.AnyPath);
                 continue;
             }
             float speed = MathF.Sqrt(p.Velocity.X * p.Velocity.X + p.Velocity.Z * p.Velocity.Z);

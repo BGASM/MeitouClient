@@ -101,7 +101,7 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
     /// <summary>Whether the AI runs the character now: it has a mind and nothing else holds it (a fight, a flight, an order, a carry, a trade, a knock-out).</summary>
     public static bool Holds(in CharacterHot n, CharacterCold cold)
     {
-        if (cold.Ai is not { } mind || cold.IsPlayer || cold.InCombat || cold.Fleeing || cold.Engaged || !cold.CarriedBy.IsNone || !cold.Carrying.IsNone || cold.Medical is { Incapacitated: true }) return false;
+        if (cold.Ai is not { } mind || cold.IsPlayer || cold.InCombat || cold.Fleeing || cold.Engaged || cold.IsImprisoned || !cold.CarriedBy.IsNone || !cold.Carrying.IsNone || cold.Medical is { Incapacitated: true }) return false;
         return (CharacterTask)n.Task switch
         {
             CharacterTask.Idle or CharacterTask.Wander or CharacterTask.Follow => true,
@@ -389,6 +389,8 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
     {
         var (packages, template) = TemplateOf(squad.TemplateId);
         var home = AssignHome(world, squad, template);
+        // The template's initial door state applies to the home it is given (docs/game/locks.md "Doors"); the first squad's wins, a saved building keeps its own.
+        if (home is not null) world.Fixtures.ApplyInitialDoorState(home.InstanceId, template?.InitialDoorState ?? 0);
         ulong roll = Rng.Hash(world.Seed, (ulong)squad.Id, RngPurpose.Think, SeedSalts.AiPatrol);
         squad.Ai = new Blackboard(packages)
         {

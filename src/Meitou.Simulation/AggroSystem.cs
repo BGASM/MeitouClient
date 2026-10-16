@@ -245,7 +245,7 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
             if (!prev[i].Alive || i >= slots.Length || world.Tick < slots[i].CalmUntil) continue;
             byte task = next[i].Task;
             if (task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat || task == (byte)CharacterTask.Rest && !AiSleeper(table.Cold(i))) continue;
-            if (table.Cold(i) is not { IsPlayer: false, InCombat: false, Fleeing: false, Fighter.CanAttack: true, Medical.Incapacitated: false, Carrying.IsNone: true } cold || !Relations.Contains(cold.Faction)) continue;
+            if (table.Cold(i) is not { IsPlayer: false, InCombat: false, Fleeing: false, IsImprisoned: false, Fighter.CanAttack: true, Medical.Incapacitated: false, Carrying.IsNone: true } cold || !Relations.Contains(cold.Faction)) continue;
             bool police = wanted[cold.Faction] && Crimes is { } crimes && crimes.IsPoliceLike(world, cold);
             var stance = cold.Ai?.Stance ?? Ai.AiStance.Aggressive;
             if (!police && (stance == Ai.AiStance.Passive || !hasEnemy[cold.Faction] && stance != Ai.AiStance.AggressiveNeutrals)) continue;
@@ -439,7 +439,7 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         if (taken.Contains(slot) || !table.Next[slot].Alive) return false;
         byte task = table.Next[slot].Task;
         if (task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat || task == (byte)CharacterTask.Rest && !AiSleeper(table.Cold(slot))) return false;
-        return table.Cold(slot) is { IsPlayer: false, InCombat: false, Fleeing: false, Fighter.CanAttack: true, Medical.Incapacitated: false, Carrying.IsNone: true };   // a carrier picks no fight (the original's engagement weight is 0 while carrying)
+        return table.Cold(slot) is { IsPlayer: false, InCombat: false, Fleeing: false, IsImprisoned: false, Fighter.CanAttack: true, Medical.Incapacitated: false, Carrying.IsNone: true };   // a carrier picks no fight (the original's engagement weight is 0 while carrying)
     }
 
     // ------------------------------------------------------------------ leash and stand down

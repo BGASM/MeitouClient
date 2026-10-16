@@ -43,6 +43,9 @@ public sealed class SavedCharacterLink
     /// <summary>Read from the character's STATS and MEDICAL_STATE records; null when the race or the data could not be resolved. The host's body systems take these over.</summary>
     public CharacterStats? Stats { get; set; }
     public MedicalState? Medical { get; set; }
+    /// <summary>The bed or cage state and fixture read from the save (<see cref="HeldSave"/>): while the character still has them, the original's keys are written back as read.</summary>
+    public Locks.HeldState InSomething { get; set; }
+    public string? InWhat { get; set; }
 }
 
 /// <summary>A player platoon of the save that is now a <see cref="Squad"/> in the world.</summary>

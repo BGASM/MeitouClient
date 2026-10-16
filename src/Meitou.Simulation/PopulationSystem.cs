@@ -221,6 +221,8 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         var site = data.Sites[town.Site];
         var state = states[town.Site];
         float radius = site.Town.SizeRadius * site.Town.TownRadiusMult;
+        // The town's doors, cages, containers and beds, once (they stay registered when the town unloads).
+        world.Fixtures.RegisterSite(world, data, town.Site);
         foreach (var built in town.Squads)
         {
             var squad = SpawnSquad(world, built, site, radius);

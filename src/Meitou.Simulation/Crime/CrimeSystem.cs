@@ -186,7 +186,7 @@ public sealed class CrimeSystem(FactionRelations relations, CrimeSettings? setti
         for (int s = 0; s < table.HighWater; s++)
         {
             if (!next[s].Alive || table.Cold(s) is not { } c) continue;
-            if (c.Bounties is { } ledger) Expire(world, s, c, ledger, hoursPerTick);
+            if (c.Bounties is { } ledger && !c.IsImprisoned) Expire(world, s, c, ledger, hoursPerTick);   // paused while imprisoned (economy.md 11.3)
             if (c.Pending is { } p)
             {
                 p.Timer -= seconds;

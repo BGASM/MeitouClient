@@ -37,6 +37,7 @@ public sealed class WorldSession : IDisposable
         worldSettings = settings;
         worldWalkability = walkability ?? new OpenGroundWalkability(ground);
         World = new World(settings, worldWalkability, systems);
+        World.Fixtures.Doors = worldWalkability as Meitou.Simulation.Locks.IDoorGate;
     }
 
     readonly WorldSettings worldSettings;
@@ -114,6 +115,8 @@ public sealed class WorldSession : IDisposable
         var old = World;
         World = next;
         Discard(old);
+        // The navmesh door table follows the new world: the old one's locked doors are forgotten, the new one's told.
+        if (worldWalkability is Meitou.Simulation.Locks.IDoorGate gate) { gate.ResetDoors(); next.Fixtures.Doors = gate; }
         return next;
     }
 

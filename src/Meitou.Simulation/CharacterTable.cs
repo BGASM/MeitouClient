@@ -152,6 +152,20 @@ public sealed class CharacterCold
     public Ai.AiMind? Ai { get; set; }
     /// <summary>Held still by an interaction (a trader in an open trade, <see cref="Trading.TradeSystem"/>): the AI leaves it alone. Serial phases only.</summary>
     public bool Engaged { get; set; }
+    /// <summary>
+    /// The original's <c>Character+0x2f8</c> (save key <c>in something</c>): in a bed or imprisoned in a cage or restraint, with <see cref="InWhat"/> the
+    /// <see cref="Locks.Fixture.Id"/> it is in (null: not known, e.g. a loaded prisoner whose cage the world has not mapped). Set by <see cref="Locks.FixtureRegistry"/>, serial phases only.
+    /// </summary>
+    public Locks.HeldState InSomething { get; set; }
+    public string? InWhat { get; set; }
+    /// <summary>Imprisoned: it does not move, fight, carry or run AI (docs/simulation.md "Cages, beds and locks").</summary>
+    public bool IsImprisoned => InSomething == Locks.HeldState.Imprisoned;
+    /// <summary>
+    /// The prison sentence as the original stores it (docs/game/economy.md 11.5): the start in <see cref="World.GameHours"/> and the length in game hours (save keys <c>sentence</c>,
+    /// <c>psts</c>); served when start + length is not after now. Length 0: none (served).
+    /// </summary>
+    public double SentenceStart { get; set; }
+    public float SentenceLength { get; set; }
 }
 
 /// <summary>
@@ -272,6 +286,24 @@ public sealed class CharacterTable
         return true;
     }
 
+    /// <summary>
+    /// Puts a character at <paramref name="position"/> facing <paramref name="yaw"/>, standing still with no path (a teleport: into a cage). Serial phases or setup only; outside a
+    /// tick both buffers are written, as <see cref="Spawn"/> does.
+    /// </summary>
+    public void Place(int slot, Vector3 position, float yaw)
+    {
+        if (phase == TablePhase.Parallel) throw new InvalidOperationException("characters are placed in the serial phases only");
+        ref var n = ref next[slot];
+        n.Position = position;
+        n.Yaw = yaw;
+        n.Velocity = Vector3.Zero;
+        n.Goal = new Vector2(position.X, position.Z);
+        n.Flags = (ushort)(n.Flags & ~(ushort)MoveFlags.AnyPath);
+        n.Task = (byte)CharacterTask.Idle;
+        n.TaskTime = 0;
+        if (!inTick) previous[slot] = n;
+    }
+
     void Grow()
     {
         int size = previous.Length * 2;
@@ -342,6 +374,9 @@ public sealed class CharacterTable
             // The AI's decision and the trade hold add to the hash only while set, so worlds without AI packages hash as before.
             if (k.Ai is { } mind) { hasher.Add(0x41694D64); mind.Hash(ref hasher); }
             if (k.Engaged) hasher.Add(0x456E6761);
+            // Beds, cages and sentences add to the hash only while set, so worlds without them hash as before.
+            if (k.InSomething != Locks.HeldState.None) { hasher.Add(0x496E536D); hasher.Add((int)k.InSomething); hasher.Add(k.InWhat is { } w ? Rng.StableHash(w) : 0UL); }
+            if (k.SentenceLength > 0) { hasher.Add(k.SentenceStart); hasher.Add(k.SentenceLength); }
         }
         hasher.Add(free.Count);
         foreach (int slot in free) hasher.Add(slot);

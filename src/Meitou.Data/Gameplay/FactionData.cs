@@ -62,6 +62,9 @@ public sealed record FactionData
     public IReadOnlyList<RecordLink> Biomes { get; init; } = [];
     public IReadOnlyList<RecordLink> NoGoZones { get; init; } = [];
     public IReadOnlyList<RecordLink> TradeCulture { get; init; } = [];
+    /// <summary><c>doors lock level</c> (fcs.def default 40) and <c>lock level random</c> (10): base and spread of every building lock the faction owns (docs/game/locks.md "Lock object").</summary>
+    public int DoorsLockLevel { get; init; } = 40;
+    public int LockLevelRandom { get; init; } = 10;
     public IReadOnlyList<RecordLink> BuildingsReplacements { get; init; } = [];
 
     public static FactionData From(GameRecord r)
@@ -101,6 +104,8 @@ public sealed record FactionData
             NoGoZones = Links("no-go zones"),
             TradeCulture = Links("trade culture"),
             BuildingsReplacements = Links("buildings replacements"),
+            DoorsLockLevel = RecordReading.Int(r, "doors lock level", 40),
+            LockLevelRandom = RecordReading.Int(r, "lock level random", 10),
         };
     }
 

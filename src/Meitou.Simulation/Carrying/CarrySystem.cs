@@ -69,12 +69,12 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
 
     /// <summary>A character that can be given a pick-up: awake, with a body, not fighting, not carrying or carried, with a usable left arm.</summary>
     public static bool CanCarry(CharacterCold cold) =>
-        cold is { Medical: { Incapacitated: false } m, Race: not null, InCombat: false } && cold.Carrying.IsNone && cold.CarriedBy.IsNone && LeftArmUsable(m);
+        cold is { Medical: { Incapacitated: false } m, Race: not null, InCombat: false, IsImprisoned: false } && cold.Carrying.IsNone && cold.CarriedBy.IsNone && LeftArmUsable(m);
 
-    /// <summary>A character that may be lifted: knocked out or dead, of a <c>carriable</c> race (every base race but the Leviathan, <b>Verified</b>), not carried already.</summary>
-    public static bool CanBeLifted(CharacterCold cold) => cold is { Medical.Incapacitated: true, Race.Carriable: true } && cold.CarriedBy.IsNone;
+    /// <summary>A character that may be lifted: knocked out or dead, of a <c>carriable</c> race (every base race but the Leviathan, <b>Verified</b>), not carried already, not in a cage.</summary>
+    public static bool CanBeLifted(CharacterCold cold) => cold is { Medical.Incapacitated: true, Race.Carriable: true, IsImprisoned: false } && cold.CarriedBy.IsNone;   // out of a cage only through a release (not yet the lift-out of locks.md)
 
-    /// <summary>A character that may be looted: knocked out or dead (the original's <c>isItemLootable</c> also takes the bedded and imprisoned, which do not exist here), with an inventory.</summary>
+    /// <summary>A character that may be looted: knocked out or dead (the original's <c>isItemLootable</c> also takes the bedded and imprisoned, not modelled here yet), with an inventory.</summary>
     public static bool CanBeLooted(CharacterCold cold) => cold is { Medical.Incapacitated: true, Inventory: not null };
 
     /// <summary>

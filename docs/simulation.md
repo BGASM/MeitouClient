@@ -201,7 +201,29 @@ stolen ownership marks. [carry-loot.md](game/carry-loot.md). It also runs the st
 `CrimeSystem`: pending deeds, witnesses, booking, police eligibility, faction ledgers and expiry.
 Carry/combat report deeds; serial sweep observes current positions. Bounty expiry uses
 `0.04 hours/cat`, permanent at >=10000. Original categories, witness rules, imprisonment and
-remaining uncertainties: [economy.md](game/economy.md).
+remaining uncertainties: [economy.md](game/economy.md). Expiry is paused while imprisoned.
+
+## Cages, beds and locks
+
+`Locks/`: `World.Fixtures` (`FixtureRegistry`) holds every door, `has lock` container, cage (function 8, pole/peeler
+`Restrains`) and bed of a town, registered once when the population first spawns the town (`RegisterSite`), kept on
+unload, hashed only once non-empty. Facts: [locks](game/locks.md), [economy 11.5/11.7](game/economy.md#115-bail-and-sentence).
+- **Ids** (engine): a building's own lock = its instance id; door i `<inst>#i`; interior item `<inst>/<layout index>`
+  (`TownBuildings` collects them as `TownFixture`s); bed k `<inst>@bed<k>`. Owner: the placement's `owner faction ID`, else
+  the town's faction. Lock levels roll from `Rng.Hash(seed, StableHash(id), Lock, 0)`: load order never changes them.
+- **Doors**: `AiSystem` applies the template's `initial door state` when it assigns a home (first squad, not to restored
+  doors). `IDoorGate` (the game's `NavAdapter` -> `NavDoors`, reset on `ReplaceWorld`) closes a building for every path while
+  all its doors are effectively locked and none broken (engine: one nav door state per building; closed-unlocked doors stay passable).
+- **Cages/beds**: `FindCage` (original weights), `Imprison` (state 2, `CharacterTable.Place` at the item's origin, cage
+  locked, sentence), `Release` (unlock, clear, erase the releaser's and jail's bounty entries for a booking releaser),
+  `GetOut` (refused while locked; Escaping Prison unless served), `EnterBed`/`LeaveBed` (a move order gets a sleeper up).
+  `CharacterCold.InSomething`/`InWhat` name the fixture; an imprisoned character is skipped by AI, movement (held still),
+  aggro, answering, `CombatSystem.Engage` as attacker (it can still be attacked) and carrying. Sentence: `SentenceStart`
+  (`World.GameHours`) + `SentenceLength`; served when start + length <= now; no bounty with the cage owner: none (served).
+- **Lockpicking** (`Lockpicking`, serial, for the next wave's order and AI tasks): `Step` per task update (pending crime,
+  timer on the lock, seeded roll by the lock's roll counter, XP), `Allowed` (min chance; engine: conscious, an arm, not
+  carried, not on a pole), `Break` (strength > 3 x hardness). Not built: shackles (item locks), cutting, lifting out of a
+  cage, the owner's lock/unlock tasks, door motion.
 
 ## Trade
 
@@ -229,7 +251,8 @@ handles and original saved/derived/regenerated state.
 
 F5/F9 and named save menus share mapping. Restore clock, player money/faction, relation/prosperity,
 player squads, character transforms/names/roles, stats/medical parts, appearance, inventories,
-bounties and selection. Town/roaming populations regenerate. Weather, orders/paths, animation,
+bounties, bed/cage state and sentence, and registered buildings' locks and doors (into existing zone records only; a
+new save has none, [save.md](formats/save.md#locks-cages-and-sentences)) and selection. Town/roaming populations regenerate. Weather, orders/paths, animation,
 combat engagement, wound-list/pain, pending crimes, buildings/ground items, camera/speed are not
 fully restored. Loaded hashes need not match captured hashes: compare carried fields and agreement
 between repeated loads. QuickSaveTests checks carried fields and repeatable loading.

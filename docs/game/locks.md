@@ -2,7 +2,7 @@
 
 Original-game rules for lockable objects and the tasks that use them. Task tables: [ai-tasks](ai-tasks.md);
 carrying into beds/cages: [carry-loot](carry-loot.md); crime amounts and bounties: [economy](economy.md#crimes-bounties-and-prisoners);
-lockpicking stat and XP core: [character-stats](character-stats.md). Function addresses are kenshi_x64.exe 1.0.68.
+lockpicking stat and XP core: [character-stats](character-stats.md). As built: [simulation](../simulation.md#cages-beds-and-locks). Function addresses are kenshi_x64.exe 1.0.68.
 
 ## Data
 
@@ -165,6 +165,6 @@ suffix `i`: `state<i>`, `doa<i>`, `broken<i>`, `gatecode<i>`, `wants lock<i>`, a
 | Whether KO'd, carried or restrained characters may pick (no explicit test besides task conditions) | require conscious, free arms, not on a pole |
 | Item kind 9 and the tool quality field used by cutting | treat tool items as kind 9, use the best |
 | Exact strength terms of cut/break (`FUN_1406457e0(stats, 1, ...)` x stat-scale virtual) | effective strength x 1 |
-| Whether non-owners path around locked doors | path through, fail at the door, replan |
+| Whether non-owners path around locked doors | a building whose doors are all effectively locked is closed for every path; closed unlocked doors are passable |
 | Door states 2 (opening) and their timing; `gatecode` | 2 = opening; preserve `gatecode` |
 | What else sets or clears the squad "house locked" flag | the rules above |

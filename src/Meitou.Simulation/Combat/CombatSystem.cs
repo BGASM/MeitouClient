@@ -164,6 +164,7 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
         var cold = table.Cold(a)!;
         var tc = table.Cold(t)!;
         if (cold.Fighter is null || cold.Stats is null || cold.Medical is null || cold.Race is null || tc.Medical is null || cold.Medical.Incapacitated || tc.Medical.Incapacitated) return false;
+        if (cold.IsImprisoned) return false;   // a prisoner does not fight (it may still be attacked: engine choice)
         ref var s = ref read[a];
         s.TargetSlot = t;
         s.TargetGeneration = target.Generation;

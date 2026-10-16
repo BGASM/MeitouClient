@@ -25,6 +25,8 @@ public enum RngPurpose : uint
     MapItem = 12,
     /// <summary>The stealth knock-out roll (<see cref="Carrying.CarrySystem.StealthKoChance"/>).</summary>
     StealthKo = 13,
+    /// <summary>Lock levels at creation and the pick rolls (<see cref="Locks.FixtureRegistry"/>, <see cref="Locks.Lockpicking"/>), keyed by the fixture's id.</summary>
+    Lock = 14,
 }
 
 /// <summary>

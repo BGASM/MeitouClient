@@ -30,7 +30,17 @@ public sealed record TownBuilding(string InstanceId, string BuildingId, string N
 {
     public IEnumerable<HomeSpot> Of(HomeSpotKind kind) => Spots.Where(s => s.Kind == kind);
     public int Beds => Spots.Count(s => s.Kind == HomeSpotKind.Bed);
+    /// <summary>The placement state's <c>owner faction ID</c> (a FACTION string id); null when the state names none (the town's faction owns it).</summary>
+    public string? OwnerFactionId { get; init; }
+    /// <summary>The cages and lockable containers of its interior layout (docs/game/locks.md "Data"), in layout order.</summary>
+    public IReadOnlyList<TownFixture> Fixtures { get; init; } = [];
 }
+
+/// <summary>
+/// A lockable object of a building's interior layout: a cage or pole (BUILDING_FUNCTIONALITY <c>function</c> 8) or a BUILDING with <c>has lock</c>. <paramref name="Id"/> is
+/// the parent's instance id, "/", and the item's index in the layout (an <b>engine</b> name: the save's ids of generated interiors are not mapped).
+/// </summary>
+public sealed record TownFixture(string Id, string RecordId, bool IsCage, Vector3 Position, float Yaw);
 
 /// <summary>
 /// The buildings of each placed town, for the AI's homes, beds and nodes (docs/simulation.md "AI", Homes). A placed building belongs to the town its state's
@@ -43,6 +53,8 @@ public sealed record TownBuilding(string InstanceId, string BuildingId, string N
 public static class TownBuildings
 {
     public const int BedFunction = 6, SkeletonBedFunction = 25;
+    /// <summary>BUILDING_FUNCTIONALITY <c>function</c> 8, BF_CAGE: cages, the prisoner pole, the peeler (docs/game/locks.md "Data").</summary>
+    public const int CageFunction = 8;
 
     /// <summary>The buildings by town placement id (<see cref="TownPlacement.InstanceId"/>), each list in placement order.</summary>
     public static Dictionary<string, List<TownBuilding>> Build(GameDatabase db, WorldLevelData levels, BuildingLayouts? layouts, Func<double, double, float> terrainHeight)
@@ -53,6 +65,8 @@ public static class TownBuildings
             if (db.Find(t.TownId) is { Type: FcsRecordType.TOWN } record && Gameplay.TownData.From(record) is var town)
                 radius[t.InstanceId] = MathF.Max(town.SizeRadius * town.TownRadiusMult, 1);
         var beds = new Dictionary<string, bool>(StringComparer.Ordinal);
+        var functions = new Dictionary<string, GameRecord?>(StringComparer.Ordinal);
+        List<TownFixture>? fixtures = null;
         var result = new Dictionary<string, List<TownBuilding>>(StringComparer.Ordinal);
         foreach (var b in levels.Buildings())
         {
@@ -72,16 +86,28 @@ public static class TownBuildings
                     bar = exterior.GetInt("is bar") != 0;
                 }
                 if (layouts.Find(record, state.GetString("interior layout name"), exterior: false) is { } interior)
+                {
+                    int index = 0;
                     foreach (var item in layouts.Items(interior))
                     {
                         var (at, rotation) = BuildingLayouts.Place(resolved.Position, b.Rotation, item);
                         HomeSpotKind? kind = item.Building.GetBool("is node") ? NodeKind(item.Building.Name)
                             : IsBed(db, item.Building, beds) ? HomeSpotKind.Bed : null;
                         if (kind is { } k) spots.Add(new HomeSpot(k, at, YawOf(rotation)));
+                        else if (FunctionOf(db, item.Building, functions)?.GetInt("function") == CageFunction || item.Building.GetBool("has lock"))
+                            (fixtures ??= []).Add(new TownFixture($"{b.InstanceId}/{index}", item.Building.StringId,
+                                FunctionOf(db, item.Building, functions)?.GetInt("function") == CageFunction, at, YawOf(rotation)));
+                        index++;
                     }
+                }
             }
             if (!result.TryGetValue(town.InstanceId, out var list)) result[town.InstanceId] = list = [];
-            list.Add(new TownBuilding(b.InstanceId, record.StringId, record.Name, resolved.Position, YawOf(b.Rotation), shop, bar, spots));
+            string? owner = state?.GetString("owner faction ID") is { Length: > 0 } o ? o : null;
+            list.Add(new TownBuilding(b.InstanceId, record.StringId, record.Name, resolved.Position, YawOf(b.Rotation), shop, bar, spots)
+            {
+                OwnerFactionId = owner, Fixtures = fixtures ?? [],
+            });
+            fixtures = null;
         }
         return result;
     }
@@ -105,6 +131,24 @@ public static class TownBuildings
                     bed = true;
         cache[building.StringId] = bed;
         return bed;
+    }
+
+    /// <summary>
+    /// The first BUILDING_FUNCTIONALITY record in any reference list of <paramref name="building"/> (its <c>function</c>, <c>restrains movement</c>, <c>use range</c>), cached by id; null
+    /// for a building without one.
+    /// </summary>
+    public static GameRecord? FunctionOf(GameDatabase db, GameRecord building, Dictionary<string, GameRecord?> cache)
+    {
+        if (cache.TryGetValue(building.StringId, out var known)) return known;
+        GameRecord? found = null;
+        foreach (var list in building.ReferenceLists)
+        {
+            foreach (var r in building.GetReferences(list))
+                if (db.Find(r.TargetStringId) is { Type: FcsRecordType.BUILDING_FUNCTIONALITY } f) { found = f; break; }
+            if (found is not null) break;
+        }
+        cache[building.StringId] = found;
+        return found;
     }
 
     /// <summary>The simulation's yaw (0 along +Z, turning towards +X) of a rotation.</summary>

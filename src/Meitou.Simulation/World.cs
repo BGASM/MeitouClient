@@ -109,6 +109,8 @@ public sealed partial class World : IDisposable
     public PlatoonRegistry Platoons { get; } = new();
     /// <summary>The player: faction, money, selection.</summary>
     public PlayerState Player { get; } = new();
+    /// <summary>Doors, lockable containers, cages and beds of the registered towns, with their occupants (docs/simulation.md "Cages, beds and locks").</summary>
+    public Locks.FixtureRegistry Fixtures { get; } = new();
     public IReadOnlyList<ITickSystem> Systems => systems;
     /// <summary>The number of ticks run; during a tick, the number of the tick being run.</summary>
     public long Tick { get; private set; }
@@ -264,6 +266,7 @@ public sealed partial class World : IDisposable
         Squads.Hash(ref h);
         Platoons.Hash(ref h);
         Player.Hash(ref h);
+        if (Fixtures.Count > 0) Fixtures.Hash(ref h);   // only once a town with buildings registered, so worlds without them hash as before
         foreach (var s in systems) if (s is IStateHashed hashed) hashed.Hash(ref h);
         return h.Value;
     }

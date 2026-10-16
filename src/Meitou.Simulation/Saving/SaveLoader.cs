@@ -58,6 +58,13 @@ public static class SaveLoader
         world.Player.Money = camera.PlayerMoney;
         LoadTownKnowledge(save, data, world.Player);
 
+        // Building locks and doors are taken from the zones when their town registers; held characters name their bed or cage by building instance.
+        var buildingStates = HeldSave.BuildingStates(save);
+        world.Fixtures.Saved = buildingStates;
+        var instanceOf = new Dictionary<Meitou.Data.Fcs.FcsRecord, string>(ReferenceEqualityComparer.Instance);
+        foreach (var (instance, record) in buildingStates) instanceOf[record] = instance;
+        var handles = save.BuildHandles();
+
         var races = new Dictionary<string, RaceData?>(StringComparer.Ordinal);
         var parts = new Dictionary<string, BodyPartTemplate?>(StringComparer.Ordinal);
         var bySource = new Dictionary<SaveCharacter, CharacterId>();
@@ -66,14 +73,13 @@ public static class SaveLoader
         {
             bool mine = playerFaction is not null && platoon.FactionId == playerFaction.Id;
             if (mine && platoon.IsLoaded)
-                LoadPlayerPlatoon(world, platoon, data, options, loaded, playerIndex, races, parts, bySource, assembly);
+                LoadPlayerPlatoon(world, platoon, data, options, loaded, playerIndex, races, parts, bySource, assembly, handles, instanceOf);
             else if (!mine && options.NpcPlatoons)
                 LoadRoamingPlatoon(world, platoon, data, loaded);
         }
         if (loaded.PlayerPlatoons.Count > 0) world.Player.Squad = loaded.PlayerPlatoons[0].Squad.Id;
 
         // The selection.
-        var handles = save.BuildHandles();
         var selected = new List<Hand> { camera.SelectedCharacter };
         for (int k = 0; camera.Record.Ints.ContainsKey($"selected_characters{k}I"); k++) selected.Add(Hand.Read(camera.Record, $"selected_characters{k}"));
         foreach (var h in selected)
@@ -130,7 +136,8 @@ public static class SaveLoader
     }
 
     static void LoadPlayerPlatoon(World world, SavePlatoon platoon, PopulationData data, SaveLoadOptions options, LoadedSave loaded,
-        int playerIndex, Dictionary<string, RaceData?> races, Dictionary<string, BodyPartTemplate?> parts, Dictionary<SaveCharacter, CharacterId> bySource, CharacterAssembly assembly)
+        int playerIndex, Dictionary<string, RaceData?> races, Dictionary<string, BodyPartTemplate?> parts, Dictionary<SaveCharacter, CharacterId> bySource, CharacterAssembly assembly,
+        SaveHandles handles, IReadOnlyDictionary<Meitou.Data.Fcs.FcsRecord, string> instanceOf)
     {
         var squad = new Squad
         {
@@ -210,6 +217,10 @@ public static class SaveLoader
             // Bounties: the ledger keys of the character's state record (docs/simulation.md "Crimes and bounties").
             cold.Bounties = BountySave.Read(sc.GameState, data.Relations, loaded.Clock, world.Tick, world.TickSeconds);
             if (cold.IsPlayer && sc.GameState is { } orders) Orders.Read(orders, cold);
+            // In a bed or a cage, and the sentence (docs/simulation.md "Cages, beds and locks"); the fixture binds when its town registers.
+            HeldSave.Read(sc.GameState, cold, handles, instanceOf);
+            cold.Save.InSomething = cold.InSomething;
+            cold.Save.InWhat = cold.InWhat;
             // The body: the saved stats and medical state go to the body systems, the rest of the assembly (inventory, fighter) is made as for a new character.
             if (race is not null && stats is not null && medical is not null)
                 assembly.AttachSaved(cold, race, stats, medical, record, savedItems.Count > 0 ? SavedKit.ToInventory(savedItems, data.Items, loaded.Notes) : null);

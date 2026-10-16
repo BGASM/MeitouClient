@@ -47,6 +47,8 @@ public sealed record SquadTemplate
     /// <summary><c>building</c>: the home building a resident squad uses (first entry); <c>building designation</c> is the editor's BuildingDesignation.</summary>
     public RecordLink? Building { get; init; }
     public int BuildingDesignation { get; init; }
+    /// <summary><c>initial door state</c> (DoorState: 0 CLOSED, 1 OPEN, 2 LOCKED, 3 BROKEN), applied to the home building when it is assigned (docs/game/locks.md "Doors").</summary>
+    public int InitialDoorState { get; init; }
     /// <summary><c>nest</c> links.</summary>
     public IReadOnlyList<RecordLink> Nest { get; init; } = [];
 
@@ -105,6 +107,7 @@ public sealed record SquadTemplate
             ForceSpeed = r.GetInt("force speed"),
             Building = building.Count > 0 ? RecordLink.From(building[0]) : null,
             BuildingDesignation = r.GetInt("building designation"),
+            InitialDoorState = r.GetInt("initial door state"),
             Nest = Links("nest"),
             IsTrader = RecordReading.Bool(r, "is trader", false),
             Vendors = Links("vendors"),

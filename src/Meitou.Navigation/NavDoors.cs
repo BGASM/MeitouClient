@@ -30,5 +30,12 @@ public sealed class NavDoors
     public void Open(string buildingInstance) => Set(buildingInstance, false);
     public void Close(string buildingInstance) => Set(buildingInstance, true);
 
+    /// <summary>Opens every door (a new world replaced the one that closed them).</summary>
+    public void Clear()
+    {
+        foreach (var s in doors.Values)
+            if (s.Closed) { s.Closed = false; Interlocked.Increment(ref version); }
+    }
+
     public bool IsClosed(string buildingInstance) => doors.TryGetValue(buildingInstance, out var s) && s.Closed;
 }
