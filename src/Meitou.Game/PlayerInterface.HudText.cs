@@ -45,17 +45,21 @@ sealed partial class PlayerInterface
         return new HudLine(s.Label.ToUpperInvariant(), text, MainColour, change < 0 ? BadColour : change > 0 ? GoodColour : null);
     })];
 
+    /// <summary>The unit of the run speed in the information panel (Interface settings; the game shows mph).</summary>
+    public SpeedUnit SpeedUnit { get; set; }
+
     /// <summary>
     /// The extended lines (shown when the information panel is expanded; <c>FUN_140895350</c>, docs/game/ui-screens.md section 4): the XP rates, the KO point, the run
-    /// speed in mph (units per second x 0.22369362) with its change from the unhurt run value in brackets, and the hunger rate.
+    /// speed in mph (units per second x 0.22369362; km/h x 0.36) with its change from the unhurt run value in brackets, and the hunger rate.
     /// </summary>
-    internal static HudLine[] ExtendedLines(CharacterSnapshot lead)
+    internal static HudLine[] ExtendedLines(CharacterSnapshot lead, SpeedUnit unit = SpeedUnit.Mph)
     {
         if (lead.Hud?.Extended is not { } e) return [];
         static string Percent(float f) => ((int)(f * 100)).ToString(CultureInfo.InvariantCulture) + "%";
-        const float Mph = 0.22369362f;
-        int speed = (int)MathF.Round(e.RunSpeed * Mph), change = (int)MathF.Round((e.RunSpeed - e.RunValue) * Mph);
-        string run = change == 0 ? $"{speed} mph" : change < 0 ? $"{speed} ({change}) mph" : $"{speed} (+{change}) mph";
+        float factor = unit == SpeedUnit.Kmh ? 0.36f : 0.22369362f;
+        string suffix = unit == SpeedUnit.Kmh ? "km/h" : "mph";
+        int speed = (int)MathF.Round(e.RunSpeed * factor), change = (int)MathF.Round((e.RunSpeed - e.RunValue) * factor);
+        string run = change == 0 ? $"{speed} {suffix}" : change < 0 ? $"{speed} ({change}) {suffix}" : $"{speed} (+{change}) {suffix}";
         return [new("Athletics XP:", Percent(e.AthleticsXp)), new("Strength XP:", Percent(e.StrengthXp)),
             new("Toughness XP:", ((int)e.ToughnessXp).ToString(CultureInfo.InvariantCulture) + "x"),
             new("KO point:", ((int)e.KoPoint).ToString(CultureInfo.InvariantCulture)),
@@ -107,7 +111,7 @@ sealed partial class PlayerInterface
         AddLines(controls, "NameText", [new(lead.Name, faction, TitleColour, TitleColour)], row, sidePixels);
         AddLines(controls, "StateText", StateLines(lead), row, sidePixels);
         AddLines(controls, "StatsText", StatsLines(lead), row, sidePixels);
-        if (infoExpanded) AddLines(controls, "ExtendedStatsText", ExtendedLines(lead).Select(line => line with
+        if (infoExpanded) AddLines(controls, "ExtendedStatsText", ExtendedLines(lead, SpeedUnit).Select(line => line with
             { Label = line.Label.ToUpperInvariant(), LabelColour = MainColour }).ToArray(), row, sidePixels);
         foreach (var (bar, name, arrows) in medicalRows)
         {
