@@ -111,6 +111,8 @@ sealed partial class PlayerInterface
             }
         }
 
+        DrawMarker(o);
+
         // The box.
         if (dragging && dragFrom is { } from)
         {

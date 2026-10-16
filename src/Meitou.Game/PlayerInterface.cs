@@ -85,6 +85,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
             else if (Ray(p) is { } ray && GroundHit(ray.Origin, ray.Direction) is { } hit)
             {
                 Move(hit, shift);
+                PlaceMarker(hit);
                 (steering, steerTarget, steerTick) = (!shift, hit, session.World.Tick);
             }
             return true;
@@ -157,6 +158,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         if (Ray(mouse) is not { } ray || GroundHit(ray.Origin, ray.Direction) is not { } hit) return;
         if (final && session.World.Tick == steerTick && hit == steerTarget) return;
         Move(hit, queued: false);
+        PlaceMarker(hit);
         (steerTarget, steerTick) = (hit, session.World.Tick);
     }
 
