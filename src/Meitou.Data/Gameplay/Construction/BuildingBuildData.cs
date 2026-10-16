@@ -38,6 +38,34 @@ public sealed record BuildingBuildData
     public bool IsExteriorFurniture { get; init; }
     public bool IsNode { get; init; }
     public bool CeilingPlacement { get; init; }
+    /// <summary><c>is door</c>: build work x3, never completes itself, no refund (out of scope this milestone).</summary>
+    public bool IsDoor { get; init; }
+
+    /// <summary>The site's target: the sum of the required amounts (0 completes at once).</summary>
+    public float Target
+    {
+        get
+        {
+            float sum = 0;
+            foreach (var m in Materials) sum += m.Required;
+            return sum;
+        }
+    }
+
+    /// <summary>
+    /// The progress per game second of one unit of build work: <c>build speed mult</c> / (1200/11) (docs/game/buildings-production.md "Construction state"). 0 or below completes a site at once.
+    /// </summary>
+    public float Rate => BuildSpeedMult / (1200f / 11f);
+
+    /// <summary>
+    /// The build window's "Estimated build time" in game hours (docs/game/buildings-production.md "Construction tick", <b>Verified</b>): <c>materials / (build speed mult x build speed x option)</c>, for a builder whose
+    /// engineering factor is 1 (engineering 41.2). <paramref name="buildSpeed"/> is CONSTANTS <c>build speed</c>; the window shows whole hours. Infinity for a rate of 0 or below.
+    /// </summary>
+    public float EstimatedHours(float buildSpeed, float option = 1)
+    {
+        float perHour = BuildSpeedMult * buildSpeed * option;
+        return perHour > 0 ? Target / perHour : float.PositiveInfinity;
+    }
 
     public static BuildingBuildData From(GameRecord r)
     {
@@ -65,6 +93,7 @@ public sealed record BuildingBuildData
             IsExteriorFurniture = RecordReading.Bool(r, "is exterior furniture", false),
             IsNode = RecordReading.Bool(r, "is node", false),
             CeilingPlacement = RecordReading.Bool(r, "ceiling placement", false),
+            IsDoor = RecordReading.Bool(r, "is door", false),
         };
     }
 

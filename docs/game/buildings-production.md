@@ -173,7 +173,8 @@ candidate; category = `building category` (default "misc"), group = `building gr
 A building is offered when it is in the research manager's unlocked set, filled from each completed RESEARCH's
 `enable buildings` (or the window's debug flag +0xa8 is set); a category shows when one member passes. In the base game
 88 buildings are unlocked by research; categories DOORS, sign, nodes, moor, CANNIBAL, EXTERIOR, Furniture and misc have
-none and never show. A group's default pick is the member with the highest `build materials`. Sort order **Unknown**.
+none and never show. A new game starts with the research `_Default Start` (`5359-gamedata.base`) completed (**Verified**: the exe
+string; **Observed**: `finished0` of the five sample saves); Meitou adds it to every new game (`ResearchGate`). A group's default pick is the member with the highest `build materials`. Sort order **Unknown**.
 Stats panel (`FUN_1404df450`): "Materials cost:" (each `construction` item and amount, or Building Materials x
 `build materials`, or "Nothing"), "Estimated build time:" (formula above, whole hours), then power output/consumption,
 `power capacity`, Num People (`max operators`), Produces (`produces`, `output rate`), Efficiency, Damage, Training max
