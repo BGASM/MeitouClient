@@ -56,6 +56,7 @@ public static class SaveLoader
         int playerIndex = playerFaction is not null && data.FactionIndex(playerFaction.Id) is var pi and >= 0 ? pi : data.PlayerFaction;
         world.Player.Faction = playerIndex;
         world.Player.Money = camera.PlayerMoney;
+        LoadTownKnowledge(save, data, world.Player);
 
         var races = new Dictionary<string, RaceData?>(StringComparer.Ordinal);
         var parts = new Dictionary<string, BodyPartTemplate?>(StringComparer.Ordinal);
@@ -88,6 +89,19 @@ public static class SaveLoader
         for (int a = 0; a < n; a++)
             for (int b = 0; b < n; b++) all[a * n + b] = relations.Get(a, b);
         return all;
+    }
+
+    /// <summary>The towns' <c>discovered</c>, <c>explored</c> and <c>recently discovered</c> bools, matched to the placed towns by instance id.</summary>
+    static void LoadTownKnowledge(SaveGame save, PopulationData data, PlayerState player)
+    {
+        var sites = data.Sites.Where(s => s.InstanceId.Length > 0).ToDictionary(s => s.InstanceId, s => s.Index, StringComparer.Ordinal);
+        foreach (var town in save.Towns)
+        {
+            if (!sites.TryGetValue(town.Instance, out int site)) continue;
+            var flags = (town.Discovered ? TownKnowledge.Discovered : 0) | (town.Record.Bools.GetValueOrDefault("explored") ? TownKnowledge.Explored : 0)
+                | (town.Record.Bools.GetValueOrDefault("recently discovered") ? TownKnowledge.Recent : 0);
+            if (flags != 0) player.Know(site, flags);
+        }
     }
 
     static void LoadFactions(SaveGame save, PopulationData data, SaveLoadOptions options, LoadedSave loaded)

@@ -181,6 +181,12 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         player.MeshHit = (id, origin, direction) => gpu.Characters?.RayHit(DrawKey(id), origin, direction);
         player.Floor = (() => viewedFloor, StepFloor);
         player.FactionName = faction => popData is { } d && faction >= 0 && faction < d.Factions.Count ? d.Factions[faction].Name : null;
+        player.MapTowns = () => popData?.Sites ?? [];
+        player.MapStandingOf = id =>
+        {
+            if (popData is not { } d || id is null || d.FactionIndex(id) is not (>= 0 and var town) || session.World.Player.Faction is not (>= 0 and var mine)) return MapStanding.Neutral;
+            return town == mine ? MapStanding.Player : d.Relations.IsAlly(mine, town) ? MapStanding.Ally : d.Relations.Get(mine, town) < -30 ? MapStanding.Enemy : MapStanding.Neutral;
+        };
         if (IsSandbox) player.ReservedKeys.UnionWith([Meitou.Engine.Input.Key.Z, Meitou.Engine.Input.Key.X, Meitou.Engine.Input.Key.C, Meitou.Engine.Input.Key.Y, Meitou.Engine.Input.Key.P, Meitou.Engine.Input.Key.G]);
         player.ConfigureFrontend(scene.Database,
             () => Meitou.Data.Save.SaveCatalog.Scan(Meitou.Simulation.Saving.QuickSave.DefaultRoot, install.SaveDirectory,

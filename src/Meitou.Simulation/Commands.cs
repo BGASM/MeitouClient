@@ -80,6 +80,9 @@ public sealed record SelectCommand(IReadOnlyList<CharacterId> Characters, bool A
 /// <summary>Clears order selection and shows another faction's character in the HUD panels. <see cref="CharacterId.None"/> clears inspection only.</summary>
 public sealed record InspectCommand(CharacterId Target) : SimCommand;
 
+/// <summary>The map was closed: towns lose their recently-discovered mark (<see cref="TownKnowledge.Recent"/>).</summary>
+public sealed record SeenDiscoveriesCommand : SimCommand;
+
 /// <summary>Stop: the characters (the selection when the list is empty) drop their orders and stand.</summary>
 public sealed record StopCommand(IReadOnlyList<CharacterId> Characters) : SimCommand;
 

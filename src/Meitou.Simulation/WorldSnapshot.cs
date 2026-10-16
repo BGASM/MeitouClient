@@ -103,6 +103,8 @@ public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> C
     public IReadOnlyList<ProjectileSnapshot> Projectiles { get; init; } = [];
     /// <summary>The open trade (null: none).</summary>
     public Trading.TradeView? Trade { get; init; }
+    /// <summary>What the player knows of each placed town (<see cref="PlayerState.Towns"/>).</summary>
+    public IReadOnlyList<TownKnowledge> Towns { get; init; } = [];
 }
 
 /// <summary>

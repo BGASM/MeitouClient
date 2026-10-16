@@ -91,7 +91,26 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
     {
         if (world.Tick % settings.CheckEveryTicks != 0) return;
         RefreshZones(world);
+        Discover(world);
         StepRoaming(world);
+    }
+
+    /// <summary>The XZ distance at which a player character discovers and explores a town (docs/game/ui-screens.md "Map").</summary>
+    public const float DiscoverRange = 400;
+
+    /// <summary>A town a player character walks within <see cref="DiscoverRange"/> of becomes discovered and explored.</summary>
+    void Discover(World world)
+    {
+        if (!world.Player.Exists) return;
+        var prev = world.Characters.Previous;
+        for (int i = 0; i < prev.Length; i++)
+        {
+            if (!prev[i].Alive || world.Characters.Cold(i) is not { IsPlayer: true }) continue;
+            var at = new Vector2(prev[i].Position.X, prev[i].Position.Z);
+            foreach (var site in data.Sites)
+                if (Vector2.DistanceSquared(at, new(site.Position.X, site.Position.Z)) <= DiscoverRange * DiscoverRange)
+                    world.Player.Know(site.Index, TownKnowledge.Discovered | TownKnowledge.Explored);
+        }
     }
 
     void RefreshZones(World world)

@@ -71,6 +71,7 @@ public static class SaveCapture
         if (data.PlayerFaction >= 0) camera.PlayerFactionName = data.Factions[data.PlayerFaction].Name;
 
         UpdateFactions(game, data, loaded);
+        WriteTownKnowledge(game, data, world.Player);
         var written = WritePlayerSquads(builder, world, data, loaded, options, clock);
         WriteSelection(game, world, written);
         if (loaded is not null) WriteRoaming(game, world, loaded);
@@ -107,6 +108,22 @@ public static class SaveCapture
     }
 
     /// <summary>Writes the prosperity and counters of the loaded factions and the current relation table into the save's factions.</summary>
+    /// <summary>Writes what the player knows of each placed town into its state, by instance id. Flags are only added: the world never forgets a town.</summary>
+    static void WriteTownKnowledge(SaveGame game, PopulationData data, PlayerState player)
+    {
+        var known = player.Towns;
+        var byInstance = new Dictionary<string, TownKnowledge>(StringComparer.Ordinal);
+        for (int i = 0; i < known.Length && i < data.Sites.Count; i++)
+            if (known[i] != 0 && data.Sites[i].InstanceId.Length > 0) byInstance[data.Sites[i].InstanceId] = known[i];
+        foreach (var town in game.Towns)
+        {
+            if (!byInstance.TryGetValue(town.Instance, out var flags)) continue;
+            if ((flags & TownKnowledge.Discovered) != 0) town.Record.Bools["discovered"] = true;
+            if ((flags & TownKnowledge.Explored) != 0) town.Record.Bools["explored"] = true;
+            town.Record.Bools["recently discovered"] = (flags & TownKnowledge.Recent) != 0;
+        }
+    }
+
     static void UpdateFactions(SaveGame game, PopulationData data, LoadedSave? loaded)
     {
         var index = new Dictionary<string, int>(StringComparer.Ordinal);

@@ -60,6 +60,8 @@ public sealed class GeneratedAppearances(GameDatabase db, string installRoot) : 
 /// <summary>A town placed in the world.</summary>
 public sealed record TownSite(int Index, TownData Town, Vector3 Position, ZoneCoordinate Zone)
 {
+    /// <summary>The placement's instance id in the level data (<c>9-rebirth-INGAME</c>), which the save's town state names.</summary>
+    public string InstanceId { get; init; } = "";
     /// <summary>The town's placed buildings with their beds and nodes (<see cref="TownBuildings"/>), the AI's homes; empty when the host gave none.</summary>
     public IReadOnlyList<TownBuilding> Buildings { get; init; } = [];
 }
@@ -127,6 +129,7 @@ public sealed class PopulationData
             sites.Add(new TownSite(sites.Count, TownData.From(record), p.Position, WorldLayout.ZoneOf(p.Position.X, p.Position.Z))
             {
                 Buildings = buildings is not null && buildings.TryGetValue(p.InstanceId, out var list) ? list : [],
+                InstanceId = p.InstanceId,
             });
         }
         var factions = FactionData.LoadAll(db);

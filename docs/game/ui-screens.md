@@ -59,7 +59,7 @@ which are descriptive (RTTI knows `MessageBoxManager::Box`; the constructor of a
 | LoadingWindow | 14091a280 | Kenshi_LoadingScreen | Top | message text with a tip |
 | MainBarGUI (HUD) | 14072d3b0 | Kenshi_MainPanel | Middle | see section 4 |
 | Overview (ManagementScreen) | 14049f5b0 | Kenshi_OverviewWindow | Window | tabs Map, Faction, Research, Craft, Squads, Messages ("DIALOGUE"), AI |
-| MapScreen | 140490210 | in Overview | - | world map, markers |
+| MapScreen | 140490210 | in Overview | - | world map, markers ([Map](#map)) |
 | ProspectingWindow | 14049c2e0 | Kenshi_ProspectingWindow | Window | resource lines (`Kenshi_ProspectingWindowResourceLine`) |
 | CharacterStatsWindow | 1408ba700 | Kenshi_StatsWindow | Window | Attributes, Skills1..4, Statistics, Description1/2 data panels |
 | Inventory (character) | 1401538e0 | inventory layouts | Window | slots: back, shirt, head, legs, boots, armour, main weapon, hip weapon, belt, backpack_attach, ARRANGE, LIMBS |
@@ -178,6 +178,40 @@ Medical body-part labels are larger than the stats body text. Meitou uses 16 em
 pixels at 1080 lines for medical labels, arrows and values, centred over the full
 bar height; sizing text to the inset datapanel shrinks it. Exact original font
 hinting remains **Unknown**.
+
+### Map
+
+MapScreen (ctor `140490210`) in the Overview's MAP tab: `MapImage` (`GUI_Map.dds`) on a 4096² `MapScrollView` canvas. **Verified** by reading the
+decompile unless marked; Meitou's adapter is `PlayerInterface.Map.cs`.
+
+- **Projection:** the image spans world X and Z −147456…147456, world (0, 0) at its centre, +X right, **+Z down** (`14048cf70`; also checked by drawing
+  the placed towns on `GUI_Map.dds`: Shark lands in the swamp, Stoat in the Great Desert, Mongrel on the Fog Islands).
+- **Mouse:** left or middle press pans with the `hand` cursor, no threshold; release ends it. Right press does nothing; right **release** inside the view
+  orders the selection to move (task 0x1d, the shared order dispatcher `1407f9e20`) to the point under the cursor, clamped to the image, Y = max(terrain,
+  100). Shift is read but not used (no queueing); a town marker takes clicks like the map under it. Extra selected characters get a random offset
+  rand·√(60·count)+5 around the point (Meitou leaves spreading to its move order).
+- **Zoom:** scale = on-screen pixels per canvas pixel, from fit-the-whole-map (min(view w, h)/4096, the start) to 1.5 × UI scale. Buttons add or
+  subtract the least scale about the centre; the wheel adds 0.000625 per wheel unit (0.075 a notch) about the cursor. Zoom level 0 below 0.4 × UI
+  scale, 1 up to 0.75 ×, else 2. Markers keep their pixel size. Opening the map and the centre button centre on the camera focus.
+- **Colours** (`kenshi_colours.xml`): MarkerAlly `#5cb473`, Neutral `#dfdfdf`, Enemy `#e65139`, Player `#8dcdff`, Movement `#79b44b`; PlayerSelected
+  (0.652, 0.903, 1.0) is built in. Player faction: Player (Selected when selected); else Ally, Enemy (relation below −30 or a faction flag), Neutral (`14048f320`).
+- **Camera marker:** `Camera` group, colour Player, every frame at the camera focus, turned by the angle between the level view direction and −Z
+  (negative towards −X). Size 32 × 32 from the layout (**Observed**).
+- **Characters:** `Character` group × UI scale, centred, every 1 s; the player's characters (plus ones campaigns and AI packages track, not modelled);
+  hidden at zoom level 0. Downed or dead get nothing special (**Observed**).
+- **Movement marker:** only after a map right click: at the order point, bottom-centre anchored, colour Movement, for 3 s of real time; opening the map
+  hides it.
+- **Towns** (`140491700`, `14048e230`): every placed TOWN except type 8 (NestMarker) and 10, only when its state is `discovered`; a nest (type 0) also
+  needs a player character within √10616832 ≈ 3258. Group by type: Nest, Outpost (also Military, Prison), Town, Village, Ruin (Ruins), Workcamp
+  (SlaveCamp), SmallPlace (POI). Levels shown: Town and recently discovered ones always, types 1 and 3–7 from level 1, Nest and POI at level 2.
+  Size: group size × UI scale × 0.5 at level 0; Town × 0.75 / 1.0 at levels 1 / 2, others × 0.85. Explored: faction colour and the name;
+  unexplored: Neutral and `unexplored name` (the name when empty). Label: `Kenshi_StandardFont_Medium`, black shadow, the marker's colour, centred
+  round(3.2 × UI scale) below the icon, none at level 0 or for nests. A `recently discovered` town gets a `NewDiscovered` child icon; closing the
+  Overview on the map clears the flag (`14049c210`). Player-owned towns and camps (TownBase: Camp / Nest) are not modelled in Meitou.
+- **Discovery:** a character within 400 units (XZ) sets `discovered` and `explored` (`14092f6b0`; that the point is a player character's is
+  **Observed**); map items set `discovered` and `recently discovered` (`14075f550`, not modelled). Meitou checks with the population's zone refresh
+  (every 15 ticks), keeps the flags per placed town (`PlayerState.Towns`) and reads and writes the GAMESTATE_TOWN bools by `instance`.
+- **Unknown:** where `NewDiscovered` sits on the marker (Meitou: the top-right corner, half size), town tooltips (not drawn), MapRoad lines.
 
 ## 6. Inventory, trade, dialogue, build
 
