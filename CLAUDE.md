@@ -40,6 +40,11 @@ drop-in replacement that runs original content and mods unchanged. Plan in [ROAD
 - The mod editor is .NET: `ilspycmd -p -o <dir outside the repo> "<Kenshi>/forgotten construction set.exe"`
   (`dotnet tool install -g ilspycmd`). Its `GameData` class is the reference for the `.mod` format.
 
+## Branches
+
+- After merging a branch into master, remove its worktree (`git worktree remove`) and delete the branch
+  (`git branch -d`) without asking, once the worktree has no uncommitted work.
+
 ## Build
 
 - Get the user's explicit approval before adding tests, including new cases in existing tests.
