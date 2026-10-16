@@ -74,6 +74,8 @@ public static class SaveCapture
         WriteTownKnowledge(builder, data, world.Player);
         var buildings = HeldSave.BuildingStates(game);
         WriteLocks(world, buildings);
+        ResearchSave.Write(game.Research, world.Research);
+        if (data.PlayerFaction >= 0) BuildingSave.Write(game, world, data.Factions[data.PlayerFaction].Id, options.Seed);
         var written = WritePlayerSquads(builder, world, data, loaded, options, clock, buildings);
         WriteSelection(game, world, written);
         if (loaded is not null) WriteRoaming(game, world, loaded);

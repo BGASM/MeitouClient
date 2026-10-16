@@ -177,7 +177,7 @@ public sealed class SaveBuilder
         return town;
     }
 
-    /// <summary>Adds the world records the game always writes after the towns: BIOMES, RESEARCH and TERRAIN_DECALS, empty. (Weather and research state are not modelled yet.)</summary>
+    /// <summary>Adds the world records the game always writes after the towns: BIOMES, RESEARCH and TERRAIN_DECALS, empty. (Weather is not modelled yet; the research is written by <c>Meitou.Simulation.Saving.ResearchSave</c>.)</summary>
     public void AddEmptyWorldState()
     {
         Quick(FcsRecordType.BIOMES);

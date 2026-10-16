@@ -65,6 +65,10 @@ public static class SaveLoader
         foreach (var (instance, record) in buildingStates) instanceOf[record] = instance;
         var handles = save.BuildHandles();
 
+        // The research the player has finished, and the buildings the player made (docs/simulation.md "Buildings").
+        ResearchSave.Load(save.Research, world.Research, data.Db);
+        if (playerFaction is not null) BuildingSave.Read(save, world, data.Db, playerFaction.Id, playerIndex);
+
         var races = new Dictionary<string, RaceData?>(StringComparer.Ordinal);
         var parts = new Dictionary<string, BodyPartTemplate?>(StringComparer.Ordinal);
         var bySource = new Dictionary<SaveCharacter, CharacterId>();

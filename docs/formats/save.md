@@ -38,6 +38,15 @@ position. Content-file `platoon/` alone means no platoon file, not an empty file
 Every GAMESTATE_BUILDING uses its zone container C, CS11111 and a listed slot. Overlay retains
 base placements and saved targets for IDs present in both.
 
+**Research** (RESEARCH record in `quick.save`, **Verified**: five sample saves): float `num finished`, strings `finished<k>` (RESEARCH ids in the
+order finished; every sample holds only `finished0` = `5359-gamedata.base`), float `num currents` (0). Meitou (`Saving/ResearchSave`) round-trips the
+finished list; research in progress is not modelled and its keys are left as they are.
+
+**Player-built buildings** (Meitou `Saving/BuildingSave`): an instance in the zone's `0-buildinglist` with id `<n>-zone<X>.<Y>-INGAME` and a
+GAMESTATE_BUILDING `<id>-S23` carrying `name`, `owner faction ID`, `floornum`, `destroyed`, `flags`, `is complete`, `pause`, `construction progress`,
+`<i>construction mats`, `world Y pos`, `handle`, `isInsideBuilding` (key set from the original's writer `FUN_1405547f0`, **Verified** by code; no
+sample save holds a player-built building, so a real file was not compared). Meitou-only `meitou parent` (instance id) names a parent the handle cannot.
+
 Save runtime state, derive definitions/race/gear/material/terrain from merged base/mod data,
 regenerate unsaved foliage/weather particles. Reused declared type IDs do not imply declared
 field schema: ITEM, ITEM_PLACEMENT_GROUP, STATS, RESEARCH and BIOMES have saved-state keys.
