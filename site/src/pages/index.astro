@@ -17,8 +17,11 @@ import Base from '../layouts/Base.astro';
   </section>
 
   <section id="about" class="about">
-    <h2>Section Title</h2>
-    <p>Placeholder text for this section.</p>
+    <div class="about-text">
+      <h2>Subsection Title</h2>
+      <p>Placeholder text for this section.</p>
+    </div>
+    <img class="about-image" src="/bgvideo.jpg" alt="" width="1920" height="1080" loading="lazy" />
   </section>
 </Base>
 
@@ -35,9 +38,12 @@ import Base from '../layouts/Base.astro';
   /* The name set like the wordmark: Meitou semibold, Client regular. */
   .name > span { font-weight: 400; }
   /* Below the video: Learn More scrolls here. */
-  .about { min-height: 60vh; padding: 72px 0; }
+  /* Text left, image right, at most 1600px wide and centred. */
+  .about { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; max-width: 1600px; margin: 0 auto; padding: 72px 0; }
   .about h2 { margin: 0 0 var(--space-5); color: #fff; font: 600 32px/40px var(--font-exo); }
   .about p { max-width: 620px; margin: 0; font-size: 18px; line-height: 27px; }
+  .about-image { display: block; width: 100%; height: auto; border-radius: calc(2 * var(--radius-card)); }
+  @media (max-width: 800px) { .about { grid-template-columns: 1fr; } }
   @media (prefers-reduced-motion: no-preference) { :global(html) { scroll-behavior: smooth; } }
   /* Narrow screens: drop the stack below the links at the top right. */
   @media (max-width: 900px) { .hero { padding-top: calc(var(--edge) + 48px); } }
