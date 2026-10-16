@@ -48,7 +48,7 @@ sealed partial class PlayerInterface
             if (trade is null || hit.Screen is not ("inventory" or "bag") || Selected().FirstOrDefault(c => c.Id == trade.Customer)?.ItemGrid is not { } grid) return;
             string section = hit.Screen == "bag" ? "backpack_content" : "main";
             int columns = section == "main" ? grid.Width : grid.BagWidth, rows = section == "main" ? grid.Height : grid.BagHeight;
-            if (!DropCell(p, hit.Screen, section, columns, rows, b.Grab, b.Item.Width, b.Item.Height, out int x, out int y)) return;
+            if (!DropCell(p, hit.Screen, section, columns, rows, b.Grab, b.Item.Width, b.Item.Height, Footprints(grid.Items, section, -1), out int x, out int y)) return;
             Say(new BuyItem(b.Item.Token, b.Item.Quantity) { Tick = session.World.Tick, Section = section, X = x, Y = y });
             return;
         }
@@ -62,7 +62,8 @@ sealed partial class PlayerInterface
             if (trade is null || trade.Customer != drag.Character) return;
             int? sx = null;
             int sy = 0;
-            if (TraderGrid(hit.Screen) is { } stockGrid && DropCell(p, hit.Screen, stockGrid, trade.StockWidth, trade.StockHeight, drag.Grab, item.Width, item.Height, out int cx, out int cy))
+            if (TraderGrid(hit.Screen) is { } stockGrid && DropCell(p, hit.Screen, stockGrid, trade.StockWidth, trade.StockHeight, drag.Grab, item.Width, item.Height,
+                    trade.Stock.Select(s => (s.X, s.Y, s.Width, s.Height)), out int cx, out int cy))
                 (sx, sy) = (cx, cy);
             Say(new SellItem(token, item.Quantity) { Tick = session.World.Tick, X = sx, Y = sy });
             return;
@@ -84,26 +85,55 @@ sealed partial class PlayerInterface
                 Say(new MoveInventoryItem(drag.Character, token, target, 0, 0) { Tick = session.World.Tick });
                 return;
             }
-            if (DropCell(p, hit.Screen, target, size.Width, size.Height, drag.Grab, item.Width, item.Height, out int wx, out int wy))
+            if (DropCell(p, hit.Screen, target, size.Width, size.Height, drag.Grab, item.Width, item.Height, Footprints(own.Items, target, item.Index), out int wx, out int wy))
                 Say(new MoveInventoryItem(drag.Character, token, target, wx, wy) { Tick = session.World.Tick });
             return;
         }
         int cols = target == "main" ? own.Width : own.BagWidth, rws = target == "main" ? own.Height : own.BagHeight;
-        if (!DropCell(p, hit.Screen, target, cols, rws, drag.Grab, item.Width, item.Height, out int tx, out int ty)) return;
+        if (!DropCell(p, hit.Screen, target, cols, rws, drag.Grab, item.Width, item.Height, Footprints(own.Items, target, item.Index), out int tx, out int ty)) return;
         Say(new MoveInventoryItem(drag.Character, token, target, tx, ty) { Tick = session.World.Tick });
     }
 
-    /// <summary>The cell of a grid widget (<paramref name="slotName"/> of screen <paramref name="screen"/>) an item lands in when dropped at <paramref name="p"/>, held at <paramref name="grab"/>.</summary>
-    bool DropCell(Vector2 p, string screen, string slotName, int columns, int rows, Vector2 grab, int width, int height, out int x, out int y)
+    /// <summary>The cells taken in <paramref name="section"/> by items other than the dragged one (<paramref name="dragged"/>, its index; -1 none).</summary>
+    static IEnumerable<(int X, int Y, int Width, int Height)> Footprints(IEnumerable<InventoryItemView> items, string section, int dragged) =>
+        items.Where(i => i.Section == section && i.Index != dragged).Select(i => (i.X, i.Y, i.Width, i.Height));
+
+    /// <summary>
+    /// The cell of a grid widget (<paramref name="slotName"/> of screen <paramref name="screen"/>) an item lands in when dropped at <paramref name="p"/>, held at <paramref name="grab"/>.
+    /// Forgiving: the pointer may be up to a cell outside the grid, the cell is clamped into it, and an occupied cell snaps to the nearest free one within
+    /// <see cref="DropSnapCells"/> (<paramref name="occupied"/>: the other items of that grid). Without a free cell nearby the clamped cell is returned and the sim refuses it.
+    /// </summary>
+    bool DropCell(Vector2 p, string screen, string slotName, int columns, int rows, Vector2 grab, int width, int height, IEnumerable<(int X, int Y, int Width, int Height)> occupied, out int x, out int y)
     {
         x = y = 0;
         var controls = faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent).First(f => f.Id == screen).Controls;
         var slot = controls.FirstOrDefault(c => c.Name == slotName);
-        if (slot is null || columns <= 0 || rows <= 0 || !slot.Bounds.Contains(p.X, p.Y) || slot.Clip is { } clip && !clip.Contains(p.X, p.Y)) return false;
-        x = (int)MathF.Floor((p.X - slot.Bounds.X) / slot.Bounds.Width * columns - grab.X * width + 0.5f);
-        y = (int)MathF.Floor((p.Y - slot.Bounds.Y) / slot.Bounds.Height * rows - grab.Y * height + 0.5f);
+        if (slot is null || columns <= 0 || rows <= 0 || width > columns || height > rows) return false;
+        var b = slot.Bounds;
+        float cellW = b.Width / columns, cellH = b.Height / rows;
+        if (p.X < b.X - cellW || p.X > b.X + b.Width + cellW || p.Y < b.Y - cellH || p.Y > b.Y + b.Height + cellH ||
+            slot.Clip is { } clip && !clip.Contains(Math.Clamp(p.X, b.X, b.X + b.Width), Math.Clamp(p.Y, b.Y, b.Y + b.Height))) return false;
+        // Where the item's top-left corner is, in cells.
+        float fx = (p.X - b.X) / cellW - grab.X * width, fy = (p.Y - b.Y) / cellH - grab.Y * height;
+        x = Math.Clamp((int)MathF.Round(fx), 0, columns - width);
+        y = Math.Clamp((int)MathF.Round(fy), 0, rows - height);
+        var others = occupied.ToArray();
+        bool Free(int cx, int cy) => !others.Any(o => cx < o.X + o.Width && o.X < cx + width && cy < o.Y + o.Height && o.Y < cy + height);
+        if (Free(x, y)) return true;
+        float best = DropSnapCells * DropSnapCells + 0.01f;
+        int bx = x, by = y;
+        for (int cy = 0; cy <= rows - height; cy++)
+            for (int cx = 0; cx <= columns - width; cx++)
+            {
+                float d = (cx - fx) * (cx - fx) + (cy - fy) * (cy - fy);
+                if (d < best && Free(cx, cy)) (best, bx, by) = (d, cx, cy);
+            }
+        (x, y) = (bx, by);
         return true;
     }
+
+    /// <summary>How far, in cells, a drop on an occupied cell looks for a free one.</summary>
+    const float DropSnapCells = 2;
 
     void AddInventoryDrag(List<UiControl> controls)
     {
