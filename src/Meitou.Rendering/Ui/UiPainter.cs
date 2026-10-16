@@ -384,6 +384,7 @@ public sealed class UiPainter : IDisposable
     {
         if (!pointers.TryGetValue(name, out var pointer)) pointers[name] = pointer = MyGuiPointers.Resolve(resources, name);
         if (pointer is null) return;
+        overlay.Flush(width, height);   // whatever was queued before (another texture, text) goes first
         var loaded = LoadTexture(pointer.Image.Texture);
         var at = pointer.At(MathF.Round(mouse.X), MathF.Round(mouse.Y));
         var source = pointer.Image.Source;

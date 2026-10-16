@@ -148,8 +148,7 @@ and the notch on the stem are in `position.mesh` itself; on every ground move, f
 **Verified** (read `data/gui/pointer/kenshi_pointers.xml`, `images/kenshi_images.xml`): 25 `ResourceImageSetPointer`s (default `arrow`, layer
 `Pointer`, the last in `core_layer.xml`), each naming a `Size`, a hot spot `Point` (pixels from its top left) and an image set whose one frame
 (group and index `Pointer`) is a crop of `Kenshi_UI.png`. An entry with an empty name and no values also exists. Some frames differ from the
-pointer's `Size` (`lift` 34×30 in 35×35, `hand` 33×35 in 32×32, `pick_item` 32×32 in 35×35): **Observed** (MyGUI's pointer resource, not
-rechecked here) the frame is stretched to `Size`, placed at mouse − `Point`, in screen pixels (no UI scale).
+pointer's `Size` (`lift` 34×30 in 35×35, `hand` 33×35 in 32×32, `pick_item` 32×32 in 35×35). **Verified** (MyGUI `ResourceImageSetPointer::setPosition`, read on GitHub): the image box is `Size` large at mouse − `Point`, so the frame is stretched to `Size`; screen pixels (no UI scale).
 
 **Observed** (FUN_1406e3d60, which calls `PointerManager::setPointer`): pointer mode → name: 0 `arrow` (`invisible` with the free camera
 and the Esc menu hidden), 1 `med`, 2 `search`, 3 `lift`, 4 `pick_item`, 5 `attk`, 7 `talk`, 8 and 10 `s_talk`, 9 `use`, 0xb `build`,
@@ -159,7 +158,7 @@ and the Esc menu hidden), 1 `med`, 2 `search`, 3 `lift`, 4 `pick_item`, 5 `attk`
 
 Meitou (`PlayerInterface.Pointer.cs`, engine choices): the window's own cursor is hidden and the pointer drawn last in the frame (not in
 screenshots or cinema takes). It follows the quick right-click order, so it never disagrees with the click: with a selection, over a
-trader `talk`, another living character `attk`, an own hurt character `med`, an own downed one `lift`; Ctrl over a downed character
+trader `talk`, another living character `attk` (neutrals too: the quick order does not check hostility yet), an own hurt character `med`, an own downed one `lift`; Ctrl over a downed character
 `lift`, Alt `search`; otherwise, over the interface, the settings panel or the loading screen, `arrow`. `hardware_mouse` is not read.
 
 ## Unknowns
