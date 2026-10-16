@@ -226,3 +226,41 @@ internal sealed partial class ZoneGeometryGatherer
         if (carver) stats.Carvers++; else stats.Painters++;
     }
 }
+
+internal sealed partial class ZoneGeometryGatherer
+{
+    /// <summary>
+    /// The collision triangles of the buildings placed in <paramref name="zone"/> (each placement once, in its own zone; its triangles may reach past the zone) that ragdolls land
+    /// on and hit (docs/game/ragdolls.md "Collision groups"): walls and floors, stairs, furniture and roofs; not doors, interior masks or passable parts. Three points per
+    /// triangle, world space.
+    /// </summary>
+    public void RagdollTriangles(ZoneCoordinate zone, List<Vector3> output)
+    {
+        var (ox, oz) = WorldLayout.ZoneOrigin(zone);
+        var min = new Vector2((float)ox, (float)oz);
+        foreach (var (b, record, position, destroyed) in NearBuildings(zone, min, min + new Vector2(WorldLayout.ZoneSize), 0))
+        {
+            if (b.Zone != zone) continue;
+            AddRagdollBuilding(record, b.InstanceId, position, b.Rotation, destroyed, output);
+            foreach (var (item, at, rotation) in LayoutObjects(b, record, position, destroyed))
+                AddRagdollBuilding(item.Building, $"{b.InstanceId}/{item.InstanceId}", at, rotation, false, output);
+        }
+    }
+
+    void AddRagdollBuilding(GameRecord building, string placementId, Vector3 position, Quaternion rotation, bool destroyed, List<Vector3> output)
+    {
+        var node = NodeMatrix(building, position, rotation);
+        var doors = building.GetReferences("doors").Select(r => r.TargetStringId).ToHashSet();
+        foreach (var mesh in WorldObjectLayout.Building(db, building, placementId, position, rotation, new BuildingState(destroyed)))
+        {
+            var part = mesh.Source;
+            string path = CollisionPathOf(part, destroyed);
+            if (path.Length == 0 || part.GetBool("is door") || mesh.Owner.GetBool("is door") || doors.Contains(mesh.Owner.StringId)) continue;
+            // Groups 23..26: a building that is ignored by paths, or a passable part (ragdolls do not collide with them).
+            if ((PathMode)mesh.Owner.GetInt("path mode", (int)PathMode.Obstacle) == PathMode.Ignore || part.GetBool("passable")) continue;
+            if (collision.Get(path) is not { } prepared) continue;
+            foreach (var shape in prepared.Shapes)
+                foreach (int i in shape.Indices) output.Add(Vector3.Transform(shape.Vertices[i], node));
+        }
+    }
+}

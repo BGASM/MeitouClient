@@ -43,6 +43,8 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
 {
     /// <summary>Getting up blends from the ragdoll's pose to the animation over this many seconds (<b>Observed</b>, <c>FUN_1407d3130</c>).</summary>
     public const float GetUpBlend = 0.75f;
+    /// <summary>The edge of a square of static ground and buildings the scene is made of, in world units, on a grid from the origin (engine choice).</summary>
+    public const float TileSize = 32;
     /// <summary>Freezing (docs/game/ragdolls.md "Sleep and limits"): not before this age, then when this share of the bodies is still; at the latest after <see cref="FreezeLatest"/>.</summary>
     public const float FreezeEarliest = 2, FreezeShare = 0.6f, FreezeLatest = 7;
     /// <summary>A body is still under these squared speeds (the game's PhysX sleep velocities: linear² 2.25, angular² 1.96).</summary>

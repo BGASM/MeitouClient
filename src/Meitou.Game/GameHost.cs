@@ -42,6 +42,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
     IReadOnlyList<Meitou.Data.World.TownPlacement> townPlacements = [];
     Meitou.Simulation.IWalkability? simWalkability;
     Meitou.Data.Characters.CharacterRigs? characterRigs;
+    Meitou.Navigation.RagdollGeometry? ragdollGeometry;
     Meitou.Navigation.NavSystem? nav;
     volatile bool navChanged;
     readonly Dictionary<Meitou.Data.World.ZoneCoordinate, long> navZones = [];
@@ -73,7 +74,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
     public int Run()
     {
         try { return o.Screenshot is not null ? Screenshot() : Interactive(); }
-        finally { DisposeTitleScene(); session?.Dispose(); nav?.Dispose(); ownedScene?.Dispose(); }
+        finally { DisposeTitleScene(); session?.Dispose(); nav?.Dispose(); ragdollGeometry?.Dispose(); ownedScene?.Dispose(); }
     }
 
     void Boot(VulkanDisplay display, bool interactive)
@@ -126,6 +127,8 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
                 nav = new Meitou.Navigation.NavSystem(install, gameDb, levels!, heights.HeightAt);
                 nav.ZoneReady += _ => navChanged = true;
                 walkability = new NavAdapter(nav.Walkability);
+                // Ragdolls land on the terrain and the buildings' collision (gathered per zone on a worker when a ragdoll comes near).
+                ragdollGeometry = new Meitou.Navigation.RagdollGeometry(install, gameDb, levels!, heights.HeightAt);
             }
             var towns = levels is null ? [] : levels.Towns().ToList();
             // The wild (homeless squads and nests) needs the world's area sectors; the sandbox and the duel have none.
