@@ -47,6 +47,22 @@ appearance/population, not just shading cost. Depth-aware reduced-resolution com
 preserve opaque intersections. Texture anisotropy caps mipmapped samplers, distinct from texture
 resolution/LOD bias. [Particle simulation](formats/particle-universe.md).
 
+## UI depth stamp
+
+The game host hands the frame the controls that were fully opaque and held still in the last UI
+frame (`UiPainter.StableOpaqueRects`, only while that interface is drawn again). Each depth
+slice then gets depth 0 under them (`UiDepthStamp`, one `vkCmdClearAttachments` per slice, after
+the slice's clear), so the scene's early depth test rejects every fragment there. Rectangles are
+mirrored in Y (scene targets hold the picture upside down) and inset 8 render pixels where they
+meet the scene (jitter, FXAA/TAA/FSR neighbourhoods). No inset at the picture's edge.
+**Observed** (RTX 4070, 1594x896 DLSS, new-game start, 22% covered, `--no-vsync`, 5 samples
+each): gpu 6.37 ms off vs ~6.15 ms on; scene stage 2.51 vs ~2.28 ms; the layers pass costs
+~0.08 ms more with the stamp. Sky, post passes and the upscaler still cover the stamped area.
+**Unknown:** the exposure and night grading still measure the colour under the stamp (the clear
+colour, not the scene behind it); identical top-strip luminance in one matched pair of
+screenshots, not proven for dark or foggy scenes. Occlusion and Hi-Z from a stamped frame hide
+what lies behind a panel for one frame after it closes.
+
 ## Validation
 
 **Verified** merged-pass checks: Faithful/FXAA and TAA reference images byte-identical in the

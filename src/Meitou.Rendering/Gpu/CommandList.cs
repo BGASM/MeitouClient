@@ -200,6 +200,19 @@ public sealed unsafe class CommandList
     /// <summary>Clears the depth attachment of the open rendering inside <paramref name="rect"/> (<c>vkCmdClearAttachments</c>; a shadow atlas tile, a depth slice).</summary>
     public void ClearDepth(float value, Rect2D rect) => Clear(false, default, true, value, rect);
 
+    /// <summary>Clears the depth attachment of the open rendering inside every one of <paramref name="rects"/> in one call (the UI depth stamp).</summary>
+    public void ClearDepth(float value, ReadOnlySpan<Rect2D> rects)
+    {
+        var attachment = new ClearAttachment(ImageAspectFlags.DepthBit, 0, new ClearValue(depthStencil: new ClearDepthStencilValue(value, 0)));
+        var areas = stackalloc ClearRect[32];
+        for (int start = 0; start < rects.Length; start += 32)
+        {
+            int n = Math.Min(32, rects.Length - start);
+            for (int i = 0; i < n; i++) areas[i] = new ClearRect(rects[start + i], 0, 1);
+            vk.CmdClearAttachments(Handle, 1, &attachment, (uint)n, areas);
+        }
+    }
+
     /// <summary>Clears the colour and / or depth attachment of the open rendering inside <paramref name="rect"/> (<c>vkCmdClearAttachments</c>,
     /// the colour first, as <c>VkGl.Clear</c> records it).</summary>
     public void Clear(bool colour, ClearColorValue colourValue, bool depth, float depthValue, Rect2D rect)

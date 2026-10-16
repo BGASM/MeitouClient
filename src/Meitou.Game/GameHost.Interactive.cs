@@ -114,7 +114,7 @@ sealed partial class GameHost
         // The hour is the game clock's (time does not follow the keys); PageUp/PageDown/Home set the lens while the editor is open and in the free camera.
         var cinema = new Cinema(() => camera, () => (float)session.Clock.HourOfDay, null, () => BorderlessFullScreen.IsOn(window), () => BorderlessFullScreen.Toggle(window),
             Cinema.GameFile, lensKeysAlways: false);
-        bool cinemaHolds = false, interfaceHidden = false;
+        bool cinemaHolds = false, interfaceHidden = false, uiDrawnLast = false;
         cinema.Moved = () => cinemaHolds = true;
         // PageUp/PageDown step the floor in the strategy camera: in the free camera and on a camera the cinema holds they set the lens (Home puts it back).
         cinema.LensKeys = () => session.Camera.IsFree || cinemaHolds;
@@ -343,6 +343,10 @@ sealed partial class GameHost
                 profiler?.BeginFrame();
                 // A scene load draws only the loading screen; the warm-up draws whole frames under it (the first frames of a new place build what it needs).
                 bool covered = Covered, sceneLoading = sceneLoad is not null;
+                // The scene is not shaded under the controls that were fully opaque and held still in the last UI frame (UiDepthStamp), only while that interface is drawn again now.
+                var (opaqueRects, opaqueWidth, opaqueHeight) = player.OpaqueUiRects;
+                bool stampUi = uiDrawnLast && !interfaceHidden && !cinema.Clean && takeFile is null && !covered && !sceneLoading && !TitleVisible && !g.NoPopulation && overlay is not null;
+                (gpu.UiHoles, gpu.UiHolesWidth, gpu.UiHolesHeight) = stampUi ? (opaqueRects, opaqueWidth, opaqueHeight) : (null, 0, 0);
                 if (sceneLoading && skyArrival is { AtStars: true })
                     WorldFrame.DrawLoadingSky(gpu, scene, camera, size.X, size.Y, presentationHour ?? 0, (float)animSeconds, o.FogDistance);
                 else if (!sceneLoading || skyArrival is not null) DrawWorld(size.X, size.Y);
@@ -358,7 +362,8 @@ sealed partial class GameHost
                 screenshotRequested = false;
                 if (ui && overlay is not null && !g.NoPopulation) DrawMarkers(overlay, size.X, size.Y);
                 if (!g.NoPopulation && !covered && panel?.Visible != true) player.Steer();
-                if (ui && overlay is not null && !g.NoPopulation) player.Draw(overlay, size.X, size.Y);
+                uiDrawnLast = ui && overlay is not null && !g.NoPopulation;
+                if (uiDrawnLast) player.Draw(overlay!, size.X, size.Y);
                 if (ui && overlay is not null && IsSandbox) DrawSandbox(overlay, size.X, size.Y);
                 // The debug overlays are left out of saved pictures: the statistics at the top left, the key list below them, the profiler.
                 if (ui && overlay is not null && !shot)
