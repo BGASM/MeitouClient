@@ -58,7 +58,7 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
 
 <style>
   /* --frame: the page ground around the video; --edge: where content starts, just inside the frame. */
-  .mt-scene { --frame: 12px; --edge: calc(var(--frame) + 24px); }
+  .mt-scene { --frame: 24px; --edge: calc(var(--frame) + 24px); }
 
   /* First view: the video in a frame with rounded inner corners, behind the header and hero. */
   .bg {
@@ -68,7 +68,7 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
     right: var(--frame);
     height: calc(100svh - 2 * var(--frame));
     overflow: hidden;
-    border-radius: var(--radius-card);
+    border-radius: calc(2 * var(--radius-card));
     pointer-events: none;
   }
   .bg video { display: block; width: 100%; height: 100%; object-fit: cover; }
