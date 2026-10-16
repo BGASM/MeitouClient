@@ -1294,6 +1294,7 @@ static class WorldFrame
         gpu.Post?.SetCamera(eye, view, camera.FieldOfView, aspect);
         gpu.Terrain.BeginFrame();
         var stamp = UiDepthStamp.Enabled && gpu.UiHoles is { } holes ? UiDepthStamp.RenderRects(holes, gpu.UiHolesWidth, gpu.UiHolesHeight, width, height, rw, rh) : [];
+        post.DepthStamped = stamp.Length > 0;
         bool first = true, foliageDrawn = false;
         Matrix4x4 particleViewProjection = default, particleNearProjection = default;
         float particleNear = 0;

@@ -55,13 +55,19 @@ slice then gets depth 0 under them (`UiDepthStamp`, one `vkCmdClearAttachments` 
 the slice's clear), so the scene's early depth test rejects every fragment there. Rectangles are
 mirrored in Y (scene targets hold the picture upside down) and inset 8 render pixels where they
 meet the scene (jitter, FXAA/TAA/FSR neighbourhoods). No inset at the picture's edge.
-**Observed** (RTX 4070, 1594x896 DLSS, new-game start, 22% covered, `--no-vsync`, 5 samples
-each): gpu 6.37 ms off vs ~6.15 ms on; scene stage 2.51 vs ~2.28 ms; the layers pass costs
-~0.08 ms more with the stamp. Sky, post passes and the upscaler still cover the stamped area.
-**Unknown:** the exposure and night grading still measure the colour under the stamp (the clear
-colour, not the scene behind it); identical top-strip luminance in one matched pair of
-screenshots, not proven for dark or foggy scenes. Occlusion and Hi-Z from a stamped frame hide
-what lies behind a panel for one frame after it closes.
+The merged exposure kernel leaves out taps whose near depth is 0 (weighted mean; the unmasked
+path is unchanged), and the layers passes (`LayersHalf`, `SceneLayers`, `SceneLayersLean`)
+discard there, so neither reads the clear colour nor shades under the UI. The separate
+(non-merged) exposure passes and the other post passes, the sky and the upscaler still cover the
+stamped area.
+**Observed** (RTX 4070, 1594x896 DLSS, new-game start, 22% covered, `--no-vsync`, paused view,
+`--seed 1`, 5 samples per run, 2 runs per setting): gpu ms off 6.8 and 7.0, stamp only 7.3 and
+6.8, stamp with mask and early-outs 7.3 and 7.1: **no gain measured**; run-to-run spread is about
+0.3 ms. Earlier runs with a wandering camera showed 0.2 ms; that was the view, not the stamp.
+At this size the scene stage is not fragment-bound; a higher render resolution may differ.
+**Unknown:** that the exposure mask samples the depth at the right place (its uv is taken to
+match the colour's, as the composite's depth and colour do); darker or foggier scenes. Occlusion
+and Hi-Z from a stamped frame hide what lies behind a panel for one frame after it closes.
 
 ## Validation
 
