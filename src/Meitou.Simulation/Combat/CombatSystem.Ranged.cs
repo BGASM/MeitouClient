@@ -638,11 +638,9 @@ public sealed partial class CombatSystem : IProjectileSource
             D.NextBlow = 0;
             D.ReactTech = -1;
         }
+        // Only a heavy bolt staggers (engine choice: the original's reaction to a bolt was not traced).
         else if (damage.Cut + damage.Blunt + damage.Pierce + damage.ExtraStun > DamageFormulas.StumbleThreshold(toughness, combat))
-        {
-            D.StunUntil = Math.Max(D.StunUntil, now + (int)MathF.Ceiling(CombatTuning.HeavyHitStun / world.TickSeconds));
-            D.HitHeavy = true;
-        }
+            Stagger(world, ref D, v, dc, true, now, (ulong)(uint)p.Id ^ 0x424F4C54UL);
         if (dc.Stats is { } vs && dc.Fighter is { } vf)
             xp.Combat(vs, dc.Race, XpEvent.HitTaken, vf.Unarmed, StatsEnumerated.None, p.ShooterSkill, StrengthFactor(dc, vf));
         bool shooterAlive = p.Shooter < prev.Length && prev[p.Shooter].Alive && prev[p.Shooter].Generation == p.ShooterGeneration;

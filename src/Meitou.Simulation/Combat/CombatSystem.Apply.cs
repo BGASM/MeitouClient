@@ -39,6 +39,7 @@ public sealed partial class CombatSystem
             outcome = HitOutcomes.Decide(reaction, progress, direction);
         }
 
+        A.LastOutcome = outcome;
         switch (outcome)
         {
             case BlowOutcome.Missed:
@@ -104,12 +105,7 @@ public sealed partial class CombatSystem
             D.NextBlow = 0;
             D.ReactTech = -1;
         }
-        else if (damage.Cut + damage.Blunt + damage.Pierce + damage.ExtraStun > DamageFormulas.StumbleThreshold(toughness, combat))
-        {
-            // A heavy hit ("Heavy_Hit" instead of "Light_Hit"): the target is helpless for a moment. It takes effect at the next Act, so the blows already thrown this tick still land.
-            D.StunUntil = Math.Max(D.StunUntil, now + (int)MathF.Ceiling(CombatTuning.HeavyHitStun / world.TickSeconds));
-            D.HitHeavy = true;
-        }
+        else Stagger(world, ref D, d, dc, damage.Cut + damage.Blunt + damage.Pierce + damage.ExtraStun > DamageFormulas.StumbleThreshold(toughness, combat), now, CombatRolls.BlowCounter(a, seq, blow, 0));
         GainCombatXp(ac, dc, XpEvent.HitDealt, XpEvent.HitTaken);
         // A killing by the player's squad is a murder against the victim's faction (engine choice of the event kind, docs/simulation.md "Combat").
         if (Crimes is { } crimes)
@@ -120,6 +116,31 @@ public sealed partial class CombatSystem
         }
         if (death && Relations is not null && ac.IsPlayer && !dc.IsPlayer) PlayerRelations.Event(world, Relations, dc.Faction, RelationEventKind.Murder);
         Record(now, a, d, blow, outcome, part, damage, knockout, death);
+    }
+
+    /// <summary>
+    /// A hit's reaction (<b>Verified</b>, FUN_1404391f0 / FUN_140665490, docs/game/combat.md "Hit reactions"): a stumble clip is picked unless the hit is light and one is
+    /// already playing; it is big when heavy and none was playing. A picked clip cancels the defender's own swing (that blow never lands) and its reaction, and holds it helpless
+    /// until the clip ends (the knockback is the clip's root motion). With no clip to play the swing is still cancelled, with a short pause. Takes effect at the next Act.
+    /// </summary>
+    void Stagger(World world, ref CombatSlot D, int d, CharacterCold dc, bool heavy, int now, ulong counter)
+    {
+        bool stumbling = D.StumbleClip >= 0 && now < D.StunUntil;
+        D.HitHeavy = heavy && !stumbling;
+        if (stumbling && !heavy) return;
+        D.AttackTech = -1;
+        D.NextBlow = 0;
+        D.ReactTech = -1;
+        string? part = D.HitPart >= 0 && D.HitPart < dc.Medical!.Parts.Count ? dc.Medical.Parts[D.HitPart].Template.StringId : null;
+        float roll = CombatRolls.Float(world.Seed, Rng.Key(world.Characters.IdOf(d)), CombatRoll.Stumble, counter);
+        if (part is not null && StumbleChooser?.Invoke(dc, part, D.HitHeavy, D.HitBehind ? 1 : 0, roll) is { } clip)
+        {
+            D.StumbleClip = clip.Clip;
+            D.StumbleStart = now;
+            D.StunUntil = now + Math.Max(1, (int)MathF.Ceiling(clip.Seconds / world.TickSeconds));
+            D.ReadyTick = Math.Max(D.ReadyTick, D.StunUntil);
+        }
+        else D.ReadyTick = Math.Max(D.ReadyTick, now + (int)MathF.Ceiling(CombatTuning.InterruptPause / world.TickSeconds));
     }
 
     /// <summary>The cover roll of one blow: a function of the defender, the blow and the armour piece.</summary>

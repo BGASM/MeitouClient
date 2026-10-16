@@ -126,6 +126,16 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     int CarriedClip { get; } = library.IndexOf(Carrying.CarrySystem.CarriedClip);
 
     int HeldClip(CharacterTask task) => task switch { CharacterTask.Treat => TreatingClip, CharacterTask.Rest => RestingClip, _ => -1 };
+    // The combat system asks this system for its hit reaction clips (it owns the stun, this system the clips).
+    readonly bool stumbleHook = Hook(combat, library, lengths);
+
+    static bool Hook(CombatSystem? combat, AnimationLibrary library, AnimationLengths lengths)
+    {
+        if (combat is null) return false;
+        combat.StumbleChooser = (cold, part, big, side, roll) => ChooseStumble(library, lengths, cold, part, big, side, roll);
+        return true;
+    }
+
     // The fall (a stand-in for the ragdoll) and getting up.
     readonly int fall = library.IndexOfAny("Dodge back fall"), getUp = library.IndexOf("standing up 3");
     // The crossbow clips (RANGED records, played by the combat system's timing).
@@ -188,7 +198,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             };
         }
         string? part = slot.HitPart >= 0 && cold.Medical is { } body && slot.HitPart < body.Parts.Count ? body.Parts[slot.HitPart].Template.StringId : null;
-        return new CombatView(technique, progress, slot.HitTick, slot.HitHeavy, slot.HitBehind, part);
+        return new CombatView(technique, progress, slot.HitTick, slot.HitHeavy, slot.HitBehind, part, slot.StumbleClip, slot.StumbleStart);
     }
 
     /// <summary>
@@ -250,31 +260,18 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         if (a.Rate == 0) a.Rate = cold.Appearance is { } look ? 2 - CharacterShape.MovementScaleOf(look) : 1;
         // Carrying picks the "carrying left" clips and a carried body the "being carried" ones (the ANIMATION booleans, docs/animation.md).
         bool carried = !cold.CarriedBy.IsNone;
-        var stance = new AnimationStance { Right = new HandHold(cold.DrawnWeapon), Combat = cold.InCombat, CarryingLeft = !cold.Carrying.IsNone, BeingCarried = carried };
-        bool down = false;
-        if (cold.Medical is { } body)
-        {
-            // Leg health in per cent weighs the limp clips; a knocked-out or dead character falls and lies on the floor.
-            float left = 100, right = 100;
-            foreach (var part in body.Parts)
-            {
-                if (part.Template.Type != Meitou.Data.Gameplay.Bodies.BodyPartType.Leg) continue;
-                if (part.Template.Side == Meitou.Data.Gameplay.Bodies.BodySide.Left) left = MathF.Min(left, part.Fraction * 100);
-                else right = MathF.Min(right, part.Fraction * 100);
-            }
-            stance = stance with { LeftLeg = left, RightLeg = right };
-            down = body.Incapacitated;
-        }
+        var stance = StanceOf(cold);
+        bool down = cold.Medical is { Incapacitated: true };
 
         if (down && !a.WasDown && !carried) StartAction(a, fall, false);
         if (carried) a.Action = -1;   // held on the shoulder: no falling or getting up
         else if (!down && a.WasDown) StartAction(a, getUp, false);
         a.WasDown = down;
-        if (!down && fight.HitTick > a.SeenHit)
+        // The hit reaction the combat system picked (it holds the character helpless for the clip's length; see ChooseStumble).
+        if (!down && fight.StumbleClip >= 0 && fight.StumbleStart > a.SeenHit)
         {
-            a.SeenHit = fight.HitTick;
-            Stumble(a, fight, stance, seed, key, tick, upper);
-            upper.Clear();
+            a.SeenHit = fight.StumbleStart;
+            StartAction(a, fight.StumbleClip, true);
         }
         int technique = down ? -1 : fight.Technique;
         bool fullTechnique = technique >= 0 && Library.Definitions[technique].Area == AnimationArea.All;
@@ -516,25 +513,43 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     }
 
     /// <summary>
-    /// The hit reaction for a hit (docs/animation.md "Hit reactions", <b>Verified</b>): none unless the hit is heavy or no reaction is playing; else one of
-    /// the hit part's stumbles with <c>big stumble</c> = heavy and free and <c>stumble from</c> = the side, drawn by weight.
+    /// The hit reaction clip of a hit, for <see cref="CombatSystem.StumbleChooser"/> (docs/animation.md "Hit reactions", <b>Verified</b>; whether one is wanted at all, and
+    /// how big, the combat system decides): one of the hit part's stumbles with that <c>big stumble</c> and <c>stumble from</c> = the side, drawn by weight with
+    /// <paramref name="roll"/>; with its length in seconds at its play speed. Null when none fits.
     /// </summary>
-    void Stumble(CharacterAnimation a, in CombatView fight, in AnimationStance stance, ulong seed, ulong key, long tick, List<(int Index, float Weight)> scratch)
+    static (int Clip, float Seconds)? ChooseStumble(AnimationLibrary library, AnimationLengths lengths, CharacterCold cold, string part, bool big, int side, float roll)
     {
-        bool free = !(a.Action >= 0 && a.ActionIsStumble);
-        if (fight.HitPart is not { } part || !fight.HitHeavy && !free) return;
-        scratch.Clear();
-        Library.Stumbles(part, fight.HitHeavy && free, fight.HitBehind ? 1 : 0, stance, a.ActionIsStumble ? a.Action : -1, scratch);
-        if (scratch.Count == 0) return;
+        if (library.Animal(cold.RecordId) is not null) return null;
+        var candidates = new List<(int Index, float Weight)>();
+        int playing = cold.Animation is { ActionIsStumble: true, Action: >= 0 } an ? an.Action : -1;
+        library.Stumbles(part, big, side, StanceOf(cold), playing, candidates);
+        if (candidates.Count == 0) return null;
         float total = 0;
-        foreach (var (_, w) in scratch) total += w;
-        float pick = Rng.Float(Rng.Hash(seed, key, RngPurpose.Animation, (ulong)tick ^ 0x5354554D424CUL)) * total;
-        int chosen = scratch[^1].Index;
-        foreach (var (index, w) in scratch)
+        foreach (var (_, w) in candidates) total += w;
+        float pick = roll * total;
+        int chosen = candidates[^1].Index;
+        foreach (var (index, w) in candidates)
         {
             if ((pick -= w) < 0) { chosen = index; break; }
         }
-        StartAction(a, chosen, true);
+        var d = library.Definitions[chosen];
+        float seconds = lengths.Of(d.Clip) / (d.PlaySpeed > 0 ? d.PlaySpeed : 1);
+        return seconds > 0 ? (chosen, seconds) : null;
+    }
+
+    /// <summary>What a character holds and does, as the clips' conditions read it; leg health in per cent weighs the limp clips.</summary>
+    static AnimationStance StanceOf(CharacterCold cold)
+    {
+        var stance = new AnimationStance { Right = new HandHold(cold.DrawnWeapon), Combat = cold.InCombat, CarryingLeft = !cold.Carrying.IsNone, BeingCarried = !cold.CarriedBy.IsNone };
+        if (cold.Medical is not { } body) return stance;
+        float left = 100, right = 100;
+        foreach (var part in body.Parts)
+        {
+            if (part.Template.Type != Meitou.Data.Gameplay.Bodies.BodyPartType.Leg) continue;
+            if (part.Template.Side == Meitou.Data.Gameplay.Bodies.BodySide.Left) left = MathF.Min(left, part.Fraction * 100);
+            else right = MathF.Min(right, part.Fraction * 100);
+        }
+        return stance with { LeftLeg = left, RightLeg = right };
     }
 
     /// <summary>Starts a one-shot clip from its first frame (nothing when the data has no such clip).</summary>
@@ -614,9 +629,9 @@ public interface IAnimationSource
 
 /// <summary>
 /// The combat state the animation follows: the technique playing (library index, -1 none) and its progress (0 to 1), and the last hit taken (tick, -1
-/// none; heavy, from behind, the body part's LOCATIONAL_DAMAGE string id).
+/// none; heavy, from behind, the body part's LOCATIONAL_DAMAGE string id), and the hit reaction clip the combat system started (library index, -1 none) and its tick.
 /// </summary>
-public readonly record struct CombatView(int Technique, float Progress, int HitTick, bool HitHeavy, bool HitBehind, string? HitPart)
+public readonly record struct CombatView(int Technique, float Progress, int HitTick, bool HitHeavy, bool HitBehind, string? HitPart, int StumbleClip = -1, int StumbleStart = -1)
 {
     public static readonly CombatView None = new(-1, 0, -1, false, false, null);
 }

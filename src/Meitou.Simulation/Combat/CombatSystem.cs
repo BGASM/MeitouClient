@@ -54,6 +54,11 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
     public FactionRelations? Relations { get; set; }
     /// <summary>The crime system the player's assaults, killings and hits on the police are reported to (null: no crimes).</summary>
     public Crime.CrimeSystem? Crimes { get; set; }
+    /// <summary>
+    /// Picks the hit reaction clip of a hit (set by the animation system, which owns the clips): the defender, the hit part's LOCATIONAL_DAMAGE id, big stumble, the side
+    /// (0 front, 1 rear) and a roll in [0, 1); returns the clip (an animation library index) and its length in seconds, or null when none fits. Null: hits play no clip.
+    /// </summary>
+    public Func<CharacterCold, string, bool, int, float, (int Clip, float Seconds)?>? StumbleChooser { get; set; }
     public IReadOnlyList<CombatTechnique> Techniques => techniques;
 
     /// <summary>The resolved blows so far (when <see cref="CombatOptions.RecordLog"/> is on).</summary>

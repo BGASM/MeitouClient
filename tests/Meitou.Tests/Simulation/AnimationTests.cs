@@ -105,9 +105,9 @@ public class AnimationTests
         Assert.Equal(0.4f, layers.Single(l => l.Name == "Cut left").Time, 3);
         Assert.DoesNotContain(layers, l => l.Name == "stand 1" && l.Weight > 0.01f);
         Assert.True(forward.Y > 0, $"the cut moved the character {forward}");
-        // A heavy hit to the chest from the front: "mid blow" plays from its start and pushes the character back.
+        // A heavy hit to the chest from the front, for which the combat system picked "mid blow": it plays from its start and pushes the character back.
         var back = Vector2.Zero;
-        for (int i = 0; i < 15; i++) back += system.Update(a, cold, 0, dt, 1, 1, 30 + i, combatView: CombatView.None with { HitTick = 29, HitHeavy = true, HitPart = "chest" });
+        for (int i = 0; i < 15; i++) back += system.Update(a, cold, 0, dt, 1, 1, 30 + i, combatView: CombatView.None with { HitTick = 29, HitHeavy = true, HitPart = "chest", StumbleClip = lib.IndexOfAny("mid blow"), StumbleStart = 29 });
         Assert.Equal(lib.IndexOfAny("mid blow"), a.Action);
         Assert.Equal(0.5f, a.ActionTime, 3);
         Assert.True(back.Y < 0, $"the hit moved the character {back}");

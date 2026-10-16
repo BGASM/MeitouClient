@@ -1,12 +1,17 @@
 namespace Meitou.Simulation.Combat;
 
-/// <summary>Engine choices of the duel loop where the research stops (each is labelled <b>Unknown</b> in docs/simulation.md "Combat").</summary>
+/// <summary>Timing constants of the duel loop: the verified ones say so, the rest are engine choices where the research stops (docs/simulation.md "Combat").</summary>
 public static class CombatTuning
 {
-    /// <summary>Seconds a fighter waits before an attack after being ordered, and between attacks (a uniform draw between the two).</summary>
+    /// <summary>Seconds a fighter waits before its first attack after being ordered (a uniform draw between the two; engine choice).</summary>
     public const float PauseMin = 0.15f, PauseMax = 0.6f;
-    /// <summary>Seconds a heavy hit (a damage sum above the stumble threshold) staggers its target; a light hit does not.</summary>
-    public const float HeavyHitStun = 0.5f;
+    /// <summary>
+    /// Seconds a fighter waits after its attack by how its last blow ended (<b>Verified</b>, FUN_14060a2f0, docs/game/combat.md "Pacing"): 0.6 after a hit, 0.3 blocked,
+    /// 0.2 dodged; a miss (not in the original's list) waits as a dodge (engine choice). A hit that finds no reaction clip still cancels the swing and waits <see cref="InterruptPause"/>.
+    /// </summary>
+    public const float HitPause = 0.6f, BlockedPause = 0.3f, DodgedPause = 0.2f, MissedPause = 0.2f, InterruptPause = 0.2f;
+    /// <summary>Seconds between a staggered fighter's chances to break out of its hit reaction into a block (<b>Verified</b>, the original's +0x124).</summary>
+    public const float BreakOutSeconds = 1.2f;
     /// <summary>How far (world units) a defender looks for blows coming at it.</summary>
     public const float ReactionScanRadius = 60;
     /// <summary>A blow lands if the gap between the two bodies is still within the reach it started with plus this slack; else it misses.</summary>

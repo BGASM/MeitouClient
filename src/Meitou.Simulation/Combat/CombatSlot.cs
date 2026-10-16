@@ -24,7 +24,7 @@ public struct CombatSlot
     public int ReactTech, ReactStart, ReactTicks;
     /// <summary>The last blow the character made a reaction decision about (attacker slot, attack number, blow), so each blow is decided once.</summary>
     public int ReactedSlot, ReactedSeq, ReactedBlow;
-    /// <summary>The earliest tick a new attack may start, and the tick until which a heavy hit holds the character helpless.</summary>
+    /// <summary>The earliest tick a new attack may start, and the tick until which a hit reaction holds the character helpless.</summary>
     public int ReadyTick, StunUntil;
     /// <summary>Knocked out or dead (a copy of <c>MedicalState.Incapacitated</c> that other characters can read).</summary>
     public bool Down;
@@ -33,6 +33,10 @@ public struct CombatSlot
     /// <summary>The last hit taken, for the hit reaction clip: its tick (-1: none yet), the body part (index into the medical state's parts), whether it was heavy (above the stumble threshold) and came from behind.</summary>
     public int HitTick, HitPart;
     public bool HitHeavy, HitBehind;
+    /// <summary>The hit reaction the last interrupting hit started (an animation library index, -1: none) and its tick; it holds the character helpless until <see cref="StunUntil"/>.</summary>
+    public int StumbleClip, StumbleStart;
+    /// <summary>How the last blow of the character's own attack ended (<see cref="BlowOutcome"/>), which sets the pause after the attack.</summary>
+    public BlowOutcome LastOutcome;
 
     // The ranged controller (docs/simulation.md "Combat", ranged; the original keeps it at Character +0x2f0). All zero for a character that never used a crossbow.
     /// <summary>Fighting with the crossbow rather than the melee weapon; the controller's state (<see cref="RangedStates"/>).</summary>
@@ -49,7 +53,7 @@ public struct CombatSlot
 
     public static CombatSlot Fresh(int generation) => new()
     {
-        Generation = generation, TargetSlot = -1, TargetGeneration = 0, AttackTech = -1, ReactTech = -1, ReactedSlot = -1, ReactedSeq = -1, HitTick = -1, HitPart = -1,
+        Generation = generation, TargetSlot = -1, TargetGeneration = 0, AttackTech = -1, ReactTech = -1, ReactedSlot = -1, ReactedSeq = -1, HitTick = -1, HitPart = -1, StumbleClip = -1,
     };
 
     public readonly bool Fighting => TargetSlot >= 0;
@@ -87,6 +91,9 @@ public struct CombatSlot
         h.Add(HitPart);
         h.Add(HitHeavy);
         h.Add(HitBehind);
+        h.Add(StumbleClip);
+        h.Add(StumbleStart);
+        h.Add((int)LastOutcome);
         // The ranged controller goes in only once it has been used, so worlds without crossbows hash as they did before it existed.
         if (!RangedUsed) return;
         h.Add(Ranged);

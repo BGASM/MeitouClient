@@ -31,9 +31,9 @@ public sealed class PursuitSystem(CombatSystem combat) : ITickSystem
             // A crossbowman walks only while closing in (out of range or the line of fire blocked); aiming and reloading it stands.
             bool shooting = st.Ranged && st.RangedState != (byte)RangedStates.Closing;
             bool holding = Orders.Has(table.Cold(i), CharacterOrders.Hold);
-            if (st.Down || st.AttackTech >= 0 || st.ReactTech >= 0 || shooting || !st.Ranged && gap <= CombatTuning.CloseInGap || holding)
+            if (st.Down || st.AttackTech >= 0 || st.ReactTech >= 0 || world.Tick < st.StunUntil || shooting || !st.Ranged && gap <= CombatTuning.CloseInGap || holding)
             {
-                // In reach or mid-swing, or holding position: stand and fight.
+                // In reach, mid-swing or staggered (the hit reaction carries it), or holding position: stand and fight.
                 if ((n.Flags & Path) != 0)
                 {
                     n.Flags = (ushort)(n.Flags & ~Path);

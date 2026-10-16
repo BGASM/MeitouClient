@@ -15,6 +15,11 @@ original lower/upper/whole-body layering and additive/average semantics; do not 
 clip as a whole-body override. Advance one-shots through fades; loop durations and root tracks
 must agree with movement. Missing clips/lengths use explicit fallback, not original-parity claims.
 
+Hit reactions: the six ANIMATION records with `stumbles` all relocate; their `Bip01` track is the knockback
+(**Observed**, root displacement of the base-game clips in world units): `mid blow light` 1.13 s ~10 back,
+`mid blow` 4.63 s peak 18 back (~45%) ending 4 back, `back blow light` 0.67 s ~0, `back blow low` 1.47 s 17.7
+forward, `mid blow drop` 6.57 s ~4 back, `back blow high` has no clip. When they play: [combat.md](game/combat.md#hit-reactions).
+
 ### Choosing candidates (`@ 14051d660`)
 
 Verified (decompilation). Every selection (movement blend, idles, stumbles) runs the same filter over a list

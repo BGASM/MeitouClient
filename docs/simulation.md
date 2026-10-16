@@ -152,6 +152,11 @@ does not grant worn bonuses. Race restrictions, swaps and prosthetic changes rem
 block/dodge, armour and per-part damage, stun/KO/death, combat XP. Read previous combat state;
 ordered effects apply hits. `TickMedical=false` with BodySystem, `SelfApproach=false` with pursuit.
 Original formulas, constants and unresolved technique terms: [combat.md](game/combat.md).
+Hits, pauses and initiative follow combat.md "Hit reactions" / "Pacing"; the combat system picks the stumble
+clip (through the animation system's chooser) and holds the fighter for its length. Engine choices: a miss waits
+0.2 s; the first attack after an order waits 0.15–0.6 s; the initiative roll is drawn per pair and tick so both
+sides agree, and the loser waits a tick to block the winner's swing; a target in its pause is simply attacked;
+no circling or attack slots yet; the block break-out ignores the 10% lower bound; only a heavy bolt staggers.
 
 ### Ranged
 

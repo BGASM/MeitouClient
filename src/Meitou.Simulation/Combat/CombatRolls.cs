@@ -13,6 +13,10 @@ public enum CombatRoll : ulong
     Reaction = 4,
     /// <summary>Whether a piece of armour covers the part a blow hit.</summary>
     Cover = 5,
+    /// <summary>Which hit reaction clip a hit plays (counter: the attacker, its attack number and the blow).</summary>
+    Stumble = 6,
+    /// <summary>Who swings first when two fighters are ready at each other on the same tick (keyed by the pair, so both sides draw the same number).</summary>
+    Initiative = 7,
 }
 
 /// <summary>
