@@ -132,12 +132,15 @@ verb 25 "First Aid" (pointer mode 1 `med`, section 7; Meitou's context menu also
 
 **Observed** (decompile): a ground move order shows an entity of `position.mesh` (a downward cone over a flat ring, 0.29 × 1.56 units)
 scaled 8 on its scene node, at the ray's ground point (the terrain-click handler FUN_140800250, show FUN_1407f2660). Built in FUN_1407f9530:
-a clone of a generated flat-colour material named `movemarker`, pass 0 alpha blended. Each frame FUN_1407f92d0 sets the fragment constant
+a clone (`movemarker`) of `debug_marker`, pass 0 set to alpha blending (`setSceneBlending(0)`, SBT_TRANSPARENT_ALPHA). Each frame FUN_1407f92d0 sets the fragment constant
 `colour` of pass 0 to (0.612, 0.694, 0.529, t) and of pass 1 to (0.306, 0.347, 0.2645, 0.6 t), then lowers t (1 at the click) by the scaled
 frame time `DAT_142133794` ([game-loop.md](game-loop.md#the-three-time-values): 1 s of game time, 0.01 a frame at speed 0) and hides it at
 t ≤ 0. Shown only with `Movement marker` ([settings.md](../formats/settings.md); global `DAT_142133511`, `Rotation marker` is `DAT_142133510`).
-Meitou draws pass 0's front faces through the HUD overlay without depth test (`PlayerInterface.MoveMarker.cs`), on every ground move and
-steering order, always on (settings.cfg is not read yet).
+**Verified** against `data/materials/debug.material` and `materials/forward/basic.program` / `basic.hlsl`: `debug_marker` pass 0 is
+`depth_func less_equal`, pass 1 `depth_write off`, `depth_func greater`, `alpha_blend` (the part behind the scene); both `Basic_Lit_VP`
+(`NORMALS`: `rgb *= saturate(N·sun) * contrast + 1 - contrast`, contrast 0.5) and `Basic_FP` (`colour × vertex colour`).
+Meitou (`MoveMarkerRenderer`) draws both passes after the tone map, so the colours show as given whatever the exposure, sorting fragments by
+the near slice's scene depth; on every ground move and steering order, always on (settings.cfg is not read yet).
 
 ## Unknowns
 
@@ -147,7 +150,7 @@ steering order, always on (settings.cfg is not read yet).
 - Which window event 7 toggles (taken to be Tutorials); targets of events 1 and 2 inferred from the action names.
 - Meaning of the target kinds 8 and 0x16 that shortcut the 0.2 s context-menu hold test.
 - Press versus release timing of the command button, and the exact rotation marker condition.
-- The movement marker's pass 1 (depth state; likely the occluded part) and whether a held, steering right click shows it again each order.
+- Whether a held, steering right click shows it again each order.
 - Conditions inside FUN_140917120 (which windows count as closable) and the meaning of the held/edge flags.
 - Box select handling of non-player squads and animals.
 - Whether the controls loader accepts every composed name the formatter writes (`Alt+`, `Key_<n>`) when reading

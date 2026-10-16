@@ -111,7 +111,7 @@ sealed partial class PlayerInterface
             }
         }
 
-        DrawMarker(o);
+        FadeMarker();
 
         // The box.
         if (dragging && dragFrom is { } from)

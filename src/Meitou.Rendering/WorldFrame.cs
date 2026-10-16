@@ -588,6 +588,8 @@ static class WorldFrame
         public readonly List<FogVolumes.EffectFog> EffectFogs = [];
         /// <summary>The weather's particle effects (null while there are none: a clear weather, or <c>--no-particles</c>); <see cref="EnsureParticles"/> makes it.</summary>
         public ParticleRenderer? Particles;
+        /// <summary>The movement marker the game interface shows after a ground move order (null in the viewer, or without <c>position.mesh</c>).</summary>
+        public MoveMarkerRenderer? MoveMarker;
         /// <summary>The Tab panel's weather particles at 0 and its particle density, given to <see cref="Particles"/> every frame (it is made only with the first weather).</summary>
         public bool WeatherParticles = true;
         public float ParticleDensity = 1;
@@ -640,6 +642,7 @@ static class WorldFrame
             Characters?.Dispose();
             Objects?.Dispose();
             Particles?.Dispose();
+            MoveMarker?.Dispose();
             Water?.Dispose();
             Surfaces?.Dispose();
             Reflection?.Dispose();
@@ -1395,6 +1398,12 @@ static class WorldFrame
         post.MarkParticles();
         if (gpu.Post is { } coverageTarget) coverageTarget.Particles = gpu.Particles;
         gpu.Post?.End(); // SSAO, upscaler, exposure, tone map, FXAA into gpu.Post.Target
+        // The movement marker over the finished picture, in the material's own colours, sorted against the near slice's depth like the game's debug_marker.
+        if (gpu.MoveMarker is { Strength: > 0 } marker && particleNear > 0 && gpu.Post is { Target: { } picture } markerPost)
+        {
+            var (markerNear, markerFar) = camera.Slices().Last();
+            marker.Record(picture, width, height, markerPost.SceneDepth, markerPost.RenderWidth, markerPost.RenderHeight, view * camera.Projection(aspect, markerNear, markerFar), eye, sun);
+        }
         if (gpu.DebugShadows > 0 && gpu.Shadow is not null)
         {
             var (nearestNear, nearestFar) = camera.Slices().Last();
