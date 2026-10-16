@@ -70,8 +70,13 @@ public sealed partial class CarrySystem
     {
         var table = world.Characters;
         if (!table.TryResolveNext(order.Target, out int target) || !CanBeKnockedOut(table.Cold(target)!)) return;
-        if (Nearest(table, Who(world, order.Attackers), target, s => s != target && CanKnockOut(table.Cold(s)!)) is int attacker)
-            Begin(table, attacker, order.Target, CharacterTask.StealthKo, CharacterTask.Idle);
+        // The first that can go, in the order given (the selection's order), so the chance the interface showed is the one rolled.
+        foreach (var id in Who(world, order.Attackers))
+            if (table.TryResolveNext(id, out int attacker) && attacker != target && CanKnockOut(table.Cold(attacker)!))
+            {
+                Begin(table, attacker, order.Target, CharacterTask.StealthKo, CharacterTask.Idle);
+                return;
+            }
     }
 
     /// <summary>The point behind the target the attacker creeps to.</summary>
