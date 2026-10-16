@@ -14,12 +14,15 @@ import Base from '../layouts/Base.astro';
 </Base>
 
 <style>
-  /* Fills the first view below the header (156px), stack at the top left. */
-  .hero { display: flex; align-items: flex-start; min-height: calc(100svh - 156px); padding: 16px 0 calc(var(--edge) + 24px); }
+  /* Fills the first view, stack at the top left in place of the wordmark. */
+  .hero { display: flex; align-items: flex-start; min-height: 100svh; padding: var(--edge) 0; }
   .stack { min-width: 0; }
-  h1 { margin: 0 0 var(--space-6); color: var(--paper-light); text-shadow: 0 2px 12px rgba(8, 6, 5, .6); white-space: nowrap; font: 600 clamp(32px, 6vw, 52px)/1.1 var(--font-exo); }
+  h1 { margin: 0 0 var(--space-6); color: #fff; text-shadow: 0 2px 12px rgba(8, 6, 5, .6); white-space: nowrap; font: 600 clamp(32px, 6vw, 52px)/1.1 var(--font-exo); }
   .lede { max-width: 620px; margin: 0; font-size: 18px; line-height: 27px; text-shadow: 0 1px 8px rgba(8, 6, 5, .8); }
-  /* The name set like the header wordmark: Meitou semibold, Client regular. */
+  /* The name set like the wordmark: white, Meitou semibold, Client regular. */
+  .name { color: #fff; }
   .name > span { font-weight: 400; }
+  /* Narrow screens: drop the stack below the links at the top right. */
+  @media (max-width: 900px) { .hero { padding-top: calc(var(--edge) + 48px); } }
   @media (max-width: 640px) { h1 { white-space: normal; } }
 </style>
