@@ -78,7 +78,8 @@ public sealed partial class CombatSystem
         var events = hitEvents;   // Apply is serial, so one list serves every hit
         events.Clear();
         var cover = new CoverRoll(world.Seed, Rng.Key(table.IdOf(d)), a, seq, blow);
-        var (part, damage) = HitResolver.Land(dc.Medical, ctx, packet, target.Armour, cover, toughness, tech.LowStrike, direction == 6, combat, events);
+        var (part, damage, absorbed) = HitResolver.LandDetailed(dc.Medical, ctx, packet, target.Armour, cover, toughness, tech.LowStrike, direction == 6, combat, events);
+        FloatHit(world, d, dc, ac.IsPlayer, part, damage, absorbed);
 
         A.Landed++;
         D.Taken++;
@@ -174,6 +175,13 @@ public sealed partial class CombatSystem
     float StrengthFactor(CharacterCold c, Fighter f) => f.Unarmed
         ? 1 - f.EncumbranceFactor
         : xp.WeaponWeightStrengthFactor(f.Weapon!.Stats.Weight, c.Stats![StatsEnumerated.Strength], c.Medical!.StatMultiplier(StatsEnumerated.Strength));
+
+    /// <summary>Queues the damage floater of a landed hit when the host shows them (<see cref="World.Floaters"/>).</summary>
+    void FloatHit(World world, int d, CharacterCold dc, bool sourceIsPlayer, int part, in HitDamage damage, in ArmourAbsorbed absorbed)
+    {
+        if (world.Floaters is not { } queue || part < 0) return;
+        queue.Enqueue(Floater.Hit(world.Characters.IdOf(d), world.Characters.Previous[d].Position, dc.IsPlayer, sourceIsPlayer, dc.Medical!.Parts[part].Template.Name, damage, absorbed));
+    }
 
     void Record(int now, int a, int d, int blow, BlowOutcome outcome, int part, in HitDamage damage, bool knockout, bool death)
     {

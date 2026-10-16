@@ -34,6 +34,7 @@ sealed partial class PlayerInterface
     /// <summary>Drops the transient state of the mouse (a drag box, a steering right click): the world it belonged to is gone.</summary>
     public void Reset()
     {
+        floaters.Clear();
         dragFrom = null;
         dragging = false;
         steering = false;
@@ -112,6 +113,7 @@ sealed partial class PlayerInterface
         }
 
         DrawStealth(o);
+        DrawFloaters(o);
         FadeMarker();
 
         // The box.
