@@ -215,7 +215,7 @@ decompile unless marked; Meitou's adapter is `PlayerInterface.Map.cs`.
   `meitou-nest:<wild site>:<TOWN id>` and reads them back; the place is filled in when the nest next loads.
 - **Discovery** (`14092f6b0`): a character within 400 units (XZ) sets `discovered` and `explored` (that it is a player character's is **Observed**);
   else, not yet discovered, within 8500 (17000 for type Town, halved for Nest and Ruins) sets `discovered` with the message "Discovered {1}", none for
-  nests. Meitou checks with the population's zone refresh (every 15 ticks), a camp only after its nest has loaded; flags per placed town
+  nests. Meitou skips types 8 and 10 (whether the original does is **Unknown**) and checks with the population's zone refresh (every 15 ticks), a camp only after its nest has loaded; flags per placed town
   (`PlayerState.Towns`) and per camp (`PlayerState.Camps`), read and written as the GAMESTATE_TOWN bools.
 - **Map items** (MAP_ITEM: `towns` with v0 = how many of that TOWN, 0 all, v1 = weight; `unlock count`, 0 all): only by right-clicking the item in a
   player character's inventory (`140714a20` → `14075f550`). Candidates per link: the placed towns of that record (not types 0, 8, 10) not yet

@@ -119,6 +119,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
             var at = new Vector2(prev[i].Position.X, prev[i].Position.Z);
             foreach (var site in data.Sites)
             {
+                if (site.Town.Type is TownType.NestMarker or TownType.Null) continue;   // never on the map
                 float d2 = Vector2.DistanceSquared(at, new(site.Position.X, site.Position.Z)), far = DiscoverRangeOf(site.Town.Type);
                 if (d2 <= ExploreRange * ExploreRange) player.Know(site.Index, TownKnowledge.Discovered | TownKnowledge.Explored);
                 else if (d2 <= far * far && player.Know(site.Index, TownKnowledge.Discovered) && site.Town.Type != TownType.Nest) world.Post($"Discovered {site.Town.Name}");
@@ -134,9 +135,9 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
                 player.KnowCamp(new CampView(w, nest.Id, nest.Name, faction?.Id ?? nest.Faction ?? "", faction?.NotReal ?? false, new Vector3(centre.X, 0, centre.Y), flags), flags);
             }
         }
-        // A camp known from a save gets its place once its nest has loaded.
+        // A camp known from a save gets its place once its nest has loaded (never when the wild layout gives that site another nest).
         foreach (var camp in player.Camps)
-            if (camp.Position is null && camp.Site >= 0 && camp.Site < wildCentres.Length && wildCentres[camp.Site] is { } c)
+            if (camp.Position is null && camp.Site >= 0 && camp.Site < wildCentres.Length && WildSites[camp.Site].Nest?.Id == camp.TownId && wildCentres[camp.Site] is { } c)
                 player.KnowCamp(camp with { Position = new Vector3(c.X, 0, c.Y) }, TownKnowledge.None);
     }
 

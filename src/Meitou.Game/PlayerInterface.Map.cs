@@ -168,7 +168,7 @@ sealed partial class PlayerInterface
         {
             bool nest = type == TownType.Nest, recent = (known & TownKnowledge.Recent) != 0, explored = (known & TownKnowledge.Explored) != 0;
             if (nest && !PlayerNear(position)) return;
-            int least = nest || type == TownType.PointOfInterest ? 2 : recent || type == TownType.Town ? 0 : 1;
+            int least = nest ? 2 : recent || type == TownType.Town ? 0 : type == TownType.PointOfInterest ? 2 : 1;
             if (level < least) return;
             var faction = MapFactionOf?.Invoke(factionId);
             string group = type switch
