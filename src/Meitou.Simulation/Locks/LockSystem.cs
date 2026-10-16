@@ -12,9 +12,10 @@ public sealed record GetOutOrder(IReadOnlyList<CharacterId> Characters) : SimCom
 
 /// <summary>
 /// The player's lock orders (docs/simulation.md "Arrest and jail"): picking a cage's lock (<see cref="Lockpicking.Step"/> once a tick while in reach, with its pending crime, rolls and
-/// XP) and getting out of a cage (<see cref="FixtureRegistry.GetOut"/>). Serial phases only; the picker's fixture is <see cref="CharacterCold.PickingLock"/>.
+/// XP) and getting out of a cage (<see cref="FixtureRegistry.GetOut"/>). Serial phases only; the picker's fixture is <see cref="CharacterCold.PickingLock"/>. The NPCs' rounds (releasing
+/// served prisoners, locking up at night, keeping cages locked) are in LockSystem.Rounds.cs.
 /// </summary>
-public sealed class LockSystem(GameConstants constants, BodyOptions options) : ITickSystem
+public sealed partial class LockSystem(GameConstants constants, BodyOptions options) : ITickSystem
 {
     /// <summary>A picker outside the cage works on it within the cage's <c>use range</c> plus this.</summary>
     public const float Reach = 15;
@@ -58,6 +59,7 @@ public sealed class LockSystem(GameConstants constants, BodyOptions options) : I
 
     public void SlowWorld(World world)
     {
+        Rounds(world);
         var table = world.Characters;
         var next = table.Next;
         for (int s = 0; s < table.HighWater; s++)

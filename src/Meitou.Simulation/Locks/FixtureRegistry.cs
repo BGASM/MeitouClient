@@ -17,7 +17,8 @@ namespace Meitou.Simulation.Locks;
 /// its hardness the parent's), doors at least 1, others at least 0, at most 100; locks start unlocked; the owner is the placement's <c>owner faction ID</c>, else the town's.</item>
 /// <item><b>Doors</b>: the squad's <c>initial door state</c> applies when its home is assigned (<see cref="ApplyInitialDoorState"/>). <see cref="Doors"/> hears a building as
 /// blocked for paths while every one of its doors is effectively locked and none broken (<b>engine choice</b>: the navmesh has one door state per building).</item>
-/// <item><b>Cages</b>: <see cref="FindCage"/> (the original's weights), <see cref="Imprison"/>, <see cref="Release"/>, <see cref="GetOut"/>; beds <see cref="EnterBed"/> / <see cref="LeaveBed"/>.</item>
+/// <item><b>Cages</b>: <see cref="FindCage"/> (the original's weights, cages a carrier cannot reach left out), <see cref="Imprison"/> (recorded in <see cref="CagingsOf"/> and <see cref="Caged"/>),
+/// <see cref="Release"/>, <see cref="GetOut"/>, <see cref="LiftOut"/>; beds <see cref="EnterBed"/> / <see cref="LeaveBed"/>.</item>
 /// </list>
 /// </summary>
 public sealed class FixtureRegistry
@@ -35,6 +36,11 @@ public sealed class FixtureRegistry
     readonly HashSet<int> sites = [];
     readonly HashSet<string> initialApplied = new(StringComparer.Ordinal);
     readonly Dictionary<string, GameRecord?> functions = new(StringComparer.Ordinal);
+    // (cage id, faction) -> the game hour until which a walk there is known to fail (engine: the "no path" memo of FindCage). Sorted, so it hashes in a fixed order.
+    readonly SortedDictionary<(string Cage, int Faction), double> unreachable = new(Comparer<(string Cage, int Faction)>.Create((a, b) =>
+        string.CompareOrdinal(a.Cage, b.Cage) is var c and not 0 ? c : a.Faction.CompareTo(b.Faction)));
+    readonly List<Imprisonment> cagings = [];
+    long cagingsTick = -1;
     IDoorGate? doors;
 
     public int Count => all.Count;
@@ -211,6 +217,63 @@ public sealed class FixtureRegistry
         if (any) doors.SetDoorsBlocked(building, blocked);
     }
 
+    /// <summary>The building is shut for paths: it has doors, every one effectively locked and none broken (the test <see cref="Doors"/> is told).</summary>
+    public bool IsShut(string building)
+    {
+        if (!byBuilding.TryGetValue(building, out var list)) return false;
+        bool any = false;
+        foreach (var d in list)
+        {
+            if (d.Kind != FixtureKind.Door) continue;
+            any = true;
+            if (d.DoorBroken || d.Lock is not { EffectivelyLocked: true }) return false;
+        }
+        return any;
+    }
+
+    /// <summary>The building has doors and all of them are locked (effectively or not; a broken one counts as open). Night rounds test this, not <see cref="IsShut"/>.</summary>
+    public bool AllDoorsLocked(string building)
+    {
+        if (!byBuilding.TryGetValue(building, out var list)) return false;
+        bool any = false;
+        foreach (var d in list)
+        {
+            if (d.Kind != FixtureKind.Door) continue;
+            any = true;
+            if (d.DoorBroken || d.Lock is not { Locked: true, Broken: false }) return false;
+        }
+        return any;
+    }
+
+    /// <summary>The faction that owns a building's doors (-1: no doors).</summary>
+    public int DoorOwner(string building)
+    {
+        if (byBuilding.TryGetValue(building, out var list))
+            foreach (var d in list) if (d.Kind == FixtureKind.Door) return d.Owner;
+        return -1;
+    }
+
+    /// <summary>
+    /// Locks or unlocks every door of a building at once (the end of the owner's lock/unlock tasks; their 3.3 s are the caller's); locking closes an open door first
+    /// (docs/game/locks.md "Doors"). False when the building has no doors.
+    /// </summary>
+    public bool SetDoorsLocked(string building, bool locked)
+    {
+        if (!byBuilding.TryGetValue(building, out var list)) return false;
+        bool any = false;
+        foreach (var d in list)
+        {
+            if (d.Kind != FixtureKind.Door || d.Lock is not { } l) continue;
+            any = true;
+            if (locked) { d.Motion = DoorMotion.Closed; d.OpenAmount = 0; }
+            l.Locked = locked;
+            l.PickTime = 0;
+            l.NextRoll = LockState.FirstRoll;
+        }
+        if (any) SyncDoors(building);
+        return any;
+    }
+
     // ------------------------------------------------------------------ cages and beds
 
     /// <summary>Whether nobody is in it: no occupant, or one that is gone or no longer held there.</summary>
@@ -220,7 +283,8 @@ public sealed class FixtureRegistry
     /// <summary>
     /// The cage a carrier of <paramref name="faction"/> at <paramref name="at"/> puts a captive in (the original's finder, economy.md 11.7, <b>Observed</b>): every free cage weighs
     /// clamp(1 - d^2 / 4608^2, 1e-5, 1), x100 when of the carrier's faction, x100 when in <paramref name="home"/> (a building instance id); the highest wins, the first registered on a
-    /// tie. The usability and police tests of the original are not modelled; <paramref name="skip"/> leaves out reserved cages. Null when none is free.
+    /// tie. The usability and police tests of the original are not modelled; <paramref name="skip"/> leaves out reserved cages, and <see cref="Reachable"/> the ones the carrier
+    /// cannot get to. Null when none is free.
     /// </summary>
     public Fixture? FindCage(World world, Vector3 at, int faction, string? home = null, Func<Fixture, bool>? skip = null)
     {
@@ -228,7 +292,7 @@ public sealed class FixtureRegistry
         float bestWeight = 0;
         foreach (var f in all)
         {
-            if (f.Kind != FixtureKind.Cage || !IsFree(world.Characters, f) || skip?.Invoke(f) == true) continue;
+            if (f.Kind != FixtureKind.Cage || !IsFree(world.Characters, f) || !Reachable(world, f, faction) || skip?.Invoke(f) == true) continue;
             float d2 = Vector2.DistanceSquared(new Vector2(at.X, at.Z), new Vector2(f.Position.X, f.Position.Z));
             float w = Math.Clamp(1 - d2 / (CageSearchScale * CageSearchScale), 1e-5f, 1);
             if (faction >= 0 && f.Owner == faction) w *= 100;
@@ -236,6 +300,26 @@ public sealed class FixtureRegistry
             if (w > bestWeight) (best, bestWeight) = (f, w);
         }
         return best;
+    }
+
+    /// <summary>
+    /// Whether a carrier of <paramref name="faction"/> can get to a fixture (<b>engine choice</b>; the original's finder tests are not decoded): not when its building is shut
+    /// (<see cref="IsShut"/>) and its doors are another faction's (an owner may unlock its own on the way), and not while a walk of that faction there is known to fail
+    /// (<see cref="MarkUnreachable"/>: no path query may run inside a tick, so a failed walk stands in for one).
+    /// </summary>
+    public bool Reachable(World world, Fixture f, int faction)
+    {
+        if (IsShut(f.Building) && DoorOwner(f.Building) != faction) return false;
+        return unreachable.Count == 0 || !unreachable.TryGetValue((f.Id, faction), out double until) || until <= world.GameHours;
+    }
+
+    /// <summary>Walks of <paramref name="faction"/> to the fixture keep failing: <see cref="Reachable"/> is false for <paramref name="hours"/> game hours (engine choice). Serial phases only.</summary>
+    public void MarkUnreachable(World world, Fixture f, int faction, double hours = 24)
+    {
+        List<(string, int)>? expired = null;
+        foreach (var (key, until) in unreachable) if (until <= world.GameHours) (expired ??= []).Add(key);
+        if (expired is not null) foreach (var key in expired) unreachable.Remove(key);
+        unreachable[(f.Id, faction)] = world.GameHours + hours;
     }
 
     /// <summary>The nearest free bed within <paramref name="range"/> of a building owned by <paramref name="faction"/> (any owner when negative). <b>Engine choice</b>: the original's bed search is Unknown.</summary>
@@ -262,9 +346,10 @@ public sealed class FixtureRegistry
     /// <summary>
     /// Puts a character in a free cage (the original's enter, locks.md "Cages and beds"): imprisoned state, held at the cage's position and facing, orders and path dropped, the cage
     /// locked. A captive with a bounty for the cage owner's faction gets a sentence from now (<see cref="SentenceHours"/>); one without gets none (served at once, the engine reading of
-    /// economy.md 11.5). The caller lets go of a carried captive first. False when the cage is taken or the character is held, carried or carrying.
+    /// economy.md 11.5). The caller lets go of a carried captive first and names it as <paramref name="carrier"/> (None: put in by the system). False when the cage is taken or the
+    /// character is held, carried or carrying. Every caging is kept for its tick (<see cref="CagingsOf"/>) and raised as <see cref="Caged"/>: the hook of the bounty claim.
     /// </summary>
-    public bool Imprison(World world, CharacterId prisoner, Fixture cage, float prisonTime = 1)
+    public bool Imprison(World world, CharacterId prisoner, Fixture cage, float prisonTime = 1, CharacterId? carrier = null)
     {
         var table = world.Characters;
         if (cage.Kind != FixtureKind.Cage || !IsFree(table, cage) || !table.TryResolveNext(prisoner, out int s)) return false;
@@ -286,6 +371,39 @@ public sealed class FixtureRegistry
             c.SentenceStart = 0;
             c.SentenceLength = 0;
         }
+        if (cagingsTick != world.Tick) { cagings.Clear(); cagingsTick = world.Tick; }
+        var caging = new Imprisonment(world.Tick, carrier ?? CharacterId.None, prisoner, cage);
+        cagings.Add(caging);
+        Caged?.Invoke(world, caging);
+        return true;
+    }
+
+    /// <summary>The cagings of tick <paramref name="tick"/> (only the latest tick's are kept: a system placed after the caging one reads them in the same tick, as <see cref="CrimeSystem.BookingsOf"/>).</summary>
+    public IReadOnlyList<Imprisonment> CagingsOf(long tick) => cagingsTick == tick ? cagings : [];
+
+    /// <summary>Raised (serially) by every <see cref="Imprison"/> once the captive is held and its sentence set: where a captive's bounty is claimed (economy.md 11.4).</summary>
+    public event Action<World, Imprisonment>? Caged;
+
+    /// <summary>
+    /// The occupant of an unlocked cage is lifted out by the character in <paramref name="lifter"/> (locks.md "Cages and beds", <c>FUN_14034fbe0</c>, <b>Observed</b>): it is no longer held
+    /// (the carry link is the caller's). Out of the cage of another faction than the lifter's, the lifter gets a pending code 7 against the cage owner and the freed one a pending
+    /// Escaping Prison and the escaped flag. False when it is not imprisoned or its cage is effectively locked.
+    /// </summary>
+    public bool LiftOut(World world, CharacterId prisoner, int lifter, CrimeSystem? crimes = null)
+    {
+        var table = world.Characters;
+        if (!table.TryResolveNext(prisoner, out int s) || table.Cold(s) is not { IsImprisoned: true } c || table.Cold(lifter) is not { } lc) return false;
+        var cage = c.InWhat is { } id ? Find(id) : null;
+        if (cage?.Lock is { EffectivelyLocked: true }) return false;
+        bool foreign = cage is { Owner: >= 0 } && cage.Owner != lc.Faction;
+        if (foreign && crimes is not null)
+        {
+            crimes.SetPending(world, lifter, CrimeCode.Terrorism, cage!.Owner, prisoner, CrimeSystem.MinTimer);
+            crimes.SetPending(world, s, CrimeCode.EscapingPrison, cage.Owner, CharacterId.None, CrimeSystem.MinTimer);
+        }
+        if (cage is not null && cage.Occupant == prisoner) cage.Occupant = CharacterId.None;
+        Clear(c);
+        c.Escaped = foreign;
         return true;
     }
 
@@ -450,5 +568,11 @@ public sealed class FixtureRegistry
         h.Add(all.Count);
         foreach (var f in all) f.Hash(ref h);
         h.Add(initialApplied.Count);
+        if (unreachable.Count == 0) return;   // only once a walk failed, so worlds without one hash as before
+        h.Add(unreachable.Count);
+        foreach (var ((cage, faction), until) in unreachable) { h.Add(Rng.StableHash(cage)); h.Add(faction); h.Add(until); }
     }
 }
+
+/// <summary>One caging (<see cref="FixtureRegistry.Imprison"/>): who put whom in which cage, in which tick (<see cref="Carrier"/> None: the system did, or a caller that named nobody).</summary>
+public readonly record struct Imprisonment(long Tick, CharacterId Carrier, CharacterId Captive, Fixture Cage);

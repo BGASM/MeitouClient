@@ -39,6 +39,8 @@ internal static class SeedSalts
     public const ulong MemberLook = 1000;
     /// <summary>Counter base of the roll for the look of member n of the player's squad (n is added).</summary>
     public const ulong PlayerLook = 5000;
+    /// <summary>Counters (under <see cref="RngPurpose.Spawn"/>, keyed by the character's id) of a new NPC's bounty roll and its fuzz (<see cref="Crime.SpawnBounties"/>).</summary>
+    public const ulong BountyChance = 0xB0C7UL, BountyFuzz = 0xB0F2UL;
     /// <summary>The AI's patrol timer and route (<see cref="Ai.AiSystem"/>).</summary>
     public const ulong AiPatrol = 0x5041UL;
     /// <summary>A platoon's short-range patrol point off screen (<see cref="Ai.PlatoonJobs"/>).</summary>

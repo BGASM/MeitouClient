@@ -238,16 +238,19 @@ unload, hashed only once non-empty. Facts: [locks](game/locks.md), [economy 11.5
 - **Doors**: `AiSystem` applies the template's `initial door state` when it assigns a home (first squad, not to restored
   doors). `IDoorGate` (the game's `NavAdapter` -> `NavDoors`, reset on `ReplaceWorld`) closes a building for every path while
   all its doors are effectively locked and none broken (engine: one nav door state per building; closed-unlocked doors stay passable).
-- **Cages/beds**: `FindCage` (original weights), `Imprison` (state 2, `CharacterTable.Place` at the item's origin, cage
-  locked, sentence), `Release` (unlock, clear, erase the releaser's and jail's bounty entries for a booking releaser),
+- **Cages/beds**: `FindCage` (original weights; engine: skips a cage the carrier can't reach, `Reachable`: its building
+  shut by another faction's doors, or a walk of that faction there failed in the last 24 game hours, `MarkUnreachable`;
+  no path query runs in a tick), `Imprison` (state 2, `CharacterTable.Place` at the item's origin, cage
+  locked, sentence; optional carrier; every caging is in `CagingsOf(tick)` and the `Caged` event, the bounty-claim hook),
+  `LiftOut` (a `PickUpOrder` on the occupant of an unlocked cage, awake or down, engine; out of another faction's cage
+  the lifter gets a pending code 7 and the freed one Escaping Prison + `Escaped`), `Release` (unlock, clear, erase the releaser's and jail's bounty entries for a booking releaser),
   `GetOut` (refused while locked; Escaping Prison unless served), `EnterBed`/`LeaveBed` (a move order gets a sleeper up).
   `CharacterCold.InSomething`/`InWhat` name the fixture; an imprisoned character is skipped by AI, movement (held still),
   aggro, answering, `CombatSystem.Engage` as attacker (it can still be attacked) and carrying. Sentence: `SentenceStart`
   (`World.GameHours`) + `SentenceLength`; served when start + length <= now; no bounty with the cage owner: none (served).
 - **Lockpicking** (`Lockpicking`, serial; the player's order is in [Arrest and jail](#arrest-and-jail)): `Step` per task update (pending crime,
   timer on the lock, seeded roll by the lock's roll counter, XP), `Allowed` (min chance; engine: conscious, an arm, not
-  carried, not on a pole), `Break` (strength > 3 x hardness). Not built: shackles (item locks), cutting, the
-  owner's lock/unlock tasks, door motion.
+  carried, not on a pole), `Break` (strength > 3 x hardness). Not built: shackles (item locks), cutting, door motion.
 
 ## Arrest and jail
 
@@ -270,16 +273,41 @@ Arrests, the recognition meter and the marker are hashed only while set; none of
   (`CarrySystem.BeginPickUp`), `FindCage` from the guard (his squad's home building; other arrests' cages reserved), walk,
   and within `use range` + 15 (or a walk that ended within 200) `LetGo` + `Imprison` (`prison time` CONSTANTS). The fight
   stopping with the target up re-orders it within 800, else he gives up; no free cage: he drops the captive (engine).
-- **Release** (engine): every 30 ticks an awake player prisoner whose sentence is served is freed in the jail faction's name
-  (the nearest police-like NPC of it within 1500 is logged as releaser; none needed), which erases its and the jail's entries;
-  it walks off by itself. NPC prisoners are never released (their jailers' AI is not built).
+- **Release**: player and NPC prisoners alike are freed by the release rounds below.
+- **Rounds** (`LockSystem.Rounds.cs`, serial; a sweep every 30 ticks starts at most 4, at most 8 run; the worker is
+  `Engaged`; each lock takes the owner's 3.3 s): **release** (211): an awake prisoner whose sentence is served, in a cage of
+  a faction that books bounties, is freed by an NPC of that faction (one with goal 211 in its role list and hours first,
+  else police-like, nearest within 1500) who walks there, unlocks and `Release`s in its faction's name; engine: none such,
+  3 failed walks or 120 s, and the system frees it; cages of non-booking factions free nobody. **Lock-up** (155, 197): while
+  a member has the goal in its hours a free member with it locks every door of the home (155 only with every member
+  inside, engine: within the home's farthest node + 10; neither with a stranger inside); when no member's goal is in its
+  hours, what a round locked is unlocked (engine: the morning unlock is not traced; the flag is not saved). **Wardens**
+  (195): occupied unlocked cages of the faction in its town are locked. **Keys** (engine): a worker whose target is behind
+  its own faction's or home's shut doors unlocks them standing before it walks (the sim doesn't know door positions); an
+  arrest's guard walking to such a cage has them opened at once. Rounds and locked homes are hashed only while any exist.
 - **Lock orders** (`LockSystem`, context-menu verbs on a caged character): `PickLockOrder` (the prisoner its own cage, a mate
   walks to it; `Lockpicking.Step` each tick in reach, messages "Pick success!"/"Pick failed"), `GetOutOrder` (refused while
   locked; an unserved sentence books a pending Escaping Prison and sets `Escaped`, as does any cage of a lawless owner).
   `Imprison`/`Release` clear `Escaped`.
 - **HUD**: `CharacterSnapshot.Prison`; the State line shows the status panel's prison text.
-- Not built: bail (needs dialogue), lifting a prisoner out of a cage (`CarrySystem.CanBeLifted` refuses the caged), claiming
-  a captive's bounty, bounty hunters (they only spot), slaves, shackles, the jailers' own release and lock rounds.
+- **Bail** (`PayBailOrder`, verb "Pay bail (c.N)" on a caged character; engine stands in for the bounty desk dialogue): offered
+  while the cage's owner is neither the player's faction nor lawless; price `BailFor` (11.5); paid when a free, awake player
+  character is within 500 of the cage and the money suffices (a zero bail frees at once): erases the jail's entry, `Release`
+  (no escape). Works for NPC prisoners too (only freed, not recruited).
+- **Put in Cage / claim** (`PutInCageOrder`, verb on a body a selected character carries; engine): the carrier walks to the
+  best free cage within 1500 (`FindCage`; others' cages reserved), `LetGo` + `Imprison` as an arrest does, then `Claim`
+  (11.4 caging tests; the slaver exception never applies): the cage owner's unclaimed entry, halved for a dead captive, is
+  paid and marked claimed ("Received c.N reward."). A new order or 3 failed walks end it. The dialogue hand-over is not built.
+- **Spawn bounties** (`SpawnBounties`, 11.2): rolled for new NPCs (not the player's, not sandbox spawns) under `Spawn` keyed
+  by the character id, one fuzz roll for all its factions; no `bounty factions` -> "the empire" (fcs.def), engine: the
+  faction named United Cities. Inspecting an NPC shows its bounty in the HUD's bounty panel.
+- **Bounty hunters** (engine identification: NPCs of an ADVENTURER faction with a `legal system`, in the base data exactly
+  Bounty Hunters): in the spotting sweep they see the player's entry for their faction's booking faction (`legal system`,
+  `CrimeFactions.BookingOf`); above 4000 and once recognised (the same meter) the nearest free one and his squad attack
+  (`Engaged`), re-ordered while the target is up and within 3000. When it is down, carried, caged or out of reach the hunt
+  ends: no cage (11.8), and that hunter leaves that target alone for 600 game seconds (engine). Hunts and cagings are
+  hashed only while any exist; not saved.
+- Not built: slaves, shackles, jailed NPCs from spawn data (template `prisoners`, `SquadFactory`).
 
 ## Buildings
 

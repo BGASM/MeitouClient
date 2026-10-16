@@ -109,9 +109,9 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
 
 /// <summary>
 /// A prisoner's cage and sentence (docs/game/economy.md 11.5): <see cref="Locked"/> the cage is effectively locked; <see cref="Sentence"/> its length in game hours (0: none, so it waits
-/// to be released), <see cref="HoursLeft"/> what remains of it.
+/// to be released), <see cref="HoursLeft"/> what remains of it; <see cref="Bail"/> the bail offered for it (<see cref="Crime.ArrestSystem.BailFor"/>; null: none).
 /// </summary>
-public readonly record struct PrisonView(bool Locked, float Sentence, double HoursLeft);
+public readonly record struct PrisonView(bool Locked, float Sentence, double HoursLeft, int? Bail = null);
 
 /// <summary>The trained stats the HUD shows for the selection.</summary>
 public readonly record struct SkillSummary(float Attack, float Defence, float Dodge, float Toughness, float Strength, float Athletics);

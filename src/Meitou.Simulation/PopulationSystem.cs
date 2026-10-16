@@ -280,6 +280,8 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
                 FootprintRadius = race?.GetFloat("pathfind footprint radius") ?? 0,
             };
             assembly.Attach(table.PeekNextId(), cold, ref hot, record, race, world.Seed, plan.IsAnimal ? plan.Age : 1);
+            // A new NPC's bounties (economy.md 11.2; engine: not the player's characters, nor the sandbox's idle spawns).
+            if (!player && !idle) cold.Bounties = Crime.SpawnBounties.Roll(data, record, world.Seed, table.PeekNextId(), world.Tick);
             var id = table.Spawn(hot, cold, world.Tick);
             squad.Members.Add(id);
             if (plan.Role == SquadRole.Leader && squad.Leader.IsNone) squad.Leader = id;

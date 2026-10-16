@@ -33,6 +33,10 @@ sealed partial class PlayerInterface
         bool down = target.Body is { } b && (b.Dead || b.Unconscious);
         var carriers = Selected().Where(c => c.Carrying == id).Select(c => c.Id).ToArray();
         if (carriers.Length > 0) verbs.Add(("Put Down", () => Say(new Meitou.Simulation.Carrying.PutDownOrder(carriers) { Tick = session.World.Tick })));
+        // Meitou stand-ins for the original's cage use and its bounty desk dialogue (docs/simulation.md "Arrest and jail"): carry the body to the nearest free cage; pay a prisoner's bail.
+        if (carriers.Length > 0) verbs.Add(("Put in Cage", () => Say(new Meitou.Simulation.Crime.PutInCageOrder(carriers) { Tick = session.World.Tick })));
+        if (target.Prison is { Bail: { } bail } && target.Body is not { Dead: true })
+            verbs.Add(($"Pay bail (c.{bail.ToString("N0", CultureInfo.InvariantCulture)})", () => Say(new Meitou.Simulation.Crime.PayBailOrder(id) { Tick = session.World.Tick })));
         if (!down && !target.IsPlayer)
         {
             if (target.IsTrader) verbs.Add(("Trade", () => Say(new Meitou.Simulation.Trading.OpenTrade(selection[0], id) { Tick = session.World.Tick })));
@@ -49,6 +53,9 @@ sealed partial class PlayerInterface
             if (prison.Locked) verbs.Add(("Pick Lock", () => Say(new Meitou.Simulation.Locks.PickLockOrder(selection, id) { Tick = session.World.Tick })));
             else if (selection.Contains(id)) verbs.Add(("Get Out", () => Say(new Meitou.Simulation.Locks.GetOutOrder([id]) { Tick = session.World.Tick })));
         }
+        // Out of an unlocked cage a mate lifts the prisoner, awake or down (out of another faction's cage a crime for both, locks.md "Cages and beds").
+        if (target.Prison is { Locked: false } && !selection.Contains(id) && target.CarriedBy.IsNone && carriers.Length == 0)
+            verbs.Add(("Pick Up", () => Say(new Meitou.Simulation.Carrying.PickUpOrder([], id) { Tick = session.World.Tick })));
         if (down && target.CarriedBy.IsNone && carriers.Length == 0 && target.Prison is null)
         {
             verbs.Add(("Pick Up", () => Say(new Meitou.Simulation.Carrying.PickUpOrder([], id) { Tick = session.World.Tick })));

@@ -28,9 +28,13 @@ public sealed record ArrestSettings
     public float CageSlack { get; init; } = 200;
     /// <summary>Walks to the cage before the carrier gives up and drops the captive.</summary>
     public int CageWalks { get; init; } = 3;
-    /// <summary>The release sweep runs every this many ticks; a police-like NPC of the jail's faction within <see cref="ReleaserRange"/> of the cage is the releaser.</summary>
-    public int ReleaseEveryTicks { get; init; } = 30;
-    public float ReleaserRange { get; init; } = AggroSystem.OutdoorSight;
+    /// <summary>A player character within this of the cage pays a bail (the original pays at a law NPC's dialogue in that town).</summary>
+    public float BailRange { get; init; } = 500;
+    /// <summary>The player's "Put in Cage" takes the best free cage within this distance of the carrier.</summary>
+    public float CageSearchRange { get; init; } = AggroSystem.OutdoorSight;
+    /// <summary>A bounty hunter stops chasing a target farther than this; after a hunt he leaves that target alone for <see cref="HuntRestSeconds"/> game seconds.</summary>
+    public float HuntLeash { get; init; } = 3000;
+    public float HuntRestSeconds { get; init; } = 600;
     /// <summary>Keep a <see cref="ArrestSystem.Log"/> (tests).</summary>
     public bool RecordLog { get; init; }
 }
@@ -60,7 +64,7 @@ public sealed class Arrest
     }
 }
 
-public enum ArrestEventKind { Attack, Fine, Paid, Arrest, Lifted, Jailed, Dropped, GaveUp, Released }
+public enum ArrestEventKind { Attack, Fine, Paid, Arrest, Lifted, Jailed, Dropped, GaveUp, Released, Bailed, Claimed, Hunt, HuntOver }
 
 public readonly record struct ArrestEvent(long Tick, ArrestEventKind Kind, CharacterId Guard, CharacterId Target, int Faction, int Amount);
 
@@ -77,9 +81,11 @@ public readonly record struct ArrestEvent(long Tick, ArrestEventKind Kind, Chara
 /// cage: he drops the captive (engine choice; the original's is Unknown).</item>
 /// <item><b>Release</b> (11.5, goal 211): a player character whose sentence is served and who is awake is freed by the jail's faction (a police-like NPC of it near the cage, else the
 /// system in its name; engine choice), which erases its and the jail's bounty entries. NPC prisoners stay (their jailers' AI is not built).</item>
+/// <item><b>Bail, claims, hunters</b> (11.4, 11.5, 11.8; ArrestSystem.Bounties.cs): <see cref="PayBailOrder"/>, the player's <see cref="PutInCageOrder"/> with its reward
+/// (<see cref="Claim"/>), and bounty hunters that chase a recognised bounty above <see cref="HuntLimit"/> until the target is down.</item>
 /// </list>
 /// </summary>
-public sealed class ArrestSystem(CrimeSystem crimes, GameConstants constants, ArrestSettings? settings = null) : ITickSystem, IStateHashed
+public sealed partial class ArrestSystem(CrimeSystem crimes, GameConstants constants, ArrestSettings? settings = null) : ITickSystem, IStateHashed
 {
     /// <summary>Bounties below this are fined (the "Small bounty" dialogue's <c>0 &lt; b &lt; 1050</c>, <b>Verified</b> by probe).</summary>
     public const int FineLimit = 1050;
@@ -125,12 +131,22 @@ public sealed class ArrestSystem(CrimeSystem crimes, GameConstants constants, Ar
             if (Step(world, arrests[k])) k++;
             else arrests.RemoveAt(k);
         }
-        if (world.Tick % Math.Max(1, Settings.ReleaseEveryTicks) == 0) ReleaseServed(world);
+        for (int k = 0; k < cagings.Count;)
+        {
+            if (StepCaging(world, cagings[k])) k++;
+            else cagings.RemoveAt(k);
+        }
+        for (int k = 0; k < hunts.Count;)
+        {
+            if (StepHunt(world, hunts[k])) k++;
+            else hunts.RemoveAt(k);
+        }
     }
 
     bool Busy(CharacterId id)
     {
         foreach (var a in arrests) if (a.Guard == id || a.Target == id) return true;
+        foreach (var h in hunts) if (h.Rest <= 0 && h.Hunter == id) return true;
         return false;
     }
 
@@ -175,8 +191,9 @@ public sealed class ArrestSystem(CrimeSystem crimes, GameConstants constants, Ar
             bool sneaking = (c.Orders & CharacterOrders.Sneak) != 0;
             float stealth = sneaking ? Orders.Stealth(c) : 0;
             bool seen = false;
-            int best = -1, escapeGuard = -1;
-            float bestD2 = float.MaxValue, escapeD2 = float.MaxValue;
+            int best = -1, escapeGuard = -1, hunter = -1;
+            float bestD2 = float.MaxValue, escapeD2 = float.MaxValue, hunterD2 = float.MaxValue;
+            var target = table.IdOf(s);
             for (int w = 0; w < table.HighWater; w++)
             {
                 if (w == s || !next[w].Alive) continue;
@@ -186,11 +203,17 @@ public sealed class ArrestSystem(CrimeSystem crimes, GameConstants constants, Ar
                 int bounty = c.Bounties?.Of(wc.Faction) is { Claimed: false } e ? e.Amount : 0;
                 bool spots = bounty > 0 && bounty >= SpotThreshold(wc.NpcClass);
                 bool escapee = c.Escaped && Crimes.IsPoliceLike(world, wc) && InOwnTown(world, w);
-                if (!spots && !escapee) continue;
+                bool hunts = HuntsFor(wc, c);
+                if (!spots && !escapee && !hunts) continue;
                 float v = sneaking ? AggroSystem.SneakVisibility(next[w].Position, next[w].Yaw, at, Settings.SpotRange, stealth)
                     : AggroSystem.Visibility(next[w].Position, next[w].Yaw, at, Settings.SpotRange);
                 if (v <= 0) continue;
                 if (escapee && FreeGuard(world, w) && d2 < escapeD2) (escapeGuard, escapeD2) = (w, d2);
+                if (hunts)
+                {
+                    seen = true;
+                    if (d2 < hunterD2 && FreeHunter(world, w, target)) (hunter, hunterD2) = (w, d2);
+                }
                 if (!spots) continue;
                 seen = true;
                 if (d2 < bestD2 && FreeGuard(world, w)) (best, bestD2) = (w, d2);
@@ -204,6 +227,7 @@ public sealed class ArrestSystem(CrimeSystem crimes, GameConstants constants, Ar
             c.Recognition = seen ? MathF.Min(1, c.Recognition + step) : MathF.Max(0, c.Recognition - step);
             bool recognised = seen && (c.RecentlyWanted > 0 || c.Recognition >= 1);
             if (recognised && best >= 0) Start(world, best, s, force: false);
+            if (recognised && hunter >= 0 && hunter != best) BeginHunt(world, hunter, s);
         }
     }
 
@@ -406,7 +430,7 @@ public sealed class ArrestSystem(CrimeSystem crimes, GameConstants constants, Ar
         return true;
     }
 
-    bool Reserved(Fixture f, Arrest self)
+    bool Reserved(Fixture f, Arrest? self)
     {
         foreach (var a in arrests) if (!ReferenceEquals(a, self) && a.Cage == f.Id) return true;
         return false;
@@ -434,29 +458,6 @@ public sealed class ArrestSystem(CrimeSystem crimes, GameConstants constants, Ar
         return false;
     }
 
-    // ------------------------------------------------------------------ release
-
-    /// <summary>Frees every awake player character whose sentence is served, in the jail faction's name (<see cref="FixtureRegistry.Release"/>).</summary>
-    void ReleaseServed(World world)
-    {
-        var table = world.Characters;
-        var next = table.Next;
-        for (int s = 0; s < table.HighWater; s++)
-        {
-            if (!next[s].Alive || table.Cold(s) is not { IsPlayer: true, IsImprisoned: true, InWhat: { } where } c || c.Medical is { Incapacitated: true }) continue;
-            if (!FixtureRegistry.SentenceServed(c, world.GameHours) || world.Fixtures.Find(where) is not { } cage) continue;
-            var releaser = CharacterId.None;
-            float best = Settings.ReleaserRange * Settings.ReleaserRange;
-            for (int w = 0; w < table.HighWater; w++)
-            {
-                if (!next[w].Alive || table.Cold(w) is not { IsPlayer: false, Medical.Incapacitated: false } wc || wc.Faction != cage.Owner || !Crimes.IsPoliceLike(world, wc)) continue;
-                float d2 = Vector3.DistanceSquared(next[w].Position, cage.Position);
-                if (d2 < best) (releaser, best) = (table.IdOf(w), d2);
-            }
-            if (world.Fixtures.Release(world, table.IdOf(s), cage.Owner, Crimes)) Note(world, ArrestEventKind.Released, releaser, table.IdOf(s), cage.Owner, 0);
-        }
-    }
-
     void Note(World world, ArrestEventKind kind, CharacterId guard, CharacterId target, int faction, int amount)
     {
         if (Settings.RecordLog) log.Add(new ArrestEvent(world.Tick, kind, guard, target, faction, amount));
@@ -464,6 +465,7 @@ public sealed class ArrestSystem(CrimeSystem crimes, GameConstants constants, Ar
 
     public void Hash(ref StateHasher hasher)
     {
+        HashBounties(ref hasher);
         if (arrests.Count == 0) return;   // only while an arrest runs, so worlds without them hash as before
         hasher.Add(0x41727273);
         hasher.Add(arrests.Count);

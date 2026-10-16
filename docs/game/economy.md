@@ -173,7 +173,9 @@ Per-character hash map keyed by faction (`Character+0xf0`). Entry (`FUN_1405e7ee
 
 - **Spawn bounties** (`FUN_14062b210`, **Observed**): CHARACTER `bounty chance` vs an inclusive roll 0..100 (`roll < chance`);
   amount `trunc(bounty amount + 0.5*k)`, `k` an integer in `[0, 2*bounty amount fuzz]` (the fuzz only adds), for each
-  `bounty factions` entry (else `defaultEmpireFactionSID`), added without a crime bit (`FUN_140853e20`).
+  `bounty factions` entry (else `defaultEmpireFactionSID`), added without a crime bit (`FUN_140853e20`). fcs.def: "Defaults to the
+  empire"; 117 base CHARACTER records have a chance, 64 of them no `bounty factions` (**Verified** by probe). Whether the fuzz is rolled
+  per faction is **Unknown**.
 
 ### 11.3 Lifetime
 
@@ -288,7 +290,9 @@ decompile's `DialogActionEnum` / `DialogConditionEnum` / `EventTriggerEnum`, com
   from town to town" / "Patrol map (short range) LOOTING", none of which has goal 204 or a cage goal. Their dialogue answers
   event 44 for bounties > 4000 (two dialogues, split at 35000) with `DA_ATTACK_CHASE_FOREVER` (6), never `DA_ARREST_TARGET`.
   "Bounty Hunter" is NPC class 9 (ADVENTURER), "Bounty Hunter Low" class 1 (police-like). Whether a hunter delivers a captive
-  anywhere is **Unknown** (nothing in its data does).
+  anywhere is **Unknown** (nothing in its data does). Bounty Hunters is the only base FACTION of `fundamental type` ADVENTURER with a
+  `legal system` (**Verified** by probe; the others with one: Medics Guild, Traders Guild, Slave Traders, Free Traders, Tech Hunters,
+  Empire Peasants, Machinists -> United Cities; the empires point at themselves).
 
 ### 12. Slaves, prisoners, animals
 

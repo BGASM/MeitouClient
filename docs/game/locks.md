@@ -165,6 +165,7 @@ suffix `i`: `state<i>`, `doa<i>`, `broken<i>`, `gatecode<i>`, `wants lock<i>`, a
 | Whether KO'd, carried or restrained characters may pick (no explicit test besides task conditions) | require conscious, free arms, not on a pole |
 | Item kind 9 and the tool quality field used by cutting | treat tool items as kind 9, use the best |
 | Exact strength terms of cut/break (`FUN_1406457e0(stats, 1, ...)` x stat-scale virtual) | effective strength x 1 |
+| Whether an awake prisoner can be lifted out of an unlocked cage (`FUN_14034fbe0`'s callers not traced) | allowed; the carry rules then knock out a non-friendly one on the shoulder and set a friendly one down |
 | Whether non-owners path around locked doors | a building whose doors are all effectively locked is closed for every path; closed unlocked doors are passable |
 | Door states 2 (opening) and their timing; `gatecode` | 2 = opening; preserve `gatecode` |
 | What else sets or clears the squad "house locked" flag | the rules above |

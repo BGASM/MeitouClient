@@ -1,0 +1,54 @@
+using Meitou.Data;
+
+namespace Meitou.Simulation.Crime;
+
+/// <summary>
+/// The bounties a new NPC is made with (docs/game/economy.md 11.2 "Spawn bounties", the game's <c>FUN_14062b210</c>, <b>Observed</b>): CHARACTER <c>bounty chance</c> against an inclusive
+/// roll 0..100 (a bounty when the roll is below it); the amount <c>trunc(bounty amount + 0.5 k)</c>, k an integer in [0, 2 x <c>bounty amount fuzz</c>], added for every <c>bounty factions</c>
+/// entry without a crime bit. The rolls are Meitou's seeded stream keyed by the character's id (the original's sequence is not reproduced).
+/// </summary>
+public static class SpawnBounties
+{
+    /// <summary>
+    /// The faction a record without <c>bounty factions</c> is wanted by: fcs.def's "Defaults to the empire" (the game reads <c>defaultEmpireFactionSID</c>, whose value was not found).
+    /// <b>Engine choice</b>: the faction named United Cities.
+    /// </summary>
+    public const string DefaultEmpire = "United Cities";
+
+    /// <summary>The ledger a character made from <paramref name="record"/> starts with, or null (no CHARACTER record, no chance, a failed roll, or no faction to be wanted by).</summary>
+    public static BountyLedger? Roll(PopulationData data, GameRecord? record, ulong seed, CharacterId id, long tick)
+    {
+        if (record is not { Type: Meitou.Data.Fcs.FcsRecordType.CHARACTER }) return null;
+        int chance = IntOf(record, "bounty chance");
+        if (chance <= 0) return null;
+        ulong key = Rng.Key(id);
+        if (Rng.Int(Rng.Hash(seed, key, RngPurpose.Spawn, SeedSalts.BountyChance), 101) >= chance) return null;
+        int amount = IntOf(record, "bounty amount"), fuzz = Math.Max(0, IntOf(record, "bounty amount fuzz"));
+        int k = fuzz > 0 ? Rng.Int(Rng.Hash(seed, key, RngPurpose.Spawn, SeedSalts.BountyFuzz), 2 * fuzz + 1) : 0;
+        int value = (int)(amount + 0.5 * k);
+        if (value <= 0) return null;
+        BountyLedger? ledger = null;
+        var refs = record.GetReferences("bounty factions");
+        if (refs.Count == 0) Add(DefaultFaction(data));
+        else foreach (var r in refs) Add(data.FactionIndex(r.TargetStringId));
+        return ledger;
+
+        void Add(int faction)
+        {
+            if (faction < 0 || faction >= data.Factions.Count) return;
+            var entry = (ledger ??= new BountyLedger()).Get(faction, data.Factions[faction].Name);
+            entry.Amount += value;
+            entry.RaisedTick = tick;
+        }
+    }
+
+    static int DefaultFaction(PopulationData data)
+    {
+        for (int f = 0; f < data.Factions.Count; f++)
+            if (data.Factions[f].Name == DefaultEmpire) return f;
+        return -1;
+    }
+
+    static int IntOf(GameRecord r, string key) =>
+        r.Ints.TryGetValue(key, out int v) ? v : r.Floats.TryGetValue(key, out float f) ? (int)MathF.Round(f) : 0;
+}

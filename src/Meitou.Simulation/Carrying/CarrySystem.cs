@@ -72,7 +72,21 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         cold is { Medical: { Incapacitated: false } m, Race: not null, InCombat: false, IsImprisoned: false } && cold.Carrying.IsNone && cold.CarriedBy.IsNone && LeftArmUsable(m);
 
     /// <summary>A character that may be lifted: knocked out or dead, of a <c>carriable</c> race (every base race but the Leviathan, <b>Verified</b>), not carried already, not in a cage.</summary>
-    public static bool CanBeLifted(CharacterCold cold) => cold is { Medical.Incapacitated: true, Race.Carriable: true, IsImprisoned: false } && cold.CarriedBy.IsNone;   // out of a cage only through a release (not yet the lift-out of locks.md)
+    public static bool CanBeLifted(CharacterCold cold) => cold is { Medical.Incapacitated: true, Race.Carriable: true, IsImprisoned: false } && cold.CarriedBy.IsNone;
+
+    /// <summary>
+    /// <see cref="CanBeLifted"/>, or the occupant of a cage that is not effectively locked, of a <c>carriable</c> race, awake or not (the lift out of a cage, locks.md "Cages and beds";
+    /// <b>engine choice</b>: whether the original lifts an awake prisoner is Unknown). The player's lift; the rescue and the arrest lift only the downed and free.
+    /// </summary>
+    public static bool CanBeLifted(World world, CharacterCold cold) => CanBeLifted(cold) || InOpenCage(world, cold) is not null;
+
+    /// <summary>The cage a prisoner that may be lifted out sits in (null: not caged, or locked in, or not liftable).</summary>
+    public static Locks.Fixture? InOpenCage(World world, CharacterCold cold) =>
+        cold is { IsImprisoned: true, Race.Carriable: true, InWhat: { } id } && cold.CarriedBy.IsNone && world.Fixtures.Find(id) is { } cage && cage.Lock is not { EffectivelyLocked: true } ? cage : null;
+
+    /// <summary>How near a carrier must come to lift a body: <see cref="CarrySettings.Reach"/>, or for a caged one the cage's <c>use range</c> + <see cref="Locks.LockSystem.Reach"/> (the cage is in the way).</summary>
+    float ReachOf(World world, CharacterCold body) =>
+        body.IsImprisoned && body.InWhat is { } id && world.Fixtures.Find(id) is { } cage ? MathF.Max(Settings.Reach, cage.UseRange + Locks.LockSystem.Reach) : Settings.Reach;
 
     /// <summary>A character that may be looted: knocked out or dead (the original's <c>isItemLootable</c> also takes the bedded and imprisoned, not modelled here yet), with an inventory.</summary>
     public static bool CanBeLooted(CharacterCold cold) => cold is { Medical.Incapacitated: true, Inventory: not null };
@@ -102,7 +116,7 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
             switch (command)
             {
                 case PickUpOrder order:
-                    if (!table.TryResolveNext(order.Target, out int body) || !CanBeLifted(table.Cold(body)!)) break;
+                    if (!table.TryResolveNext(order.Target, out int body) || !CanBeLifted(world, table.Cold(body)!)) break;
                     if (Nearest(table, Who(world, order.Carriers), body, s => s != body && CanCarry(table.Cold(s)!)) is int carrier)
                         Begin(table, carrier, order.Target, CharacterTask.PickUp, CharacterTask.Idle);
                     break;
@@ -219,13 +233,13 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
             var cold = table.Cold(i)!;
             bool lifting = n.Task == (byte)CharacterTask.PickUp;
             if (cold.Medical is not { Incapacitated: false } || cold.InCombat || !table.TryResolveNext(cold.CarryTarget, out int t)
-                || (lifting ? cold.LiftTime < 0 && !(CanCarry(cold) && CanBeLifted(table.Cold(t)!)) : !CanBeLooted(table.Cold(t)!)))
+                || (lifting ? cold.LiftTime < 0 && !(CanCarry(cold) && CanBeLifted(world, table.Cold(t)!)) : !CanBeLooted(table.Cold(t)!)))
             {
                 if (!(lifting && cold.LiftTime >= 0)) End(table, i);   // a lift under way is finished or broken off in SlowWorld
                 continue;
             }
             const ushort Path = (ushort)MoveFlags.AnyPath;
-            if (Gap(next[i], next[t]) <= Settings.Reach)
+            if (Gap(next[i], next[t]) <= (lifting ? ReachOf(world, table.Cold(t)!) : Settings.Reach))
             {
                 if ((n.Flags & Path) != 0)
                 {
@@ -282,8 +296,14 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         if (!attached && cold.LiftTime > CarrySettings.AttachAt * LiftSeconds)
         {
             // The body is attached once, at 0.4 of the clip, if it can still be lifted and is still near (the reach was tested when the clip started).
-            if (!table.TryResolveNext(cold.CarryTarget, out int b) || !CanCarry(cold) || !CanBeLifted(table.Cold(b)!)
-                || Gap(table.Next[i], table.Next[b]) > 2 * Settings.Reach)   // pushed about while lifting: some slack, not a pick-up from afar
+            if (!table.TryResolveNext(cold.CarryTarget, out int b) || !CanCarry(cold) || !CanBeLifted(world, table.Cold(b)!)
+                || Gap(table.Next[i], table.Next[b]) > 2 * ReachOf(world, table.Cold(b)!))   // pushed about while lifting: some slack, not a pick-up from afar
+            {
+                End(table, i);
+                return;
+            }
+            // Out of an unlocked cage: no longer held there (and the crimes of lifting someone out of another faction's cage).
+            if (table.Cold(b)!.IsImprisoned && !world.Fixtures.LiftOut(world, cold.CarryTarget, i, Crimes))
             {
                 End(table, i);
                 return;

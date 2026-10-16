@@ -82,7 +82,7 @@ public sealed class BountyEntry
     public int Amount { get; set; }
     /// <summary>Bit <c>1 &lt;&lt; code</c> for each crime booked into this entry.</summary>
     public int Crimes { get; set; }
-    /// <summary>A bounty hunter or the police turned the character in for it already (the claim of economy.md 11.4; not built, kept for the save).</summary>
+    /// <summary>The player turned the character in for it already (the claim of economy.md 11.4, <see cref="ArrestSystem.Claim"/>): it never pays twice, and the police no longer go after it.</summary>
     public bool Claimed { get; set; }
     public long RaisedTick { get; set; }
 }
@@ -181,6 +181,12 @@ public sealed class PendingCrime
     }
 }
 
+/// <summary>Pay the bail of a caged character (<see cref="ArrestSystem.BailFor"/>): a free player character near the cage pays, the jail's entry is erased and the prisoner freed.</summary>
+public sealed record PayBailOrder(CharacterId Prisoner) : SimCommand;
+
+/// <summary>The carriers (the selection when empty) take the bodies they carry to the nearest free cage and put them in; a wanted captive pays its bounty (<see cref="ArrestSystem.Claim"/>).</summary>
+public sealed record PutInCageOrder(IReadOnlyList<CharacterId> Carriers) : SimCommand;
+
 /// <summary>A bounty line for the HUD (selected characters only): who wants the character, how much, for what, and the hours left (infinity: never expires).</summary>
 public readonly record struct BountyLine(string Faction, int Amount, string Crimes, double HoursLeft);
 
@@ -206,7 +212,8 @@ public readonly record struct CrimeEvent(long Tick, CrimeEventKind Kind, Charact
 /// <summary>What the crime rules need to know of the factions: who books bounties and whose goods are free.</summary>
 public sealed class CrimeFactions
 {
-    readonly bool[] books, lawless, bandit;
+    readonly bool[] books, lawless, bandit, hunters;
+    readonly int[] booking;
 
     public CrimeFactions(FactionRelations relations)
     {
@@ -215,6 +222,8 @@ public sealed class CrimeFactions
         books = new bool[n];
         lawless = new bool[n];
         bandit = new bool[n];
+        hunters = new bool[n];
+        booking = new int[n];
         for (int f = 0; f < n; f++)
         {
             var data = relations.Factions[f];
@@ -222,7 +231,26 @@ public sealed class CrimeFactions
             bandit[f] = data.FundamentalType == FundamentalType.Bandit;
             lawless[f] = data.NotReal || bandit[f];
         }
+        for (int f = 0; f < n; f++)
+        {
+            var data = relations.Factions[f];
+            int legal = data.LegalSystem is { } id ? relations.IndexOf(id) : -1;
+            booking[f] = legal >= 0 ? legal : books[f] ? f : -1;
+            hunters[f] = data.FundamentalType == FundamentalType.Adventurer && legal >= 0 && !data.NotReal;
+        }
     }
+
+    /// <summary>
+    /// The faction whose ledger entry <paramref name="f"/>'s bounties use (the game's <c>FUN_140851fb0</c>, economy.md 11.2, <b>Observed</b>): its <c>legal system</c> when it has one, else
+    /// itself when it books bounties, else -1. Only the bounty hunters' spotting reads it here (the booking keeps the witness's own faction).
+    /// </summary>
+    public int BookingOf(int f) => Relations.Contains(f) ? booking[f] : -1;
+
+    /// <summary>
+    /// The faction's NPCs hunt bounties (economy.md 11.8). <b>Engine choice</b>: nothing in the data flags bounty hunters; read here as <c>fundamental type</c> ADVENTURER with a
+    /// <c>legal system</c>, which in the base data is exactly the faction Bounty Hunters (-> United Cities; <b>Verified</b> by probe of the FACTION records).
+    /// </summary>
+    public bool Hunts(int f) => Relations.Contains(f) && hunters[f];
 
     public FactionRelations Relations { get; }
 

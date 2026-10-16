@@ -1,0 +1,262 @@
+using System.Numerics;
+using Meitou.Simulation.Locks;
+
+namespace Meitou.Simulation.Crime;
+
+/// <summary>A player character carrying a body to a cage (<see cref="PutInCageOrder"/>; serial state of the <see cref="ArrestSystem"/>).</summary>
+public sealed class Caging
+{
+    public required CharacterId Carrier { get; init; }
+    public required CharacterId Captive { get; init; }
+    public required string Cage { get; set; }
+    public int Tries { get; set; }
+
+    internal void Hash(ref StateHasher h)
+    {
+        h.Add(Carrier); h.Add(Captive); h.Add(Rng.StableHash(Cage)); h.Add(Tries);
+    }
+}
+
+/// <summary>A bounty hunter after a player character (economy.md 11.8): chasing until the target is down, then resting from it (<see cref="Rest"/> game seconds left).</summary>
+public sealed class Hunt
+{
+    public required CharacterId Hunter { get; init; }
+    public required CharacterId Target { get; init; }
+    /// <summary>Game seconds since the last attack order.</summary>
+    public float Time { get; set; }
+    /// <summary>Above 0: the hunt is over and the hunter leaves this target alone for that many more game seconds.</summary>
+    public float Rest { get; set; }
+
+    internal void Hash(ref StateHasher h)
+    {
+        h.Add(Hunter); h.Add(Target); h.Add(Time); h.Add(Rest);
+    }
+}
+
+public sealed partial class ArrestSystem
+{
+    /// <summary>Bounty hunters go after a bounty above this (their "bounty spotted" dialogues answer only <c>b &gt; 4000</c>, economy.md 11.8, <b>Verified</b> by probe).</summary>
+    public const int HuntLimit = 4000;
+    /// <summary>The least bail for a prisoner not of the player's faction (economy.md 11.5, <b>Observed</b>).</summary>
+    public const int MinNpcBail = 2000;
+
+    readonly List<Caging> cagings = [];
+    readonly List<Hunt> hunts = [];
+
+    public IReadOnlyList<Caging> Cagings => cagings;
+    public IReadOnlyList<Hunt> Hunts => hunts;
+
+    public void Inputs(World world, IReadOnlyList<SimCommand> commands)
+    {
+        foreach (var command in commands)
+        {
+            switch (command)
+            {
+                case PayBailOrder bail: PayBail(world, bail.Prisoner); break;
+                case PutInCageOrder put:
+                    foreach (var id in put.Carriers.Count > 0 ? put.Carriers : world.Player.Selection.ToArray()) StartCaging(world, id);
+                    break;
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ bail
+
+    /// <summary>
+    /// The bail of a caged character (economy.md 11.5, <b>Observed</b>): twice its bounty with the jail (the cage owner's faction), at least <see cref="MinNpcBail"/> when it is not of the
+    /// player's faction. Null when none is offered: not caged, or the cage is the player's or of a lawless faction (<b>engine</b> stand-in for the original's speaker and hostility tests).
+    /// </summary>
+    public int? BailFor(World world, CharacterCold c)
+    {
+        if (!c.IsImprisoned || c.InWhat is not { } id || world.Fixtures.Find(id) is not { Kind: FixtureKind.Cage } cage) return null;
+        int owner = cage.Owner;
+        if (owner < 0 || owner == world.Player.Faction || Crimes.Factions.Lawless(owner)) return null;
+        long price = 2L * (c.Bounties?.AmountFor(owner) ?? 0);
+        if (c.Faction != world.Player.Faction) price = Math.Max(price, MinNpcBail);
+        return (int)Math.Min(price, int.MaxValue);
+    }
+
+    /// <summary>
+    /// Pays a prisoner's bail (the original's <c>FUN_1406ae170</c>, economy.md 11.5): a free, awake player character within <see cref="ArrestSettings.BailRange"/> of the cage (<b>engine</b>: the
+    /// original pays at a law NPC's dialogue in that town) and money for it; the jail's entry is erased and the prisoner freed (no escape).
+    /// </summary>
+    void PayBail(World world, CharacterId prisoner)
+    {
+        var table = world.Characters;
+        if (!table.TryResolveNext(prisoner, out int p) || table.Cold(p) is not { IsImprisoned: true, InWhat: { } where } pc || world.Fixtures.Find(where) is not { } cage) return;
+        if (BailFor(world, pc) is not { } price) { world.Post("Nobody here takes bail."); return; }
+        int payer = -1;
+        float best = Settings.BailRange * Settings.BailRange;
+        for (int s = 0; s < table.HighWater; s++)
+        {
+            if (s == p || !table.Next[s].Alive || table.Cold(s) is not { IsPlayer: true, IsImprisoned: false, Medical.Incapacitated: false, CarriedBy.IsNone: true }) continue;
+            var at = table.Next[s].Position;
+            float d2 = Vector2.DistanceSquared(new Vector2(at.X, at.Z), new Vector2(cage.Position.X, cage.Position.Z));
+            if (d2 <= best) (payer, best) = (s, d2);
+        }
+        if (payer < 0) { world.Post("Nobody is near enough to the jail to pay the bail."); return; }
+        if (world.Player.Money < price) { world.Post($"Not enough money: the bail is c.{price}."); return; }
+        world.Player.Money -= price;
+        if (pc.Bounties is { } ledger && ledger.Of(cage.Owner) is { } entry)
+        {
+            ledger.Remove(entry);
+            if (ledger.Count == 0) pc.Bounties = null;
+        }
+        world.Post($"{table.Cold(payer)!.Name} paid a bail of c.{price} for {pc.Name}");
+        world.Fixtures.Release(world, prisoner);
+        pc.Recognition = 0;
+        Note(world, ArrestEventKind.Bailed, table.IdOf(payer), prisoner, cage.Owner, price);
+    }
+
+    // ------------------------------------------------------------------ putting a captive in a cage, and the claim
+
+    void StartCaging(World world, CharacterId carrier)
+    {
+        var table = world.Characters;
+        if (Carry is null || !table.TryResolveNext(carrier, out int s) || table.Cold(s) is not { IsPlayer: true, IsImprisoned: false, Medical.Incapacitated: false, Carrying.IsNone: false } c) return;
+        cagings.RemoveAll(k => k.Carrier == carrier);
+        var cage = FindCageFor(world, s, c, null);
+        if (cage is null) { world.Post($"{c.Name}: no free cage nearby"); return; }
+        cagings.Add(new Caging { Carrier = carrier, Captive = c.Carrying, Cage = cage.Id });
+        MovementSystem.GoTo(table, s, new Vector2(cage.Position.X, cage.Position.Z), c.RunSpeed);
+    }
+
+    /// <summary>The cage finder from the carrier (other cagings' and arrests' cages reserved), within <see cref="ArrestSettings.CageSearchRange"/>; null when none.</summary>
+    Fixture? FindCageFor(World world, int s, CharacterCold c, Caging? self)
+    {
+        var at = world.Characters.Next[s].Position;
+        var cage = world.Fixtures.FindCage(world, at, c.Faction, null, f => Reserved(f, null) || cagings.Exists(k => !ReferenceEquals(k, self) && k.Cage == f.Id));
+        float r = Settings.CageSearchRange;
+        return cage is not null && Vector2.DistanceSquared(new Vector2(at.X, at.Z), new Vector2(cage.Position.X, cage.Position.Z)) <= r * r ? cage : null;
+    }
+
+    /// <summary>One tick of a caging; false when it is over (put in, dropped, or another order).</summary>
+    bool StepCaging(World world, Caging k)
+    {
+        var table = world.Characters;
+        if (!table.TryResolveNext(k.Carrier, out int s) || table.Cold(s) is not { Medical.Incapacitated: false } c || c.Carrying != k.Captive) return false;
+        ref var n = ref table.Next[s];
+        var cage = world.Fixtures.Find(k.Cage);
+        if (cage is null || !FixtureRegistry.IsFree(table, cage))
+        {
+            if (FindCageFor(world, s, c, k) is not { } other) { world.Post($"{c.Name}: no free cage nearby"); return false; }
+            k.Cage = other.Id;
+            MovementSystem.GoTo(table, s, new Vector2(other.Position.X, other.Position.Z), c.RunSpeed);
+            return true;
+        }
+        var goal = new Vector2(cage.Position.X, cage.Position.Z);
+        float d = Vector2.Distance(new Vector2(n.Position.X, n.Position.Z), goal);
+        bool walking = n.Task == (byte)CharacterTask.GoTo;
+        if (walking && Vector2.Distance(n.Goal, goal) > 1) return false;   // another order
+        if (d <= cage.UseRange + Settings.CageReach || !walking && d <= Settings.CageSlack)
+        {
+            if (walking) MovementSystem.Stop(table, s);
+            Carry!.LetGo(world, s);
+            if (!world.Fixtures.Imprison(world, k.Captive, cage, constants.PrisonTime)) { world.Post($"{c.Name} could not put the captive in the cage"); return false; }
+            Claim(world, s, k.Captive, cage);
+            return false;
+        }
+        if (!walking)
+        {
+            if (n.Task != (byte)CharacterTask.Idle || ++k.Tries > Settings.CageWalks) return false;   // a new order, or the cage cannot be reached
+            MovementSystem.GoTo(table, s, goal, c.RunSpeed);
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// The reward for a captive the carrier just put in <paramref name="cage"/> (the game's <c>FUN_140330d50</c>, economy.md 11.4, <b>Observed</b>): a player carrier, a captive not of the
+    /// player's faction, a cage whose owner is not the player's faction and not lawless (<c>not real</c> or BANDIT), neither of them escaped; the captive's unclaimed entry for the cage owner's
+    /// faction pays, halved (truncated) when the captive is dead, into the player's money, and is marked claimed. The slaver exception does not apply (the player's characters are never
+    /// slaves here). Returns what it paid (0: nothing).
+    /// </summary>
+    public int Claim(World world, int carrier, CharacterId captive, Fixture cage)
+    {
+        var table = world.Characters;
+        if (table.Cold(carrier) is not { IsPlayer: true, Escaped: false } || !table.TryResolveNext(captive, out int b) || table.Cold(b) is not { IsPlayer: false, Escaped: false } bc) return 0;
+        int owner = cage.Owner;
+        if (cage.Kind != FixtureKind.Cage || owner < 0 || owner == world.Player.Faction || bc.Faction == world.Player.Faction || Crimes.Factions.Lawless(owner)) return 0;
+        if (bc.Bounties?.Of(owner) is not { Amount: > 0, Claimed: false } entry) return 0;
+        int amount = bc.Medical is { Dead: true } ? entry.Amount / 2 : entry.Amount;
+        world.Player.Money += amount;
+        entry.Claimed = true;
+        world.Post($"Received c.{amount} reward.");
+        Note(world, ArrestEventKind.Claimed, table.IdOf(carrier), captive, owner, amount);
+        return amount;
+    }
+
+    // ------------------------------------------------------------------ bounty hunters
+
+    /// <summary>The bounty a hunter of <paramref name="faction"/> sees on <paramref name="c"/>: the unclaimed entry of its faction's booking faction (<see cref="CrimeFactions.BookingOf"/>).</summary>
+    int HuntBounty(CharacterCold c, int faction) =>
+        Crimes.Factions.BookingOf(faction) is var f and >= 0 && c.Bounties?.Of(f) is { Claimed: false } e ? e.Amount : 0;
+
+    /// <summary>The looker is a bounty hunter (<see cref="CrimeFactions.Hunts"/>) that would go after <paramref name="target"/>'s bounty.</summary>
+    bool HuntsFor(CharacterCold looker, CharacterCold target) => Crimes.Factions.Hunts(looker.Faction) && HuntBounty(target, looker.Faction) > HuntLimit;
+
+    /// <summary>A hunter free to start a hunt on <paramref name="target"/>: awake, not fighting or carrying, in no arrest or hunt, and not resting from this target.</summary>
+    bool FreeHunter(World world, int slot, CharacterId target)
+    {
+        var table = world.Characters;
+        if (!table.Next[slot].Alive || table.Next[slot].Task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat) return false;
+        if (table.Cold(slot) is not { IsPlayer: false, InCombat: false, Fleeing: false, IsImprisoned: false, Medical.Incapacitated: false, Carrying.IsNone: true, CarriedBy.IsNone: true, Fighter.CanAttack: true }) return false;
+        var id = table.IdOf(slot);
+        if (Busy(id)) return false;
+        foreach (var h in hunts) if (h.Hunter == id && (h.Rest <= 0 || h.Target == target)) return false;
+        return true;
+    }
+
+    /// <summary>The hunter and his squad attack the target and chase it (the dialogue's <c>DA_ATTACK_CHASE_FOREVER</c>, economy.md 11.8).</summary>
+    void BeginHunt(World world, int hunter, int target)
+    {
+        var table = world.Characters;
+        var hc = table.Cold(hunter)!;
+        hc.Engaged = true;
+        hunts.Add(new Hunt { Hunter = table.IdOf(hunter), Target = table.IdOf(target) });
+        Attack(world, hunter, target);
+        world.Post($"{hc.Name} is after the bounty on {table.Cold(target)!.Name}!");
+        Note(world, ArrestEventKind.Hunt, table.IdOf(hunter), table.IdOf(target), hc.Faction, HuntBounty(table.Cold(target)!, hc.Faction));
+    }
+
+    /// <summary>One tick of a hunt; false when it is gone. The chase ends when the target is down (the hunter leaves it: nothing in the data cages it), carried, caged or beyond the leash.</summary>
+    bool StepHunt(World world, Hunt h)
+    {
+        var table = world.Characters;
+        float dt = world.TickSeconds;
+        if (h.Rest > 0) return (h.Rest -= dt) > 0;
+        if (!table.TryResolveNext(h.Hunter, out int g) || table.Cold(g) is not { Medical.Incapacitated: false } gc) return false;
+        bool over = !table.TryResolveNext(h.Target, out int t) || table.Cold(t) is not { Medical.Incapacitated: false, IsImprisoned: false, CarriedBy.IsNone: true };
+        if (!over)
+        {
+            h.Time += dt;
+            ref var gn = ref table.Next[g];
+            if (gn.Task != (byte)CharacterTask.Attack && !gc.InCombat && h.Time >= 1)
+            {
+                float gap = Vector3.Distance(gn.Position, table.Next[t].Position);
+                if (gap > Settings.HuntLeash || HuntBounty(table.Cold(t)!, gc.Faction) <= HuntLimit) over = true;
+                else { h.Time = 0; Attack(world, g, t); }
+            }
+        }
+        if (!over) return true;
+        gc.Engaged = false;
+        h.Rest = Settings.HuntRestSeconds;
+        Note(world, ArrestEventKind.HuntOver, h.Hunter, h.Target, gc.Faction, 0);
+        return true;
+    }
+
+    void HashBounties(ref StateHasher hasher)
+    {
+        if (cagings.Count > 0)
+        {
+            hasher.Add(0x43616765);
+            hasher.Add(cagings.Count);
+            foreach (var k in cagings) k.Hash(ref hasher);
+        }
+        if (hunts.Count > 0)
+        {
+            hasher.Add(0x48756E74);
+            hasher.Add(hunts.Count);
+            foreach (var h in hunts) h.Hash(ref hasher);
+        }
+    }
+}

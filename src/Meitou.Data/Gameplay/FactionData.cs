@@ -40,6 +40,11 @@ public sealed record FactionData
     public bool NotReal { get; init; }
     public bool OffersBounties { get; init; }
     /// <summary>
+    /// The first <c>legal system</c> reference (a FACTION id; null: none): the faction whose ledger entry the faction's bounties use (the loader stores it at <c>+0x38</c>,
+    /// docs/game/economy.md 11.2, <b>Observed</b>; e.g. Bounty Hunters and Medics Guild -> United Cities).
+    /// </summary>
+    public string? LegalSystem { get; init; }
+    /// <summary>
     /// The faction books crimes as bounties: the faction loader <c>FUN_1407fe270</c> sets the faction's byte <c>+0x40</c> to true for <c>fundamental type</c> LAW_ENFORCEMENT and
     /// otherwise to <c>offers bounties</c> (<b>Observed</b>, docs/game/economy.md 11.6). In the base data: Police, Mercenary Police, United Cities, The Holy Nation, Shek Kingdom, Republic of Tertius.
     /// </summary>
@@ -86,6 +91,7 @@ public sealed record FactionData
             RoadPreference = r.GetFloat("road preference"),
             NotReal = r.GetBool("not real"),
             OffersBounties = r.GetBool("offers bounties"),
+            LegalSystem = r.GetReferences("legal system") is { Count: > 0 } legal ? legal[0].TargetStringId : null,
             RunAwayRatioOfSquadSize = r.GetFloat("run away ratio of squad size"),
             RunAwayRatioRelativeToEnemy = r.GetFloat("run away ratio relative to enemy"),
             MaxProsperity = r.GetInt("max prosperity"),

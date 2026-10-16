@@ -113,7 +113,7 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
     }
 
     /// <summary>The role list a member takes (docs/game/ai.md "Goal loading"): the squad leader the leader's, else by its squad role.</summary>
-    static AiRole RoleOf(Squad squad, CharacterId id, CharacterCold cold) =>
+    internal static AiRole RoleOf(Squad squad, CharacterId id, CharacterCold cold) =>
         squad.Leader == id || cold.Role == (int)SquadRole.Leader ? AiRole.Leader
         : cold.Role == (int)SquadRole.Squad2 ? AiRole.Squad2
         : cold.Role == (int)SquadRole.Slave ? AiRole.Slave
