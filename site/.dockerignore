@@ -3,3 +3,4 @@ dist
 .astro
 Dockerfile
 .dockerignore
+public/*.mp4
