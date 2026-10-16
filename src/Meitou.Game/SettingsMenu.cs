@@ -52,6 +52,8 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
     public Func<string>? UpscalerStatus { get; init; }
     /// <summary>Applies a new attackers-per-target setting to the running combat system.</summary>
     public Action<int>? AttackSlotsChanged { get; init; }
+    /// <summary>Applies the late-dodges setting to the running combat system.</summary>
+    public Action<bool>? LateDefencesChanged { get; init; }
     public bool Visible
     {
         get => visible || menuProgress > 0;
@@ -132,6 +134,9 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         if (page == 4)
         {
             result.Add(new(AttackSlotsSlider.Label, "How many enemies may fight one character in melee at once (the game: 1).", Slider: AttackSlotsSlider));
+            result.Add(new("Late dodges and blocks", "Balance change: a dodge or block that succeeds its roll but starts a moment late still works, "
+                + "instead of failing as in the game. Makes skilled fighters much harder to wear down when several enemies attack at once.",
+                Toggle: new("Late dodges and blocks", () => config.LateDefences, v => { config.LateDefences = v; LateDefencesChanged?.Invoke(v); }, Remaster: true, OnOff: true)));
             result.Add(new("Hover outline", "Outline and tint the character under the cursor, in the colour of what a right click would do.",
                 Toggle: new("Hover outline", () => config.HoverOutline, v => config.HoverOutline = v, Remaster: true, OnOff: true)));
             result.Add(new("Main menu scene transitions", "Sky flight to/from the main menu (Meitou UI).",
@@ -349,6 +354,8 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         config.MainMenuTransitionSpeed = 1;
         config.InGameTransitionSpeed = 1;
         AttackSlotsSlider.Set(UserConfig.MeitouAttackSlots);
+        config.LateDefences = true;
+        LateDefencesChanged?.Invoke(true);
         config.HardwareMouse = false;
         config.HoverOutline = true;
         player.SetUiMode(UiMode.Faithful);

@@ -34,4 +34,6 @@ public sealed record CombatOptions
     public float ApproachSpeed { get; init; } = 30;
     /// <summary>How many enemies may melee one target at once (before the race's extra slots); null: CONSTANTS <c>max num attack slots</c> (1).</summary>
     public int? AttackSlots { get; init; }
+    /// <summary>A dodge or block that passed its roll but starts too late joins its clip partway so it still counts (Meitou balance choice); false: the game's rule, it fails.</summary>
+    public bool LateDefences { get; init; }
 }

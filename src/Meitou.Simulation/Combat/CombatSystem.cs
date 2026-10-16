@@ -46,6 +46,7 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
         this.lengths = lengths;
         Settings = settings ?? new CombatOptions();
         AttackSlots = Math.Max(1, Settings.AttackSlots ?? combat.MaxNumAttackSlots);
+        LateDefences = Settings.LateDefences;
         xp = new XpService(constants, options);
     }
 
@@ -53,6 +54,9 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
 
     /// <summary>How many enemies may melee one target at once, before the target race's <c>extra attack slots</c>: CONSTANTS <c>max num attack slots</c> (1, Faithful) unless a setting changes it.</summary>
     public int AttackSlots { get; set; }
+
+    /// <summary>A late but successfully rolled dodge or block still counts (<see cref="CombatOptions.LateDefences"/>); off is the game's rule.</summary>
+    public bool LateDefences { get; set; }
 
     /// <summary>The live relation table the player's assaults and killings change (<c>PopulationData.Relations</c>); null: nothing changes (hand-built test worlds).</summary>
     public FactionRelations? Relations { get; set; }

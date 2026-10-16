@@ -157,7 +157,8 @@ clip (through the animation system's chooser) and holds the fighter for its leng
 0.2 s; the first attack after an order waits 0.15–0.6 s; the initiative roll is drawn per pair and tick so both
 sides agree, and the loser holds off for 1 s; a target that would not swing back (stumbling, defending, not fighting, Block or
 Passive order) is simply attacked; one that lost the roll to a fighter becomes its target; a defence that starts late
-joins its clip partway so the passed roll counts;
+joins its clip partway so the passed roll counts when "Late dodges and blocks" is on (Advanced setting, a balance
+change: Faithful off, Meitou on);
 attack slots go to the nearest fighters at the target (Advanced setting "Attackers per target", 1-5: Faithful 1,
 the CONSTANTS value; Meitou 3), the rest wait instead of circling; the block break-out ignores the 10% lower bound; only a heavy bolt staggers.
 

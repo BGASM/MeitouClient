@@ -31,6 +31,8 @@ sealed class UserConfig
     /// <summary>How many enemies may melee one target at once (Advanced settings, 1-5): Faithful 1 (the game's CONSTANTS), Meitou 3.</summary>
     public int AttackSlots { get; set; } = MeitouAttackSlots;
     public const int FaithfulAttackSlots = 1, MeitouAttackSlots = 3;
+    /// <summary>A late but successfully rolled dodge or block still counts (Advanced settings; Faithful off, Meitou on): a balance change for fights against several enemies.</summary>
+    public bool LateDefences { get; set; } = true;
     /// <summary>The Windows cursor instead of the game's drawn pointer (the original's <c>hardware_mouse</c>, default off; Interface settings).</summary>
     public bool HardwareMouse { get; set; }
     /// <summary>Outline and tint the character under the cursor (Advanced settings; Meitou only, the game has none).</summary>

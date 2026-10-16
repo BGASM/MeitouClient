@@ -368,10 +368,14 @@ public sealed partial class CombatSystem
         var reaction = techniques[pick];
         int ticks = Ticks(reaction, PlayRate(cold, reaction, attack: false), dt, cold);
         // The reaction is timed so that it is at its "blocked frame" when the blow arrives; with less lead time it starts at once and is less far along,
-        // but never too little for the roll it passed to count: a late one joins its clip partway (engine choice, docs/simulation.md "Combat").
+        // With LateDefences (Meitou balance choice, docs/simulation.md "Combat") never too little for the roll it passed to count: a late one joins its clip partway.
         int strike = scan.Strike;
-        float least = reaction.IsBlock ? HitOutcomes.BlockProgress : HitOutcomes.DodgeFrom;
-        int start = Math.Min(Math.Max(now, strike - (int)MathF.Round(reaction.StrikeProgress(1) * ticks)), strike - (int)MathF.Ceiling(least * ticks) - 1);
+        int start = Math.Max(now, strike - (int)MathF.Round(reaction.StrikeProgress(1) * ticks));
+        if (LateDefences)
+        {
+            float least = reaction.IsBlock ? HitOutcomes.BlockProgress : HitOutcomes.DodgeFrom;
+            start = Math.Min(start, strike - (int)MathF.Ceiling(least * ticks) - 1);
+        }
         s.ReactTech = pick;
         s.ReactStart = start;
         s.ReactTicks = ticks;
