@@ -264,7 +264,9 @@ public sealed partial class CombatSystem : IProjectileSource
 
     /// <summary>
     /// Chooses crossbow or melee for a fighting character that carries a crossbow (an <b>engine rule</b>, <see cref="RangedTuning"/>): the crossbow while it has shots or
-    /// ammunition, no melee attacker is on it and the target is not close; melee otherwise. A character without a crossbow is left alone.
+    /// ammunition, no melee attacker is on it and the target is not close; melee otherwise. With the Ranged order (its tooltip: "prioritise ranged attacks, melee will be a
+    /// last resort") the distance does not count: crossbow unless dry or a melee attacker is on it (the split is an <b>engine choice</b>; the original's switch rule is
+    /// <b>Unknown</b>). A character without a crossbow is left alone.
     /// </summary>
     void ChooseMode(World world, int i, ref CombatSlot s, CharacterCold cold, bool fighting)
     {
@@ -290,8 +292,10 @@ public sealed partial class CombatSystem : IProjectileSource
         if (!can || MeleeThreat(world, i) || Orders.Has(cold, CharacterOrders.Block)) want = false;   // the Block order shoots no bolts either
         else
         {
+            // The Ranged order takes the crossbow however close the target is (between swings); melee only when dry or a melee attacker is on it.
             float gap = Gap(world.Characters.Previous, world.Characters, i, s.TargetSlot);
-            want = s.Ranged ? gap >= RangedTuning.MeleeSwitchGap : gap >= RangedTuning.RangedSwitchGap && s.AttackTech < 0;
+            want = Orders.Has(cold, CharacterOrders.Ranged) ? s.Ranged || s.AttackTech < 0
+                : s.Ranged ? gap >= RangedTuning.MeleeSwitchGap : gap >= RangedTuning.RangedSwitchGap && s.AttackTech < 0;
         }
         if (want == s.Ranged) return;
         s.Ranged = want;

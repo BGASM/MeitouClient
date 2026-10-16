@@ -97,6 +97,11 @@ work; direct orders still run. Saved toggles override defaults, including explic
 Jobs uses the Meitou-only bool `meitou jobs enabled`; the original save key is **Unknown**.
 Sneak: sneaking speed cap and clips, quieter, smaller view factor; a hostile looker sees the sneaker only once its
 spot meter fills ([perception](game/perception.md#spotting-a-sneaker)); the exposure feeds stealth XP.
+Ranged (tooltip, **Verified** in `main.pot`, mainbar.cpp:1279: "prioritise ranged attacks, melee will be a last resort"): a
+crossbow carrier takes the crossbow at any distance and melees only when dry or a melee attacker is on it; off, the distance
+rule of `ChooseMode` applies. Taunt (mainbar.cpp:1273: "draw more of the enemy to attack him"): a hostile looker picking a
+new fight prefers a visible taunter over any non-taunter (nearest first); its squad joins as usual. Fights already under way
+are not retargeted; a sneaking taunter does not count. Both rules are engine choices; the original's are **Unknown**.
 New games select the squad's first member. The game host also selects the first member after
 loading, before publishing the initial snapshot; the save reader itself retains saved selection.
 

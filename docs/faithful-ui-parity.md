@@ -65,7 +65,7 @@ found the front end, inventory, bag and limb windows sharing one set of bindings
 | Research and crafting | No complete research queue, benches or production queue backend |
 | Construction/prospecting | No complete placement/construction or prospecting backend |
 | Squad editing/faction identity | Selection exists; splitting/merging/dismissal and faction naming commands need implementation |
-| Orders/AI policy | Medic/rescue/stop, Block, Passive, Hold, Sneak and the move speed act ([Order toggles](simulation.md#order-toggles)); Chase, Ranged and Taunt are stored only; editable jobs need commands |
+| Orders/AI policy | Medic/rescue/stop, Block, Passive, Hold, Sneak, Ranged, Taunt and the move speed act ([Order toggles](simulation.md#order-toggles)); Chase is stored only; editable jobs need commands |
 | Inventory mutations | Validated pocket/bag/equipment moves and arrangement, paused interface commands, worn appearance/combat refresh; stack/split, swaps, race constraints, prosthetics and character transfers remain |
 | Advanced new-game options | Start records/spawning exist; per-session option overrides need integration |
 | Character creation | Race/appearance data exist; player editor changes need validated commands |

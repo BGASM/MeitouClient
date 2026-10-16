@@ -224,6 +224,8 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         public float HomeR2;
         public int Best;
         public float BestD2;
+        /// <summary>The best target so far has the Taunt order: it outranks every target without it.</summary>
+        public bool BestTaunts;
         /// <summary>The looker's spot meters (read only during the query) and the sneakers it sees this scan.</summary>
         public List<Spot>? Spots;
         public List<Sighting> Sightings;
@@ -309,10 +311,15 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         ref readonly var other = ref s.Table.Previous[slot];
         float d2 = Vector3.DistanceSquared(other.Position, s.Eye);
         if (d2 > s.Range * s.Range && d2 > NoiseFar * NoiseFar) return;
-        bool sneaking = (s.Table.Cold(slot)?.Orders & CharacterOrders.Sneak) != 0;
-        // Strictly nearer only: the grid visits a cell's slots in ascending order, so a tie keeps the lower slot within a cell; across cells the
+        var orders = s.Table.Cold(slot)?.Orders ?? CharacterOrders.None;
+        bool sneaking = (orders & CharacterOrders.Sneak) != 0;
+        // The Taunt order draws the looker (its tooltip: "draw more of the enemy to attack him"): a taunter outranks any target without it, nearest first among them.
+        // A sneaking taunter is not conspicuous. Engine choice: the original's weighting is Unknown.
+        bool taunts = !sneaking && (orders & CharacterOrders.Taunt) != 0;
+        // Strictly better only: the grid visits a cell's slots in ascending order, so a tie keeps the lower slot within a cell; across cells the
         // order is the grid's fixed one. Either way it is a function of the state. A sneaker farther than the best still gets its spot meter.
-        if (d2 >= s.BestD2 && !sneaking) return;
+        bool better = taunts != s.BestTaunts ? taunts : d2 < s.BestD2;
+        if (!better && !sneaking) return;
         if (s.Table.Cold(slot) is not { Medical.Incapacitated: false } c) return;
         bool wanted = s.Police && Crime.CrimeSystem.IsWantedBy(c, s.Faction);
         bool enemy = s.Stance != Ai.AiStance.Passive
@@ -335,7 +342,7 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
             if (v > 0) s.Sightings.Add(new Sighting(slot, other.Generation, Orders.SpotSeconds(v, stealth)));
             if (d2 <= s.Range * s.Range)
                 s.Effects.Emit(s.Self, slot, ExposureEffect, (float)(full && v > 0 ? StealthExposure.Detected : v > 0 ? StealthExposure.Noticed : StealthExposure.Near));
-            if (d2 >= s.BestD2) return;
+            if (!better) return;
             seen = full && v > 0;
         }
         else seen = Visibility(s.Eye, s.Yaw, other.Position, s.Range) > 0;
@@ -349,6 +356,7 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         }
         s.Best = slot;
         s.BestD2 = d2;
+        s.BestTaunts = taunts;
     }
 
     /// <summary>

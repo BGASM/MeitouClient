@@ -20,9 +20,9 @@ public enum CharacterOrders : ushort
     Chase = 4,
     /// <summary>Non-combat mode: does not answer attacks by itself (an ordered attack still goes).</summary>
     Passive = 8,
-    /// <summary>Ranged mode: kept and saved; no effect yet.</summary>
+    /// <summary>Ranged mode: a crossbow carrier shoots at any distance, melee only as the last resort (docs/simulation.md "Order toggles").</summary>
     Ranged = 16,
-    /// <summary>Taunt mode: kept and saved; no effect yet.</summary>
+    /// <summary>Taunt mode: hostile lookers picking a new fight prefer this character (docs/simulation.md "Order toggles").</summary>
     Taunt = 32,
     /// <summary>Sneaking: slower, harder to see and to hear, seen only once a looker's spot meter fills, trains stealth (docs/game/perception.md, docs/game/pathfinding.md "Sneaking").</summary>
     Sneak = 64,
