@@ -188,7 +188,8 @@ paths; preserve current ordering. Original threshold/sense/retreat facts:
 
 `CarrySystem`: serial links, pickup/put-down, dropping on KO/death/attack, rescue jobs and inventory
 looting. Carried bodies follow the carrier and affect load. Loot can raise witnessed theft and
-stolen ownership marks. [carry-loot.md](game/carry-loot.md).
+stolen ownership marks. [carry-loot.md](game/carry-loot.md). It also runs the stealth knock-out
+(`StealthKo` task, reusing `CarryTarget`/`LiftTime`): [combat](game/combat.md#stealth-knock-out).
 
 ## Crimes and bounties
 

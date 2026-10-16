@@ -24,6 +24,8 @@ public enum CharacterTask : byte
     PutDown = 8,
     /// <summary>Walks to <see cref="CharacterCold.CarryTarget"/> (a downed or dead character) and takes everything from its inventory that fits (<see cref="Carrying.CarrySystem"/>).</summary>
     Loot = 9,
+    /// <summary>Creeps up behind <see cref="CharacterCold.CarryTarget"/> and swings to knock it out (<see cref="Carrying.CarrySystem"/>; the original's <c>Task_StealthKO</c>).</summary>
+    StealthKo = 10,
 }
 
 /// <summary>Bits of <see cref="CharacterHot.Flags"/> the movement system uses.</summary>

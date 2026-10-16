@@ -16,6 +16,15 @@ public sealed record PutDownOrder(IReadOnlyList<CharacterId> Carriers) : SimComm
 public sealed record LootOrder(IReadOnlyList<CharacterId> Looters, CharacterId Target) : SimCommand;
 
 /// <summary>
+/// Orders one of the attackers (the selection when the list is empty) to knock <see cref="Target"/> out from behind (the original's order 228, verb "Stealth KO", <c>Task_StealthKO</c>):
+/// the nearest sneaking one that can act creeps up behind it and swings; the roll (<see cref="CarrySystem.StealthKoChance"/>) decides between a knock-out and a fight.
+/// </summary>
+public sealed record StealthKoOrder(IReadOnlyList<CharacterId> Attackers, CharacterId Target) : SimCommand;
+
+/// <summary>A stealth knock-out swing that was rolled: the target was knocked out (<see cref="Success"/>) or turned on the attacker.</summary>
+public readonly record struct StealthKoEntry(long Tick, CharacterId Attacker, CharacterId Target, float Chance, bool Success);
+
+/// <summary>
 /// Switches the rescue job on or off for the characters (the selection when the list is empty): the original's <c>rescue</c> toggle (NUM8, job <c>FIND_AND_RESCUE_IF_THERES_BEDS</c>).
 /// While it is on, an idle character picks up the nearest downed member of its faction. <see cref="On"/> null flips each character's own switch.
 /// </summary>

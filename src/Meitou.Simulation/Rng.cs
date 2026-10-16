@@ -23,6 +23,8 @@ public enum RngPurpose : uint
     Trade = 11,
     /// <summary>Which towns a map item reveals (<see cref="Items.MapItems"/>).</summary>
     MapItem = 12,
+    /// <summary>The stealth knock-out roll (<see cref="Carrying.CarrySystem.StealthKoChance"/>).</summary>
+    StealthKo = 13,
 }
 
 /// <summary>

@@ -143,11 +143,14 @@ public static class StandardSystems
             var library = o.AnimationLibrary ?? AnimationLibrary.FromDatabase(data.Db);
             var lengths = o.AnimationLengths ?? new AnimationLengths();
             systems.Add(new AnimationSystem(library, lengths, o.AnimationBlendRate ?? 4, combat));
+            // The stealth knock-out swing lasts the length of the knockout record's clip.
+            if (carry is not null && library.IndexOf(Meitou.Simulation.Carrying.CarrySystem.KnockoutClip) is >= 0 and var ko) carry.KnockoutSeconds = lengths.Of(library.Definitions[ko].Clip);
         }
         if (Has(StandardParts.Feed)) systems.Add(new FeedSystem(data.Items, o.Feed));
         if (Has(StandardParts.Retaliation)) systems.Add(new RetaliationSystem(combat!));
         AggroSystem? aggro = null;
         if (Has(StandardParts.Aggro)) systems.Add(aggro = new AggroSystem(data.Relations, o.Aggro));
+        if (carry is not null) carry.Aggro = aggro;
         if (Has(StandardParts.Flee)) systems.Add(new FleeSystem(data.Relations, combat!, o.Aggro?.SightRange ?? AggroSystem.OutdoorSight));
         Meitou.Simulation.Crime.CrimeSystem? crime = null;
         if (Has(StandardParts.Crime))

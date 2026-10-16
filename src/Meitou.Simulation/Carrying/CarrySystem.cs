@@ -22,7 +22,7 @@ namespace Meitou.Simulation.Carrying;
 /// Everything runs in the serial phases (<c>Inputs</c>, <c>Schedule</c>, <c>SlowWorld</c>), in slot order, so the result does not depend on threads or partitions. Placed after the body system (its
 /// <c>SlowWorld</c> sees this tick's knock-outs and the corpses already removed) and before combat.
 /// </summary>
-public sealed class CarrySystem(GameConstants constants, BodyOptions options, float liftSeconds = 1, CarrySettings? settings = null) : ITickSystem
+public sealed partial class CarrySystem(GameConstants constants, BodyOptions options, float liftSeconds = 1, CarrySettings? settings = null) : ITickSystem
 {
     /// <summary>The bone of the carrier the body hangs from (the original's <c>Bip01 L UpperArm</c> for the left side, <b>Verified</b>).</summary>
     public const string AttachBone = "Bip01 L UpperArm";
@@ -111,6 +111,9 @@ public sealed class CarrySystem(GameConstants constants, BodyOptions options, fl
                     if (Nearest(table, Who(world, loot.Looters), victim, s => s != victim && table.Cold(s) is { Medical.Incapacitated: false, Inventory: not null, InCombat: false } c && c.CarriedBy.IsNone) is int looter)
                         Begin(table, looter, loot.Target, CharacterTask.Loot, CharacterTask.Idle);
                     break;
+                case StealthKoOrder ko:
+                    BeginKnockOut(world, ko);
+                    break;
                 case PutDownOrder put:
                     foreach (var id in Who(world, put.Carriers))
                     {
@@ -172,7 +175,7 @@ public sealed class CarrySystem(GameConstants constants, BodyOptions options, fl
     {
         var cold = table.Cold(slot)!;
         ref var n = ref table.Next[slot];
-        if (n.Task is (byte)CharacterTask.PickUp or (byte)CharacterTask.PutDown or (byte)CharacterTask.Loot)
+        if (n.Task is (byte)CharacterTask.PickUp or (byte)CharacterTask.PutDown or (byte)CharacterTask.Loot or (byte)CharacterTask.StealthKo)
         {
             MovementSystem.Stop(table, slot);
             n.Task = (byte)cold.ResumeTask;
@@ -187,6 +190,7 @@ public sealed class CarrySystem(GameConstants constants, BodyOptions options, fl
 
     public void Schedule(World world)
     {
+        ScheduleKnockOuts(world);
         var table = world.Characters;
         var next = table.Next;
         float dt = world.TickSeconds;
@@ -243,6 +247,7 @@ public sealed class CarrySystem(GameConstants constants, BodyOptions options, fl
                 case CharacterTask.PickUp: Lift(world, table, i, dt); break;
                 case CharacterTask.PutDown: PutDown(world, i, dt); break;
                 case CharacterTask.Loot: Loot(world, table, i); break;
+                case CharacterTask.StealthKo: Swing(world, table, i, dt); break;
             }
         }
         KeepLinks(world);

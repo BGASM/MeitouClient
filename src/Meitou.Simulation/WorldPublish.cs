@@ -13,6 +13,11 @@ public sealed partial class World
         var table = Characters;
         var list = new List<CharacterSnapshot>(table.Count);
         var state = table.Previous;
+        // The selection's first member that could knock someone out from behind: the stealth KO chances are against it.
+        int koSlot = -1;
+        foreach (var s in Player.Selection)
+            if (table.TryResolveNext(s, out int k) && table.Cold(k) is { } c && Carrying.CarrySystem.CanKnockOut(c)) { koSlot = k; break; }
+        var aggro = koSlot >= 0 ? systems.OfType<AggroSystem>().FirstOrDefault() : null;
         for (int i = 0; i < state.Length; i++)
         {
             if (!state[i].Alive) continue;
@@ -54,6 +59,8 @@ public sealed partial class World
                 Activity = cold is { Ai.Goal: { } goal } && Ai.AiSystem.Holds(state[i], cold) ? Ai.TaskBehaviours.Text(goal.Task.Type) : null,
                 Stealth = sneaking ? watchers.Length == 0 ? StealthExposure.Unobserved : watchers.Max(w => w.Level) : null,
                 Watchers = watchers,
+                StealthKoChance = koSlot >= 0 && i != koSlot && cold is { IsPlayer: false } && Carrying.CarrySystem.CanBeKnockedOut(cold)
+                    ? Carrying.CarrySystem.StealthKoChance(table.Cold(koSlot)!, cold, aggro?.Spotted(i, table.IdOf(koSlot)) == true) : null,
             });
         }
         PreviousSnapshot = Snapshot;

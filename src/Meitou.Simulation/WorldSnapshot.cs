@@ -91,6 +91,11 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     /// <see cref="StealthExposure.Noticed"/> almost seen, anything lower hidden; null when not a sneaking player character.
     /// </summary>
     public StealthExposure? Stealth { get; init; }
+    /// <summary>
+    /// The chance in per cent that the selection's first sneaking member knocks this character out from behind (<see cref="Carrying.CarrySystem.StealthKoChance"/>); null when no
+    /// selected character is sneaking or this one cannot be knocked out (a player character, or already down).
+    /// </summary>
+    public float? StealthKoChance { get; init; }
     /// <summary>The hostile NPCs that noticed or detected this sneaking player character in the last 4 s.</summary>
     public IReadOnlyList<WatcherView> Watchers { get; init; } = [];
 }

@@ -292,6 +292,9 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         return spots;
     }
 
+    /// <summary>Whether the NPC in slot <paramref name="looker"/> has spotted the sneaker <paramref name="target"/> (its spot meter is full; serial phases).</summary>
+    public bool Spotted(int looker, CharacterId target) => looker < slots.Length && SpotOf(slots[looker].Spots, target.Slot, target.Generation) > 1;
+
     /// <summary>The looker's spot meter on <paramref name="slot"/> before this scan (0: none).</summary>
     static float SpotOf(List<Spot>? spots, int slot, int generation)
     {

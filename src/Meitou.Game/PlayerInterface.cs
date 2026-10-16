@@ -103,6 +103,9 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     {
         if (SelectedIds() is not { Count: > 0 } selection) return null;
         if (PickTrader(p) is { } trader) return ("talk", trader, () => Say(new Meitou.Simulation.Trading.OpenTrade(selection[0], trader) { Tick = session.World.Tick }));
+        // While sneaking, a right click on an NPC is a stealth knock-out (the original's tutorial: "right click on an NPC while sneaking").
+        if (PickTarget(p) is { } mark && session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == mark) is { StealthKoChance: not null })
+            return ("attk", mark, () => Say(new Meitou.Simulation.Carrying.StealthKoOrder(selection, mark) { Tick = session.World.Tick }));
         if (PickTarget(p) is { } victim) return ("attk", victim, () => Say(new Meitou.Simulation.Combat.AttackOrder(selection, victim) { Tick = session.World.Tick }));
         if (PickHurtAlly(p) is { } patient) return ("med", patient, () => Say(new Meitou.Simulation.FirstAid.TreatOrder(selection, patient) { Tick = session.World.Tick }));
         if (PickDowned(p, ownOnly: true) is { } ally) return ("lift", ally, () => Say(new Meitou.Simulation.Carrying.PickUpOrder([], ally) { Tick = session.World.Tick }));

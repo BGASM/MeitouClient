@@ -123,6 +123,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     int RestingClip { get; } = library.IndexOf("sitting idle");
     /// <summary>The carrier's lift clip (<c>shoulder lift left</c>, played backwards to put down) and a carried body's held pose (<c>carry me</c>, a category 3 record the library appends); -1 when the data has none.</summary>
     int LiftClip { get; } = library.IndexOf(Carrying.CarrySystem.LiftClip);
+    int KnockoutClip { get; } = library.IndexOf(Carrying.CarrySystem.KnockoutClip);
     int CarriedClip { get; } = library.IndexOf(Carrying.CarrySystem.CarriedClip);
 
     int HeldClip(CharacterTask task) => task switch { CharacterTask.Treat => TreatingClip, CharacterTask.Rest => RestingClip, _ => -1 };
@@ -332,6 +333,15 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             float length = Lengths.Of(Library.Definitions[LiftClip].Clip);
             lift = LiftClip;
             liftTime = task == CharacterTask.PickUp ? MathF.Min(cold.LiftTime, length) : MathF.Max(length - cold.LiftTime, 0);
+            wanted.Clear();
+            wanted.Add((lift, 1));
+            a.Idle = -1;
+        }
+        // A stealth knock-out swing (the carry system's timing): the whole-body knockout clip at x1.2.
+        else if (!down && KnockoutClip >= 0 && cold.LiftTime >= 0 && task == CharacterTask.StealthKo)
+        {
+            lift = KnockoutClip;
+            liftTime = MathF.Min(cold.LiftTime * Carrying.CarrySystem.KnockoutPlaySpeed, Lengths.Of(Library.Definitions[KnockoutClip].Clip));
             wanted.Clear();
             wanted.Add((lift, 1));
             a.Idle = -1;
