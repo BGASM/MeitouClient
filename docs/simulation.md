@@ -57,7 +57,7 @@ factories/database/relations and lazy body/combat/item assembly. Research owns o
 ## Systems and their order
 
 `StandardSystems.Build` is the single wiring authority. Ordered systems:
-Population, Player, AI, Pursuit, Movement, FirstAid, Body, Carry, Combat, Animation, Feed,
+Population, Player, AI, Pursuit, Movement, FirstAid, Body, Carry, Construction, Combat, Animation, Feed,
 Retaliation, Aggro, Flee, Crime, Trade. Tests selecting subsets retain this relative order.
 Population spawns before later SlowWorld work; player selection precedes movement orders;
 AI writes tasks before movement; pursuit schedules paths before movement answers them.
@@ -225,6 +225,88 @@ unload, hashed only once non-empty. Facts: [locks](game/locks.md), [economy 11.5
   carried, not on a pole), `Break` (strength > 3 x hardness). Not built: shackles (item locks), cutting, lifting out of a
   cage, the owner's lock/unlock tasks, door motion.
 
+## Buildings
+
+Player construction contract (Faithful UI). Facts: [construction](game/buildings-production.md#construction),
+[placement](game/buildings-production.md#placement), [build menu](game/buildings-production.md#build-menu),
+[build tasks](game/ai-tasks.md#build-tasks), [save keys](formats/zones.md#placement-keys). Out of scope: walls and
+snapping, outposts/town creation (`creates player town` only blocks), the door x3 rule, production/power/storage,
+research progress, fetching from storage (task 247).
+
+**Shared types** (stub commit f4cb78c; the simulation track owns and fills them):
+- `Meitou.Data/Gameplay/Construction/BuildingBuildData.cs`: `BuildingBuildData.From/LoadAll` (build fields, material
+  entries), `MaterialCost`.
+- `.../PlacementRules.cs`: `PlacementFailure` (one value per original message), `PlacementTown`,
+  `TownBlock(BuildingBuildData, Vector2 at, IReadOnlyList<PlacementTown>, string playerFactionId)`, `Message(PlacementFailure)`.
+- `Meitou.Simulation/Construction/ConstructionCommands.cs`: `PlannedBuilding(Record, Position, Rotation, Floor, Parent)`;
+  `PlaceBuildings(Plans)` (Confirm), `BuildOrder(Characters, Site, Repair)` (orders 2/95), `DismantleOrder(Characters, Site)`
+  (96), `CancelSite(Site)` (engine: only a site with nothing delivered), `PauseSite(Site, Paused)`. Sites are named by instance id.
+- `.../ConstructionSnapshot.cs` + `WorldSnapshot`: `Buildings` (`BuildingSnapshot`: `Id`, `Record`, `Position` absolute,
+  `Rotation`, `Floor`, `Parent`, `Owner` faction index, `Progress`/`Target` in material units, `Materials` (item,
+  required, delivered), `Complete`, `Paused`, `Dismantling`), `BuildingsRevision`, `UnlockedBuildings`.
+
+**Simulation state.** `World.Buildings` (`Construction.BuildingRegistry`): player-built sites in creation order, by id,
+holding the snapshot's fields plus rate, builder counter and destroyed. Base-game placements are not in it. Ids
+`<n>-zone<X>.<Y>-INGAME`, n from a hashed registry counter started above every id in that zone's level file and the
+loaded save. `World.Research` (`Construction.ResearchState`): completed RESEARCH ids from the start-off's `research`
+(`PopulationSystem.Player`) and the save; unlocked = union of their `enable buildings`; static this milestone, not hashed.
+
+**ConstructionSystem** (`StandardParts.Construction`, in `All`) runs after Carry, before Combat; all of it is serial.
+- `Inputs`: commands. `PlaceBuildings` re-checks only the data half (record is a BUILDING, unlocked, `TownBlock`); a
+  failing plan is dropped with `World.Post(Message)`. `PlaceBuildings`, `CancelSite` and `PauseSite` also apply while
+  paused (`ApplyPausedInterfaceCommands`). Orders set the new `CharacterTask`s `Build`, `Dismantle`, `DeliverMaterials`
+  and `CharacterCold.BuildSite`; movement walks the character to the site (work distance **Unknown**; engine:
+  footprint edge + 20).
+- AI `Think` gives the auto-job (researched scoring) to idle player characters with Jobs, as for medic work.
+- `SlowWorld`: arrived characters in slot order deliver (5 s bar, one unit per missing type, inventory then backpack),
+  build or dismantle by the researched formulas with dt = `TickSeconds`, `Building speed` option 1, CONSTANTS
+  `build speed` and `min dismantle materials percentage` via `GameConstants`. The 0.75^k counter resets each tick
+  (engine reading of the **Unknown** reset), so k = builders already applied to the site this tick. Completion sets
+  `Complete` and posts the message for the player faction; dismantling to 0 refunds and removes the site.
+- Refund count of entry i rolls `Rng.Hash(seed, StableHash(id), RngPurpose.Build, i)`. Engine (no ground items yet):
+  the items go to the dismantler's inventory, then backpack; the rest is lost with a message.
+- `BuildingsRevision` bumps on add, complete, destroyed and remove.
+
+**Hash and determinism.** The registry hashes (counter, then each site's fields in creation order) only once non-empty,
+like `Fixtures`; `BuildSite` hashes only when set; existing goldens stay. Decisions read only world state and command
+order, never collision or navmesh readiness (paths stay the usual asynchronous input).
+
+**Host seam: snapshot diff.** The host keeps the last `BuildingsRevision` it acted on (-1 after `ReplaceWorld`) and,
+when it differs, diffs `Buildings` by id: added → render overlay (and navmesh if it qualifies), removed → out of both,
+newly complete → navmesh. Progress does not bump the revision; the scaffold reads `Progress/Target` each frame (rule in
+[construction look](game/buildings-production.md#construction-look)). An event queue would lose changes across dropped
+ticks and loads; the diff does not. Navmesh membership (engine reading of the Observed rebuild on placing):
+`PathMode != 0` and (`Complete` or `BuildThreshold == 0`). After each rebuilt zone publishes, the host enqueues
+`RepathCommand`.
+- Overlay type: the existing `BuildingPlacement` (`StateId` null, `WorldY` = absolute Y, zone of the position).
+- Rendering: `WorldObjects.AddRuntime/RemoveRuntime(BuildingPlacement)` merged into `BuildZone`; the streamer reloads
+  that zone; per-instance `constructionState` drives the scaffold.
+- Navigation: one thread-safe overlay store shared by every `ZoneGeometryGatherer` (`NearBuildings` and `BuildingHash`
+  see it, so the cache key changes), `NavSystem.AddRuntimeBuilding/RemoveRuntimeBuilding` and `RebuildZone(zone)` for
+  each zone within `BuildingReach`.
+
+**Placement validation.** Host: `Meitou.Game/Building/PlacementCheck.Evaluate(PlacementQuery) -> PlacementFailure`,
+pure over the query (build data, transform, floor, queued ghosts, snapshot characters and sites, towns) and services
+(heightmap, collision cache, water level). It calls `PlacementRules.TownBlock` first and returns the first failure in
+the original's order. The geometric half depends on asynchronously loaded collision, so the simulation trusts it and
+re-checks only the data half. Ghost controls, tilt and the unconfirmed ghost queue (Undo) are host UI state.
+
+**Saves.** Simulation track: `Saving/BuildingSave.cs` writes each site as a GAMESTATE_BUILDING plus its building-list
+entry in its zone file (keys per [zones](formats/zones.md#placement-keys)) and reads player-faction `-INGAME` buildings
+absent from the level data back into the registry; `Saving/ResearchSave.cs` reads and writes the completed RESEARCH.
+The first snapshot after a load carries every site, so the host seam needs nothing extra.
+
+**Files.** Simulation track: `Meitou.Data/Gameplay/Construction/*`, `Gameplay/GameConstants.cs`, `Meitou.Data/Save/*`
+if needed; `Meitou.Simulation/Construction/*`, `StandardSystems.cs`, `World.cs`, `World.Interface.cs`,
+`WorldPublish.cs`, `WorldSnapshot.cs`, `Movement.cs`, `CharacterTable.cs` (cold fields), `Rng.cs`, `SeedSalts.cs`,
+`PopulationSystem.Player.cs`, `Ai/AiSystem.cs`, `Ai/TaskBehaviours.cs`, `Saving/*`. Host track:
+`Meitou.Game/GameHost.Building.cs` (diff, overlays, rebuilds, repath), `PlayerInterface.Build.cs` (Kenshi_BuildWindow,
+ghost, commands), `Building/PlacementCheck.cs`, `Building/BuildMenu.cs` (categories and groups from
+`BuildingBuildData` and `UnlockedBuildings`), `KeyMap.cs` (build map), `PlayerInterface.ContextMenu.cs` and
+`PlayerInterface.Picking.cs` (site verbs), `GameHost.Interactive.cs` (hook), `Meitou.Engine` if needed,
+`Meitou.Ui/*`; `Meitou.Rendering/WorldObjects.cs`, `ObjectStreamer.cs` and the object shader plumbing;
+`Meitou.Navigation/NavSystem.cs`, `NavMeshService.cs`, `ZoneGeometryGatherer*.cs`, new `NavRuntimeBuildings.cs`.
+
 ## Trade
 
 `TradeSystem`: trader-squad stock/purse/restock, open trade, buying/selling/fencing. Charge,
@@ -253,7 +335,7 @@ F5/F9 and named save menus share mapping. Restore clock, player money/faction, r
 player squads, character transforms/names/roles, stats/medical parts, appearance, inventories,
 bounties, bed/cage state and sentence, and registered buildings' locks and doors (into existing zone records only; a
 new save has none, [save.md](formats/save.md#locks-cages-and-sentences)) and selection. Town/roaming populations regenerate. Weather, orders/paths, animation,
-combat engagement, wound-list/pain, pending crimes, buildings/ground items, camera/speed are not
+combat engagement, wound-list/pain, pending crimes, base-game building state, ground items, camera/speed are not
 fully restored. Loaded hashes need not match captured hashes: compare carried fields and agreement
 between repeated loads. QuickSaveTests checks carried fields and repeatable loading.
 
@@ -279,7 +361,7 @@ order. Renderer state lives in Rendering; snapshots are the simulation-to-host b
 
 Original-game unknowns are maintained in each linked subsystem reference; do not infer parity from our determinism tests.
 
-**Engine gaps:** remaining AI is listed in [AI](#ai); persistent town/world state, buildings and production, full UI fidelity, dynamic doors and physics remain incomplete. Save and combat limitations are listed in their subsystem sections.
+**Engine gaps:** remaining AI is listed in [AI](#ai); persistent town/world state, production, walls and outposts, full UI fidelity, dynamic doors and physics remain incomplete. Save and combat limitations are listed in their subsystem sections.
 
 **Behaviour and hash constraints.**
 - No end-of-tick hook: the combat system swaps its arrays at the end of its `SlowWorld`, so the result depends on the system order

@@ -2,7 +2,8 @@
 
 Original building classes/function IDs, records, construction/producer/power/storage/farm/research
 binary research; field/constants tables and expressions retained. Placement: [zones](../formats/zones.md),
-prices/stock: [economy](economy.md). Meitou production/research gameplay is incomplete.
+prices/stock: [economy](economy.md). Meitou construction contract: [simulation](../simulation.md#buildings);
+production/research gameplay is incomplete.
 
 ## Construction
 
