@@ -31,6 +31,7 @@ static class BuildingLodShaders
             uniform vec4 uFadeRange;
             out vec2 vRange;
             flat out float vInterior;
+            flat out float vScaffold;
             #define uModel mat4(vec4(aInstance0.xyz, 0.0), vec4(aInstance1.xyz, 0.0), vec4(aInstance2.xyz, 0.0), vec4(aInstance3.xyz, 1.0))
             """);
         v = Replace(v, @"void\s+main\s*\(\s*\)\s*\{", """
@@ -38,6 +39,7 @@ static class BuildingLodShaders
             {
                 vRange = vec2(aInstance0.w, aInstance1.w);
                 vInterior = aInstance2.w;
+                vScaffold = aInstance3.w;
                 if (uFadeMode == 1)
                 {
                     float fd = length((uModel * vec4(aPosition, 1.0)).xyz - uFadeEye);
@@ -56,6 +58,8 @@ static class BuildingLodShaders
             #version 330 core
             in vec2 vRange;
             flat in float vInterior;
+            flat in float vScaffold;
+            float gridLine(float v) { float f = fract(v); return min(f, 1.0 - f); }
             float ditherValue() { return fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))); }
             """);
         if (solid) f = Replace(f, @"if\s*\(\s*uAlphaThreshold\s*>\s*0\.0\s*&&\s*alpha\s*<\s*uAlphaThreshold\s*\)\s*discard\s*;", "");
@@ -68,7 +72,7 @@ static class BuildingLodShaders
                     float dv = ditherValue();
                     if (dv < vRange.x || dv >= vRange.y) discard;
                 }
-            """);
+            """ + ScaffoldTest);
         // The viewer's plain lighting is overwritten by the game sky's lighting: compute it only where it is used (the same values).
         f = Literal(f, "if (uFogDistance > 0.0 && uAtmoParams.x > 0.5) colour = kenshiLight(albedo, n, v, glossLit, vWorld);\n", "");
         f = Literal(f, """
@@ -98,7 +102,40 @@ static class BuildingLodShaders
                 colour = albedo * (ambient + diff * sunLight) + spec * diff * sunLight;
             }
             """);
+        // The placement ghost (docs/render-objects.md "Placement ghost") draws with a non-zero flat colour (which an ordinary draw leaves at 0): it tints the lit picture.
+        f = Literal(f, "fragColour = vec4(colour, 1.0);\n", """
+            if (dot(uFlatColour, uFlatColour) > 0.0) colour = mix(colour, colour * uFlatColour * 1.6 + uFlatColour * 0.12, 0.7);
+            fragColour = vec4(colour, 1.0);
+            """);
         return f;
+    }
+
+    /// <summary>
+    /// The scaffold clip of an unfinished building (docs/render-objects.md "Construction sites"): <c>vScaffold</c> is the instance matrix's spare M44, 1 for every
+    /// ordinary instance and <see cref="ScaffoldBase"/> plus the world height of the clip plane for a site. Above the plane only a scaffold grid is kept.
+    /// </summary>
+    public const float ScaffoldBase = 10000;
+
+    const string ScaffoldTest = """
+                if (vScaffold > 2.0 && vWorld.y > vScaffold - 10000.0)
+                {
+                    float cell = 0.12;
+                    bool onGrid = gridLine(vWorld.y * cell) < 0.06 || gridLine((vWorld.x + vWorld.z) * cell) < 0.06 || gridLine((vWorld.x - vWorld.z) * cell) < 0.06;
+                    if (!onGrid) discard;
+                }
+        """;
+
+    /// <summary>The caster's fragment shader with the same clip, so a site's shadow is its built part and scaffold.</summary>
+    static string Depth()
+    {
+        string f = ShadowShaders.MeshDepthFragment;
+        f = Replace(f, @"in\s+vec2\s+vUv\s*;", """
+            in vec2 vUv;
+            in vec3 vWorld;
+            flat in float vScaffold;
+            float gridLine(float v) { float f = fract(v); return min(f, 1.0 - f); }
+            """);
+        return Replace(f, @"void\s+main\s*\(\s*\)\s*\{", "void main()\n{\n" + ScaffoldTest);
     }
 
     // ---- the native model (docs/renderer-native.md 3.3, step O) ----
@@ -145,7 +182,7 @@ static class BuildingLodShaders
     public static string VertexNative() => NativeShaders.Port(Vertex(), NativeShaders.Map(Own), PushMembers);
     public static string FragmentNative(bool solid = false) => Gi.GiResolveShaders.WithAlbedo(NativeShaders.Port(Fragment(solid), NativeShaders.Map(Own), PushMembers));
     /// <summary><see cref="ShadowShaders.MeshDepthFragment"/> for <see cref="VertexNative"/>.</summary>
-    public static string DepthNative() => NativeShaders.Port(ShadowShaders.MeshDepthFragment, NativeShaders.Map(Own), PushMembers);
+    public static string DepthNative() => NativeShaders.Port(Depth(), NativeShaders.Map(Own), PushMembers);
 
     /// <summary>The first <paramref name="from"/> in <paramref name="source"/> (text, with the lines' indentation made equal) replaced by <paramref name="to"/>.</summary>
     static string Literal(string source, string from, string to)

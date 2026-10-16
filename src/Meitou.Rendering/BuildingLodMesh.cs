@@ -14,6 +14,8 @@ sealed class DecodedObjectMesh
     public required Dictionary<int, DecodedObjectMesh> Manual;
     public required Vector3 Centre;
     public required float Radius;
+    /// <summary>The mesh's highest local Y (the scaffold clip of an unfinished building scales with it).</summary>
+    public float Top;
     /// <summary>How the levels are picked (<see cref="LodCurve"/>); null: the distances as they are.</summary>
     public LodCurve? Curve;
     /// <summary>The finest level held (0: all of them): see <see cref="ObjectMeshCache.LevelFor"/>.</summary>
@@ -77,6 +79,8 @@ sealed class GpuObjectMesh
     public required GpuObjectMesh?[] Manual;
     public required Vector3 Centre;
     public required float Radius;
+    /// <summary>The mesh's highest local Y (the scaffold clip of an unfinished building scales with it).</summary>
+    public float Top;
     public long Bytes;
     /// <summary>The finest LOD level whose triangles are held (<see cref="ObjectMeshCache.LevelFor"/>): a draw at a finer level uses this one instead.</summary>
     public int MinLevel;
@@ -291,8 +295,8 @@ sealed unsafe class ObjectMeshCache(GpuContext gpuContext, AssetLocator assets, 
                 for (int i = 0; i < part.Vertices.Length; i++)
                     part.Vertices[i].Colour = new Vector4(part.Vertices[i].Colour.X * 1.5f, part.Vertices[i].Colour.Y * 1.5f, part.Vertices[i].Colour.Z * 1.5f, part.Vertices[i].Colour.W);
         var centre = model.Center;
-        float radius = model.Radius;
-        if (mesh.Bounds is { } b && b.Max.X >= b.Min.X) { centre = (b.Min + b.Max) / 2; radius = Math.Max((b.Max - b.Min).Length() / 2, 1e-3f); }
+        float radius = model.Radius, top = centre.Y + radius;
+        if (mesh.Bounds is { } b && b.Max.X >= b.Min.X) { centre = (b.Min + b.Max) / 2; radius = Math.Max((b.Max - b.Min).Length() / 2, 1e-3f); top = b.Max.Y; }
         var levels = MeshLod.Levels(mesh);
         // Generated levels among the file's (docs/render-objects.md, "Generated levels"): a mesh drawn through the normal path, not a distant one, without a skeleton.
         LodCurve? curve = null;
@@ -325,7 +329,7 @@ sealed unsafe class ObjectMeshCache(GpuContext gpuContext, AssetLocator assets, 
             manual[l] = inner;
         }
         if (minLevel >= levels.Count) minLevel = levels.Count - 1;   // the chain ended earlier than the distances said
-        var result = new DecodedObjectMesh { Model = model, Levels = levels, Manual = manual, Centre = centre, Radius = radius, Curve = curve, MinLevel = minLevel };
+        var result = new DecodedObjectMesh { Model = model, Levels = levels, Manual = manual, Centre = centre, Radius = radius, Top = top, Curve = curve, MinLevel = minLevel };
         foreach (var part in model.Parts) result.Prepared.Add(PreparePart(result, part, keep));
         return result;
     }
@@ -365,6 +369,7 @@ sealed unsafe class ObjectMeshCache(GpuContext gpuContext, AssetLocator assets, 
         Manual = Enumerable.Range(0, d.Levels.Count).Select(l => d.Manual.TryGetValue(l, out var m) ? Prepare(m) : null).ToArray(),
         Centre = d.Centre,
         Radius = d.Radius,
+        Top = d.Top,
         MinLevel = d.MinLevel,
     };
 

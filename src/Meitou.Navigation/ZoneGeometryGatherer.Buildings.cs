@@ -20,12 +20,13 @@ internal sealed partial class ZoneGeometryGatherer
             for (int dx = -1; dx <= 1; dx++)
             {
                 var z = new ZoneCoordinate(zone.X + dx, zone.Y + dz);
-                if (!buildingsByZone.TryGetValue(z, out var list)) continue;
-                foreach (var b in list)
-                {
-                    if (b.Position.X < lo.X || b.Position.X > hi.X || b.Position.Z < lo.Y || b.Position.Z > hi.Y) continue;
-                    if (BuildingPlacements.Resolve(b, db, levels, terrain) is { } resolved) yield return resolved;
-                }
+                // The buildings of the level data, then the ones the player placed (an empty overlay adds nothing, the cache keys stay).
+                foreach (var list in (IReadOnlyList<BuildingPlacement>[])[buildingsByZone.GetValueOrDefault(z) ?? [], runtime?.In(z) ?? []])
+                    foreach (var b in list)
+                    {
+                        if (b.Position.X < lo.X || b.Position.X > hi.X || b.Position.Z < lo.Y || b.Position.Z > hi.Y) continue;
+                        if (BuildingPlacements.Resolve(b, db, levels, terrain) is { } resolved) yield return resolved;
+                    }
             }
     }
 

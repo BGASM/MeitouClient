@@ -53,6 +53,7 @@ sealed partial class GameHost
             session.Camera.MovePivot(new Vector2(walker.Position.X, walker.Position.Z));
             camera.Target = DrawnPosition(walker);
         }
+        UpdateBuildings();   // the sites of a loaded save or a started game, before the objects settle
         gpu.Streamer?.Settle(camera.Eye);
         gpu.Objects?.Settle(camera.Eye);
         gpu.Foliage?.Settle(camera.Eye);

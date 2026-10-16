@@ -96,14 +96,70 @@ sealed class WorldObjects : IDisposable
         return objects;
     }
 
+    // ---- runtime placements (buildings the player placed: docs/simulation.md "Buildings", host seam) ----
+
+    readonly object runtimeLock = new();
+    readonly Dictionary<string, BuildingPlacement> runtime = new(StringComparer.Ordinal);
+    // Replaced whole on every change, so worker threads in BuildZone read a stable snapshot without the lock.
+    volatile Dictionary<ZoneCoordinate, BuildingPlacement[]> runtimeByZone = [];
+
+    /// <summary>Adds (or replaces, by <see cref="BuildingPlacement.InstanceId"/>) a placement that is not in the level data; zones laid out from now on include it.</summary>
+    public void AddRuntime(BuildingPlacement placement)
+    {
+        lock (runtimeLock)
+        {
+            runtime[placement.InstanceId] = placement;
+            Reindex();
+        }
+    }
+
+    /// <summary>Removes a runtime placement; returns it (null when there was none).</summary>
+    public BuildingPlacement? RemoveRuntime(string instanceId)
+    {
+        lock (runtimeLock)
+        {
+            if (!runtime.Remove(instanceId, out var removed)) return null;
+            Reindex();
+            return removed;
+        }
+    }
+
+    /// <summary>Drops every runtime placement (a loaded save replaces the world); returns their zones.</summary>
+    public List<ZoneCoordinate> ClearRuntime()
+    {
+        lock (runtimeLock)
+        {
+            var zones = runtime.Values.Select(p => p.Zone).Distinct().ToList();
+            runtime.Clear();
+            Reindex();
+            return zones;
+        }
+    }
+
+    /// <summary>Whether a runtime placement with this id is still in the store.</summary>
+    public bool HasRuntime(string instanceId) { lock (runtimeLock) return runtime.ContainsKey(instanceId); }
+
+    void Reindex() => runtimeByZone = runtime.Values.GroupBy(p => p.Zone).ToDictionary(g => g.Key, g => g.ToArray());
+
+    IEnumerable<BuildingPlacement> RuntimeIn(ZoneCoordinate zone) => runtimeByZone.TryGetValue(zone, out var list) ? list : [];
+
     /// <summary>Lays out one zone's buildings and map features as the game builds them (docs/formats/zones.md).</summary>
     public ZoneObjects BuildZone(ZoneCoordinate zone)
     {
         if (staged is not null) return staged.GetValueOrDefault(zone) ?? new() { Zone = zone };
+        var fixedPlacements = buildingsByZone.GetValueOrDefault(zone);
+        return Lay(zone, fixedPlacements is null ? RuntimeIn(zone) : fixedPlacements.Concat(RuntimeIn(zone)), withFeatures: true);
+    }
+
+    /// <summary>Lays out one runtime placement alone (a building the player placed), for a zone that is already laid out (worker threads).</summary>
+    public ZoneObjects BuildRuntime(BuildingPlacement placement) => Lay(placement.Zone, [placement], withFeatures: false);
+
+    ZoneObjects Lay(ZoneCoordinate zone, IEnumerable<BuildingPlacement> placements, bool withFeatures)
+    {
         var result = new ZoneObjects { Zone = zone };
         var map = heights!.Value!;
         var db = Database;
-        if (buildingsByZone.TryGetValue(zone, out var placements))
+        {
             foreach (var b in placements)
             {
                 if (b.Position == Vector3.Zero) continue;
@@ -153,6 +209,8 @@ sealed class WorldObjects : IDisposable
                     Interlocked.Increment(ref stand);
                 }
             }
+        }
+        if (!withFeatures) return result;
         int featureIndex = zone.Y * WorldLayout.ZoneCount + zone.X;
         var list = featureIndex < Features.Zones.Count ? Features.Zones[featureIndex] : [];
         for (int i = 0; i < list.Count; i++)

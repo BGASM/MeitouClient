@@ -38,12 +38,15 @@ internal sealed partial class ZoneGeometryGatherer : IDisposable
     readonly List<Vector3>[]? seedsByZone;
     readonly BuildingLayouts layouts;
 
-    public ZoneGeometryGatherer(GameInstall install, GameDatabase db, WorldLevelData levels, CollisionCache collision)
+    readonly NavRuntimeBuildings? runtime;
+
+    public ZoneGeometryGatherer(GameInstall install, GameDatabase db, WorldLevelData levels, CollisionCache collision, NavRuntimeBuildings? runtime = null)
     {
         this.install = install;
         this.db = db;
         this.levels = levels;
         this.collision = collision;
+        this.runtime = runtime;
         map = TerrainHeightmap.Open(install);
         foreach (var b in levels.Buildings())
         {

@@ -322,6 +322,7 @@ sealed partial class GameHost
             animSeconds += frameDt;
             animClock = true;
             UpdateNav();
+            UpdateBuildings();
             if (!cinemaHolds) ApplyCamera(session.CameraAt());
             cinema.Advance(cinema.FrameTime(dt));   // a flight through the keys moves the camera (and takes it from the rig)
             string? takeFile = cinema.TakeFrame();

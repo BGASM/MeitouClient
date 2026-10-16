@@ -51,6 +51,8 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         public required bool Town;
         /// <summary>Back faces culled: the instances are <c>interior</c> parts (docs/formats/zones.md "Interior view"; the game culls building parts' back faces, so a room's ceiling vanishes seen from above).</summary>
         public bool BackCull;
+        /// <summary>The placement ghost: 0 not, 1 valid (green), 2 invalid (red) (<see cref="BatchKind.Ghost"/>).</summary>
+        public int Ghost;
         public bool Manual;
         /// <summary>Some instance is mid cross-fade (or a town's per-vertex fade): its draws need the program with the dither <c>discard</c>.</summary>
         public bool Fading;
@@ -183,6 +185,78 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
     public IReadOnlyList<PlacedMesh>? Staged { get => streamer.Staged; set => streamer.Staged = value; }
     float DistantReach => DistantRange * (guard?.RangeScale ?? 1f);
 
+    // ---- runtime buildings, construction sites and the placement ghost (docs/render-objects.md "Construction sites") ----
+
+    /// <summary>A building the player placed: part of its zone from now on (laid out apart from the rest of an already loaded zone).</summary>
+    public void AddRuntime(BuildingPlacement placement)
+    {
+        objects.AddRuntime(placement);
+        streamer.AddRuntime(placement);
+    }
+
+    /// <summary>A placed building is gone: its parts leave the zone.</summary>
+    public void RemoveRuntime(string instanceId)
+    {
+        if (objects.RemoveRuntime(instanceId) is { } removed) streamer.RemoveRuntime(instanceId, removed.Zone);
+    }
+
+    /// <summary>Forgets every runtime building (a loaded save replaces the world) and lays out the zones that had one again.</summary>
+    public void ClearRuntime() => streamer.Reload(objects.ClearRuntime());
+
+    /// <summary>
+    /// The sites under construction: placement id to the look's <c>f</c> (docs/game/buildings-production.md "Construction look"). A listed building draws only the part below
+    /// 1.2 f of each mesh's height, and a scaffold grid above. Read on the render thread; the host replaces it as it likes.
+    /// </summary>
+    public IReadOnlyDictionary<string, float>? Construction { get => construction; set => construction = value; }
+    IReadOnlyDictionary<string, float>? construction;
+
+    PlacedMesh[] ghostBase = [];
+    object? ghostParts;
+    bool ghostValid;
+
+    /// <summary>
+    /// The placement ghost: a building's parts laid out at the origin (<paramref name="parts"/>, kept while the same list is passed) drawn at <paramref name="world"/>
+    /// (rotation, then position), green when <paramref name="valid"/>, else red. Null parts: no ghost.
+    /// </summary>
+    public void SetGhost(IReadOnlyList<PlacedMesh>? parts, Matrix4x4 world, bool valid)
+    {
+        if (parts is null || parts.Count == 0)
+        {
+            if (ghostBase.Length > 0) { streamer.ClearLoose(); ghostBase = []; ghostParts = null; }
+            return;
+        }
+        if (!ReferenceEquals(parts, ghostParts))
+        {
+            streamer.ClearLoose();
+            ghostParts = parts;
+            ghostBase = [.. parts.Where(p => !p.Interior)];
+            foreach (var p in ghostBase) streamer.MakeLoose(p);
+        }
+        ghostValid = valid;
+        var loose = streamer.Loose.Real;
+        for (int i = 0; i < loose.Count && i < ghostBase.Length; i++)
+        {
+            var transform = ghostBase[i].Transform * world;
+            var inst = loose[i];
+            inst.Placed = ghostBase[i] with { Transform = transform };
+            inst.Transform = transform;
+            if (inst.Gpu is { } gpu) inst.Centre = Vector3.Transform(gpu.Centre, transform);
+        }
+    }
+
+    void DrawGhost(ObjectStreamer.Instance inst, Vector3 eye, Vector4[] frustum, long now)
+    {
+        if (inst.Gpu is not { } gpu) return;
+        if (!ReferenceEquals(inst.Mesh.Gpu, gpu)) { Unresolve(streamer.Loose, inst); return; }
+        float value = Vector3.Distance(inst.Centre, eye) - inst.Radius;
+        if (!SphereVisible(frustum, inst.Centre, inst.Radius)) return;
+        inst.Mesh.LastUsed = now;
+        DrawnInstances++;
+        int level = Math.Max(gpu.Curve.Select(Math.Max(value, 0) * LodBias), gpu.MinLevel);
+        // A dither coverage of 65 %: the building shows through as a screen-door.
+        Add(gpu, inst.Materials!, level, inst.Transform, 0, 0.65f, value, ghost: ghostValid ? BatchKind.Ghost : BatchKind.GhostBad);
+    }
+
     /// <summary>Draw nothing but the real objects (no distant meshes): the game with distant towns off.</summary>
     public bool NoDistant { get; set; }
 
@@ -282,6 +356,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         ResolveTowns(eye);
         unresolvedInRange = streamer.Scan(eye, RealRange, DistantReach, NoDistant, Resolve, unlimited ? int.MaxValue : 40);
         unresolvedInRange += streamer.ScanLandmarks(eye, LandmarkReach, Resolve, unlimited ? int.MaxValue : 10);
+        unresolvedInRange += streamer.ScanLoose(streamer.Loose, eye, RealRange, Resolve, unlimited ? int.MaxValue : 10);
         meshes.Pump();
         MarkInRange(eye, force: unlimited);
         meshes.Trim();
@@ -294,6 +369,8 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
             if (streamer.LandmarkZone is { } landmarkZone)
                 foreach (var inst in landmarkZone.Real)
                     if (inst.Gpu is { } resolved && unloadedMeshes.Contains(resolved)) Unresolve(landmarkZone, inst);
+            foreach (var inst in streamer.Loose.Real)
+                if (inst.Gpu is { } resolved && unloadedMeshes.Contains(resolved)) Unresolve(streamer.Loose, inst);
             unloadedMeshes.Clear();
         }
         textureCache.Pump(wait: unlimited, max: unlimited ? 16 : 8, budgetMs: Math.Max(budgetMs * 0.5, 0.5));
@@ -633,6 +710,9 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
             float reach = LandmarkReach;
             foreach (var inst in landmarkZone.Real) DrawReal(landmarkZone, inst, reach, eye, frustum, options, now);
         }
+        // The placement ghost (Build mode): its parts at the cursor, dithered and tinted green or red; not in a shadow or the landmarks-only pass.
+        if (ghostBase.Length > 0 && !depthPass && !landmarksOnly)
+            foreach (var inst in streamer.Loose.Real) DrawGhost(inst, eye, frustum, now);
         if (!NoDistant && !landmarksOnly)
             foreach (var t in towns)
             {
@@ -736,21 +816,30 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         var m = inst.Transform;
         // Spare instance-matrix component: room GI gain without splitting shared furniture batches.
         m.M34 = inst.Placed.Interior || inst.Placed.ParentPlacementId is not null && InteriorAt(m.Translation) is not null ? 1 : 0;
+        // Another spare component, M44: 1, or for a construction site the height of its scaffold clip plane (BuildingLodShaders.ScaffoldBase + world Y).
+        bool site = false;
+        if (construction is { Count: > 0 } && !inst.Stand && construction.TryGetValue(inst.Placed.ParentPlacementId ?? inst.Placed.PlacementId, out float built))
+        {
+            float scaleY = new Vector3(m.M21, m.M22, m.M23).Length();
+            m.M44 = BuildingLodShaders.ScaffoldBase + m.M42 + 1.2f * Math.Clamp(built, 0f, 1f) * gpu.Top * scaleY;
+            site = true;
+        }
         if (!blend.IsBlending)
         {
-            Add(gpu, inst.Materials!, blend.Lower, m, 0, weight >= 0.999f ? 2 : weight, value, inst.Placed.Interior);
+            Add(gpu, inst.Materials!, blend.Lower, m, 0, weight >= 0.999f ? 2 : weight, value, inst.Placed.Interior, site);
             return;
         }
-        Add(gpu, inst.Materials!, blend.Upper, m, 0, blend.T * weight, value, inst.Placed.Interior);
-        Add(gpu, inst.Materials!, blend.Lower, m, blend.T * weight, weight, value, inst.Placed.Interior);
+        Add(gpu, inst.Materials!, blend.Upper, m, 0, blend.T * weight, value, inst.Placed.Interior, site);
+        Add(gpu, inst.Materials!, blend.Lower, m, blend.T * weight, weight, value, inst.Placed.Interior, site);
     }
 
-    void Add(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, Matrix4x4 m, float lo, float hi, float near, bool backCull = false)
+    void Add(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, Matrix4x4 m, float lo, float hi, float near, bool backCull = false, bool site = false, int ghost = 0)
     {
         var manual = gpu.Manual[level];
         // Fully visible: lo 0 and hi 2 (the shader keeps everything when hi >= 1 and lo is 0). With the early depth test off every batch is "fading": the old merging.
-        bool fading = !EarlyDepth.Enabled || lo > 0 || hi < 1;
-        var batch = BatchFor(manual ?? gpu, materials, manual is null ? level : 0, (fading ? BatchKind.Fading : BatchKind.Solid) | (backCull ? BatchKind.BackCull : 0));
+        // A construction site discards the fragments above its clip plane, so it needs the program with a discard as well.
+        bool fading = !EarlyDepth.Enabled || lo > 0 || hi < 1 || site;
+        var batch = BatchFor(manual ?? gpu, materials, manual is null ? level : 0, (fading ? BatchKind.Fading : BatchKind.Solid) | (backCull ? BatchKind.BackCull : 0) | ghost);
         batch.Manual = manual is not null;
         if (batch.Count == 0) { active.Add(batch); batch.Near = near; } else if (near < batch.Near) batch.Near = near;
         m.M14 = lo;
@@ -765,13 +854,17 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         public const int Solid = 0, Fading = 1, Town = 2;
         /// <summary>A flag on Solid or Fading: <see cref="Batch.BackCull"/>.</summary>
         public const int BackCull = 4;
+        /// <summary>Flags: the placement ghost, valid or invalid (<see cref="Batch.Ghost"/>).</summary>
+        public const int Ghost = 8, GhostBad = 16;
     }
 
     Batch BatchFor(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, int kind)
     {
         var key = (gpu, materials, level, kind);
         if (!batchMap.TryGetValue(key, out var batch))
-            batchMap[key] = batch = new Batch { Mesh = gpu, Materials = materials, Level = level, Town = kind == BatchKind.Town, Fading = (kind & ~BatchKind.BackCull) != BatchKind.Solid, BackCull = (kind & BatchKind.BackCull) != 0 };
+            batchMap[key] = batch = new Batch { Mesh = gpu, Materials = materials, Level = level, Town = kind == BatchKind.Town,
+                Fading = (kind & ~(BatchKind.BackCull | BatchKind.Ghost | BatchKind.GhostBad)) != BatchKind.Solid, BackCull = (kind & BatchKind.BackCull) != 0,
+                Ghost = (kind & BatchKind.GhostBad) != 0 ? 2 : (kind & BatchKind.Ghost) != 0 ? 1 : 0 };
         return batch;
     }
 
@@ -957,6 +1050,8 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
                 {
                     var pm = b.Materials.Parts[Math.Min(i, b.Materials.Parts.Length - 1)];
                     Material(ref d, gp, pm, options);
+                    // The placement ghost: the shader tints a draw whose flat colour is non-zero.
+                    if (b.Ghost != 0) d.Push.FlatColour = b.Ghost == 1 ? new Vector3(0.35f, 1f, 0.45f) : new Vector3(1f, 0.3f, 0.25f);
                     // A part whose diffuse map is not resident yet is drawn plain grey (pop-in the benchmark counts).
                     if (!depthPass && options.Textures && d.Diffuse == 0 && pm.WantsDiffuse) untexturedDraws++;
                     d.Solid = !depthPass && !b.Fading && d.Push.AlphaThreshold == 0f;

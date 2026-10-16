@@ -15,6 +15,9 @@ public sealed class NavSystem : IDisposable
 {
     readonly NavMeshService service;
 
+    /// <summary>The buildings the player placed, which every zone build sees (<see cref="AddRuntimeBuilding"/>).</summary>
+    public NavRuntimeBuildings Runtime { get; } = new();
+
     public NavSystem(GameInstall install, GameDatabase db, WorldLevelData levels, Func<float, float, float> terrainHeight, NavBuildSettings? settings = null, NavMeshCache? cache = null)
     {
         // The long-range grid reads every second heightmap sample (36 units) when it is first needed: the simulation's own grid is coarse far from the start.
@@ -25,7 +28,7 @@ public sealed class NavSystem : IDisposable
             var grid = new HeightWindow(0, 0, 2, size, size, raw);
             return (x, z) => grid.TryHeightAt(x, z, out float h) ? h : terrainHeight(x, z);
         });
-        service = new NavMeshService(install, db, levels, Walkability, settings, cache);
+        service = new NavMeshService(install, db, levels, Walkability, settings, cache, Runtime);
     }
 
     public NavmeshWalkability Walkability { get; }
@@ -58,6 +61,29 @@ public sealed class NavSystem : IDisposable
 
     /// <summary>Drops a zone's mesh (its cache file stays). Paths already handed out stay valid as lists of points.</summary>
     public void UnloadZone(ZoneCoordinate zone) => service.Unload(zone);
+
+    /// <summary>
+    /// A building the player placed (or finished) takes part in the navmesh from the next build of the zones it reaches; the zones loaded now are built again, and
+    /// <see cref="ZoneReady"/> fires for each when it goes live.
+    /// </summary>
+    public void AddRuntimeBuilding(BuildingPlacement placement)
+    {
+        Runtime.Add(placement);
+        foreach (var zone in NavRuntimeBuildings.ZonesReached(placement.Position)) RebuildZone(zone);
+    }
+
+    /// <summary>The building is gone (dismantled, cancelled, a world replaced): the zones it shaped are built again without it.</summary>
+    public void RemoveRuntimeBuilding(string instanceId)
+    {
+        if (Runtime.Remove(instanceId) is { } removed)
+            foreach (var zone in NavRuntimeBuildings.ZonesReached(removed.Position)) RebuildZone(zone);
+    }
+
+    /// <summary>Builds a zone again if its mesh is loaded (a zone that is not is built with the current buildings when it is asked for).</summary>
+    public void RebuildZone(ZoneCoordinate zone)
+    {
+        if (Walkability.World.Find(zone) is not null) _ = service.Rebuild(zone);
+    }
 
     public void Dispose() => service.Dispose();
 }
