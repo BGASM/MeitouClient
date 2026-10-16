@@ -141,7 +141,7 @@ t ≤ 0. Shown only with `Movement marker` ([settings.md](../formats/settings.md
 (`NORMALS`: `rgb *= saturate(N·sun) * contrast + 1 - contrast`, contrast 0.5) and `Basic_FP` (`colour × vertex colour`).
 Meitou (`MoveMarkerRenderer`) draws both passes after the tone map, so the colours show as given whatever the exposure, sorting fragments by
 the near slice's scene depth, multisampled (up to 8×) and resolved over the picture: the mesh's rough band at the cone's widest part
-and the notch on the stem are in `position.mesh` itself; on every ground move and steering order, always on (settings.cfg is not read yet).
+and the notch on the stem are in `position.mesh` itself; on every ground move, following the cursor each frame while the button steers, always on (settings.cfg is not read yet).
 
 ## Unknowns
 

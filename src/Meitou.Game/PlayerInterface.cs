@@ -154,11 +154,11 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     {
         UpdateContextMenu();
         if (!steering || OverHud(mouse)) return;
-        if (!final && session.World.Tick == steerTick) return;
         if (Ray(mouse) is not { } ray || GroundHit(ray.Origin, ray.Direction) is not { } hit) return;
+        PlaceMarker(hit);   // the marker follows the cursor every frame; the order only once a tick
+        if (!final && session.World.Tick == steerTick) return;
         if (final && session.World.Tick == steerTick && hit == steerTarget) return;
         Move(hit, queued: false);
-        PlaceMarker(hit);
         (steerTarget, steerTick) = (hit, session.World.Tick);
     }
 
