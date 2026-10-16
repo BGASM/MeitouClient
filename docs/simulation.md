@@ -314,7 +314,7 @@ Arrests, the recognition meter and the marker are hashed only while set. What a 
 Player construction contract (Faithful UI). Facts: [construction](game/buildings-production.md#construction),
 [placement](game/buildings-production.md#placement), [build menu](game/buildings-production.md#build-menu),
 [build tasks](game/ai-tasks.md#build-tasks), [save keys](formats/zones.md#placement-keys). Out of scope: the
-wall subsection parent links, outpost behaviour beyond the record (residents, raids, renaming, the map marker), the door x3 rule,
+outpost behaviour beyond the record (residents, raids, renaming, the map marker), the door x3 rule,
 production/power/storage, research progress, fetching from storage (task 247).
 
 **Shared types** (stubs f4cb78c, filled by the simulation track):
@@ -450,7 +450,8 @@ auto-job act on the root; its progress sets the children's (`min(p/target, 1) x 
 removal removes them. So an attached piece costs nothing; the link is not saved or hashed. A destroyed attached piece
 just follows its wall again (original **Unknown**). **Engine gaps**: level (NPC town) walls are not snap candidates;
 indoor lines (radius 25), the steep-climb straight extension, the offset clamp and the arrows are not built; the stretch
-is recomputed each frame from the signed overshoot; the host still lists an attached piece's own materials.
+is recomputed each frame from the signed overshoot; the host still shows an attached piece's own materials and
+offers Cancel on it (the snapshot has no `WallParent`), which cancels the whole wall.
 
 **Saves.** `Saving/BuildingSave.cs` writes each site as a GAMESTATE_BUILDING (`<id>-S23`) plus its entry in the zone
 file's `0-buildinglist` (keys per [zones](formats/zones.md#placement-keys)); a zone without a file gets one, the slot
