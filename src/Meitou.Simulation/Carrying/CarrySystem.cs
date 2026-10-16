@@ -142,6 +142,24 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         }
     }
 
+    /// <summary>Starts a pick-up of <paramref name="body"/> by the character in <paramref name="carrier"/> (serial phases; the arrest system's lift): false when it cannot carry or the body cannot be lifted.</summary>
+    public bool BeginPickUp(World world, int carrier, CharacterId body)
+    {
+        var table = world.Characters;
+        if (!table.TryResolveNext(body, out int b) || b == carrier || table.Cold(carrier) is not { } c || !CanCarry(c) || !CanBeLifted(table.Cold(b)!)) return false;
+        Begin(table, carrier, body, CharacterTask.PickUp, CharacterTask.Idle);
+        return true;
+    }
+
+    /// <summary>Lets go of the carried body where the carrier stands, without the put-down knock-out (serial phases; the arrest system's put-in-cage). False when it carries nothing.</summary>
+    public bool LetGo(World world, int carrier)
+    {
+        var table = world.Characters;
+        if (table.Cold(carrier) is not { Carrying.IsNone: false } c || !table.TryResolveNext(c.Carrying, out int b)) return false;
+        Unlink(world, carrier, b, drop: true);
+        return true;
+    }
+
     /// <summary>The slot among <paramref name="ids"/> that <paramref name="accept"/> takes and is nearest the target (ties: the first listed).</summary>
     static int? Nearest(CharacterTable table, IReadOnlyList<CharacterId> ids, int target, Func<int, bool> accept)
     {

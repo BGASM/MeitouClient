@@ -43,7 +43,13 @@ sealed partial class PlayerInterface
         }
         if (target.Body is { Dead: false, NeedsAid: true } && !selection.Contains(id))
             verbs.Add(("First Aid", () => Say(new Meitou.Simulation.FirstAid.TreatOrder(selection, id) { Tick = session.World.Tick })));
-        if (down && target.CarriedBy.IsNone && carriers.Length == 0)
+        // A caged character: pick its cage's lock (the prisoner its own, a mate from outside), and once it is open the prisoner may get out (an escape unless served).
+        if (target.Prison is { } prison && !down)
+        {
+            if (prison.Locked) verbs.Add(("Pick Lock", () => Say(new Meitou.Simulation.Locks.PickLockOrder(selection, id) { Tick = session.World.Tick })));
+            else if (selection.Contains(id)) verbs.Add(("Get Out", () => Say(new Meitou.Simulation.Locks.GetOutOrder([id]) { Tick = session.World.Tick })));
+        }
+        if (down && target.CarriedBy.IsNone && carriers.Length == 0 && target.Prison is null)
         {
             verbs.Add(("Pick Up", () => Say(new Meitou.Simulation.Carrying.PickUpOrder([], id) { Tick = session.World.Tick })));
             verbs.Add(("Loot", () => Say(new Meitou.Simulation.Carrying.LootOrder([], id) { Tick = session.World.Tick })));

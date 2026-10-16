@@ -26,7 +26,7 @@ public enum StandardParts
     Flee = 2048,
     /// <summary>Carrying downed characters, the rescue job and looting (<see cref="Meitou.Simulation.Carrying.CarrySystem"/>).</summary>
     Carry = 4096,
-    /// <summary>Crimes and bounties (<see cref="Meitou.Simulation.Crime.CrimeSystem"/>): pending crimes from the player's deeds, witnesses, the police; with <c>Aggro</c> the police attack wanted characters.</summary>
+    /// <summary>Crimes and bounties (<see cref="Meitou.Simulation.Crime.CrimeSystem"/>): pending crimes from the player's deeds, witnesses, the police; the arrests, fines and jail (<see cref="Meitou.Simulation.Crime.ArrestSystem"/>) and the lock orders (<see cref="Meitou.Simulation.Locks.LockSystem"/>) come with it.</summary>
     Crime = 8192,
     /// <summary>Shops, prices and trading (<see cref="Meitou.Simulation.Trading.TradeSystem"/>).</summary>
     Trade = 16384,
@@ -59,6 +59,7 @@ public sealed class StandardSystemOptions
     public AggroSettings? Aggro { get; init; }
     public Meitou.Simulation.Carrying.CarrySettings? Carry { get; init; }
     public Meitou.Simulation.Crime.CrimeSettings? Crime { get; init; }
+    public Meitou.Simulation.Crime.ArrestSettings? Arrest { get; init; }
     public Meitou.Simulation.Trading.TradeSettings? Trade { get; init; }
     public Meitou.Simulation.Ai.AiSettings? Ai { get; init; }
 }
@@ -74,6 +75,8 @@ public sealed class StandardSystemSet
     public AggroSystem? Aggro { get; init; }
     public Meitou.Simulation.Carrying.CarrySystem? Carry { get; init; }
     public Meitou.Simulation.Crime.CrimeSystem? Crime { get; init; }
+    public Meitou.Simulation.Crime.ArrestSystem? Arrest { get; init; }
+    public Meitou.Simulation.Locks.LockSystem? Locks { get; init; }
     public Meitou.Simulation.Trading.TradeSystem? Trade { get; init; }
     public Meitou.Simulation.Ai.AiSystem? Ai { get; init; }
 }
@@ -102,7 +105,8 @@ public sealed class StandardSystemSet
 /// leash sweep sees the tasks every other system left, and its look (<c>Act</c>) runs after combat's, reading only the last tick's positions.
 /// <b>Flee after aggro</b>: a squad that breaks sends its runners off after every fight of the tick was ordered, and its stop orders are deferred like theirs.</item>
 /// <item><b>Crime last</b>: its witness sweep (<c>SlowWorld</c>) sees the positions, carry links and pending crimes every other system left this tick; the deeds are reported to it by
-/// combat (<c>Inputs</c>, commit, the bolt flight in <c>Schedule</c>) and carrying (<c>SlowWorld</c>), all serial. It adds nothing to the hash until a crime is pending.</item>
+/// combat (<c>Inputs</c>, commit, the bolt flight in <c>Schedule</c>) and carrying (<c>SlowWorld</c>), all serial. It adds nothing to the hash until a crime is pending. The arrest system
+/// right after it acts on the bookings and sightings of the same tick, then the lock system (its picks book crimes the next sweep sees).</item>
 /// <item><b>Trade after crime</b>: a caught fence is reported to the crime system from the trade's <c>Inputs</c>, and the shops are opened and restocked in <c>SlowWorld</c> after the
 /// population made the tick's squads. It adds nothing to the hash until a squad has a shop.</item>
 /// </list>
@@ -153,13 +157,17 @@ public static class StandardSystems
         if (carry is not null) carry.Aggro = aggro;
         if (Has(StandardParts.Flee)) systems.Add(new FleeSystem(data.Relations, combat!, o.Aggro?.SightRange ?? AggroSystem.OutdoorSight));
         Meitou.Simulation.Crime.CrimeSystem? crime = null;
+        Meitou.Simulation.Crime.ArrestSystem? arrest = null;
+        Meitou.Simulation.Locks.LockSystem? locks = null;
         if (Has(StandardParts.Crime))
         {
             // Last: its sweep sees every position, task and carry link the tick left; the deeds come in from combat and carrying in their own serial steps.
             systems.Add(crime = new Meitou.Simulation.Crime.CrimeSystem(data.Relations, o.Crime));
             if (combat is not null) combat.Crimes = crime;
             if (carry is not null) carry.Crimes = crime;
-            if (aggro is not null) aggro.Crimes = crime;
+            // Right after it: the police act on this tick's bookings and sightings; the lock orders (picking, getting out) report their crimes to it.
+            systems.Add(arrest = new Meitou.Simulation.Crime.ArrestSystem(crime, data.Bodies.Constants, o.Arrest) { Carry = carry });
+            systems.Add(locks = new Meitou.Simulation.Locks.LockSystem(data.Bodies.Constants, data.BodyOptions) { Crimes = crime });
         }
         Meitou.Simulation.Trading.TradeSystem? trade = null;
         if (Has(StandardParts.Trade))
@@ -167,6 +175,6 @@ public static class StandardSystems
             systems.Add(trade = new Meitou.Simulation.Trading.TradeSystem(data, o.Trade));
             trade.Crimes = crime;
         }
-        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime, Trade = trade, Ai = ai };
+        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime, Arrest = arrest, Locks = locks, Trade = trade, Ai = ai };
     }
 }

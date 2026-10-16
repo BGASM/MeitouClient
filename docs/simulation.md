@@ -58,7 +58,8 @@ factories/database/relations and lazy body/combat/item assembly. Research owns o
 
 `StandardSystems.Build` is the single wiring authority. Ordered systems:
 Population, Player, AI, Pursuit, Movement, FirstAid, Body, Carry, Construction, Combat, Animation, Feed,
-Retaliation, Aggro, Flee, Crime, Trade. Tests selecting subsets retain this relative order.
+Retaliation, Aggro, Flee, Crime, Arrest, Locks, Trade (Arrest and Locks come with the Crime part). Tests selecting subsets
+retain this relative order.
 Population spawns before later SlowWorld work; player selection precedes movement orders;
 AI writes tasks before movement; pursuit schedules paths before movement answers them.
 First aid reads patients in its own Act barrier and applies treatment during serial commit.
@@ -201,7 +202,8 @@ stolen ownership marks. [carry-loot.md](game/carry-loot.md). It also runs the st
 `CrimeSystem`: pending deeds, witnesses, booking, police eligibility, faction ledgers and expiry.
 Carry/combat report deeds; serial sweep observes current positions. Bounty expiry uses
 `0.04 hours/cat`, permanent at >=10000. Original categories, witness rules, imprisonment and
-remaining uncertainties: [economy.md](game/economy.md). Expiry is paused while imprisoned.
+remaining uncertainties: [economy.md](game/economy.md). Expiry is paused while imprisoned. The police's response:
+[Arrest and jail](#arrest-and-jail).
 
 ## Cages, beds and locks
 
@@ -220,10 +222,42 @@ unload, hashed only once non-empty. Facts: [locks](game/locks.md), [economy 11.5
   `CharacterCold.InSomething`/`InWhat` name the fixture; an imprisoned character is skipped by AI, movement (held still),
   aggro, answering, `CombatSystem.Engage` as attacker (it can still be attacked) and carrying. Sentence: `SentenceStart`
   (`World.GameHours`) + `SentenceLength`; served when start + length <= now; no bounty with the cage owner: none (served).
-- **Lockpicking** (`Lockpicking`, serial, for the next wave's order and AI tasks): `Step` per task update (pending crime,
+- **Lockpicking** (`Lockpicking`, serial; the player's order is in [Arrest and jail](#arrest-and-jail)): `Step` per task update (pending crime,
   timer on the lock, seeded roll by the lock's roll counter, XP), `Allowed` (min chance; engine: conscious, an arm, not
-  carried, not on a pole), `Break` (strength > 3 x hardness). Not built: shackles (item locks), cutting, lifting out of a
-  cage, the owner's lock/unlock tasks, door motion.
+  carried, not on a pole), `Break` (strength > 3 x hardness). Not built: shackles (item locks), cutting, the
+  owner's lock/unlock tasks, door motion.
+
+## Arrest and jail
+
+`Crime/ArrestSystem` (serial `SlowWorld`, after `CrimeSystem`) and `Locks/LockSystem`. Facts: [economy 11.5, 11.7, 11.8](game/economy.md#117-arrest).
+Arrests, the recognition meter and the marker are hashed only while set; none of them is saved yet.
+- **Triggers**: a police-like witness that books a crime acts at once (`CrimeSystem.BookingsOf`, the witnessed-crime
+  events); every 15 ticks an awake NPC within 400 that sees a player character (`Visibility`/`SneakVisibility`) whose
+  bounty with its faction reaches its class threshold spots it, at once while `RecentlyWanted` > 0 (250 game seconds after
+  a booking or a witnessed crime; engine: the countdown), else after 45 s of being seen (engine: one meter per target,
+  rate not decoded); only the nearest free police-like looker acts. MILITARY threshold: engine 2000 (original 4000 or 2000);
+  the police-like NPCs of the five towns `CrimeInstallTests` loads are MILITARY (**Observed**), so there a fine comes only from a booking.
+  A police-like NPC in its own town arrests an escaped prisoner (`CharacterCold.Escaped`) it sees. `AggroSystem` no longer
+  attacks wanted characters.
+- **Fine or arrest** (engine stands in for the dialogue): outside his town (engine: farther than 2 x his resident squad's
+  home radius from its centre) the guard and his free squad mates attack. In it, 1..1049 is fined (`FineFor`; 300 up to 250
+  is engine, the data's line being unreachable): he walks up
+  (`Engaged`, so the AI leaves him alone), and within 40 takes the fine when the player's money is above it, erasing his
+  faction's entry; else, when the target runs past 800 or after 60 s, and for any bigger bounty: arrest.
+- **Arrest**: attack until the target is down (combat ends the fight; nobody beats a downed target), lift
+  (`CarrySystem.BeginPickUp`), `FindCage` from the guard (his squad's home building; other arrests' cages reserved), walk,
+  and within `use range` + 15 (or a walk that ended within 200) `LetGo` + `Imprison` (`prison time` CONSTANTS). The fight
+  stopping with the target up re-orders it within 800, else he gives up; no free cage: he drops the captive (engine).
+- **Release** (engine): every 30 ticks an awake player prisoner whose sentence is served is freed in the jail faction's name
+  (the nearest police-like NPC of it within 1500 is logged as releaser; none needed), which erases its and the jail's entries;
+  it walks off by itself. NPC prisoners are never released (their jailers' AI is not built).
+- **Lock orders** (`LockSystem`, context-menu verbs on a caged character): `PickLockOrder` (the prisoner its own cage, a mate
+  walks to it; `Lockpicking.Step` each tick in reach, messages "Pick success!"/"Pick failed"), `GetOutOrder` (refused while
+  locked; an unserved sentence books a pending Escaping Prison and sets `Escaped`, as does any cage of a lawless owner).
+  `Imprison`/`Release` clear `Escaped`.
+- **HUD**: `CharacterSnapshot.Prison`; the State line shows the status panel's prison text.
+- Not built: bail (needs dialogue), lifting a prisoner out of a cage (`CarrySystem.CanBeLifted` refuses the caged), claiming
+  a captive's bounty, bounty hunters (they only spot), slaves, shackles, the jailers' own release and lock rounds.
 
 ## Buildings
 

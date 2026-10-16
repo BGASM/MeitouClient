@@ -246,9 +246,14 @@ decompile's `DialogActionEnum` / `DialogConditionEnum` / `EventTriggerEnum`, com
   guards) answer events 8 `THIEF_CAUGHT_STEALING_FROM_ME`, 41 `WITNESS_GENERIC_ASSAULT`, 43 `WITNESS_THIEF_OR_LOCKPICK`, 44 `BOUNTY_SPOTTED`,
   45 `ESCAPED_PRISONER_SPOTTED`, 40 `ESCAPED_EX_SLAVE_SPOTTED`, 15 `I_DEFEATED_SQUAD` ("Law enforcement defeats squad (arrest them)",
   gated by `DC_CARRYING_BOUNTY_ALIVE` false) and 1 `PLAYER_TALK_TO_ME` with lines carrying `DA_ARREST_TARGET` (29). Bounty dialogues
-  branch on `DC_BOUNTY_AMOUNT_ACTUAL`: "Small bounty" (0 < b < 1050) offers a fine (300..1000 by bracket; paying runs `DA_TAKE_MONEY`
-  + `DA_CLEAR_BOUNTY` 49); refusing or lacking money runs `DA_ARREST_TARGET`; "small fry" (1050 < b < 25000) and "super high" (> 25000)
-  arrest at once. "Surrender" exists only as these dialogue choices; there is no surrender state.
+  branch on `DC_BOUNTY_AMOUNT_ACTUAL`: "Small bounty" (0 < b < 1050) offers a fine; refusing or lacking money runs `DA_ARREST_TARGET`;
+  "small fry" (1050 < b < 25000) and "super high" (> 25000) arrest at once. "Surrender" exists only as these dialogue choices; there is no
+  surrender state.
+- **Fine** (DIALOGUE "Bounty extortion pay", `Npc MILITARY Law 3`; **Verified** by probe of the base load order): one line per bracket,
+  `250 < b < 351` -> 400, then +100 per 100 up to `950 < b < 1051` -> 1100; the 300 line (`0 < b < 251`) tests the *speaker's* bounty
+  (`who` 0, a data slip: it never shows for a guard without a bounty). Paying needs `DC_PLAYERMONEY > fine` (strict) and runs
+  `DA_TAKE_MONEY` (8, the fine) + `DA_CLEAR_BOUNTY` (49); the 1100 line also runs `DA_PAY_BOUNTY` (10). Which entry 49 clears is
+  **Unknown** (Meitou: the speaker's faction's). As built: [simulation](../simulation.md#arrest-and-jail).
 - **`DA_ARREST_TARGET`** (`FUN_140680560` case 0x1d, **Observed**): when the speaker's ownership town (`Character+0x658 -> +0x30`) is set
   and equals the speaker's status `+0x88` (read as "he is in his own town"), and the target's slot `0x248` is null: the speaker gets tasks 240 `LIFT_PERSON_SNATCHING_ALLOWED_IN_TOWN_ONLY`
   ("Capture Target", needs `isTargetDown`) and 112 `FIND_CAGE_AND_PUT_IN` on the target, and the target's squad marks the speaker

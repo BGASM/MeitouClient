@@ -60,6 +60,7 @@ public class CrimeTests
         public AggroSystem Aggro { get; }
         public CarrySystem Carry { get; }
         public CrimeSystem Crime { get; }
+        public ArrestSystem Arrest { get; }
         public FactionRelations Relations { get; }
 
         public Town(ulong seed = 7, int threads = 1, int minPartition = 1)
@@ -74,11 +75,11 @@ public class CrimeTests
             Crime = new CrimeSystem(Relations, new CrimeSettings { RecordLog = true });
             Combat.Crimes = Crime;
             Carry.Crimes = Crime;
-            Aggro.Crimes = Crime;
+            Arrest = new ArrestSystem(Crime, BaseGame, new ArrestSettings { RecordLog = true }) { Carry = Carry };
             var walk = new OpenGroundWalkability((_, _) => 150);
             World = new SimWorld(new WorldSettings { Seed = seed, Threads = threads, PublishSnapshots = false, MinPartitionSize = minPartition }, walk,
                 [new PlayerSystem(), new PursuitSystem(Combat), new MovementSystem(new PathService(walk, true)), new BodySystem(BaseGame), Carry, Combat,
-                 new RetaliationSystem(Combat), Aggro, Crime]);
+                 new RetaliationSystem(Combat), Aggro, Crime, Arrest]);
         }
 
         public void Dispose() => World.Dispose();
@@ -195,7 +196,7 @@ public class CrimeTests
             if (target == 300) t.Say(new LootOrder([other], farmer) { Tick = t.World.Tick });
             hashes.Add(t.World.StateHash());
         }
-        seen = (t.Events(CrimeEventKind.Booked).Count(), t.Events(CrimeEventKind.Witnessed).Count(), t.Aggro.Log.Count);
+        seen = (t.Events(CrimeEventKind.Booked).Count(), t.Events(CrimeEventKind.Witnessed).Count(), t.Aggro.Log.Count + t.Arrest.Log.Count(e => e.Kind is ArrestEventKind.Attack or ArrestEventKind.Arrest));
         return hashes;
     }
 
@@ -250,6 +251,7 @@ public class CrimeInstallTests(ITestOutputHelper output)
                 Population = new PopulationSettings { CheckEveryTicks = 1 },
                 Combat = new CombatOptions { SelfApproach = false, TickMedical = false, RecordLog = true },
                 Aggro = new AggroSettings { RecordLog = true },
+                Arrest = new ArrestSettings { RecordLog = true },
             });
             using var world = new SimWorld(new WorldSettings { Seed = 1, PublishSnapshots = false }, walk, systems.Systems);
             world.Commands.Enqueue(new FocusCommand(site.Position) { Tick = 0 });
@@ -269,11 +271,12 @@ public class CrimeInstallTests(ITestOutputHelper output)
             var entry = (table.Cold(me.Slot)!.Bounties = new BountyLedger()).Get(wantedBy[0], data.Factions[wantedBy[0]].Name);
             entry.Amount = 5000;
             entry.RaisedTick = world.Tick;
+            table.Cold(me.Slot)!.RecentlyWanted = CrimeSystem.RecentlyWantedSeconds;   // just booked: recognised at once
             world.RunTicks(60);
-            var attackers = systems.Aggro!.Log.Where(e => e.Target == me).ToList();
-            output.WriteLine($"  wanted by {data.Factions[wantedBy[0]].Name}: attacked by {attackers.Count} ({string.Join(", ", attackers.Select(e => table.Cold(e.Attacker.Slot)?.Name))})");
+            var attackers = systems.Arrest!.Log.Where(e => e.Target == me && e.Kind is ArrestEventKind.Attack or ArrestEventKind.Arrest).ToList();
+            output.WriteLine($"  wanted by {data.Factions[wantedBy[0]].Name}: gone after by {attackers.Count} ({string.Join(", ", attackers.Select(e => $"{table.Cold(e.Guard.Slot)?.Name} {e.Kind}"))})");
             Assert.NotEmpty(attackers);
-            Assert.Contains(attackers, e => e.AttackerFaction == wantedBy[0]);
+            Assert.Contains(attackers, e => e.Faction == wantedBy[0]);
         }
         Assert.True(found > 0, "some town has police of a faction that books bounties");
     }

@@ -23,12 +23,26 @@ sealed partial class PlayerInterface
     /// <summary>A line of a text panel: label and value, each with its colour (null: the text default).</summary>
     internal readonly record struct HudLine(string Label, string Value, string? LabelColour = null, string? ValueColour = null);
 
+    /// <summary>
+    /// The status panel's prison line (<c>FUN_1405d2da0</c>, docs/game/economy.md 11.5, <b>Observed</b>): the hours left rounded up, "FOREVER" for a sentence of 2000 hours or more,
+    /// "Waiting to be released" once there is nothing left.
+    /// </summary>
+    internal static string PrisonText(PrisonView prison) =>
+        prison.Sentence >= 2000 ? "Imprisoned, sentence time remaining: FOREVER"
+        : prison.Sentence > 0 && prison.HoursLeft > 0 ? $"Imprisoned, sentence time remaining: {Math.Ceiling(prison.HoursLeft).ToString(CultureInfo.InvariantCulture)} hrs"
+        : "Waiting to be released";
+
     /// <summary>The state lines (State, Goal, Encumbrance) of the selected character.</summary>
     static HudLine[] StateLines(CharacterSnapshot lead)
     {
         var body = lead.Body;
         string state = body is { Dead: true } ? "Dead" : body is { Unconscious: true } ? "Unconscious" : (lead.Orders & CharacterOrders.Block) != 0 ? "Defensive" : "Normal";
         string? colour = body is { Dead: true } or { Unconscious: true } ? BadColour : null;
+        if (body is not { Dead: true } && lead.Prison is { } prison)
+        {
+            state = PrisonText(prison);
+            colour = BadColour;
+        }
         int encumbrance = (int)((1 - Math.Clamp(lead.Hud?.Encumbrance ?? 1, 0, 1)) * 100);
         return [new("State:", state, ValueColour: colour), new("Goal:", lead.Activity ?? "Aimless"),
             new("Encumbrance:", encumbrance.ToString(CultureInfo.InvariantCulture) + "%", ValueColour: encumbrance >= 50 ? BadColour : null)];

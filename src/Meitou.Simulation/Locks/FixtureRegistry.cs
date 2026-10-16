@@ -220,15 +220,15 @@ public sealed class FixtureRegistry
     /// <summary>
     /// The cage a carrier of <paramref name="faction"/> at <paramref name="at"/> puts a captive in (the original's finder, economy.md 11.7, <b>Observed</b>): every free cage weighs
     /// clamp(1 - d^2 / 4608^2, 1e-5, 1), x100 when of the carrier's faction, x100 when in <paramref name="home"/> (a building instance id); the highest wins, the first registered on a
-    /// tie. The usability and police tests of the original are not modelled. Null when none is free.
+    /// tie. The usability and police tests of the original are not modelled; <paramref name="skip"/> leaves out reserved cages. Null when none is free.
     /// </summary>
-    public Fixture? FindCage(World world, Vector3 at, int faction, string? home = null)
+    public Fixture? FindCage(World world, Vector3 at, int faction, string? home = null, Func<Fixture, bool>? skip = null)
     {
         Fixture? best = null;
         float bestWeight = 0;
         foreach (var f in all)
         {
-            if (f.Kind != FixtureKind.Cage || !IsFree(world.Characters, f)) continue;
+            if (f.Kind != FixtureKind.Cage || !IsFree(world.Characters, f) || skip?.Invoke(f) == true) continue;
             float d2 = Vector2.DistanceSquared(new Vector2(at.X, at.Z), new Vector2(f.Position.X, f.Position.Z));
             float w = Math.Clamp(1 - d2 / (CageSearchScale * CageSearchScale), 1e-5f, 1);
             if (faction >= 0 && f.Owner == faction) w *= 100;
@@ -272,6 +272,7 @@ public sealed class FixtureRegistry
         if (c.InSomething != HeldState.None || !c.CarriedBy.IsNone || !c.Carrying.IsNone) return false;
         c.InSomething = HeldState.Imprisoned;
         c.InWhat = cage.Id;
+        c.Escaped = false;
         cage.Occupant = prisoner;
         if (cage.Lock is { } l) { l.Locked = true; l.PickTime = 0; l.NextRoll = LockState.FirstRoll; }
         Hold(table, s, c, cage);
@@ -317,13 +318,14 @@ public sealed class FixtureRegistry
             if (ledger.Count == 0) c.Bounties = null;
         }
         Clear(c);
+        c.Escaped = false;
         if (c.IsPlayer) world.Post($"{c.Name} has been released from prison.");
         return true;
     }
 
     /// <summary>
     /// The prisoner leaves its cage by itself (Task_GetOutOfCage, locks.md "Cages and beds"): refused while the cage is effectively locked; an escape (a pending Escaping Prison
-    /// against the cage owner) unless the sentence is served. True when it got out.
+    /// against the cage owner, and the escaped flag <see cref="CharacterCold.Escaped"/>) unless the sentence is served; the flag is forced for a cage of a lawless owner. True when it got out.
     /// </summary>
     public bool GetOut(World world, CharacterId prisoner, CrimeSystem? crimes = null)
     {
@@ -331,10 +333,12 @@ public sealed class FixtureRegistry
         if (!table.TryResolveNext(prisoner, out int s) || table.Cold(s) is not { IsImprisoned: true } c) return false;
         var cage = c.InWhat is { } id ? Find(id) : null;
         if (cage?.Lock is { EffectivelyLocked: true }) return false;
-        if (!SentenceServed(c, world.GameHours) && cage is not null)
-            crimes?.SetPending(world, s, CrimeCode.EscapingPrison, cage.Owner, CharacterId.None, CrimeSystem.MinTimer);
+        bool escape = cage is not null && !SentenceServed(c, world.GameHours);
+        if (escape) crimes?.SetPending(world, s, CrimeCode.EscapingPrison, cage!.Owner, CharacterId.None, CrimeSystem.MinTimer);
+        bool escaped = escape || cage is not null && crimes is not null && crimes.Factions.Lawless(cage.Owner);
         if (cage is not null && cage.Occupant == prisoner) cage.Occupant = CharacterId.None;
         Clear(c);
+        c.Escaped = escaped;
         return true;
     }
 

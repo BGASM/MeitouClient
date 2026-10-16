@@ -139,12 +139,6 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
 
     public AggroSettings Settings { get; } = settings ?? new AggroSettings();
     public FactionRelations Relations { get; } = relations;
-    /// <summary>
-    /// The crime system: with it a police-like NPC also attacks a character its faction has an unclaimed bounty on (docs/simulation.md "Crimes and bounties"; the original's police go after
-    /// wanted characters they sense). Null: hostility by relations only.
-    /// </summary>
-    public Crime.CrimeSystem? Crimes { get; set; }
-
     /// <summary>The fights started since the last <see cref="TakeLog"/> (with <see cref="AggroSettings.RecordLog"/>).</summary>
     public IReadOnlyList<AggroEntry> Log => log;
 
@@ -172,9 +166,8 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         }
         size = Math.Max(size, n);
         var next = table.Next;
-        if (present.Length != Relations.Count) { present = new bool[Relations.Count]; hasEnemy = new bool[Relations.Count]; wanted = new bool[Relations.Count]; }
+        if (present.Length != Relations.Count) { present = new bool[Relations.Count]; hasEnemy = new bool[Relations.Count]; }
         Array.Clear(present);
-        Array.Clear(wanted);
         for (int i = 0; i < n; i++)
         {
             int generation = next[i].Alive ? next[i].Generation : -1;
@@ -182,10 +175,6 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
             if (generation >= 0 && table.Cold(i) is { Medical: not null } c && Relations.Contains(c.Faction))
             {
                 present[c.Faction] = true;
-                // Which factions want a character present: their police look even when no enemy faction is about.
-                if (Crimes is not null && c.Bounties is { } ledger)
-                    foreach (var e in ledger.Entries)
-                        if (e.Amount > 0 && !e.Claimed && Relations.Contains(e.Faction)) wanted[e.Faction] = true;
             }
         }
         // Which factions have an enemy among the factions present: a peaceful crowd skips its looks. Worked out again only when the set changes.
@@ -202,7 +191,7 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         }
     }
 
-    bool[] present = [], presentBefore = [], hasEnemy = [], wanted = [];
+    bool[] present = [], presentBefore = [], hasEnemy = [];
     long changesBefore = -1;
     readonly List<int> presentList = [];
 
@@ -213,8 +202,6 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         public CharacterTable Table;
         public FactionRelations Relations;
         public int Self, Faction;
-        /// <summary>The looker is police-like and its faction wants someone present: a wanted character counts as an enemy.</summary>
-        public bool Police;
         public Vector3 Eye;
         public float Yaw, Range;
         public ulong Seed, Key, Tick;
@@ -246,14 +233,13 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
             byte task = next[i].Task;
             if (task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat || task == (byte)CharacterTask.Rest && !AiSleeper(table.Cold(i))) continue;
             if (table.Cold(i) is not { IsPlayer: false, InCombat: false, Fleeing: false, IsImprisoned: false, Fighter.CanAttack: true, Medical.Incapacitated: false, Carrying.IsNone: true } cold || !Relations.Contains(cold.Faction)) continue;
-            bool police = wanted[cold.Faction] && Crimes is { } crimes && crimes.IsPoliceLike(world, cold);
             var stance = cold.Ai?.Stance ?? Ai.AiStance.Aggressive;
-            if (!police && (stance == Ai.AiStance.Passive || !hasEnemy[cold.Faction] && stance != Ai.AiStance.AggressiveNeutrals)) continue;
+            if (stance == Ai.AiStance.Passive || !hasEnemy[cold.Faction] && stance != Ai.AiStance.AggressiveNeutrals) continue;
             float range = RangeOf(cold, Settings.SightRange);
             if (!(range > 0)) continue;
             var scan = new Scan
             {
-                Table = table, Relations = Relations, Self = i, Faction = cold.Faction, Police = police,
+                Table = table, Relations = Relations, Self = i, Faction = cold.Faction,
                 Eye = prev[i].Position, Yaw = prev[i].Yaw, Range = range, Best = -1, BestD2 = float.MaxValue,
                 Seed = world.Seed, Key = Rng.Key(new CharacterId(i, prev[i].Generation)), Tick = (ulong)world.Tick,
                 Stance = stance,
@@ -321,16 +307,13 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         bool better = taunts != s.BestTaunts ? taunts : d2 < s.BestD2;
         if (!better && !sneaking) return;
         if (s.Table.Cold(slot) is not { Medical.Incapacitated: false } c) return;
-        bool wanted = s.Police && Crime.CrimeSystem.IsWantedBy(c, s.Faction);
+        // Wanted characters are the arrest system's (Crime.ArrestSystem): the police spot, fine or arrest them there.
         bool enemy = s.Stance != Ai.AiStance.Passive
             && (IsEnemy(s.Relations, s.Faction, c.Faction) || s.Stance == Ai.AiStance.AggressiveNeutrals && IsNeutral(s.Relations, s.Faction, c.Faction));
-        if (!enemy && !wanted) return;
-        if (!wanted)
-        {
-            // The AI's stances (docs/simulation.md "AI", Combat goals): the defensive one joins fights only, the territorial one keeps to its home.
-            if (s.Stance == Ai.AiStance.Defensive && !c.InCombat) return;
-            if (s.Stance == Ai.AiStance.Territorial && Vector2.DistanceSquared(new Vector2(other.Position.X, other.Position.Z), s.Home) > s.HomeR2) return;
-        }
+        if (!enemy) return;
+        // The AI's stances (docs/simulation.md "AI", Combat goals): the defensive one joins fights only, the territorial one keeps to its home.
+        if (s.Stance == Ai.AiStance.Defensive && !c.InCombat) return;
+        if (s.Stance == Ai.AiStance.Territorial && Vector2.DistanceSquared(new Vector2(other.Position.X, other.Position.Z), s.Home) > s.HomeR2) return;
         // A sneaking target is harder to see and to hear (the Sneak order; docs/game/perception.md "Sight", "Spotting a sneaker" and "Hearing"): in view it fills the
         // looker's spot meter and counts as seen only once the meter was full before this scan.
         float stealth = sneaking ? Orders.Stealth(c) : -1;

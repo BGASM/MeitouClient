@@ -13,8 +13,8 @@ namespace Meitou.Simulation.Crime;
 /// <item><b>Witnesses</b> (<see cref="Sweep"/>, after <c>FUN_140854d10</c>): an awake NPC of another faction that sees the culprit and cares about the victim (by the crime) sets the timer
 /// to 20; only a police-like witness of a faction that books bounties books it (<see cref="Book"/>, <c>FUN_140853ec0</c>): the crime table's amount into the ledger entry of the
 /// <b>witness's</b> faction (<c>FUN_140852010</c>).</item>
-/// <item><b>Police</b>: a hit between a police-like character and another books an Assault on the other at once (<c>FUN_140665fa0</c>); police-like NPCs attack a character wanted by
-/// their faction (<see cref="AggroSystem"/>, <see cref="IsWantedBy"/>).</item>
+/// <item><b>Police</b>: a hit between a police-like character and another books an Assault on the other at once (<c>FUN_140665fa0</c>); police-like NPCs spot, fine and arrest a character wanted by
+/// their faction (<see cref="ArrestSystem"/>).</item>
 /// <item><b>Expiry</b>: an entry lasts 0.04 hours per cat since its last raise, for ever from 10000 (<see cref="CrimeTable.LifetimeHours"/>).</item>
 /// </list>
 /// Only the player's characters are culprits (engine choice: the simulation's NPCs fight only enemies or in defence, loot nothing and carry only their own).
@@ -25,6 +25,14 @@ public sealed class CrimeSystem(FactionRelations relations, CrimeSettings? setti
     public const float MinTimer = 3, WitnessTimer = 20, PoliceHitTimer = 30, KidnapTimer = 20;
     /// <summary>The timer of a murder: engine choice (the game's setter of code 4 was not found).</summary>
     public const float MurderTimer = 20;
+    /// <summary>The "recently wanted" marker a booking or a witnessed crime sets (<see cref="CharacterCold.RecentlyWanted"/>; the game's 250.0, counted down here as game seconds: engine choice).</summary>
+    public const float RecentlyWantedSeconds = 250;
+
+    readonly List<Booking> bookings = [];
+    long bookingsTick = -1;
+
+    /// <summary>The bookings of this tick by a witness (the police-like NPC that booked, the culprit, the faction): the arrest system's witnessed-crime trigger. Not world state.</summary>
+    public IReadOnlyList<Booking> BookingsOf(long tick) => bookingsTick == tick ? bookings : [];
 
     readonly List<CrimeEvent> log = [];
 
@@ -164,6 +172,12 @@ public sealed class CrimeSystem(FactionRelations relations, CrimeSettings? setti
         entry.Amount += CrimeTable.Amount(p.Code);
         entry.Crimes |= 1 << (int)p.Code;
         entry.RaisedTick = world.Tick;
+        c.RecentlyWanted = RecentlyWantedSeconds;
+        if (!witness.IsNone)
+        {
+            if (bookingsTick != world.Tick) { bookings.Clear(); bookingsTick = world.Tick; }
+            bookings.Add(new Booking(witness, world.Characters.IdOf(culprit), faction));
+        }
         Note(world, CrimeEventKind.Booked, culprit, p.Code, faction, entry.Amount, witness);
         if (c.IsPlayer) world.Post($"{c.Name} is wanted by {entry.FactionName} for {CrimeTable.Name(p.Code)}: bounty c.{entry.Amount}");
         return true;
@@ -187,6 +201,7 @@ public sealed class CrimeSystem(FactionRelations relations, CrimeSettings? setti
         {
             if (!next[s].Alive || table.Cold(s) is not { } c) continue;
             if (c.Bounties is { } ledger && !c.IsImprisoned) Expire(world, s, c, ledger, hoursPerTick);   // paused while imprisoned (economy.md 11.3)
+            if (c.RecentlyWanted > 0) c.RecentlyWanted = MathF.Max(0, c.RecentlyWanted - seconds);
             if (c.Pending is { } p)
             {
                 p.Timer -= seconds;
@@ -232,6 +247,7 @@ public sealed class CrimeSystem(FactionRelations relations, CrimeSettings? setti
             if (c.Pending is not { } p) continue;
             if (!Reacts(world, wc, c, p)) continue;
             p.Timer = WitnessTimer;
+            c.RecentlyWanted = RecentlyWantedSeconds;
             var witness = table.IdOf(w);
             if (!p.Witnessed)
             {

@@ -184,6 +184,9 @@ public sealed class PendingCrime
 /// <summary>A bounty line for the HUD (selected characters only): who wants the character, how much, for what, and the hours left (infinity: never expires).</summary>
 public readonly record struct BountyLine(string Faction, int Amount, string Crimes, double HoursLeft);
 
+/// <summary>A crime booked by a police-like witness this tick (<see cref="CrimeSystem.BookingsOf"/>).</summary>
+public readonly record struct Booking(CharacterId Witness, CharacterId Culprit, int Faction);
+
 /// <summary>Settings of the <see cref="CrimeSystem"/>.</summary>
 public sealed record CrimeSettings
 {

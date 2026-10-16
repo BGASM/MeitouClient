@@ -96,9 +96,17 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     /// selected character is sneaking or this one cannot be knocked out (a player character, or already down).
     /// </summary>
     public float? StealthKoChance { get; init; }
+    /// <summary>In a cage: whether it is locked and the sentence (null: not imprisoned).</summary>
+    public PrisonView? Prison { get; init; }
     /// <summary>The hostile NPCs that noticed or detected this sneaking player character in the last 4 s.</summary>
     public IReadOnlyList<WatcherView> Watchers { get; init; } = [];
 }
+
+/// <summary>
+/// A prisoner's cage and sentence (docs/game/economy.md 11.5): <see cref="Locked"/> the cage is effectively locked; <see cref="Sentence"/> its length in game hours (0: none, so it waits
+/// to be released), <see cref="HoursLeft"/> what remains of it.
+/// </summary>
+public readonly record struct PrisonView(bool Locked, float Sentence, double HoursLeft);
 
 /// <summary>The trained stats the HUD shows for the selection.</summary>
 public readonly record struct SkillSummary(float Attack, float Defence, float Dodge, float Toughness, float Strength, float Athletics);

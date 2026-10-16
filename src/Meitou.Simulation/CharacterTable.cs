@@ -166,6 +166,17 @@ public sealed class CharacterCold
     /// </summary>
     public double SentenceStart { get; set; }
     public float SentenceLength { get; set; }
+    /// <summary>
+    /// The original's "recently wanted" marker (status <c>+0x110</c>, set to 250 by a booking or a witnessed crime, docs/game/economy.md 11.2/11.8): while above 0 a looker recognises
+    /// the bounty at once. Game seconds counting down (<b>engine</b>: its decrement is Unknown). <see cref="Crime.CrimeSystem"/>; hashed only while set.
+    /// </summary>
+    public float RecentlyWanted { get; set; }
+    /// <summary>The bounty recognition meter (economy.md 11.8; <b>engine</b>: one per target, not per looker): fires at 1. <see cref="Crime.ArrestSystem"/>; hashed only while set.</summary>
+    public float Recognition { get; set; }
+    /// <summary>The escaped-prisoner flag (status <c>+0xe8</c>, docs/game/locks.md "Cages and beds"): left a cage before the sentence was served. Hashed only while set.</summary>
+    public bool Escaped { get; set; }
+    /// <summary>The fixture this character is picking the lock of (<see cref="Locks.LockSystem"/>; null: none). Hashed only while set.</summary>
+    public string? PickingLock { get; set; }
 }
 
 /// <summary>
@@ -377,6 +388,11 @@ public sealed class CharacterTable
             // Beds, cages and sentences add to the hash only while set, so worlds without them hash as before.
             if (k.InSomething != Locks.HeldState.None) { hasher.Add(0x496E536D); hasher.Add((int)k.InSomething); hasher.Add(k.InWhat is { } w ? Rng.StableHash(w) : 0UL); }
             if (k.SentenceLength > 0) { hasher.Add(k.SentenceStart); hasher.Add(k.SentenceLength); }
+            // The arrest state adds to the hash only while set, so worlds without it hash as before.
+            if (k.RecentlyWanted > 0) { hasher.Add(0x52576E74); hasher.Add(k.RecentlyWanted); }
+            if (k.Recognition > 0) { hasher.Add(0x5265636F); hasher.Add(k.Recognition); }
+            if (k.Escaped) hasher.Add(0x45736361);
+            if (k.PickingLock is { } pick) { hasher.Add(0x5069636B); hasher.Add(Rng.StableHash(pick)); }
         }
         hasher.Add(free.Count);
         foreach (int slot in free) hasher.Add(slot);
