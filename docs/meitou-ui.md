@@ -8,6 +8,8 @@ components: [reference/](meitou-ui/reference/) (web, React 18): run
 `tools/scripts/meitou-ui-textures.ps1` once (crops the textures from the install into git-ignored
 `reference/textures/`), then open `reference/index.html`. Online copy (private):
 https://claude.ai/artifact/U49EczXEMYKM29AyPSGJPm.
+The project site ([site/](../site/), Astro + nginx container) uses a texture-free web variant in
+`site/src/styles/meitou.css`: same tokens, plates/paper/buttons drawn in CSS, no sprites.
 
 ## Surfaces
 
