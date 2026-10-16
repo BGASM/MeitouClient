@@ -114,6 +114,7 @@ public sealed partial class MedicalState
                 float heal = MathF.Min(p.Bandage, dtb * 0.05f * c.HealRateMult * r);
                 p.Bandage -= heal;
                 p.Flesh = MathF.Min(p.Flesh + heal, m);
+                Healed += heal;
             }
             // Self healing: untreated damage becomes treated at 0.4 of the heal speed.
             if (p.SelfHealing && conscious && p.Flesh - p.Stun < m - p.Bandage)

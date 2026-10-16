@@ -109,7 +109,7 @@ i.e. everything).
 | `Show names` | bool | 1 | Show character names | Names above the player's characters |
 | `Movement marker` | bool | 1 | Show movement marker | The green marker where you click |
 | `Rotation marker` | bool | 1 | Show rotation marker | The green marker while rotating the camera |
-| `floaters` | int 0 … 2 | 1 | Show damage floaters: Off = 0, Simple info = 1, Full info = 2 | Damage numbers; only shown within 4000 units (squared distance 1.6e7, FUN_1406508d0); 2 splits them by damage type |
+| `floaters` | int 0 … 2 | 1 | Show damage floaters: Off = 0, Simple info = 1, Full info = 2 | Damage numbers; only shown within 4000 units (squared distance 1.6e7, FUN_1406508d0); 2 splits them by damage type. Layout: [ui-screens](../game/ui-screens.md#8-damage-floaters); stored at options +0x7c |
 | `font size2` | int (stored as float); slider −10 … 32 | 3 | Font Size | GUI font size; applied by its own handler. How the number maps to a size is **Unknown** |
 | `tutorials` | bool | 1 | Tutorials | In-game tutorials ("Reset Tutorials" is a button, not a key) |
 | `censorship` | bool | 0 | Language censorship | Filters swearing in dialogue (FUN_14067e8b0) |

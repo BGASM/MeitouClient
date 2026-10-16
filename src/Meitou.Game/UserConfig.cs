@@ -21,6 +21,8 @@ sealed class UserConfig
     public Meitou.Data.Ui.UiMode UiMode { get; set; } = Meitou.Data.Ui.UiMode.Faithful;
     /// <summary>The unit of the run speed in the information panel (Interface settings): mph as the game, or km/h.</summary>
     public SpeedUnit SpeedUnit { get; set; } = SpeedUnit.Mph;
+    /// <summary>The damage floaters (Interface settings): the original's <c>floaters</c> option, Simple by default; Meitou also floats a green "+N" over a player character that heals.</summary>
+    public FloaterMode Floaters { get; set; } = FloaterMode.Simple;
     public bool MainMenuTransitions { get; set; } = true;
     public bool InGameTransitions { get; set; } = true;
     public float MainMenuTransitionSpeed { get; set; } = 1;

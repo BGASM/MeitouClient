@@ -126,6 +126,10 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
             result.Add(new("Speed units", "The unit of the run speed in the character's information panel (the game: mph).", Choice: new(() => ["mph", "km/h"],
                 () => (int)config.SpeedUnit, i => player.SpeedUnit = config.SpeedUnit = (SpeedUnit)i)));
         if (page == 2)
+            result.Add(new("Damage floaters", "Numbers that float over a character when a blow lands, with the damage armour stopped in brackets. Simple shows the total, Full one number per damage type "
+                + "and the part hit. Healing of your own characters floats up in green.", Choice: new(() => ["Off", "Simple info", "Full info"],
+                () => (int)config.Floaters, i => player.Floaters = config.Floaters = (FloaterMode)i)));
+        if (page == 2)
             result.Add(new("Hardware mouse", "Use the Windows cursor instead of the game's drawn pointer (no hover pointers).",
                 Toggle: new("Hardware mouse", () => config.HardwareMouse, v => config.HardwareMouse = v)));
         if (page == 3)
@@ -360,6 +364,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         config.HoverOutline = true;
         player.SetUiMode(UiMode.Faithful);
         player.SpeedUnit = config.SpeedUnit = SpeedUnit.Mph;
+        player.Floaters = config.Floaters = FloaterMode.Simple;
         bindings.ResetToDefaults();
         resetPending = false;
         notice = "Default settings restored.";

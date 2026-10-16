@@ -307,8 +307,34 @@ the same layout, **Observed**). The file is written to `./__tutorials.data` in t
 | countA, then countA ids | u32 list taken from the manager object at +0x48 (written first), empty in the sample |
 | countB, then countB ids | u32 list taken from the manager object at +0x28 (written second), 30 ids 4..33 in the sample |
 
+### 8. Damage floaters
+
+The options `floaters` (Off 0, Simple info 1 default, Full info 2; [settings](../formats/settings.md)) control the numbers that
+float over a character when a blow lands. Tooltip: damage "and in brackets the amount of damage that was stopped by armour";
+Full info "separate numbers for each damage type". Built at the end of `MedicalSystem` hit handling `FUN_1406508d0`
+(**Verified**, decompile; label class `ScreenLabel`, creator `FUN_14073faf0`, fonts `Kenshi_FloaterFont_Small/Medium/Large`):
+
+- **Gate**: setting above 0, and the hit character within squared distance 1.6e7 (4000 units) of the camera.
+- **Amounts**: taken after armour, toughness and the global damage multiplier (cut, blunt, pierce, stun; stun is the armour's
+  cut-to-stun part). The bracketed "stopped" amounts are armour only, before toughness and the multiplier: cut x cut reduction,
+  blunt x blunt reduction, pierce absorbed by the flat defence.
+- **Simple**: `N` = whole-number total of the four amounts (no part name), plus ` (-A)` with A the total stopped, when A is above 0.
+- **Full**: the hit part's name, `": "`, then `C` = cut (cut + pierce when pierce is above 1) with ` (-a)` when its stopped amount
+  is above 0; when blunt is 1 or more also `" + "`, `B` = blunt + stun and its own ` (-b)`. Numbers are truncated to integers.
+- **Placement**: the label follows the character, 15 units above its node. Colour (0.9, 0.9, 0.9) by default, (0.11, 0.6, 0.11) or
+  (1, 0.31, 0.31) when relation tests on the hit character and the camera's player succeed (red tested last, so it wins). Which
+  tests these are (`FUN_140678830` with 3 or 4, `FUN_1407916d0`) is **Unknown**; guess: red for the player's side being hit.
+- Wall (building) damage uses the same label with a plain `{1,num}` number, random scatter of +-20 units (`FUN_14029d2b0`).
+- Rise speed, lifetime and fade are in the label manager's update (not found): **Unknown**. No healing floater exists among the
+  callers of `FUN_14073faf0` (**Observed**).
+
+Meitou: the Simple/Full text and the gate follow the above; floaters rise 30 px and fade over 1.4 s (engine choice). Colour: red
+when a player's character is hit, green when one lands the blow, else grey. Healing is a Meitou addition: a green `+N` over a
+player character each time about a second of treated damage has healed (any non-Off setting).
+
 ## Unknowns
 
+- Rise, lifetime and fade of the damage floaters, and the colour tests (section 8).
 - Meaning of the two id lists in `__tutorials.data`.
 - Why the code looks up ten life bars while the layout has nine (`LifeBar10` is missing); the medical panel's overall health h; where the stats labels' upper case and the default squad name come from.
 - Exact tab index of the AI tab and which layout widgets belong to which tab for tabs 4 to 6.
