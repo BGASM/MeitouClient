@@ -28,8 +28,11 @@ public sealed record Slider(string Label, float Min, float Max, Func<float> Get,
     }
 }
 
-/// <summary>One checkbox: on or off, read and written through the callbacks; <see cref="Text"/> describes the state beside it. <see cref="Remaster"/>: a Faithful / Meitou switch (on: Meitou).</summary>
-public sealed record Toggle(string Label, Func<bool> Get, Action<bool> Set, Func<string>? Text = null, bool Remaster = false);
+/// <summary>
+/// One checkbox: on or off, read and written through the callbacks; <see cref="Text"/> describes the state beside it. <see cref="Remaster"/>: a Faithful / Meitou switch
+/// (on: Meitou); <see cref="OnOff"/>: one whose Faithful side is the feature off (the game has none), so its sides also read off / on.
+/// </summary>
+public sealed record Toggle(string Label, Func<bool> Get, Action<bool> Set, Func<string>? Text = null, bool Remaster = false, bool OnOff = false);
 
 /// <summary>A button beside the reset one that asks first: <see cref="Question"/> is shown with Yes / No, Yes runs <see cref="Run"/>, whose text is shown after.</summary>
 public sealed record PanelAction(string Label, Func<string> Question, Func<string> Run);

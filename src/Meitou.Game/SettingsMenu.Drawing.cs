@@ -170,8 +170,8 @@ sealed partial class SettingsMenu
         {
             // A Faithful / Meitou switch: both sides as buttons, the active one marked.
             bool meitou = remaster.Get();
-            Button("Faithful", R(880, buttonY, 108, 26), () => { if (remaster.Get()) remaster.Set(false); }, !meitou, clip: viewport);
-            Button("Meitou", R(992, buttonY, 108, 26), () => { if (!remaster.Get()) remaster.Set(true); }, meitou, clip: viewport);
+            if (remaster.OnOff) Segmented(R(860, y + (row - 22) / 2, 240, 22), meitou ? 1 : 0, i => remaster.Set(i == 1), "Faithful (off)", "Meitou (on)");
+            else Segmented(R(920, y + (row - 22) / 2, 180, 22), meitou ? 1 : 0, i => remaster.Set(i == 1));
         }
         else if (entry.Toggle is { } toggle)
             Button(toggle.Get() ? "On" : "Off", R(976, buttonY, 124, 26), () => toggle.Set(!toggle.Get()), toggle.Get(), clip: viewport);
@@ -218,14 +218,14 @@ sealed partial class SettingsMenu
             var track = R(696, y + row - 9, 396, 3);
             Rect(track, new(0.10f, 0.08f, 0.07f, 1), viewport);
             Rect(track with { Width = track.Width * slider.Fraction }, Brass with { W = 0.75f }, viewport);
-            if (slider.Faithful is { } faithful) RemasterMark(slider, faithful, "F", track, row, MainInk);
-            if (slider.Meitou is { } meitou) RemasterMark(slider, meitou, "M", track, row, LightInk);
+            if (slider.Faithful is { } faithful) RemasterMark(slider, faithful, track, FaithfulInk);
+            if (slider.Meitou is { } meitou) RemasterMark(slider, meitou, track, Brass);
             if (slider.Faithful is { } f && slider.Meitou is { } m)
             {
                 // The quick switch: jump to the game's value or Meitou's; the one the slider is at is marked.
                 float now = slider.Get(), near = 0.002f * (slider.Max - slider.Min);
-                Button("Faithful", R(688, y + 1, 80, 20), () => slider.Set(f), MathF.Abs(now - f) <= near, clip: viewport);
-                Button("Meitou", R(772, y + 1, 80, 20), () => slider.Set(m), MathF.Abs(now - m) <= near, clip: viewport);
+                int at = MathF.Abs(now - m) <= near ? 1 : MathF.Abs(now - f) <= near ? 0 : -1;
+                Segmented(R(696, y + 2, 140, 18), at, i => slider.Set(i == 1 ? m : f));
             }
             var knob = new UiRect(track.X + slider.Fraction * track.Width - 3 * scale, track.Y - 4 * scale, 6 * scale, 11 * scale);
             Rect(knob, LightInk, viewport);
@@ -241,12 +241,46 @@ sealed partial class SettingsMenu
         else if (entry.Run is { } run) Button("Clear cache", R(944, buttonY, 156, 26), run, clip: viewport);
     }
 
-    /// <summary>A tick across a slider's track at <paramref name="value"/> with its letter above (F: the game's value, M: Meitou's).</summary>
-    void RemasterMark(Meitou.Rendering.Slider slider, float value, string letter, UiRect track, float row, Vector4 ink)
+    static readonly Vector4 FaithfulInk = new(0.62f, 0.66f, 0.70f, 1);
+
+    /// <summary>A notch under a slider's track at <paramref name="value"/>, in the colour of its side of the Faithful | Meitou switch.</summary>
+    void RemasterMark(Meitou.Rendering.Slider slider, float value, UiRect track, Vector4 ink)
     {
-        float x = track.X + slider.FractionOf(value) * track.Width;
-        Rect(new(MathF.Round(x - scale), track.Y - 3 * scale, MathF.Max(1, MathF.Round(2 * scale)), track.Height + 6 * scale), ink with { W = 0.9f }, viewport);
-        Text(letter, new(x - 6 * scale, track.Y - 15 * scale, 12 * scale, 11 * scale), 9, ink, "Center", viewport);
+        float x = MathF.Round(track.X + slider.FractionOf(value) * track.Width), w = MathF.Max(2, MathF.Round(2 * scale));
+        Rect(new(x - w / 2, track.Y + track.Height + scale, w, MathF.Round(4 * scale)), ink with { W = 0.9f }, viewport);
+    }
+
+    /// <summary>
+    /// A compact Faithful | Meitou switch: one frame with two halves, the chosen half (<paramref name="selected"/>: 0 Faithful, 1 Meitou, -1 neither) filled in its
+    /// colour (the colours of the slider notches); a click on a half calls <paramref name="choose"/>.
+    /// </summary>
+    void Segmented(UiRect at, int selected, Action<int> choose, string faithful = "Faithful", string meitou = "Meitou")
+    {
+        float line = MathF.Max(1, MathF.Round(scale));
+        Rect(at, new(0.07f, 0.06f, 0.05f, 0.9f), viewport);
+        string[] names = [faithful, meitou];
+        Vector4[] inks = [FaithfulInk, Brass];
+        float half = MathF.Round(at.Width / 2);
+        for (int i = 0; i < 2; i++)
+        {
+            int index = i;
+            var part = new UiRect(at.X + i * half, at.Y, i == 0 ? half : at.Width - half, at.Height);
+            bool hovered = part.Contains(pointer.X, pointer.Y) && viewport.Contains(pointer.X, pointer.Y);
+            float hover = Hover(names[i], hovered);
+            if (selected == i) Rect(part, inks[i] with { W = 0.28f }, viewport);
+            else if (hover > 0) Rect(part, MainInk with { W = 0.08f * hover }, viewport);
+            if (selected == i) Rect(part with { Y = part.Y + part.Height - 2 * line, Height = 2 * line }, inks[i] with { W = 0.9f }, viewport);
+            var ink = selected == i ? LightInk : Vector4.Lerp(MutedInk, MainInk, hover);
+            Text(names[i], part, 12, ink, "Center", viewport);
+            if (part.Intersect(viewport).Height >= part.Height - 1) hits.Add(new(part, () => choose(index)));
+        }
+        // The frame and the divider.
+        var edge = MainInk with { W = 0.22f };
+        Rect(at with { Height = line }, edge, viewport);
+        Rect(at with { Y = at.Y + at.Height - line, Height = line }, edge, viewport);
+        Rect(at with { Width = line }, edge, viewport);
+        Rect(at with { X = at.X + at.Width - line, Width = line }, edge, viewport);
+        Rect(new(at.X + half, at.Y + 3 * scale, line, at.Height - 6 * scale), edge, viewport);
     }
 
     UiRect choiceAnchor;
