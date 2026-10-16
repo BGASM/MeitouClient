@@ -129,7 +129,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         if (page == 4)
         {
             result.Add(new(AttackSlotsSlider.Label, "How many enemies may fight one character in melee at once (the game: 1).", Slider: AttackSlotsSlider));
-            result.Add(new("Hover outline", "Outline and tint the character under the cursor, in the colour of what a right click would do.",
+            result.Add(new("Hover outline", "White outline round the character under the cursor, tinted in the colour of what a right click would do.",
                 Toggle: new("Hover outline", () => config.HoverOutline, v => config.HoverOutline = v, Remaster: true, OnOff: true)));
             result.Add(new("Main menu scene transitions", "Sky flight to/from the main menu (Meitou UI).",
                 Toggle: new("Main menu scene transitions", () => config.MainMenuTransitions, v => config.MainMenuTransitions = v)));

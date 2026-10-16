@@ -167,8 +167,8 @@ not read) shows the Windows cursor instead, applied at once.
 
 Meitou only (Advanced → Hover outline, `HoverOutline`, default on; the game has none). The character under the cursor is drawn alone into a
 mask (colour pass, live pose, picture levels, own depth planes round it) right after the portraits, then after the tone map an outline
-(about 2.5 px at 1080p, fading outward) is blended round the silhouette, through walls, and its visible part tinted, visible meaning its
-linear depth within 1 % + 1 unit of the near slice's scene depth (jittered, render size). Its colour is the pointer's order: attack red,
+(white, about 2.5 px at 1080p, fading outward) is blended round the silhouette, through walls, and its visible part tinted, visible meaning its
+linear depth within 1 % + 1 unit of the near slice's scene depth (jittered, render size). The tint's colour is the pointer's order: attack red,
 treat green, talk gold, carry/loot blue, else white (no selection or no order). Off in the free camera, with the interface hidden and in
 screenshots and cinema takes. Not in the Shift+F1 switch list (a game setting, like Attackers per target).
 
