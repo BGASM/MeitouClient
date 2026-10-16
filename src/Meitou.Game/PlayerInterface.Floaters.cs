@@ -65,7 +65,7 @@ sealed partial class PlayerInterface
         {
             float t = (float)((now - l.Born) / (double)System.Diagnostics.Stopwatch.Frequency / FloaterSeconds);
             if (Project(l.Last + new Vector3(0, FloaterHeight, 0)) is not { } at) continue;
-            float scale = l.Mode == FloaterMode.Simple ? 1.4f : 1.15f;
+            float scale = (l.Mode == FloaterMode.Simple ? 1.2f : 1f) * Math.Clamp(Height / 1080f, 0.75f, 1.5f);
             float alpha = t < 0.6f ? 1 : 1 - (t - 0.6f) / 0.4f;
             float x = at.X + l.Spread - o.MeasureText(l.Text, scale) / 2, y = at.Y - l.Row - FloaterRise * (1 - (1 - t) * (1 - t));
             o.TextScaled(l.Text, x + 1, y + 1, new Vector4(0, 0, 0, 0.8f * alpha), scale);
