@@ -47,6 +47,16 @@ appearance/population, not just shading cost. Depth-aware reduced-resolution com
 preserve opaque intersections. Texture anisotropy caps mipmapped samplers, distinct from texture
 resolution/LOD bias. [Particle simulation](formats/particle-universe.md).
 
+## Tried: UI depth stamp (removed)
+
+Writing depth 0 under fully opaque UI (22% of the HUD screen, `UiPainter.OpaqueCoverage`) so the
+scene is not shaded there, with the exposure leaving those pixels out and the layers passes
+discarding, gave **no measurable gain** (RTX 4070, 1594x896 DLSS, paused fixed view, gpu ms off
+6.8/7.0 vs on 6.8-7.3, noise ~0.3 ms). The scene stage is probably not fragment-bound there;
+**Unknown:** whether it helps at a higher render resolution, or whether early depth rejection
+took effect (the full-screen stamp upper bound was not run). Scene targets hold the picture
+upside down, so depth rectangles must be mirrored in Y.
+
 ## Validation
 
 **Verified** merged-pass checks: Faithful/FXAA and TAA reference images byte-identical in the

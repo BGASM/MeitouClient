@@ -37,7 +37,9 @@ material distance15000, VSync off. It is a tunable preset, not an automatic hard
 
 F10 key list is the current authority; F11 stats,F12 profiler,Tab settings,Alt+Enter fullscreen.
 F11 includes the opaque UI coverage: the share of the screen under fully opaque controls (solid
-backgrounds, alpha-255 atlas slices at alpha 1; `UiPainter.OpaqueCoverage`), overlaps counted once;
+backgrounds, alpha-255 atlas slices at alpha 1; `UiPainter.OpaqueCoverage`), overlaps counted once.
+Panel skins have ragged translucent borders around a solid middle, so a slice counts as its largest
+all-255 rectangle (inset 1 texel for bilinear), stretched to the control;
 0 with the UI hidden. It bounds what a UI depth stamp could skip.
 Viewer F1 switches all Faithful/Meitou; feature shortcuts use viewer bindings. Game keeps
 Space pause,F2..F4 speeds,F5 save,F9 load,F6 cinema,F7 hideUI and Ctrl+F9 FPS. Do not copy viewer
