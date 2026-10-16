@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Globalization;
 using Meitou.Data.Ui;
-using Meitou.Engine.Input;
 
 namespace Meitou.Game;
 
@@ -59,15 +58,7 @@ sealed partial class SettingsMenu
             Opacity(first, hover);
         }
         var ink = primary && Meitou ? new Vector4(20 / 255f, 8 / 255f, 6 / 255f, 1) : System.Numerics.Vector4.Lerp(MainInk, LightInk, selected ? 1 : hover);
-        if (primary && label == "Save")
-        {
-            float x = drawn.X + drawn.Width / 2 - 36 * scale, y = drawn.Y + (drawn.Height - 24 * scale) / 2;
-            controls.Add(new("settings-save-icon", "ImageBox", new(x, y, 24 * scale, 24 * scale), "", "", "", true,
-                new Dictionary<string, string> { ["ImageTexture"] = SettingsMenuArt.SaveIcon },
-                Vector4.Zero, Clip: clip, Pickable: false));
-            Text(label, new(x + 30 * scale, drawn.Y, 44 * scale, drawn.Height), 15, ink, "Center", clip);
-        }
-        else Text(label, new(drawn.X + 10 * scale, drawn.Y, drawn.Width - 20 * scale, drawn.Height), primary ? 15 : 13, ink, "Center", clip);
+        Text(label, new(drawn.X + 10 * scale, drawn.Y, drawn.Width - 20 * scale, drawn.Height), primary ? 15 : 13, ink, "Center", clip);
         if (clip is null || at.Intersect(clip.Value).Height >= at.Height - 1)
             hits.Add(new(at, action));
     }

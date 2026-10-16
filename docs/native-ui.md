@@ -32,8 +32,7 @@ pressed surfaces without yellow focus rings/underlines. Weather/time previews ar
 Graphics includes the Meitou switches under their related tabs; Advanced contains cache actions.
 Pages omit descriptive blurbs; field hints explain the setting's effect and useful constraints.
 The sidebar shows the build's nearest Git tag and short commit, embedded during compilation
-(`BuildGitTag`/`BuildGitCommit` can override them for source archives); Save uses the generated
-shaded ivory checkmark in `assets/ui/settings-save.png`, embedded for both modes.
+(`BuildGitTag`/`BuildGitCommit` can override them for source archives).
 Click a slider's number to type a value (selected initially); Enter/Tab or clicking outside
 applies it, Esc cancels. Decimals (dot/comma), scientific notation, numpad, Ctrl+A and cursor/
 selection editing are supported. Invalid/non-finite input leaves the setting unchanged;

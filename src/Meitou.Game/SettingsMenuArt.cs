@@ -1,6 +1,5 @@
 using System.Numerics;
 using Meitou.Data.Textures;
-using Meitou.Data.Ui;
 using Meitou.Rendering.Ui;
 
 namespace Meitou.Game;
@@ -9,20 +8,11 @@ namespace Meitou.Game;
 sealed class SettingsMenuArt
 {
     public const string Prefix = "meitou:settings:";
-    public const string SaveIcon = Prefix + "save-icon";
     public static string SurfacePrefix => Prefix + "v3:";
     RgbaImage? atlas;
 
     public void Ensure(UiPainter painter, bool meitou, Func<string, string?>? resolve)
     {
-        if (!painter.HasTexture(SaveIcon))
-        {
-            using var stream = typeof(SettingsMenuArt).Assembly.GetManifestResourceStream("settings-save.png")
-                ?? throw new FileNotFoundException("The settings save icon resource is missing.");
-            using var bytes = new MemoryStream();
-            stream.CopyTo(bytes);
-            painter.SetImage(SaveIcon, TextureLoader.LoadImage(bytes.ToArray()), srgb: false);
-        }
         if (!meitou || painter.HasTexture(SurfacePrefix + "button")) return;
         string path = resolve?.Invoke("Kenshi_UI.png") ?? throw new FileNotFoundException("Kenshi_UI.png not found.");
         atlas = TextureLoader.LoadFile(path, allMips: false).Levels[0];

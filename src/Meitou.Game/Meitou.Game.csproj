@@ -35,7 +35,6 @@
     <RuntimeHostConfigurationOption Include="System.GC.HeapCount" Value="4" />
     <!-- The Meitou title's wordmark (TitleLogo). -->
     <EmbeddedResource Include="../../assets/branding/kenshi-logo.png" LogicalName="kenshi-logo.png" />
-    <EmbeddedResource Include="../../assets/ui/settings-save.png" LogicalName="settings-save.png" />
   </ItemGroup>
 
   <Target Name="ReadBuildRevision" BeforeTargets="GetAssemblyAttributes">
