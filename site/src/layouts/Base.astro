@@ -23,7 +23,6 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
   </head>
   <body>
     <div class="mt-scene">
-      {video && <div class="frame" aria-hidden="true"></div>}
       {video && (
         <div class="bg" aria-hidden="true">
           <video autoplay muted loop playsinline preload="auto" poster="/bgvideo.jpg">
@@ -62,8 +61,6 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
   /* --frame: the page ground around the video; --edge: where content starts, just inside the frame. */
   .mt-scene { --frame: 36px; --edge: calc(var(--frame) + 24px); }
 
-  /* The frame around the video is pure black for the first view only. */
-  .frame { position: absolute; inset: 0 0 auto; height: 100svh; background: #000; }
 
   /* First view: the video in a frame with rounded inner corners, behind the header and hero. */
   .bg {
