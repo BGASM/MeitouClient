@@ -88,6 +88,11 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public Matrix4x4 World, PreviousWorld;
         public bool HasWorld;
         public long Posed = -1, Seen;
+        /// <summary>What the last update drew it with, for picking (<see cref="RayHit"/>): its asset, weapon, bounding sphere, and whether it is drawn in the world.</summary>
+        public CharacterAsset? Asset;
+        public bool WeaponDrawn, InWorld;
+        public Vector3 Centre;
+        public float Radius;
     }
 
     readonly Dictionary<long, CharState> states = [];
@@ -208,6 +213,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             if (!states.TryGetValue(inst.Key, out var state)) states[inst.Key] = state = new CharState();
             state.Seen = updateStamp;
             l.State = state;
+            (state.Asset, state.WeaponDrawn, state.InWorld, state.Centre, state.Radius) = (asset, inst.WeaponDrawn, !far, centre, l.Radius);
             state.PreviousWorld = state.HasWorld ? state.World : l.World;
             (state.World, state.HasWorld) = (l.World, true);
             l.Repose = inst.FullRateAnimation || state.Posed < 0 || state.Bones.Length != asset.Rig.BoneCount || (updateStamp + inst.Key) % PoseInterval(Vector3.Distance(eye, centre) / MathF.Max(1, l.Radius / HumanRadius)) == 0;

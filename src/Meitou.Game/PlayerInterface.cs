@@ -21,8 +21,8 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     public int Width = 1, Height = 1;
     /// <summary>How far from the camera a box select still takes characters.</summary>
     public const float BoxSelectRange = 7500;
-    /// <summary>Character height used for picking and for the box select's aim point.</summary>
-    public const float CharacterHeight = 2.2f;
+    /// <summary>A person's height (the renderer's sphere takes 20) for the box select's aim point and the pick capsule of a character the renderer does not draw.</summary>
+    public const float CharacterHeight = 18;
     const float DragThreshold = 5;
 
     Vector2? dragFrom;

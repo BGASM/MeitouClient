@@ -91,6 +91,12 @@ sealed partial class PlayerInterface
     /// <summary>One of the player's own living characters under the pixel that first aid has something to bandage on (a right click on it orders the selection to treat it).</summary>
     public CharacterId? PickHurtAlly(Vector2 pixel) => PickWhere(pixel, c => c.IsPlayer && c.Body is { Dead: false, NeedsAid: true });
 
+    /// <summary>
+    /// The renderer's test of a ray against a character's posed mesh (<c>CharacterRenderer.RayHit</c>): the distance, +infinity for a miss, null when it does not draw
+    /// that character (the capsule decides then). Null without a renderer.
+    /// </summary>
+    public Func<CharacterId, Vector3, Vector3, float?>? MeshHit { get; set; }
+
     CharacterId? PickWhere(Vector2 pixel, Func<CharacterSnapshot, bool> accept)
     {
         if (Ray(pixel) is not { } ray) return null;
@@ -99,6 +105,13 @@ sealed partial class PlayerInterface
         foreach (var c in session.CurrentSnapshot.Characters)
         {
             if (!accept(c)) continue;
+            // The drawn body where the renderer has it (every part of a person or an animal, as posed); else a capsule from the feet up.
+            float? hit = MeshHit?.Invoke(c.Id, ray.Origin, ray.Direction);
+            if (hit is { } meshT)
+            {
+                if (meshT < bestT) (bestT, best) = (meshT, c.Id);
+                continue;
+            }
             var feet = where(c);
             float distance = Vector3.Distance(Eye, feet);
             float radius = MathF.Max(1.0f, distance * 0.012f);

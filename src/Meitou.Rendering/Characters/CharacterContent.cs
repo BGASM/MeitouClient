@@ -29,6 +29,8 @@ internal sealed class AssetPart
     /// <summary>The mesh file's bounds (the LOD value's centre and radius), in the part's own space.</summary>
     public required Vector3 BoundsCentre;
     public required float BoundsRadius;
+    /// <summary>Boxes round the mesh for picking (<see cref="PickBox"/>): one per bone of a skinned part, one for an unskinned one.</summary>
+    public PickBox[] PickBoxes = [];
     // This frame's slot in the material table (CharacterRenderer.Update).
     public long MaterialFrame = -1;
     public int MaterialSlot;
@@ -123,7 +125,7 @@ internal sealed class CharacterContent : IDisposable
     public float LodPixelsPerRadian { get; set; } = Meitou.Data.World.TerrainLod.ProjectionScale(1080, 50 * MathF.PI / 180);
 
     /// <param name="FirstMaterialName">The first submesh's material (script) name, which is all the material resolver takes of a submesh; null: no submesh.</param>
-    sealed record LoadedMesh(GpuObjectMesh Gpu, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs = null, float[]? ShadowDistances = null, int ShadowFirst = 0);
+    sealed record LoadedMesh(GpuObjectMesh Gpu, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs = null, float[]? ShadowDistances = null, int ShadowFirst = 0, PickBox[]? PickBoxes = null);
 
     public CharacterContent(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets)
     {
@@ -176,7 +178,7 @@ internal sealed class CharacterContent : IDisposable
     string? BodySkeletonName(string path) => skeletonNames.GetOrAdd(path, p => new Lazy<string?>(() => OgreMeshReader.ReadFile(p).SkeletonName)).Value;
 
     /// <summary>What a worker makes of a mesh file (<see cref="PrepareMesh"/>): everything but the GPU buffers.</summary>
-    sealed record PreparedMesh(PreparedPart[] Parts, float[] Distances, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs, float[]? ShadowDistances, int ShadowFirst);
+    sealed record PreparedMesh(PreparedPart[] Parts, float[] Distances, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs, float[]? ShadowDistances, int ShadowFirst, PickBox[] PickBoxes);
     /// <summary>A prepared mesh (null: it could not be read) and the messages its reading left.</summary>
     sealed record Prepared(PreparedMesh? Mesh, List<string> Messages);
     static readonly Prepared Uploaded = new(null, []);
@@ -217,7 +219,7 @@ internal sealed class CharacterContent : IDisposable
             }
             var decoded = new DecodedObjectMesh { Model = model, Levels = levels, Manual = [], Centre = centre, Radius = radius };
             var parts = model.Parts.Select(part => ObjectMeshCache.PreparePart(decoded, part, keepLevels: false)).ToArray();
-            return new(new PreparedMesh(parts, [.. levels.Select(l => l.Distance)], mesh.SubMeshes.FirstOrDefault()?.MaterialName, centre, radius, morphs, shadowDistances, shadowFirst), messages);
+            return new(new PreparedMesh(parts, [.. levels.Select(l => l.Distance)], mesh.SubMeshes.FirstOrDefault()?.MaterialName, centre, radius, morphs, shadowDistances, shadowFirst, PickBox.From(model)), messages);
         }
         catch (Exception e) when (e is OgreFormatException or IOException or EndOfStreamException or InvalidDataException)
         {
@@ -259,7 +261,7 @@ internal sealed class CharacterContent : IDisposable
             gpuMesh.Bytes += vertexBytes + indexBytes;
         }
         MeshBytes += gpuMesh.Bytes;
-        return new LoadedMesh(gpuMesh, ready.FirstMaterialName, ready.Centre, ready.Radius, ready.Morphs, ready.ShadowDistances, ready.ShadowFirst);
+        return new LoadedMesh(gpuMesh, ready.FirstMaterialName, ready.Centre, ready.Radius, ready.Morphs, ready.ShadowDistances, ready.ShadowFirst, ready.PickBoxes);
     }
 
     readonly Dictionary<CharacterAppearance, Task> fetching = [];
@@ -364,7 +366,7 @@ internal sealed class CharacterContent : IDisposable
         asset.Parts.Add(new AssetPart
         {
             Label = $"body {Path.GetFileName(bodyPath)}", Mesh = body.Gpu, Shared = true, Material = BodyMaterial(c),
-            BoundsCentre = body.Centre, BoundsRadius = body.Radius,
+            BoundsCentre = body.Centre, BoundsRadius = body.Radius, PickBoxes = body.PickBoxes ?? [],
             Morphed = asset.MorphBase != 0, ShadowDistances = body.ShadowDistances, ShadowFirst = body.ShadowFirst,
         });
         foreach (var part in c.Parts)
@@ -378,7 +380,7 @@ internal sealed class CharacterContent : IDisposable
             var ap = new AssetPart
             {
                 Label = $"{part.Record.Type} '{part.Record.Name}' .{part.Field}", Mesh = loaded.Gpu, Shared = shared, Material = ItemMaterial(c, part, path, loaded),
-                BoundsCentre = loaded.Centre, BoundsRadius = loaded.Radius, Shown = part.Shown,
+                BoundsCentre = loaded.Centre, BoundsRadius = loaded.Radius, Shown = part.Shown, PickBoxes = loaded.PickBoxes ?? [],
             };
             if (!shared)
             {
