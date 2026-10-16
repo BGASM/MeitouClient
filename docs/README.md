@@ -77,5 +77,6 @@ diaries, asset dumps or decompiled output. Current choices: [DECISIONS](../DECIS
 - [character-stats](game/character-stats.md)
 - [pathfinding](game/pathfinding.md)
 - [perception](game/perception.md)
+- [ragdolls](game/ragdolls.md)
 - [ui-input](game/ui-input.md)
 - [ui-screens](game/ui-screens.md)

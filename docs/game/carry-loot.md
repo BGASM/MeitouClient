@@ -103,7 +103,7 @@ finders resolved from the thunks in the exe's bytes):
 8. The **bed rent** amount (`FUN_1403576c0`) and whether allied factions' beds charge it.
 9. A **despawn timer** for ground items.
 10. The steal order type 0x1d of the ALT path (`FUN_1407fc440`): the taskType table says 29 is `MOVE_CUS_ORDERED`.
-11. The **speed caps** of the `carrying left/right` movement clips, and the use of RACE `male/female carry ragdoll`.
+11. The **speed caps** of the `carrying left/right` movement clips (RACE `male/female carry ragdoll` are unused: [ragdolls](ragdolls.md)).
 12. `FUN_14079c600`, called when the player picks up a non-player character, and **`CharStats+0x12b`** (set by slot 97 order kind 0xc), which turns
     both rescue goals off.
 13. The terms and the random roll of `FUN_140644980` on the put-down path (section 2.2), and the relation test `FUN_1406b27b0` of "friendly".

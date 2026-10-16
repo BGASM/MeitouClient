@@ -37,7 +37,7 @@ only when heavy and none was playing; front/rear by a dot test (`FUN_140435600`)
 own technique (its blow never lands) and holds it in the stumble state until the clip ends (`FUN_140665490`,
 `FUN_14060cf60`, `FUN_140435570`); with no clip the technique is still cancelled. Every 1.2 s of the stumble
 (`+0x124`) it may break into a block against a swing at 10–99% progress (block-chance roll `FUN_140885d80`).
-Knockback is the clips' root motion only (**Observed**: no impulse in these functions; [animation](../animation.md)).
+Knockback is the clips' root motion only (**Observed**: no impulse in these functions; [animation](../animation.md); ragdolls: [ragdolls](ragdolls.md)).
 A blocked blow neither staggers nor pushes (`FUN_140665540`). **Observed**: a shackled defender skips 25%.
 
 ## Pacing
