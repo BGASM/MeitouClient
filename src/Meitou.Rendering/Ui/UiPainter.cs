@@ -181,6 +181,8 @@ public sealed class UiPainter : IDisposable
             overlay.Flush(width, height, clip);
             bool focused = c.Properties.GetValueOrDefault("Focused") == "true";
             if (c.Caption.Length == 0 && !focused) continue;
+            // MyGUI shows a button caption only through a text part of its skin: a button skin of image parts alone (the map's centre button, "O") shows none.
+            if (c.Type == "Button" && resources.Skins.TryGetValue(c.Skin, out var captionSkin) && !resources.Templates.ContainsKey(c.Skin) && !captionSkin.Parts.Any(p => p.Type is "SimpleText" or "EditText")) continue;
             var textArea = UiTextLayout.ContentRect(resources, c);
             if (textArea.Width <= 0 || textArea.Height <= 0) continue;
             var textClip = clip.Intersect(textArea);

@@ -60,6 +60,9 @@ Sources: the configured Kenshi install's `data/gui/`, the existing
   template children; window buttons carry `UserString Event` values `close` and
   `pin`. `Kenshi_ScrollBarH` uses its own name as its root skin. A template root's
   native skin must not be instantiated as another template with the same name.
+- **Observed**: a Button whose ResourceSkin has no `SimpleText`/`EditText` part shows no caption (MyGUI draws text through that part):
+  `MapCenterButton` has caption "O" on the image-only `Kenshi_CenterMapButtonSkin` and shows only its `> ● <` icon. Meitou skips such
+  button captions; other widget types keep theirs (the new-game description needs it).
 - **Unknown**: exact native widget skin registration, integer rounding, text/font
   sizing, inherited pick flags, localisation, tab button sizing and clipping
   equivalence with the original. No full MyGUI compatibility claim is made yet.
