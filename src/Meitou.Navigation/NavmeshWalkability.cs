@@ -39,6 +39,9 @@ public sealed class NavmeshWalkability : IWalkability
     /// </summary>
     public const float SnapRange = 16, TerrainSnapRange = 30;
 
+    /// <summary>How far (units) above the water's height a polygon over flooded ground still counts as the water surface (engine choice: Observed 100..104).</summary>
+    public const float WaterSurfaceBand = 6;
+
     /// <summary>
     /// How far above a character's height a surface may be and still be the one it stands on (engine choice): above the 5-unit climb, below a storey,
     /// so a walkway or upper floor overhead is not taken for the ground.
@@ -74,25 +77,40 @@ public sealed class NavmeshWalkability : IWalkability
     {
         var w = world;
         if (!w.Contains(WorldLayout.ZoneOf(x, z))) return fallback.IsWalkable(x, z);
-        return TryStand(w, x, z, nearY, out float y) && y <= nearY + StandRise;
+        return TryStand(w, x, z, nearY, out _, out bool reachable) && reachable;
     }
 
-    /// <summary>The highest real surface at (x, z) at most <see cref="StandRise"/> above <paramref name="nearY"/>, else the lowest; false off the mesh.</summary>
-    bool TryStand(NavWorld w, float x, float z, float nearY, out float y)
+    bool TryStand(NavWorld w, float x, float z, float nearY, out float y) => TryStand(w, x, z, nearY, out y, out _);
+
+    /// <summary>
+    /// The real surface of the highest mesh layer at (x, z) within <see cref="StandRise"/> above <paramref name="nearY"/> (by the mesh's height or the
+    /// real one: on steep stairs the mesh is up to 20 off, and judged by the real height alone the walker's own layer could fall out of reach and drop it
+    /// to a floor far below, Observed at Fallen Tower); else the lowest. <paramref name="reachable"/>: a layer was within reach. False off the mesh.
+    /// </summary>
+    bool TryStand(NavWorld w, float x, float z, float nearY, out float y, out bool reachable)
     {
         var heights = scratch ??= [];
         heights.Clear();
         w.HeightsAt(x, z, heights, float.IsFinite(nearY) ? nearY : 0, float.IsFinite(nearY) ? EdgeTolerance : 0);
         y = float.MinValue;
+        reachable = false;
         if (heights.Count == 0) return false;
-        float lowest = float.MaxValue;
+        float lowest = float.MaxValue, layer = float.MinValue;
         foreach (float h in heights)
         {
             float s = Snap(w, x, z, h);
-            if (s <= nearY + StandRise && s > y) y = s;
+            // Where the mesh is too far off for its surface to be found (a ramp the polygon cuts under), the surface at the walker's own height, when that
+            // is nearer the mesh than what was found (Observed: the terrain 30 below, inside the ramp, at the Great Fortress).
+            if (float.IsFinite(nearY) && MathF.Abs(s - nearY) > StandRise && w.TrySurfaceNear(x, z, nearY, StandRise, out float own)
+                && MathF.Abs(own - h) < MathF.Abs(s - h)) s = own;
             lowest = MathF.Min(lowest, s);
+            float reach = MathF.Min(h, s);
+            if (reach > nearY + StandRise || reach <= layer) continue;
+            layer = reach;
+            y = s;
+            reachable = true;
         }
-        if (y == float.MinValue) y = lowest;
+        if (!reachable) y = lowest;
         return true;
     }
 
@@ -103,7 +121,11 @@ public sealed class NavmeshWalkability : IWalkability
     float Snap(NavWorld w, float x, float z, float h)
     {
         float t = Ground(w, x, z);
-        float terrain = h > WorldWater.Height ? MathF.Abs(t - h) : float.MaxValue;
+        // Over ground under the water a polygon near the water's height is the water surface (the builder's water area): kept, not put on the seabed or a
+        // sunken floor, so all of the water is at one height.
+        bool waterSurface = t < WorldWater.Height && h < WorldWater.Height + WaterSurfaceBand;
+        if (waterSurface) return h;
+        float terrain = MathF.Abs(t - h);
         if (w.TrySurfaceNear(x, z, h, MathF.Min(SnapRange, terrain), out float s)) return s;
         return terrain <= TerrainSnapRange ? t : h;
     }
