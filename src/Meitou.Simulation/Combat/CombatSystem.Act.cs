@@ -168,7 +168,7 @@ public sealed partial class CombatSystem
         var fighter = cold.Fighter!;
         if (!fighter.CanAttack || Orders.Has(cold, CharacterOrders.Block)) return;   // the Block order: defends, starts no attack
         var tc = table.Cold(t)!;
-        if (!HasInitiative(world, i, t, cold, tc, now)) return;
+        if (!HasSlot(world, i, t, tc) || !HasInitiative(world, i, t, cold, tc, now)) return;
         float gap =Vector2.Distance(new(prev[i].Position.X, prev[i].Position.Z), new(prev[t].Position.X, prev[t].Position.Z)) - CombatTuning.Footprint(cold) - CombatTuning.Footprint(tc);
         bool moving = new Vector2(prev[t].Velocity.X, prev[t].Velocity.Z).Length() >= 1;
         float weaponReach = fighter.Unarmed ? 99 : fighter.Weapon!.Data.Length * 0.5f;
@@ -211,6 +211,37 @@ public sealed partial class CombatSystem
         ulong pair = ((ulong)(uint)lo << 32) | (uint)hi;
         float roll = CombatRolls.Float(world.Seed, pair, CombatRoll.Initiative, (ulong)(uint)now);
         return (roll < lowWins) == (i == lo);
+    }
+
+    struct SlotScan
+    {
+        public CombatSlot[] Read;
+        public CharacterTable Table;
+        public int Self, Target, TargetGeneration, Ahead;
+        public float X, Z, MyDistance;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="i"/> holds one of its target's attack slots (docs/game/combat.md "Pacing": <see cref="AttackSlots"/> plus the target race's
+    /// <c>extra attack slots</c>, FUN_140666310): the fighters at the target, nearest first (slot order on a tie), take them; the rest wait (the original circles, not modelled).
+    /// </summary>
+    bool HasSlot(World world, int i, int t, CharacterCold tc)
+    {
+        int slots = Math.Max(1, AttackSlots + (tc.Race?.ExtraAttackSlots ?? 0));
+        var prev = world.Characters.Previous;
+        float x = prev[t].Position.X, z = prev[t].Position.Z;
+        var scan = new SlotScan { Read = read, Table = world.Characters, Self = i, Target = t, TargetGeneration = prev[t].Generation, X = x, Z = z };
+        scan.MyDistance = Vector2.DistanceSquared(new(prev[i].Position.X, prev[i].Position.Z), new(x, z));
+        world.Grid.Query(x, z, CombatTuning.ReactionScanRadius, ref scan, static (int other, ref SlotScan st) =>
+        {
+            if (other == st.Self) return;
+            ref readonly var o = ref st.Read[other];
+            if (o.TargetSlot != st.Target || o.TargetGeneration != st.TargetGeneration || o.Down || o.Ranged) return;
+            ref readonly var p = ref st.Table.Previous[other];
+            float d = Vector2.DistanceSquared(new(p.Position.X, p.Position.Z), new(st.X, st.Z));
+            if (d < st.MyDistance || d == st.MyDistance && other < st.Self) st.Ahead++;
+        });
+        return scan.Ahead < slots;
     }
 
     struct Scan

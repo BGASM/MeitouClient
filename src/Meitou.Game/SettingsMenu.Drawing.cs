@@ -166,7 +166,14 @@ sealed partial class SettingsMenu
         Rect(R(212, y + row - 1, 888, 1), MainInk with { W = 0.075f }, viewport);
         Text(entry.Label, R(212, y + 2, 456, entry.Hint.Length > 0 ? 20 : 32), 14, clip: viewport);
         if (entry.Hint.Length > 0) Text(entry.Hint, R(212, y + 19, 456, 17), 11, MutedInk, clip: viewport);
-        if (entry.Toggle is { } toggle)
+        if (entry.Toggle is { Remaster: true } remaster)
+        {
+            // A Faithful / Meitou switch: both sides as buttons, the active one marked.
+            bool meitou = remaster.Get();
+            Button("Faithful", R(880, buttonY, 108, 26), () => { if (remaster.Get()) remaster.Set(false); }, !meitou, clip: viewport);
+            Button("Meitou", R(992, buttonY, 108, 26), () => { if (!remaster.Get()) remaster.Set(true); }, meitou, clip: viewport);
+        }
+        else if (entry.Toggle is { } toggle)
             Button(toggle.Get() ? "On" : "Off", R(976, buttonY, 124, 26), () => toggle.Set(!toggle.Get()), toggle.Get(), clip: viewport);
         else if (entry.Choice is { } choice)
         {
@@ -211,6 +218,15 @@ sealed partial class SettingsMenu
             var track = R(696, y + row - 9, 396, 3);
             Rect(track, new(0.10f, 0.08f, 0.07f, 1), viewport);
             Rect(track with { Width = track.Width * slider.Fraction }, Brass with { W = 0.75f }, viewport);
+            if (slider.Faithful is { } faithful) RemasterMark(slider, faithful, "F", track, row, MainInk);
+            if (slider.Meitou is { } meitou) RemasterMark(slider, meitou, "M", track, row, LightInk);
+            if (slider.Faithful is { } f && slider.Meitou is { } m)
+            {
+                // The quick switch: jump to the game's value or Meitou's; the one the slider is at is marked.
+                float now = slider.Get(), near = 0.002f * (slider.Max - slider.Min);
+                Button("Faithful", R(688, y + 1, 80, 20), () => slider.Set(f), MathF.Abs(now - f) <= near, clip: viewport);
+                Button("Meitou", R(772, y + 1, 80, 20), () => slider.Set(m), MathF.Abs(now - m) <= near, clip: viewport);
+            }
             var knob = new UiRect(track.X + slider.Fraction * track.Width - 3 * scale, track.Y - 4 * scale, 6 * scale, 11 * scale);
             Rect(knob, LightInk, viewport);
             var hit = R(688, y + row - 16, 412, 16);
@@ -223,6 +239,14 @@ sealed partial class SettingsMenu
             Button(label.Length > 0 ? label : "Unbound", R(688, buttonY, 412, 26), () => { rebinding = binding; notice = ""; }, clip: viewport);
         }
         else if (entry.Run is { } run) Button("Clear cache", R(944, buttonY, 156, 26), run, clip: viewport);
+    }
+
+    /// <summary>A tick across a slider's track at <paramref name="value"/> with its letter above (F: the game's value, M: Meitou's).</summary>
+    void RemasterMark(Meitou.Rendering.Slider slider, float value, string letter, UiRect track, float row, Vector4 ink)
+    {
+        float x = track.X + slider.FractionOf(value) * track.Width;
+        Rect(new(MathF.Round(x - scale), track.Y - 3 * scale, MathF.Max(1, MathF.Round(2 * scale)), track.Height + 6 * scale), ink with { W = 0.9f }, viewport);
+        Text(letter, new(x - 6 * scale, track.Y - 15 * scale, 12 * scale, 11 * scale), 9, ink, "Center", viewport);
     }
 
     UiRect choiceAnchor;

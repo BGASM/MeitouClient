@@ -23,6 +23,9 @@ sealed class UserConfig
     /// <summary>Borderless full screen (the Tab panel, Alt+Enter); <c>--windowed</c> starts in a window for one run.</summary>
     public bool FullScreen { get; set; } = true;
     public int TickRate { get; set; } = 30;
+    /// <summary>How many enemies may melee one target at once (Advanced settings, 1-5): Faithful 1 (the game's CONSTANTS), Meitou 3.</summary>
+    public int AttackSlots { get; set; } = MeitouAttackSlots;
+    public const int FaithfulAttackSlots = 1, MeitouAttackSlots = 3;
     /// <summary>Worker threads of the simulation; null = half the cores.</summary>
     public int? SimThreads { get; set; }
     public Dictionary<string, float> Graphics { get; set; } = [];

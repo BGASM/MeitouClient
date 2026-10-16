@@ -18,6 +18,12 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         () => config.MainMenuTransitionSpeed, v => config.MainMenuTransitionSpeed = v, "0.00'x'");
     readonly Slider inGameTransitionSpeed = new("In-game transition speed", SkyArrival.MinSpeed, SkyArrival.MaxSpeed,
         () => config.InGameTransitionSpeed, v => config.InGameTransitionSpeed = v, "0.00'x'");
+    Slider? attackSlotsSlider;
+    Slider AttackSlotsSlider => attackSlotsSlider ??= new("Attackers per target", 1, 5, () => config.AttackSlots, v =>
+    {
+        config.AttackSlots = Math.Clamp((int)MathF.Round(v), 1, 5);
+        AttackSlotsChanged?.Invoke(config.AttackSlots);
+    }, "0", Faithful: UserConfig.FaithfulAttackSlots, Meitou: UserConfig.MeitouAttackSlots);
     readonly List<Hit> hits = [];
     readonly List<UiControl> controls = [];
     readonly SettingsMenuArt art = new();
@@ -44,6 +50,8 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
     public IReadOnlyList<Slider> Sliders => values.Sliders;
     public IReadOnlyList<Toggle> Toggles => values.Toggles;
     public Func<string>? UpscalerStatus { get; init; }
+    /// <summary>Applies a new attackers-per-target setting to the running combat system.</summary>
+    public Action<int>? AttackSlotsChanged { get; init; }
     public bool Visible
     {
         get => visible || menuProgress > 0;
@@ -117,6 +125,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
                 result.Add(new(ActionLabel(action), BindingHint(action), Binding: action));
         if (page == 4)
         {
+            result.Add(new(AttackSlotsSlider.Label, "How many enemies may fight one character in melee at once (the game: 1).", Slider: AttackSlotsSlider));
             result.Add(new("Main menu scene transitions", "Sky flight to/from the main menu (Meitou UI).",
                 Toggle: new("Main menu scene transitions", () => config.MainMenuTransitions, v => config.MainMenuTransitions = v)));
             result.Add(new(mainMenuTransitionSpeed.Label, "Higher values make the camera ascend and descend faster.", Slider: mainMenuTransitionSpeed));
@@ -331,6 +340,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         config.InGameTransitions = true;
         config.MainMenuTransitionSpeed = 1;
         config.InGameTransitionSpeed = 1;
+        AttackSlotsSlider.Set(UserConfig.MeitouAttackSlots);
         player.SetUiMode(UiMode.Faithful);
         bindings.ResetToDefaults();
         resetPending = false;

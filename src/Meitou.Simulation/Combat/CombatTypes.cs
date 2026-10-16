@@ -32,4 +32,6 @@ public sealed record CombatOptions
     public bool RecordLog { get; init; }
     /// <summary>The speed (units per second) a character closes in at when it has no speed stat set.</summary>
     public float ApproachSpeed { get; init; } = 30;
+    /// <summary>How many enemies may melee one target at once (before the race's extra slots); null: CONSTANTS <c>max num attack slots</c> (1).</summary>
+    public int? AttackSlots { get; init; }
 }

@@ -94,7 +94,10 @@ sealed partial class GameHost
             panel = new SettingsMenu(player, settingsValues, session.Bindings, SaveSettings,
                 new Slider("Frame limit", 0, 360, () => fpsLimit, v => fpsLimit = (int)MathF.Round(v / 5) * 5, "0",
                     Text: v => v <= 0 ? "Unlimited" : $"{v:0} fps"), config)
-            { UpscalerStatus = () => gpu.Post?.ActiveUpscaler ?? "Off" };
+            {
+                UpscalerStatus = () => gpu.Post?.ActiveUpscaler ?? "Off",
+                AttackSlotsChanged = slots => { foreach (var combat in session.World.Systems.OfType<Meitou.Simulation.Combat.CombatSystem>()) combat.AttackSlots = slots; },
+            };
         if (panel is not null)
             foreach (var slider in panel.Sliders)
                 if (!SessionSliders.Contains(slider.Label) && config.Graphics.TryGetValue(slider.Label, out float v) && !(o.Post.Upscale.Explicit && WorldFrame.UpscalerSliders.Contains(slider.Label)))

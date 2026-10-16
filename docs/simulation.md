@@ -156,7 +156,8 @@ Hits, pauses and initiative follow combat.md "Hit reactions" / "Pacing"; the com
 clip (through the animation system's chooser) and holds the fighter for its length. Engine choices: a miss waits
 0.2 s; the first attack after an order waits 0.15–0.6 s; the initiative roll is drawn per pair and tick so both
 sides agree, and the loser waits a tick to block the winner's swing; a target in its pause is simply attacked;
-no circling or attack slots yet; the block break-out ignores the 10% lower bound; only a heavy bolt staggers.
+attack slots go to the nearest fighters at the target (Advanced setting "Attackers per target", 1-5: Faithful 1,
+the CONSTANTS value; Meitou 3), the rest wait instead of circling; the block break-out ignores the 10% lower bound; only a heavy bolt staggers.
 
 ### Ranged
 

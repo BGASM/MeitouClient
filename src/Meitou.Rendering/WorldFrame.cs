@@ -947,7 +947,8 @@ static class WorldFrame
             sliders.Add(new Slider("Full screen", 0, 1, () => getFullScreen() ? 1 : 0, v => { if (v >= 0.5f != getFullScreen()) setFullScreen(v >= 0.5f); }, Text: v => v >= 0.5f ? "borderless" : "window"));
         if (g.Objects is { } objects)
         {
-            sliders.Add(new Slider("Object draw distance", 1000, 400000, () => objects.ObjectDistance, v => objects.ObjectDistance = v, "0", Logarithmic: true));
+            sliders.Add(new Slider("Object draw distance", 1000, 400000, () => objects.ObjectDistance, v => objects.ObjectDistance = v, "0", Logarithmic: true,
+                Faithful: Enhancements.FaithfulObjectDistance, Meitou: Enhancements.MeitouObjectDistance));
             if (objects.HasLandmarks)
                 sliders.Add(new Slider("Landmark distance (Meitou)", 1000, 400000, () => objects.LandmarkDistance, v => objects.LandmarkDistance = MathF.Round(v / 100) * 100, "0", Logarithmic: true));
             sliders.Add(new Slider("Distant towns (zones)", 0, ObjectRanges.MaxDistantTownRangeZones * 10,
@@ -986,7 +987,8 @@ static class WorldFrame
             sliders.Add(new Slider("Water see-through distance (Meitou, game 4000)", 1000, 100000, () => water.ClearDistance,
                 v => water.ClearDistance = MathF.Round(v / 100) * 100, "0", Logarithmic: true));
         }
-        sliders.Add(new Slider("Terrain detail: error px (less = finer)", 1, 32, () => r.TerrainPixelError, v => r.TerrainPixelError = v, "0.0", Logarithmic: true));
+        sliders.Add(new Slider("Terrain detail: error px (less = finer)", 1, 32, () => r.TerrainPixelError, v => r.TerrainPixelError = v, "0.0", Logarithmic: true,
+            Faithful: WorldRenderOptions.DefaultTerrainPixelError, Meitou: Enhancements.MeitouTerrainPixelError));
         // The game's `Shadow Range` slider goes 1000 to 9000; the viewer allows more (the cascades stretch over it), and its left end (0) turns the
         // shadows off (low-end GPUs).
         Toggle? fifthCascade = null;
@@ -997,7 +999,7 @@ static class WorldFrame
             {
                 shadow.Enabled = v >= KenshiShadows.MinRange;
                 if (shadow.Enabled) shadow.Settings = shadow.Settings with { Range = MathF.Round(v / 100) * 100 };
-            }, "0", Logarithmic: true, Text: v => shadow.Enabled ? v.ToString("0", CultureInfo.InvariantCulture) : "0 (off)"));
+            }, "0", Logarithmic: true, Text: v => shadow.Enabled ? v.ToString("0", CultureInfo.InvariantCulture) : "0 (off)", Faithful: 5000, Meitou: Enhancements.MeitouShadowRange));
             // The game's `shadow quality` (--shadow-quality): the atlas is made again at the new side on the next frame.
             sliders.Add(new Slider("Shadow map size (game quality 0-2)", 0, 2, () => Array.IndexOf(KenshiShadows.QualitySizes, shadow.Settings.MapSize),
                 v => shadow.Settings = shadow.Settings with { MapSize = KenshiShadows.MapSize((int)MathF.Round(v)) }, "0",
@@ -1006,7 +1008,7 @@ static class WorldFrame
             if (shadow.Meitou) fifthCascade = new Toggle("Shadow cascade 5 (Meitou)", () => shadow.MeitouCascades >= 5, v => shadow.MeitouCascades = v ? 5 : 4);
         }
         // A viewer option, not the game's: 1 is the game's haze (docs/formats/sky.md).
-        sliders.Add(new Slider("Haze strength (1 = game)", 0, 3, () => g.Sky.HazeStrength, v => g.Sky.HazeStrength = v, "0.00"));
+        sliders.Add(new Slider("Haze strength (1 = game)", 0, 3, () => g.Sky.HazeStrength, v => g.Sky.HazeStrength = v, "0.00", Faithful: 1, Meitou: Enhancements.MeitouHazeStrength));
         // Ours (docs/formats/sky.md "Planetshine"): the planet's light at night, a multiple of the physical value.
         sliders.Add(new Slider("Planetshine strength (x physical)", 0, 200, () => g.Sky.PlanetshineStrength, v => g.Sky.PlanetshineStrength = MathF.Round(v), "0"));
         if (g.Post is { } post)
@@ -1036,7 +1038,8 @@ static class WorldFrame
             sliders.Add(new Slider("Hybrid tone map: ACES share", 0, 1, () => post.Options.ToneMix, v => post.Options.ToneMix = MathF.Round(v * 20) / 20, "0.00"));
             sliders.Add(new Slider("Grading (0 = game)", 0, 1, () => post.Options.Grade ? 1 : 0, v => post.Options.Grade = v >= 0.5f,
                 Text: v => v >= 0.5f ? $"saturation {PostOptions.Saturation:0.00}, contrast {PostOptions.Contrast:0.00}" : "off (as the game)"));
-            sliders.Add(new Slider("Heat haze strength (1 = game)", 0, 3, () => post.Options.HeatHazeStrength, v => post.Options.HeatHazeStrength = MathF.Round(v * 20) / 20, "0.00"));
+            sliders.Add(new Slider("Heat haze strength (1 = game)", 0, 3, () => post.Options.HeatHazeStrength, v => post.Options.HeatHazeStrength = MathF.Round(v * 20) / 20, "0.00",
+                Faithful: 1, Meitou: Enhancements.MeitouHeatHazeStrength));
             sliders.Add(new Slider("Night grading strength (0 = game)", 0, 1, () => post.Options.NightGradeStrength, v => post.Options.NightGradeStrength = MathF.Round(v * 20) / 20, "0.00"));
             sliders.Add(new Slider("Light shafts strength", 0, 1, () => post.Options.ShaftStrength, v => post.Options.ShaftStrength = MathF.Round(v * 20) / 20, "0.00"));
             sliders.Add(new Slider("Light shafts air (0 = none)", 0, 4, () => post.Options.ShaftAir, v => post.Options.ShaftAir = MathF.Round(v * 20) / 20, "0.00"));
@@ -1046,7 +1049,7 @@ static class WorldFrame
         sliders.Add(new Slider(FilteringSlider, 0, 4, () => MathF.Log2(g.Sky.Gpu.Samplers.MaxAnisotropy), v => g.Sky.Gpu.Samplers.MaxAnisotropy = 1 << (int)MathF.Round(v), "0",
             Text: v => (1 << (int)MathF.Round(v)) + "x" + (MathF.Round(v) >= 3 ? " (as the game)" : "")));
         // The Faithful / Meitou switches as checkboxes (ticked: Meitou), the F-key toggles' state.
-        var toggles = switches?.Select(e => new Toggle(e.Name, () => e.IsMeitou, v => e.IsMeitou = v, () => e.IsMeitou ? e.Meitou : e.Faithful)).ToList();
+        var toggles = switches?.Select(e => new Toggle(e.Name, () => e.IsMeitou, v => e.IsMeitou = v, () => e.IsMeitou ? e.Meitou : e.Faithful, Remaster: true)).ToList();
         if (fifthCascade is not null) (toggles ??= []).Add(fifthCascade);
         // The billboard (impostor atlas) disk cache: deleted files are baked again when next needed; the resident atlases stay until evicted.
         var actions = new List<PanelAction>();

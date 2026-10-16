@@ -2,20 +2,23 @@ using System.Numerics;
 
 namespace Meitou.Rendering;
 
-/// <summary>One slider: a value between <see cref="Min"/> and <see cref="Max"/>, read and written through the callbacks.</summary>
+/// <summary>
+/// One slider: a value between <see cref="Min"/> and <see cref="Max"/>, read and written through the callbacks. <see cref="Faithful"/> and <see cref="Meitou"/>, when known,
+/// are the game's value and Meitou's (the settings menu marks them on the track and offers a quick switch between them).
+/// </summary>
 public sealed record Slider(string Label, float Min, float Max, Func<float> Get, Action<float> Set, string Format = "0.##", bool Logarithmic = false,
-    Func<float, string>? Text = null)
+    Func<float, string>? Text = null, float? Faithful = null, float? Meitou = null)
 {
     /// <summary>The value as the panel shows it (<see cref="Text"/> when given, else <see cref="Format"/>).</summary>
     public string Display => Text?.Invoke(Get()) ?? Get().ToString(Format, System.Globalization.CultureInfo.InvariantCulture);
 
-    public float Fraction
+    public float Fraction => FractionOf(Get());
+
+    /// <summary>Where <paramref name="value"/> sits on the track (0 to 1).</summary>
+    public float FractionOf(float value)
     {
-        get
-        {
-            float v = Math.Clamp(Get(), Min, Max);
-            return Logarithmic ? MathF.Log(v / Min) / MathF.Log(Max / Min) : (v - Min) / (Max - Min);
-        }
+        float v = Math.Clamp(value, Min, Max);
+        return Logarithmic ? MathF.Log(v / Min) / MathF.Log(Max / Min) : (v - Min) / (Max - Min);
     }
 
     public void SetFraction(float t)
@@ -25,8 +28,8 @@ public sealed record Slider(string Label, float Min, float Max, Func<float> Get,
     }
 }
 
-/// <summary>One checkbox: on or off, read and written through the callbacks; <see cref="Text"/> describes the state beside it.</summary>
-public sealed record Toggle(string Label, Func<bool> Get, Action<bool> Set, Func<string>? Text = null);
+/// <summary>One checkbox: on or off, read and written through the callbacks; <see cref="Text"/> describes the state beside it. <see cref="Remaster"/>: a Faithful / Meitou switch (on: Meitou).</summary>
+public sealed record Toggle(string Label, Func<bool> Get, Action<bool> Set, Func<string>? Text = null, bool Remaster = false);
 
 /// <summary>A button beside the reset one that asks first: <see cref="Question"/> is shown with Yes / No, Yes runs <see cref="Run"/>, whose text is shown after.</summary>
 public sealed record PanelAction(string Label, Func<string> Question, Func<string> Run);
