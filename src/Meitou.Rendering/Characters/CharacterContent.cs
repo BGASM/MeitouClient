@@ -115,7 +115,6 @@ internal sealed class CharacterContent : IDisposable
     readonly GameDatabase db;
     readonly MaterialResolver resolver;
     public WorldTextureCache Textures { get; }
-    readonly ConcurrentDictionary<string, Lazy<SkeletonRig>> rigs = new(StringComparer.OrdinalIgnoreCase);
     readonly Dictionary<(string Path, int Bones), LoadedMesh?> meshes = [];
     public List<string> Messages { get; } = [];
     public long MeshBytes { get; private set; }
@@ -135,6 +134,7 @@ internal sealed class CharacterContent : IDisposable
         resolver = new MaterialResolver(db, OgreMaterialLibrary.LoadConfigured(install, out _), assets);
         Textures = new WorldTextureCache(gpu, assets, "character textures");
         Morphs = new MorphArena(gpu);
+        Rigs = new CharacterRigs(db, FindMesh, name => assets.Find(name));
     }
 
     public GameDatabase Database => db;
@@ -165,17 +165,12 @@ internal sealed class CharacterContent : IDisposable
         return assets.Configured.Find(bare) ?? assets.Find(fcsPath);
     }
 
-    SkeletonRig? Rig(string name)
-    {
-        var path = assets.Find(name);
-        if (path is null) return null;
-        return rigs.GetOrAdd(path, p => new Lazy<SkeletonRig>(() => new SkeletonRig(OgreSkeletonReader.ReadFile(p)))).Value;
-    }
+    /// <summary>Skeleton rigs and pose setups, shared with the simulation's ragdolls (<see cref="CharacterRenderer.Rigs"/>).</summary>
+    public CharacterRigs Rigs { get; }
 
-    readonly ConcurrentDictionary<string, Lazy<string?>> skeletonNames = new(StringComparer.OrdinalIgnoreCase);
+    SkeletonRig? Rig(string name) => Rigs.Rig(name);
 
-    /// <summary>The skeleton a body mesh file links, read from the file once per path (any thread); throws what the reader throws.</summary>
-    string? BodySkeletonName(string path) => skeletonNames.GetOrAdd(path, p => new Lazy<string?>(() => OgreMeshReader.ReadFile(p).SkeletonName)).Value;
+    string? BodySkeletonName(string path) => Rigs.BodySkeletonName(path);
 
     /// <summary>What a worker makes of a mesh file (<see cref="PrepareMesh"/>): everything but the GPU buffers.</summary>
     sealed record PreparedMesh(PreparedPart[] Parts, float[] Distances, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs, float[]? ShadowDistances, int ShadowFirst, PickBox[] PickBoxes);
@@ -355,8 +350,9 @@ internal sealed class CharacterContent : IDisposable
             asset.Height = Math.Max(2 * body.Centre.Y, 1);
             asset.Radius = body.Radius + new Vector2(body.Centre.X, body.Centre.Z).Length();
         }
-        asset.Shape = asset.Animal ? null : Shape(c, rig);
-        asset.GroundOffset = GroundOffset(rig, asset.Shape);
+        var setup = Rigs.For(c);
+        asset.Shape = setup?.Shape;
+        asset.GroundOffset = setup?.GroundOffset ?? 0;
         asset.HeadBone = rig.Handle("Bip01 Head") ?? -1;
         if (body.Morphs is { } bodyMorphs && bodyMorphs.Deltas(c.PoseWeights, c.Character?.GetBool("shaved") == true && bodyMorphs.HasCuttableHorns) is { } deltas)
         {
@@ -395,47 +391,12 @@ internal sealed class CharacterContent : IDisposable
             asset.Parts.Add(ap);
         }
 
-        // The posture libraries, held at the body file's sliders (docs/animation.md, "Posture sliders").
-        if (c.Body is { } bodyFile)
+        if (setup is not null)
         {
-            asset.Idle = bodyFile.IdleStance ?? asset.Idle;
-            foreach (var (animation, slider) in new[] { ("postures", "Posture"), ("neck set", "Neck position"), ("shoulder set", "Shoulder set") })
-                if (bodyFile.Floats.ContainsKey(slider) && rig.Layer(db, animation) is { } def)
-                    asset.Fixed.Add((def, def.Clip.Length * bodyFile.Get(slider) / 100));
+            asset.Idle = setup.Idle;
+            asset.Fixed.AddRange(setup.Fixed);
         }
         return asset;
-    }
-
-    /// <summary>Body-shape sliders as bone sizes (docs/animation.md, "Body shape sliders"); only skeletons with exactly 30 bones, as in Kenshi.</summary>
-    BodyShapeData? Shape(CharacterAppearance c, SkeletonRig rig)
-    {
-        if (rig.BoneCount != CharacterShape.HumanBoneCount) return null;
-        var input = c.Shape ?? CharacterShape.InputFor(db, c);
-        var shape = CharacterShape.Compute(input, name => rig.Handle(name) is not null);
-        return rig.Shape(shape.BoneSize, shape.PositionalSize, shape.MovementScale);
-    }
-
-    static readonly string[] FootBones = ["Bip01 L Foot", "Bip01 R Foot", "Bip01 L Toe0", "Bip01 R Toe0"];
-
-    /// <summary>
-    /// How far <paramref name="shape"/> raises the lowest foot bone in the bind pose over the neutral shape (docs/animation.md, "Body shape sliders"): the bone sizes
-    /// scale the legs about the hips while <c>Bip01</c> keeps its height, so a short body floats and a tall one sinks. What grounds them in Kenshi was not found;
-    /// lowering the character by this is an engine choice.
-    /// </summary>
-    static float GroundOffset(SkeletonRig rig, BodyShapeData? shape)
-    {
-        if (shape is null) return 0;
-        var handles = FootBones.Select(rig.Handle).OfType<int>().ToArray();
-        if (handles.Length == 0) return 0;
-        var scratch = rig.Rent();
-        try
-        {
-            scratch.PoseDerived(null, []);
-            float neutral = handles.Min(h => scratch.DerivedPosition[h].Y);
-            scratch.PoseDerived(shape, []);
-            return handles.Min(h => scratch.DerivedPosition[h].Y) - neutral;
-        }
-        finally { rig.Return(scratch); }
     }
 
     // ---- materials (CharacterScene.BodyMaterial / PartMaterial) ----

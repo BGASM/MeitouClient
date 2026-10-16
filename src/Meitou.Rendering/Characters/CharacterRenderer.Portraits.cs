@@ -1,3 +1,4 @@
+using Meitou.Data.Characters;
 using System.Numerics;
 using Meitou.Rendering.Gpu;
 using Silk.NET.Vulkan;

@@ -1,12 +1,11 @@
+using System.Collections.Concurrent;
 using System.Numerics;
-using Meitou.Data;
-using Meitou.Data.Characters;
 using Meitou.Data.Ogre;
 
-namespace Meitou.Rendering.Characters;
+namespace Meitou.Data.Characters;
 
 /// <summary>One bone's keyframes of an animation as flat arrays (what the sampler binary-searches).</summary>
-internal sealed class BoneTrack(float[] times, Vector3[] translation, Quaternion[] rotation, Vector3[] scale)
+public sealed class BoneTrack(float[] times, Vector3[] translation, Quaternion[] rotation, Vector3[] scale)
 {
     public readonly float[] Times = times;
     public readonly Vector3[] Translation = translation;
@@ -15,7 +14,7 @@ internal sealed class BoneTrack(float[] times, Vector3[] translation, Quaternion
 }
 
 /// <summary>An Ogre animation with its tracks indexed by bone handle (null: the animation does not move that bone).</summary>
-internal sealed class AnimationClip(string name, float length, BoneTrack?[] tracks)
+public sealed class AnimationClip(string name, float length, BoneTrack?[] tracks)
 {
     public readonly string Name = name;
     public readonly float Length = length;
@@ -26,7 +25,7 @@ internal sealed class AnimationClip(string name, float length, BoneTrack?[] trac
 /// An animation as a layer of a pose: the clip with the tracks its ANIMATION record deletes and the bones it overrides
 /// (docs/animation.md, "Startup preprocessing"). Immutable, one per (skeleton, record or animation name).
 /// </summary>
-internal sealed class LayerDef(AnimationClip clip, bool[]? excluded, int[] overrides, string label, int rootMotionBone = -1)
+public sealed class LayerDef(AnimationClip clip, bool[]? excluded, int[] overrides, string label, int rootMotionBone = -1)
 {
     public readonly AnimationClip Clip = clip;
     /// <summary>By bone handle: tracks ignored while sampling (null: none).</summary>
@@ -41,10 +40,23 @@ internal sealed class LayerDef(AnimationClip clip, bool[]? excluded, int[] overr
 }
 
 /// <summary>One animation of a pose: its definition, the time in seconds (looped over the length) and the blend weight.</summary>
-internal readonly record struct ActiveLayer(LayerDef Def, float Time, float Weight);
+public readonly record struct ActiveLayer(LayerDef Def, float Time, float Weight);
+
+/// <summary>
+/// Bone transforms in model space (the skeleton's own space, before the character's placement) that replace the animated ones when posing
+/// (<see cref="PoseScratch.PoseDerived"/>), by bone handle: a ragdoll's bodies. Only a root bone (no parent) takes <see cref="Position"/>; the others
+/// keep their offset from the parent. <see cref="Weight"/> blends from the animated pose (0) to these (1).
+/// </summary>
+public sealed class BonePose(int boneCount)
+{
+    public readonly bool[] Set = new bool[boneCount];
+    public readonly Quaternion[] Rotation = new Quaternion[boneCount];
+    public readonly Vector3[] Position = new Vector3[boneCount];
+    public float Weight = 1;
+}
 
 /// <summary>Kenshi's two extra per-bone vectors and the movement scale that the body-shape sliders set (<see cref="CharacterShape"/>).</summary>
-internal sealed class BodyShapeData(Vector3[] boneSize, Vector3[] positionalSize, float movementScale)
+public sealed class BodyShapeData(Vector3[] boneSize, Vector3[] positionalSize, float movementScale)
 {
     public readonly Vector3[] BoneSize = boneSize;
     public readonly Vector3[] PositionalSize = positionalSize;
@@ -53,11 +65,11 @@ internal sealed class BodyShapeData(Vector3[] boneSize, Vector3[] positionalSize
 
 /// <summary>
 /// An Ogre skeleton prepared for posing many characters: bones by handle, parents before children, the binding pose, the animations as
-/// arrays and the layer definitions found so far. Immutable once built except for those caches, which only the render thread fills
-/// (<see cref="Layer"/>); posing itself (<see cref="PoseScratch"/>) only reads, so it may run on any thread.
+/// arrays and the layer definitions found so far. Immutable once built except for those caches (<see cref="Layer"/>), which any thread may
+/// fill (the renderer and the simulation's ragdolls share rigs); posing itself (<see cref="PoseScratch"/>) only reads.
 /// Maths: <see cref="PoseScratch.Pose"/> (Ogre's v1 node maths with Kenshi's changes, docs/formats/ogre-skeleton.md).
 /// </summary>
-internal sealed class SkeletonRig
+public sealed class SkeletonRig
 {
     public readonly OgreSkeleton Skeleton;
     public readonly int BoneCount;
@@ -72,11 +84,11 @@ internal sealed class SkeletonRig
     /// </summary>
     public readonly bool AverageBlend;
     readonly Dictionary<string, int> handles = new(StringComparer.Ordinal);
-    readonly Dictionary<string, AnimationClip?> clips = new(StringComparer.OrdinalIgnoreCase);
-    readonly Dictionary<string, LayerDef?> layers = new(StringComparer.OrdinalIgnoreCase);
+    readonly ConcurrentDictionary<string, AnimationClip?> clips = new(StringComparer.OrdinalIgnoreCase);
+    readonly ConcurrentDictionary<string, LayerDef?> layers = new(StringComparer.OrdinalIgnoreCase);
     // The binding pose in model space, with neutral shape: what the skin matrices are relative to (Ogre's OldBone::_getOffsetTransform).
-    internal readonly Vector3[] BindPosition = [], BindScale = [];
-    internal readonly Quaternion[] BindRotationInverse = [];
+    public readonly Vector3[] BindPosition = [], BindScale = [];
+    public readonly Quaternion[] BindRotationInverse = [];
 
     public SkeletonRig(OgreSkeleton skeleton)
     {
@@ -195,7 +207,7 @@ internal sealed class SkeletonRig
 /// binding pose, average blending with override bones in a second pass, rotations interpolated by nlerp, derived scale not inherited, and
 /// skin matrices in Ogre's <c>OldBone::_getOffsetTransform</c> form.
 /// </summary>
-internal sealed class PoseScratch
+public sealed class PoseScratch
 {
     readonly SkeletonRig rig;
     readonly Vector3[] pos, scale;
@@ -216,9 +228,9 @@ internal sealed class PoseScratch
     /// writes each bone's skin matrix into <paramref name="skin"/> (<see cref="SkeletonRig.BoneCount"/> entries, System.Numerics row-vector form,
     /// the memory a GLSL <c>mat4</c> reads as its column-vector form).
     /// </summary>
-    public void Pose(BodyShapeData? shape, ReadOnlySpan<ActiveLayer> layers, Span<Matrix4x4> skin)
+    public void Pose(BodyShapeData? shape, ReadOnlySpan<ActiveLayer> layers, Span<Matrix4x4> skin, BonePose? overrides = null)
     {
-        PoseDerived(shape, layers);
+        PoseDerived(shape, layers, overrides);
         for (int h = 0; h < rig.BoneCount; h++) skin[h] = Offset(h);
     }
 
@@ -226,7 +238,8 @@ internal sealed class PoseScratch
     public Matrix4x4 BoneTransform(int h) =>
         Matrix4x4.CreateScale(DerivedScale[h]) * Matrix4x4.CreateFromQuaternion(DerivedRotation[h]) * Matrix4x4.CreateTranslation(DerivedPosition[h]);
 
-    internal void PoseDerived(BodyShapeData? shape, ReadOnlySpan<ActiveLayer> layers)
+    /// <summary>Poses the derived transforms; <paramref name="overrides"/> (null: none) replaces the model-space rotations of some bones afterwards, and their children follow.</summary>
+    public void PoseDerived(BodyShapeData? shape, ReadOnlySpan<ActiveLayer> layers, BonePose? overrides = null)
     {
         int count = rig.BoneCount;
         for (int h = 0; h < count; h++)
@@ -290,6 +303,14 @@ internal sealed class PoseScratch
                 DerivedRotation[h] = DerivedRotation[parent] * rot[h];
                 DerivedScale[h] = size * scale[h];
                 DerivedPosition[h] = Vector3.Transform(pos[h] * positional * DerivedScale[parent].Y, DerivedRotation[parent]) + DerivedPosition[parent];
+            }
+            if (overrides is not null && h < overrides.Set.Length && overrides.Set[h])
+            {
+                // A ragdoll's body sets its bone's rotation (and a root bone's position) in model space, as Kenshi writes a simulated body's orientation into
+                // its manually controlled bone (docs/game/ragdolls.md, "Per frame"); the weight blends from the animated pose (the 0.75 s of getting up).
+                float w = overrides.Weight;
+                DerivedRotation[h] = w >= 1 ? overrides.Rotation[h] : Nlerp(DerivedRotation[h], overrides.Rotation[h], w);
+                if (parent < 0) DerivedPosition[h] = Vector3.Lerp(DerivedPosition[h], overrides.Position[h], Math.Clamp(w, 0, 1));
             }
         }
     }
