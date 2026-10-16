@@ -1,0 +1,114 @@
+using System.Collections.Concurrent;
+using System.Numerics;
+using Meitou.Content;
+using Meitou.Data;
+using Meitou.Data.World;
+
+namespace Meitou.Navigation;
+
+/// <summary>A building's collision footprint on the ground plane (docs/game/buildings-production.md "Placement"): the convex hull of its collision shapes' X/Z, in the building's own space.</summary>
+/// <param name="Hull">Counter-clockwise, scale applied, no rotation or position.</param>
+public sealed record BuildingFootprint(Vector2[] Hull, float YMin, float YMax)
+{
+    /// <summary>The smallest box (X, Z) round <see cref="Hull"/>.</summary>
+    public (Vector2 Min, Vector2 Max) Bounds
+    {
+        get
+        {
+            var min = new Vector2(float.MaxValue);
+            var max = new Vector2(float.MinValue);
+            foreach (var p in Hull) { min = Vector2.Min(min, p); max = Vector2.Max(max, p); }
+            return (min, max);
+        }
+    }
+
+    /// <summary>The hull in the world for a building at <paramref name="position"/> turned by <paramref name="rotation"/> (only its effect on X and Z counts).</summary>
+    public Vector2[] Place(Vector3 position, Quaternion rotation)
+    {
+        var q = rotation.LengthSquared() < 1e-12f ? Quaternion.Identity : Quaternion.Normalize(rotation);
+        var result = new Vector2[Hull.Length];
+        for (int i = 0; i < Hull.Length; i++)
+        {
+            var p = Vector3.Transform(new Vector3(Hull[i].X, 0, Hull[i].Y), q);
+            result[i] = new Vector2(p.X + position.X, p.Z + position.Z);
+        }
+        return result;
+    }
+}
+
+/// <summary>A placed building's footprint in the world.</summary>
+public readonly record struct PlacedFootprint(string Id, Vector2[] Hull);
+
+/// <summary>
+/// Footprints of the BUILDING records (from their collision files, the way the navmesh gatherer places them) and of the level data's placed buildings, for the host's placement
+/// check. A record is read on a worker the first time it is asked for; until then <see cref="Of"/> says null and the buildings that need it are left out.
+/// </summary>
+public sealed class BuildingFootprints
+{
+    readonly GameDatabase db;
+    readonly CollisionCache collision;
+    readonly Lazy<Dictionary<ZoneCoordinate, List<BuildingPlacement>>> index;
+    readonly ConcurrentDictionary<string, Task<BuildingFootprint?>> byRecord = new(StringComparer.Ordinal);
+
+    public BuildingFootprints(GameInstall install, GameDatabase db, WorldLevelData? levels)
+    {
+        this.db = db;
+        collision = new CollisionCache(install);
+        index = new(() =>
+        {
+            var map = new Dictionary<ZoneCoordinate, List<BuildingPlacement>>();
+            if (levels is null) return map;
+            foreach (var b in levels.Buildings())
+            {
+                if (!map.TryGetValue(b.Zone, out var list)) map[b.Zone] = list = [];
+                list.Add(b);
+            }
+            return map;
+        });
+    }
+
+    /// <summary>The footprint of a BUILDING; null while it is being read, and for a record with no collision.</summary>
+    public BuildingFootprint? Of(string buildingId) => Request(buildingId) is { IsCompletedSuccessfully: true } done ? done.Result : null;
+
+    /// <summary>Whether the footprint has been worked out (it may be none).</summary>
+    public bool Ready(string buildingId) => Request(buildingId).IsCompleted;
+
+    Task<BuildingFootprint?> Request(string buildingId) => byRecord.GetOrAdd(buildingId, id => Task.Run(() => Compute(id)));
+
+    BuildingFootprint? Compute(string buildingId)
+    {
+        if (db.Find(buildingId) is not { } building) return null;
+        float scale = building.GetFloat("scale", 1);
+        if (scale <= 0) scale = 1;
+        var points = new List<Vector3>();
+        foreach (var mesh in WorldObjectLayout.Building(db, building, "footprint", Vector3.Zero, Quaternion.Identity, new BuildingState()))
+        {
+            string path = mesh.Source.GetPath("xml collision");
+            if (path.Length == 0 || collision.Get(path) is not { } prepared) continue;
+            foreach (var shape in prepared.Shapes)
+                foreach (var v in shape.Vertices) points.Add(v * scale);
+        }
+        if (points.Count < 3) return null;
+        var hull = NavGeometry.Footprint(points, 0, 0, 0).Polygon;
+        return hull.Length < 3 ? null : new BuildingFootprint(hull, points.Min(p => p.Y), points.Max(p => p.Y));
+    }
+
+    /// <summary>The footprints (those already read; the others are being read) of the level data's buildings with a placement within <paramref name="radius"/> of <paramref name="centre"/> (X, Z).</summary>
+    public IEnumerable<PlacedFootprint> StaticAround(Vector2 centre, float radius)
+    {
+        var map = index.Value;
+        const float Reach = 200;   // a building's own extent beyond its placement point
+        var home = WorldLayout.ZoneOf(centre.X, centre.Y);
+        int span = (int)MathF.Ceiling((radius + Reach) / WorldLayout.ZoneSize);
+        for (int dz = -span; dz <= span; dz++)
+            for (int dx = -span; dx <= span; dx++)
+            {
+                if (!map.TryGetValue(new ZoneCoordinate(home.X + dx, home.Y + dz), out var list)) continue;
+                foreach (var b in list)
+                {
+                    if (b.Position == Vector3.Zero || Vector2.DistanceSquared(new Vector2(b.Position.X, b.Position.Z), centre) > (radius + Reach) * (radius + Reach)) continue;
+                    if (Of(b.BuildingId) is { } footprint) yield return new PlacedFootprint(b.InstanceId, footprint.Place(b.Position, b.Rotation));
+                }
+            }
+    }
+}

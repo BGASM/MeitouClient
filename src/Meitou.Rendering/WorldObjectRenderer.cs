@@ -51,7 +51,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         public required bool Town;
         /// <summary>Back faces culled: the instances are <c>interior</c> parts (docs/formats/zones.md "Interior view"; the game culls building parts' back faces, so a room's ceiling vanishes seen from above).</summary>
         public bool BackCull;
-        /// <summary>The placement ghost: 0 not, 1 valid (green), 2 invalid (red) (<see cref="BatchKind.Ghost"/>).</summary>
+        /// <summary>The placement ghost: 0 not, 1 valid (green), 2 invalid (red), 3 queued (blue) (<see cref="BatchKind.Ghost"/>).</summary>
         public int Ghost;
         public bool Manual;
         /// <summary>Some instance is mid cross-fade (or a town's per-vertex fade): its draws need the program with the dither <c>discard</c>.</summary>
@@ -210,51 +210,86 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
     public IReadOnlyDictionary<string, float>? Construction { get => construction; set => construction = value; }
     IReadOnlyDictionary<string, float>? construction;
 
-    PlacedMesh[] ghostBase = [];
-    object? ghostParts;
-    bool ghostValid;
+    /// <summary>One placement ghost: a building's parts laid out at the origin, drawn at <paramref name="World"/> (rotation, then position) in the tint of <paramref name="State"/>.</summary>
+    public readonly record struct GhostDraw(IReadOnlyList<PlacedMesh> Parts, Matrix4x4 World, GhostState State);
 
-    /// <summary>
-    /// The placement ghost: a building's parts laid out at the origin (<paramref name="parts"/>, kept while the same list is passed) drawn at <paramref name="world"/>
-    /// (rotation, then position), green when <paramref name="valid"/>, else red. Null parts: no ghost.
-    /// </summary>
-    public void SetGhost(IReadOnlyList<PlacedMesh>? parts, Matrix4x4 world, bool valid)
+    /// <summary>The tint of a ghost: the one at the cursor can be placed or not; a queued one waits for Confirm.</summary>
+    public enum GhostState { Valid, Invalid, Queued }
+
+    // One slot per ghost drawn: the parts list its instances were made from, those instances, and where and how it is drawn now.
+    sealed class GhostSlot
     {
-        if (parts is null || parts.Count == 0)
-        {
-            if (ghostBase.Length > 0) { streamer.ClearLoose(); ghostBase = []; ghostParts = null; }
-            return;
-        }
-        if (!ReferenceEquals(parts, ghostParts))
-        {
-            streamer.ClearLoose();
-            ghostParts = parts;
-            ghostBase = [.. parts.Where(p => !p.Interior)];
-            foreach (var p in ghostBase) streamer.MakeLoose(p);
-        }
-        ghostValid = valid;
-        var loose = streamer.Loose.Real;
-        for (int i = 0; i < loose.Count && i < ghostBase.Length; i++)
-        {
-            var transform = ghostBase[i].Transform * world;
-            var inst = loose[i];
-            inst.Placed = ghostBase[i] with { Transform = transform };
-            inst.Transform = transform;
-            if (inst.Gpu is { } gpu) inst.Centre = Vector3.Transform(gpu.Centre, transform);
-        }
+        public object? Parts;
+        public PlacedMesh[] Base = [];
+        public readonly List<ObjectStreamer.Instance> Instances = [];
+        public GhostState State;
     }
 
-    void DrawGhost(ObjectStreamer.Instance inst, Vector3 eye, Vector4[] frustum, long now)
+    readonly List<GhostSlot> ghostSlots = [];
+    bool ghostsDrawn;
+
+    /// <summary>
+    /// The placement ghosts of Build mode (docs/render-objects.md "Placement ghost"): each list of parts is laid out once (the same list keeps its instances), the
+    /// transforms follow every call. Empty: no ghost.
+    /// </summary>
+    public void SetGhosts(IReadOnlyList<GhostDraw> ghosts)
     {
-        if (inst.Gpu is not { } gpu) return;
-        if (!ReferenceEquals(inst.Mesh.Gpu, gpu)) { Unresolve(streamer.Loose, inst); return; }
-        float value = Vector3.Distance(inst.Centre, eye) - inst.Radius;
-        if (!SphereVisible(frustum, inst.Centre, inst.Radius)) return;
-        inst.Mesh.LastUsed = now;
-        DrawnInstances++;
-        int level = Math.Max(gpu.Curve.Select(Math.Max(value, 0) * LodBias), gpu.MinLevel);
-        // A dither coverage of 65 %: the building shows through as a screen-door.
-        Add(gpu, inst.Materials!, level, inst.Transform, 0, 0.65f, value, ghost: ghostValid ? BatchKind.Ghost : BatchKind.GhostBad);
+        while (ghostSlots.Count > ghosts.Count)
+        {
+            DropGhost(ghostSlots[^1]);
+            ghostSlots.RemoveAt(ghostSlots.Count - 1);
+        }
+        while (ghostSlots.Count < ghosts.Count) ghostSlots.Add(new());
+        for (int s = 0; s < ghosts.Count; s++)
+        {
+            var (parts, world, state) = ghosts[s];
+            var slot = ghostSlots[s];
+            if (!ReferenceEquals(parts, slot.Parts))
+            {
+                DropGhost(slot);
+                slot.Parts = parts;
+                slot.Base = [.. parts.Where(p => !p.Interior)];
+                foreach (var p in slot.Base) slot.Instances.Add(streamer.MakeLoose(p));
+            }
+            slot.State = state;
+            for (int i = 0; i < slot.Instances.Count; i++)
+            {
+                var transform = slot.Base[i].Transform * world;
+                var inst = slot.Instances[i];
+                inst.Placed = slot.Base[i] with { Transform = transform };
+                inst.Transform = transform;
+                inst.Centre = inst.Gpu is { } gpu ? Vector3.Transform(gpu.Centre, transform) : transform.Translation;
+            }
+        }
+        ghostsDrawn = ghostSlots.Count > 0;
+    }
+
+    void DropGhost(GhostSlot slot)
+    {
+        foreach (var inst in slot.Instances) streamer.DropLoose(inst);
+        slot.Instances.Clear();
+        slot.Parts = null;
+        slot.Base = [];
+    }
+
+    void DrawGhosts(Vector3 eye, Vector4[] frustum, long now)
+    {
+        foreach (var slot in ghostSlots)
+        {
+            int tint = slot.State switch { GhostState.Valid => BatchKind.Ghost, GhostState.Invalid => BatchKind.GhostBad, _ => BatchKind.GhostQueued };
+            foreach (var inst in slot.Instances)
+            {
+                if (inst.Gpu is not { } gpu) continue;
+                if (!ReferenceEquals(inst.Mesh.Gpu, gpu)) { Unresolve(streamer.Loose, inst); continue; }
+                float value = Vector3.Distance(inst.Centre, eye) - inst.Radius;
+                if (!SphereVisible(frustum, inst.Centre, inst.Radius)) continue;
+                inst.Mesh.LastUsed = now;
+                DrawnInstances++;
+                int level = Math.Max(gpu.Curve.Select(Math.Max(value, 0) * LodBias), gpu.MinLevel);
+                // A dither coverage of 65 %: the building shows through as a screen-door.
+                Add(gpu, inst.Materials!, level, inst.Transform, 0, 0.65f, value, ghost: tint);
+            }
+        }
     }
 
     /// <summary>Draw nothing but the real objects (no distant meshes): the game with distant towns off.</summary>
@@ -711,8 +746,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
             foreach (var inst in landmarkZone.Real) DrawReal(landmarkZone, inst, reach, eye, frustum, options, now);
         }
         // The placement ghost (Build mode): its parts at the cursor, dithered and tinted green or red; not in a shadow or the landmarks-only pass.
-        if (ghostBase.Length > 0 && !depthPass && !landmarksOnly)
-            foreach (var inst in streamer.Loose.Real) DrawGhost(inst, eye, frustum, now);
+        if (ghostsDrawn && !depthPass && !landmarksOnly) DrawGhosts(eye, frustum, now);
         if (!NoDistant && !landmarksOnly)
             foreach (var t in towns)
             {
@@ -855,7 +889,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         /// <summary>A flag on Solid or Fading: <see cref="Batch.BackCull"/>.</summary>
         public const int BackCull = 4;
         /// <summary>Flags: the placement ghost, valid or invalid (<see cref="Batch.Ghost"/>).</summary>
-        public const int Ghost = 8, GhostBad = 16;
+        public const int Ghost = 8, GhostBad = 16, GhostQueued = 32;
     }
 
     Batch BatchFor(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, int kind)
@@ -863,8 +897,8 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         var key = (gpu, materials, level, kind);
         if (!batchMap.TryGetValue(key, out var batch))
             batchMap[key] = batch = new Batch { Mesh = gpu, Materials = materials, Level = level, Town = kind == BatchKind.Town,
-                Fading = (kind & ~(BatchKind.BackCull | BatchKind.Ghost | BatchKind.GhostBad)) != BatchKind.Solid, BackCull = (kind & BatchKind.BackCull) != 0,
-                Ghost = (kind & BatchKind.GhostBad) != 0 ? 2 : (kind & BatchKind.Ghost) != 0 ? 1 : 0 };
+                Fading = (kind & ~(BatchKind.BackCull | BatchKind.Ghost | BatchKind.GhostBad | BatchKind.GhostQueued)) != BatchKind.Solid, BackCull = (kind & BatchKind.BackCull) != 0,
+                Ghost = (kind & BatchKind.GhostQueued) != 0 ? 3 : (kind & BatchKind.GhostBad) != 0 ? 2 : (kind & BatchKind.Ghost) != 0 ? 1 : 0 };
         return batch;
     }
 
@@ -1051,7 +1085,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
                     var pm = b.Materials.Parts[Math.Min(i, b.Materials.Parts.Length - 1)];
                     Material(ref d, gp, pm, options);
                     // The placement ghost: the shader tints a draw whose flat colour is non-zero.
-                    if (b.Ghost != 0) d.Push.FlatColour = b.Ghost == 1 ? new Vector3(0.35f, 1f, 0.45f) : new Vector3(1f, 0.3f, 0.25f);
+                    if (b.Ghost != 0) d.Push.FlatColour = b.Ghost == 1 ? new Vector3(0.35f, 1f, 0.45f) : b.Ghost == 2 ? new Vector3(1f, 0.3f, 0.25f) : new Vector3(0.5f, 0.7f, 1f);
                     // A part whose diffuse map is not resident yet is drawn plain grey (pop-in the benchmark counts).
                     if (!depthPass && options.Textures && d.Diffuse == 0 && pm.WantsDiffuse) untexturedDraws++;
                     d.Solid = !depthPass && !b.Fading && d.Push.AlphaThreshold == 0f;

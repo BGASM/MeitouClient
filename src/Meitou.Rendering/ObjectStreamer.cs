@@ -387,6 +387,13 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
         Loose.Unresolved.Clear();
     }
 
+    /// <summary>Forgets one loose instance.</summary>
+    public void DropLoose(Instance inst)
+    {
+        Loose.Real.Remove(inst);
+        Loose.Unresolved.Remove(inst);
+    }
+
     /// <summary>The scan of <see cref="ScanLandmarks"/> over one pseudo-zone's unresolved instances.</summary>
     public int ScanLoose(Zone zone, Vector3 eye, float reach, Func<Instance, bool> resolve, int maxResolve = int.MaxValue)
     {
