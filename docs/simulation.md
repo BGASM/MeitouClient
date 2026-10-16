@@ -255,7 +255,7 @@ unload, hashed only once non-empty. Facts: [locks](game/locks.md), [economy 11.5
 ## Arrest and jail
 
 `Crime/ArrestSystem` (serial `SlowWorld`, after `CrimeSystem`) and `Locks/LockSystem`. Facts: [economy 11.5, 11.7, 11.8](game/economy.md#117-arrest).
-Arrests, the recognition meter and the marker are hashed only while set; none of them is saved yet.
+Arrests, the recognition meter and the marker are hashed only while set. What a save keeps of them: [Saves](#saves).
 - **Triggers**: a police-like witness that books a crime acts at once (`CrimeSystem.BookingsOf`, the witnessed-crime
   events); every 15 ticks an awake NPC within 400 that sees a player character (`Visibility`/`SneakVisibility`) whose
   bounty with its faction reaches its class threshold spots it, at once while `RecentlyWanted` > 0 (250 game seconds after
@@ -281,7 +281,7 @@ Arrests, the recognition meter and the marker are hashed only while set; none of
   3 failed walks or 120 s, and the system frees it; cages of non-booking factions free nobody. **Lock-up** (155, 197): while
   a member has the goal in its hours a free member with it locks every door of the home (155 only with every member
   inside, engine: within the home's farthest node + 10; neither with a stranger inside); when no member's goal is in its
-  hours, what a round locked is unlocked (engine: the morning unlock is not traced; the flag is not saved). **Wardens**
+  hours, what a round locked is unlocked (engine: the morning unlock is not traced; a loaded night's locked homes come back flagged, `meitou house locked`). **Wardens**
   (195): occupied unlocked cages of the faction in its town are locked. **Keys** (engine): a worker whose target is behind
   its own faction's or home's shut doors unlocks them standing before it walks (the sim doesn't know door positions); an
   arrest's guard walking to such a cage has them opened at once. Rounds and locked homes are hashed only while any exist.
@@ -306,7 +306,7 @@ Arrests, the recognition meter and the marker are hashed only while set; none of
   `CrimeFactions.BookingOf`); above 4000 and once recognised (the same meter) the nearest free one and his squad attack
   (`Engaged`), re-ordered while the target is up and within 3000. When it is down, carried, caged or out of reach the hunt
   ends: no cage (11.8), and that hunter leaves that target alone for 600 game seconds (engine). Hunts and cagings are
-  hashed only while any exist; not saved.
+  hashed only while any exist; restarted after a load ([Saves](#saves)).
 - Not built: slaves, shackles, jailed NPCs from spawn data (template `prisoners`, `SquadFactory`).
 
 ## Buildings
@@ -477,9 +477,17 @@ F5/F9 and named save menus share mapping. Restore clock, player money/faction, r
 player squads, character transforms/names/roles, stats/medical parts, appearance, inventories,
 bounties, bed/cage state and sentence, and registered buildings' locks and doors (into existing zone records only; a
 new save has none, [save.md](formats/save.md#locks-cages-and-sentences)) and selection. Town/roaming populations regenerate. Weather, orders/paths, animation,
-combat engagement, wound-list/pain, pending crimes, base-game building state, ground items, camera/speed are not
+combat engagement, wound-list/pain, base-game building state, ground items, camera/speed are not
 fully restored. Loaded hashes need not match captured hashes: compare carried fields and agreement
 between repeated loads. QuickSaveTests checks carried fields and repeatable loading.
+
+**Crime and jail** (keys in [save.md](formats/save.md#locks-cages-and-sentences)). Saved: bounty ledger, held state and sentence, the escaped flag, the recently-wanted
+and recognition timers (player platoon characters, written only while set), the locks of interior cages and containers (an imprisoned character stays locked in), and the homes a
+lock-up round locked (without the flag a loaded night's locks would never be undone). **Restarted, not saved** (engine choice; the guard, hunter, releaser and warden of each job is a
+town NPC the population makes again with a new id, so a saved link would dangle): arrests (a downed target lies where it fell, is spotted again once awake, the saved markers make
+that quick), cagings (the carry link is not saved: order Put in Cage again), hunts and their rest timers, release, lock-up and warden rounds (the 30-tick sweep finds
+them again), the unreachable-cage memo (relearned by a failed walk), lock picking (an order), pending crimes
+(seconds long, victim id unsaveable). Spawn bounties are not saved: they are rolled when the population makes an NPC, never for a loaded character, and NPC populations regenerate.
 
 ## Sandbox
 

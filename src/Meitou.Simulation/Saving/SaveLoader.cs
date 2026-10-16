@@ -220,6 +220,7 @@ public static class SaveLoader
             };
             // Bounties: the ledger keys of the character's state record (docs/simulation.md "Crimes and bounties").
             cold.Bounties = BountySave.Read(sc.GameState, data.Relations, loaded.Clock, world.Tick, world.TickSeconds);
+            CrimeSave.Read(sc.GameState, cold);
             if (cold.IsPlayer && sc.GameState is { } orders) Orders.Read(orders, cold);
             // In a bed or a cage, and the sentence (docs/simulation.md "Cages, beds and locks"); the fixture binds when its town registers.
             HeldSave.Read(sc.GameState, cold, handles, instanceOf);

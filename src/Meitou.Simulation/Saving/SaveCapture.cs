@@ -238,6 +238,7 @@ public static class SaveCapture
                     g.Strings["name"] = cold.Name;
                     g.Bools["is leader"] = squad.Leader == id;
                     BountySave.Write(g, cold.Bounties, data.Relations, clock, world.Tick, world.TickSeconds);
+                    CrimeSave.Write(g, cold);
                     Orders.Write(g, cold);
                     HeldSave.Write(g, cold, cold.Save, world.Fixtures, buildings);
                 }
@@ -283,11 +284,18 @@ public static class SaveCapture
         return written;
     }
 
-    /// <summary>The registered buildings' locks and doors into their zones' existing state records (a building the save has no record of, or a new save without zones, is left out).</summary>
+    /// <summary>The registered buildings' locks and doors, and the homes a lock-up round locked, into their zones' existing state records (a building the save has no record of, or a new save without zones, is left out).</summary>
     static void WriteLocks(World world, IReadOnlyDictionary<string, FcsRecord> buildings)
     {
+        var locks = world.Systems.OfType<Locks.LockSystem>().FirstOrDefault();
         foreach (var b in world.Fixtures.Buildings)
-            if (buildings.TryGetValue(b, out var state)) world.Fixtures.WriteBuilding(b, state);
+        {
+            if (!buildings.TryGetValue(b, out var state)) continue;
+            world.Fixtures.WriteBuilding(b, state);
+            if (locks is null) continue;
+            if (locks.IsHouseLocked(world, b)) state.Bools[Locks.LockSystem.HouseLockedKey] = true;
+            else state.Bools.Remove(Locks.LockSystem.HouseLockedKey);
+        }
     }
 
     static RaceData? RaceOf(string recordId, GameDatabase db, Dictionary<string, RaceData?> cache)

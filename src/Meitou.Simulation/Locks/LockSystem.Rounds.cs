@@ -73,8 +73,30 @@ public sealed partial class LockSystem : IStateHashed
 
     public IReadOnlyList<Round> ActiveRounds => rounds;
 
+    /// <summary>Meitou's save key (bool, on the building's GAMESTATE_BUILDING) of a home a lock-up round locked: without it a loaded night's locked homes would never be unlocked in the morning.</summary>
+    public const string HouseLockedKey = "meitou house locked";
+    bool savedRead;
+
+    /// <summary>Takes the homes a loaded save had locked up from the zones' building records (<see cref="FixtureRegistry.Saved"/>), once.</summary>
+    void ReadSaved(World world)
+    {
+        if (savedRead) return;
+        savedRead = true;
+        if (world.Fixtures.Saved is not { } saved) return;
+        foreach (var (building, state) in saved)
+            if (state.Bools.GetValueOrDefault(HouseLockedKey)) houseLocked.Add(building);
+    }
+
+    /// <summary>A lock-up round locked this home and nothing has unlocked it since (what <see cref="Saving.SaveCapture"/> writes as <see cref="HouseLockedKey"/>).</summary>
+    public bool IsHouseLocked(World world, string building)
+    {
+        ReadSaved(world);
+        return houseLocked.Contains(building);
+    }
+
     void Rounds(World world)
     {
+        ReadSaved(world);
         OpenArrestWays(world);
         for (int k = 0; k < rounds.Count;)
         {

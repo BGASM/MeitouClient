@@ -497,7 +497,7 @@ public sealed class FixtureRegistry
     /// <summary>
     /// Takes a building's lock and door state from its saved GAMESTATE_BUILDING (docs/game/locks.md "Save keys"): <c>hardness</c> and <c>broken</c> always, level and
     /// <c>locked</c> only when the saved <c>lock lvl</c> is above 0; doors by suffix i: <c>state</c>, <c>doa</c>, <c>broken</c>, <c>gatecode</c>, <c>wants lock</c>, <c>lock lvl</c>,
-    /// <c>locked</c>, <c>hardness</c>. Interior fixtures (whose save ids are not mapped) keep their rolls but count as restored.
+    /// <c>locked</c>, <c>hardness</c>. Interior fixtures (whose save ids are not mapped) keep their rolls but count as restored, apart from Meitou's own <c>meitou lock</c> key (see <see cref="InteriorKey"/>).
     /// </summary>
     static void Restore(FcsRecord state, string building, List<Fixture> list)
     {
@@ -515,8 +515,22 @@ public sealed class FixtureRegistry
                 if (state.Bools.TryGetValue("wants lock" + i, out bool w)) f.WantsLock = w;
             }
             else if (f.Id == building && f.Lock is { } l) ReadLock(state, l, "", broken: true);
+            else if (InteriorKey(f, building) is { } key && f.Lock is { } il && state.Ints.TryGetValue(key, out int packed))
+            {
+                il.Locked = (packed & 1) != 0;
+                il.Broken = (packed & 2) != 0;
+                il.Level = Math.Clamp(packed >> 2, 0, 100);
+            }
         }
     }
+
+    /// <summary>
+    /// Meitou's save key for the lock of an interior cage or container, whose save ids are not mapped (the original's keys name a placed building's own lock and doors only):
+    /// <c>meitou lock &lt;layout index&gt;</c>, an int of level x 4 + broken x 2 + locked, present only while the lock is locked or broken. Null for any other fixture.
+    /// </summary>
+    static string? InteriorKey(Fixture f, string building) =>
+        f.Kind is FixtureKind.Cage or FixtureKind.Container && f.Id.Length > building.Length + 1 && f.Id[building.Length] == '/' && f.Id.StartsWith(building, StringComparison.Ordinal)
+            ? "meitou lock " + f.Id[(building.Length + 1)..] : null;
 
     static void ReadLock(FcsRecord state, LockState l, string suffix, bool broken)
     {
@@ -554,6 +568,11 @@ public sealed class FixtureRegistry
                 state.Bools["locked"] = l.EffectivelyLocked;
                 state.Bools["broken"] = l.Broken;
                 state.Floats["hardness"] = l.Hardness;
+            }
+            else if (InteriorKey(f, buildingInstance) is { } key)
+            {
+                if (l.Locked || l.Broken) state.Ints[key] = l.Level << 2 | (l.Broken ? 2 : 0) | (l.Locked ? 1 : 0);
+                else state.Ints.Remove(key);
             }
         }
         return true;
