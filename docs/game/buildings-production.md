@@ -137,10 +137,20 @@ shows the first failing message in this order (**Verified** unless marked):
   875, point of interest 437.5, others 1250). A `creates player town` building is blocked within 2.5 x radius (1 x for
   ruins/POI) or 2000 of the centre; other buildings only within 1 x radius, so they may stand outside any town.
   Player towns never block.
-- **Outposts** (`FUN_1404d6d90`, `FUN_1404db180`): a ghost joins the nearest player town within 5000, or the town of a
-  player building within 2500; otherwise a `creates player town` building makes a town "Your Outpost" at its position
-  (`FUN_140934e10`), and player buildings whose nearest town within 8000 is it move into it. On Confirm, queued ghosts
-  needing a town get one at their mean position if no player town is within 16000.
+- **Outposts** (**Verified**, `FUN_1404d6d90` per queued ghost on Confirm, then `FUN_1404db180`): a ghost in or on a
+  building takes that building's town; else the nearest town of the player faction within 5000 (X/Z); else the town of
+  the nearest player building within 2500 (the decompile adds an X/Z > 10000 test there that looks unreachable,
+  **Observed**); else a `creates player town` building that is not a wall makes an outpost at its position
+  (node position plus bounding-box size, as decompiled), and every player building whose town is a player town or none
+  and whose nearest town of any faction within 8000 is the new one moves into it. Walls (`links together`, ghost class
+  `PreviewBuilding_Wall`) never make one there; after the pass, queued walls still without a town take the last player
+  town among the queue's ghosts, else the nearest town of any faction within 16000 of their mean position, else a new
+  outpost there. A global flag (`DAT_142134690+0x298`, meaning **Unknown**) skips all of this.
+- **The outpost** (**Verified**, `FUN_140934e10`): a `Town` made from the TOWN `player_town_template` (base data: name
+  "Your Outpost", type 1, `town radius mult` 1, no faction), owned by the player faction, named "Your Outpost",
+  `public` false, `plevel` 0, added to the player-town list (town manager +0x68) that the save writes
+  ([player outposts](../formats/save.md#player-outposts)). On load (`FUN_14092ae80`) a player-faction town within the
+  radius of another player town is removed with "Player town '<a>' withing boundaries of <b>".
 - **Slope** (slot 31 `FUN_1404daa20`): ground normal from four rays at the rotated bounding-box corners (outdoors) or
   one ray (indoors); slope = angle from vertical, compared with `max slope` in degrees. With `match slope` (forced for
   interior furniture and nodes) the ghost tilts to the ground and a slope over the limit fails; without it the tilt is

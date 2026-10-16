@@ -121,8 +121,13 @@ public sealed class ConstructionSystem : ITickSystem
             switch (command)
             {
                 case PlaceBuildings place:
-                    foreach (var plan in place.Plans) Place(world, plan);
+                {
+                    var placed = new List<BuildSite>(place.Plans.Count);
+                    foreach (var plan in place.Plans)
+                        if (Place(world, plan) is { } site) placed.Add(site);
+                    TownForWalls(world, placed);
                     break;
+                }
                 case BuildOrder order:
                 {
                     // A complete building has nothing to build; repairing one (order 95) needs the building health, which is not modelled.
@@ -178,19 +183,19 @@ public sealed class ConstructionSystem : ITickSystem
         return text;
     }
 
-    void Place(World world, PlannedBuilding plan)
+    BuildSite? Place(World world, PlannedBuilding plan)
     {
         var data = Data(plan.Record);
         if (data is null || !world.Research.IsUnlocked(plan.Record))
         {
             world.Post(PlacementRules.Message(PlacementFailure.NotAvailable));
-            return;
+            return null;
         }
         var fail = PlacementRules.TownBlock(data, new Vector2(plan.Position.X, plan.Position.Z), towns, playerFactionId);
         if (fail != PlacementFailure.None)
         {
             world.Post(PlacementRules.Message(fail));
-            return;
+            return null;
         }
         var reg = world.Buildings;
         var materials = new MaterialSlot[data.Materials.Count];
@@ -210,7 +215,110 @@ public sealed class ConstructionSystem : ITickSystem
             Rate = data.Rate,
         };
         site.Complete = site.Target <= 0;   // a total of 0 completes at once (Verified)
+        site.Town = TownFor(world, site, data);
         reg.Add(site);
+        return site;
+    }
+
+    // ------------------------------------------------------------------ player towns
+
+    /// <summary>A ghost joins the nearest player town within this far (X/Z) (<b>Verified</b>, <c>FUN_1404d6d90</c>).</summary>
+    public const float JoinTownRange = 5000;
+    /// <summary>... or the town of the nearest player building within this far (<b>Verified</b>).</summary>
+    public const float JoinBuildingRange = 2500;
+    /// <summary>A new outpost takes in the player buildings whose nearest town within this far is it (<b>Verified</b>).</summary>
+    public const float AdoptRange = 8000;
+    /// <summary>Queued walls without a town take the nearest town within this far of their mean position, else a new outpost there (<b>Verified</b>, <c>FUN_1404db180</c>).</summary>
+    public const float WallTownRange = 16000;
+
+    /// <summary>
+    /// The player town a new site belongs to (docs/game/buildings-production.md "Placement", Outposts): its parent building's; else the nearest player town within
+    /// <see cref="JoinTownRange"/>; else the town of the nearest player building within <see cref="JoinBuildingRange"/>; else, for a <c>creates player town</c> building that is not a
+    /// wall, a new outpost at its position, which also takes in the player buildings whose nearest town within <see cref="AdoptRange"/> it is. 0 when none.
+    /// </summary>
+    int TownFor(World world, BuildSite site, BuildingBuildData data)
+    {
+        var reg = world.Buildings;
+        if (site.Parent is { } parent) return reg.Find(parent)?.Town ?? 0;
+        int faction = world.Player.Faction;
+        PlayerTown? nearest = null;
+        float best = float.MaxValue;
+        foreach (var t in reg.Towns)
+        {
+            if (t.Owner != faction) continue;
+            float d = DistanceXZ(t.Position, site.Position);
+            if (d < best) { best = d; nearest = t; }
+        }
+        if (nearest is not null && best <= JoinTownRange) return nearest.Number;
+
+        BuildSite? near = null;
+        best = float.MaxValue;
+        foreach (var s in reg.All)
+        {
+            if (s.Owner != faction) continue;
+            float d = Vector3.Distance(s.Position, site.Position);
+            if (d < best) { best = d; near = s; }
+        }
+        if (near is { Town: > 0 } && best < JoinBuildingRange) return near.Town;
+
+        if (data.LinksTogether || !data.CreatesPlayerTown) return 0;
+        var town = reg.AddTown(site.Position, faction);
+        foreach (var s in reg.All)
+            if (s.Owner == faction && NearestTown(reg, s.Position, AdoptRange) == town.Number) s.Town = town.Number;
+        return town.Number;
+    }
+
+    /// <summary>Confirm's second pass (<b>Verified</b>, <c>FUN_1404db180</c>): queued walls still without a town take the last player town of the queue, else the nearest town within
+    /// <see cref="WallTownRange"/> of their mean position, else a new outpost there. A nearest town of another faction leaves them without one (engine: <see cref="BuildSite.Town"/> names player towns only).</summary>
+    void TownForWalls(World world, List<BuildSite> placed)
+    {
+        int count = 0, last = 0;
+        var sum = Vector3.Zero;
+        foreach (var s in placed)
+        {
+            if (Data(s.Record) is { LinksTogether: true } && s.Town == 0)
+            {
+                count++;
+                sum += s.Position;
+            }
+            else if (s.Town > 0) last = s.Town;
+        }
+        if (count == 0) return;
+        int town = last;
+        if (town == 0)
+        {
+            var mean = sum / count;
+            town = NearestTown(world.Buildings, mean, WallTownRange);
+            if (town == 0) town = world.Buildings.AddTown(mean, world.Player.Faction).Number;
+            else if (town < 0) return;
+        }
+        foreach (var s in placed)
+            if (Data(s.Record) is { LinksTogether: true } && s.Town == 0) s.Town = town;
+    }
+
+    /// <summary>The nearest town (X/Z) within <paramref name="radius"/> of any faction: a player town's number, -1 for a placed town of the level data, 0 for none.</summary>
+    int NearestTown(BuildingRegistry reg, Vector3 at, float radius)
+    {
+        int found = 0;
+        float best = radius * radius;
+        var p = new Vector2(at.X, at.Z);
+        foreach (var t in towns)
+        {
+            float d = Vector2.DistanceSquared(t.Position, p);
+            if (d <= best) { best = d; found = -1; }
+        }
+        foreach (var t in reg.Towns)
+        {
+            float d = Vector2.DistanceSquared(new Vector2(t.Position.X, t.Position.Z), p);
+            if (d <= best) { best = d; found = t.Number; }
+        }
+        return found;
+    }
+
+    static float DistanceXZ(Vector3 a, Vector3 b)
+    {
+        float dx = a.X - b.X, dz = a.Z - b.Z;
+        return MathF.Sqrt(dx * dx + dz * dz);
     }
 
     void Remove(World world, BuildSite site)

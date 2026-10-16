@@ -209,7 +209,7 @@ decompile unless marked; Meitou's adapter is `PlayerInterface.Map.cs`.
   types 1 and 3–7 from level 1, POI at level 2. Size: group size × UI scale × 0.5 at level 0; Town × 0.75 / 1.0 at levels 1 / 2, others × 0.85.
   Explored: faction colour and the name; unexplored: Neutral and `unexplored name` (the name when empty). Label: `Kenshi_StandardFont_Medium`, black
   shadow, the marker's colour, centred round(3.2 × UI scale) below the icon, none at level 0. A `recently discovered` one gets a `NewDiscovered` child
-  icon; closing the Overview on the map clears the flag (`14049c210`). Player-owned towns are not modelled in Meitou.
+  icon; closing the Overview on the map clears the flag (`14049c210`). Player outposts (`World.Buildings.Towns`) are not on Meitou's map yet.
 - **Camps and nests:** a TOWN of type 0 is a `Nest` object (factory `140581770`), made by the area spawner (`1408f7310`) from the BIOME_GROUP `nests`
   (Meitou: the wild nests, [factions-squads-towns.md](factions-squads-towns.md) 6.3). Group "Nest" when the TOWN's faction is `not real`, else "Camp"
   (`14004bc6d`). Shown only when discovered and a player character is within √10616832 ≈ 3258; always level 2 (recently discovered does not lower it),

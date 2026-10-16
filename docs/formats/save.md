@@ -172,6 +172,24 @@ Meitou-only crime keys (`Saving/CrimeSave`, `LockSystem`, `FixtureRegistry`; the
 - GAMESTATE_BUILDING `meitou house locked` (bool, a lock-up round locked this home and nothing unlocked it since).
 - GAMESTATE_BUILDING `meitou lock <layout index>` (int level x 4 + broken x 2 + locked) for each interior cage or container whose lock is locked or broken (their ids are not mapped, see above).
 
+### Player outposts
+
+Towns made in play are saved in `quick.save` only, as entries of its one GAMESTATE_TOWN_INSTANCE_LIST (type 38, name "0",
+id `<n>-quick.save-INGAME`), written from the town manager's player-town list (+0x68) and nest list (+0x80)
+(`FUN_14092a6c0`). The level data's towns are not in it: their GAMESTATE_TOWN states are written separately
+(`FUN_14036b710`). **Observed**: the owner's five saves' lists hold only nests (127 and 150 entries), each with a
+`Nest state <name>` state (type-85 handle, no `instance` key); no save has an outpost.
+
+An outpost's entry (**Verified** by code, `Town::vfunc_17` `14036eb20` with `FUN_140386d20`): id = the town's stored
+instance id, or a new `<n>-quick.save-INGAME` (kept on the town, so later saves reuse it); target = the town's TOWN
+record (`player_town_template`); position = the town's, absolute; quaternion (0, 0, 0, 0); state `<id>-S5e`. Its
+GAMESTATE_TOWN (`Town::vfunc_85` `140376b80` and the TownBase writer) is named `Town state <name>` and has the base
+towns' keys: `instance` = the entry id, `is nest` false, `building material`, `public` (false for an outpost), `plevel`,
+`replacementTown`, `trade goods`, `faction` = the player faction, `factions here<i>`, `discovered` / `explored` /
+`recently discovered`, `artifacts count`, the handle `hand*` (type 13 TOWN) and the population floats; plus int
+`override` (Town+0x51c, 0 when made, meaning **Unknown**), written only for a town whose faction is the player's.
+Buildings name it by their `town` handle. Whether the loader takes the name from the record name is **Unknown**.
+
 ### Cross-checks against base data (the sample vs `GameDatabase` of the four base files)
 
 | Check | Result |
@@ -200,6 +218,7 @@ Meitou-only crime keys (`Saving/CrimeSave`, `LockSystem`, `FixtureRegistry`; the
 | `FUN_14036dde0`, `FUN_14036c070`, `FUN_14036e450`, `FUN_1409ffad0`, `FUN_140a0bef0` | zone save, zone file write, save all zones, zone load, zone-file check |
 | `FUN_140372a60` / `FUN_14036f2e0`, `FUN_1409c6890` / `FUN_1409c9dc0` | faction write / read, war state write / read |
 | `FUN_140372ef0` / `FUN_1407ed0f0`, `FUN_1406280a0` / `FUN_140626f50` | platoon write / read, character write / read |
+| `FUN_14092a6c0`, `FUN_14036b710`, `FUN_14092ae80` | town list write ([outposts](#player-outposts)), level town states write, player-town check on load |
 | `FUN_140552320` / `FUN_140552b70`, `FUN_140555650` | building state write / read ([keys](zones.md#placement-keys)); `FUN_14057cc70` (catalogued as `Zones_CreateDoor`) is the building factory |
 
 ## Unknowns
@@ -208,7 +227,7 @@ Meitou-only crime keys (`Saving/CrimeSave`, `LockSystem`, `FixtureRegistry`; the
 - The two long slot lists (2503 and 2969 ints) at the end of `quick.save`; the `S` serial's use when a handle goes stale (what happens on a mismatch).
 - The roles of BIOMES `E<n>` instances (EffectHandler state fields), the short-key CAMERA floats and bools (`bs cod gdm ht nnm ps rs`, `bl ep`), `TI day/dat0`, `sqt`, `towntime`, `jobhr`, `ssct`, and whether MEDICAL `fed` / `KO` are the stomach buffer and the KO timer (the other MEDICAL floats are explained above).
 - Whether `loadGame` rejects or adapts to a `mods` list that differs from the current load order (nothing in the sample: single base-game save).
-- Prisoners, dead characters, bounties, trade and mission state, and player outposts: not present in an early-game sample. Player-built building keys are known from the code only ([zones](zones.md#placement-keys)).
+- Prisoners, dead characters, bounties, trade and mission state, and player outposts: not present in an early-game sample. Player-built building and outpost keys are known from the code only ([zones](zones.md#placement-keys), [outposts](#player-outposts)).
 - Exactly when platoon files are written to the working folder between saves (only at save time is certain) and which zones are written on unload ("Delaying saving zone").
 - The condition list of the autosave pause, and how `Import Game` selects squads (`FUN_140378a30`, `FUN_140377710`).
 - How relations, trust and `trustNeg` change during play (only the fresh-world values are explained), and what the player faction (no relation table, but a `known` list and `global trust`) uses instead.

@@ -34,6 +34,8 @@ public sealed record BuildingBuildData
     public bool MatchSlope { get; init; }
     public float VerticalPositionTolerance { get; init; }
     public bool CreatesPlayerTown { get; init; }
+    /// <summary><c>links together</c>: a wall piece (ghost class <c>PreviewBuilding_Wall</c>); it joins a town but never makes one itself (docs/game/buildings-production.md "Placement").</summary>
+    public bool LinksTogether { get; init; }
     public bool IsInteriorFurniture { get; init; }
     public bool IsExteriorFurniture { get; init; }
     public bool IsNode { get; init; }
@@ -89,6 +91,7 @@ public sealed record BuildingBuildData
             MatchSlope = RecordReading.Bool(r, "match slope", false),
             VerticalPositionTolerance = RecordReading.Float(r, "vertical position tolerance", 0),
             CreatesPlayerTown = RecordReading.Bool(r, "creates player town", false),
+            LinksTogether = RecordReading.Bool(r, "links together", false),
             IsInteriorFurniture = RecordReading.Bool(r, "is interior furniture", false),
             IsExteriorFurniture = RecordReading.Bool(r, "is exterior furniture", false),
             IsNode = RecordReading.Bool(r, "is node", false),

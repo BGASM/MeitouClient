@@ -27,7 +27,8 @@ public sealed partial class SaveGame
 
     /// <summary>The two INSTANCE_COLLECTIONs of <c>quick.save</c>: the player's faction, then every other faction (each instance targets a GAMESTATE_FACTION).</summary>
     public List<FcsRecord> FactionCollections { get; } = [];
-    public FcsRecord? TownInstanceList { get; private set; }
+    /// <summary>The GAMESTATE_TOWN_INSTANCE_LIST of <c>quick.save</c>: the towns made in play (nests, player outposts), each with its GAMESTATE_TOWN state. Set by a writer that adds one.</summary>
+    public FcsRecord? TownInstanceList { get; set; }
     public FcsRecord? Biomes { get; private set; }
     public FcsRecord? Research { get; private set; }
     public FcsRecord? Decals { get; private set; }

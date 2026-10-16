@@ -314,8 +314,8 @@ Arrests, the recognition meter and the marker are hashed only while set. What a 
 Player construction contract (Faithful UI). Facts: [construction](game/buildings-production.md#construction),
 [placement](game/buildings-production.md#placement), [build menu](game/buildings-production.md#build-menu),
 [build tasks](game/ai-tasks.md#build-tasks), [save keys](formats/zones.md#placement-keys). Out of scope: walls and
-snapping, outposts/town creation (`creates player town` only blocks), the door x3 rule, production/power/storage,
-research progress, fetching from storage (task 247).
+snapping, outpost behaviour beyond the record (residents, raids, renaming, the map marker), the door x3 rule,
+production/power/storage, research progress, fetching from storage (task 247).
 
 **Shared types** (stubs f4cb78c, filled by the simulation track):
 - `Meitou.Data/Gameplay/Construction/BuildingBuildData.cs`: `BuildingBuildData.From/LoadAll` (build fields, material
@@ -343,6 +343,15 @@ placement is the host's to avoid. `World.Research` (`Construction.ResearchState`
 `Unlocked` set (replaced, never changed in place). A new game completes the default start research
 (`ResearchGate.DefaultStartId`, [build menu](game/buildings-production.md#build-menu)) and the start-off's `research`
 (`PopulationSystem.StartPlayer`); a load takes the save's. Static this milestone, not hashed.
+
+**Outposts.** `World.Buildings.Towns` (`PlayerTown`: `Number` 1.., `Name`, `Position`, `Owner`; never removed) and
+`BuildSite.Town` (a number, 0 none). `PlaceBuildings` gives each new site its town by the
+[outpost rule](game/buildings-production.md#placement): the parent's; else the nearest player town within 5000 (X/Z);
+else the town of the nearest player site within 2500; else a `creates player town` non-wall makes "Your Outpost" at its
+position, and every player site whose nearest town (level towns and outposts) within 8000 is it moves in. After the
+batch, `links together` sites still without a town take the batch's last player town, else the nearest town within 16000
+of their mean, else a new outpost there; a level town of another faction leaves them without one (engine:
+`BuildSite.Town` names player towns only). Hashed (towns, and `Town` when set) only once there is one.
 
 **ConstructionSystem** (`StandardParts.Construction`, in `All`; `StandardSystemSet.Construction`) runs after Carry, before
 Combat; all of it is serial. `ConstructionSettings`: `BuildingSpeed` (the option, 1), `Reach` 20, `SettleReach` 150,
@@ -388,7 +397,7 @@ Combat; all of it is serial. `ConstructionSettings`: `BuildingSpeed` (the option
   remove. `Version` (progress, delivery, pause) only rebuilds the published list.
 
 **Hash and determinism.** `World.StateHash` adds the registry (per-zone counters, then each site's fields in creation
-order) only once it holds a site, like `Fixtures`; `CharacterCold.BuildSite` with its bar and resume task hashes only
+order, then the outposts) only once it holds a site or an outpost, like `Fixtures`; `CharacterCold.BuildSite` with its bar and resume task hashes only
 when set. Existing golden hashes are unchanged while there are no sites; the `build` scenario pins one with sites.
 Decisions read only world state and command order, never collision or navmesh readiness (paths stay the usual
 asynchronous input).
@@ -433,8 +442,12 @@ longer has (a dismantled building) are removed. The instance Y is the absolute o
 `-zoneX.Y-INGAME` buildings of the samples (**Observed**); a load prefers `world Y pos`. `is complete` is written
 explicitly. The parent is `isInsideBuilding` plus Meitou's `meitou parent` (instance id, wins on load). On load it
 reserves every `-zoneX.Y-INGAME` id of the save and reads the player faction's such buildings back, in zone and list
-order (the player's start has none, base placements use other container names). `town` and `residents` are written as
-null handles (outposts are out of scope). `Saving/ResearchSave.cs` reads and writes the RESEARCH record's `finished<k>`
+order (the player's start has none, base placements use other container names). `town` is the outpost's handle,
+`residents` the null handle. Outposts go to `quick.save` as [town-list entries](formats/save.md#player-outposts)
+(made when the save has no list); an outpost read back keeps its entry id, state and handle, a new one gets the next
+town container `C` (engine choice, the original's handle allocation is **Unknown**) and a seeded `CS`; a load reads the
+player faction's non-nest entries in list order and matches buildings by the handle's `C`/`CS`. The state's name
+is "Town state <name>" and gives the name back; a new state is written `discovered` and `explored` (Meitou choice). `Saving/ResearchSave.cs` reads and writes the RESEARCH record's `finished<k>`
 and `num finished`. Not compared with a real file that has a player-built building (the sample saves have none).
 The first snapshot after a load carries every site, so the host seam needs nothing extra.
 

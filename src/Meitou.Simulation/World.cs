@@ -274,7 +274,7 @@ public sealed partial class World : IDisposable
         Platoons.Hash(ref h);
         Player.Hash(ref h);
         if (Fixtures.Count > 0) Fixtures.Hash(ref h);   // only once a town with buildings registered, so worlds without them hash as before
-        if (Buildings.Count > 0) Buildings.Hash(ref h);   // only once the player has a site, so worlds without one hash as before
+        if (Buildings.Count > 0 || Buildings.Towns.Count > 0) Buildings.Hash(ref h);   // only once the player has a site, so worlds without one hash as before
         foreach (var s in systems) if (s is IStateHashed hashed) hashed.Hash(ref h);
         return h.Value;
     }

@@ -30,6 +30,8 @@ public sealed class BuildSite
     public int Floor { get; init; }
     /// <summary>The instance id of the building this one stands in (null outdoors).</summary>
     public string? Parent { get; set; }
+    /// <summary>The <see cref="PlayerTown.Number"/> of the player town it belongs to (the save's <c>town</c> handle); 0 for none.</summary>
+    public int Town { get; set; }
     /// <summary>The owning faction, a position in the world's faction list.</summary>
     public int Owner { get; init; }
     public required MaterialSlot[] Materials { get; init; }
@@ -79,6 +81,7 @@ public sealed class BuildSite
         h.Add(Complete);
         h.Add(Paused);
         if (Destroyed || Ruined) { h.Add(0x44657374); h.Add(Destroyed); h.Add(Ruined); }
+        if (Town != 0) { h.Add(0x546F776E); h.Add(Town); }
         h.Add(Materials.Length);
         foreach (var m in Materials)
         {
@@ -90,6 +93,37 @@ public sealed class BuildSite
 }
 
 /// <summary>
+/// A town the player's buildings made: the original's TOWN <c>player_town_template</c> ("Your Outpost"), owned by the player faction (docs/game/buildings-production.md "Placement",
+/// docs/simulation.md "Buildings"). Serial phases only.
+/// </summary>
+public sealed class PlayerTown
+{
+    /// <summary>The TOWN record every outpost is made from (<b>Verified</b>, <c>FUN_140934e10</c>).</summary>
+    public const string Template = "player_town_template";
+    /// <summary>The name a new outpost gets (<b>Verified</b>).</summary>
+    public const string DefaultName = "Your Outpost";
+
+    /// <summary>1, 2, ... in creation (or load) order: what <see cref="BuildSite.Town"/> holds.</summary>
+    public required int Number { get; init; }
+    public string Name { get; set; } = DefaultName;
+    public Vector3 Position { get; init; }
+    /// <summary>The owning faction, a position in the world's faction list.</summary>
+    public int Owner { get; init; }
+    /// <summary>The save's instance id of its town-list entry (null until a save has named it); bookkeeping for <c>Saving.BuildingSave</c>, not hashed.</summary>
+    public string? SaveInstance { get; set; }
+    /// <summary>The save's town handle <c>hand*</c> (null until a save has named it); not hashed.</summary>
+    public Meitou.Data.Save.Hand? SaveHandle { get; set; }
+
+    internal void Hash(ref StateHasher h)
+    {
+        h.Add(Number);
+        h.Add(Rng.StableHash(Name));
+        h.Add(Position);
+        h.Add(Owner);
+    }
+}
+
+/// <summary>
 /// The player-built sites of the world in creation order (docs/simulation.md "Buildings"). Ids are the original's <c>&lt;n&gt;-zone&lt;X&gt;.&lt;Y&gt;-INGAME</c>, n from a counter per zone that
 /// starts above every such id in the loaded save (<see cref="Reserve"/>). Every change that the host or a save must see bumps <see cref="Version"/>; adding, completing, destroying and
 /// removing a site also bump <see cref="Revision"/>. Hashed by <see cref="World.StateHash"/> only while it holds a site.
@@ -97,6 +131,7 @@ public sealed class BuildSite
 public sealed partial class BuildingRegistry
 {
     readonly List<BuildSite> sites = [];
+    readonly List<PlayerTown> towns = [];
     readonly Dictionary<string, BuildSite> byId = new(StringComparer.Ordinal);
     readonly Dictionary<ZoneCoordinate, int> counters = [];
     IReadOnlyList<BuildingSnapshot> published = [];
@@ -105,6 +140,20 @@ public sealed partial class BuildingRegistry
     public int Count => sites.Count;
     public IReadOnlyList<BuildSite> All => sites;
     public BuildSite? Find(string id) => byId.GetValueOrDefault(id);
+
+    /// <summary>The player towns (outposts), in creation order; never removed.</summary>
+    public IReadOnlyList<PlayerTown> Towns => towns;
+    public PlayerTown? FindTown(int number) => number > 0 && number <= towns.Count ? towns[number - 1] : null;
+
+    /// <summary>Makes a player town with the next number.</summary>
+    public PlayerTown AddTown(Vector3 position, int owner, string name = PlayerTown.DefaultName)
+    {
+        var town = new PlayerTown { Number = towns.Count + 1, Name = name, Position = position, Owner = owner };
+        towns.Add(town);
+        Revision++;
+        Version++;
+        return town;
+    }
 
     /// <summary>Bumped when a site is added, completed (or turned back into a site), destroyed or removed: the host diffs the snapshot's buildings by id when it changes.</summary>
     public long Revision { get; private set; }
@@ -216,6 +265,11 @@ public sealed partial class BuildingRegistry
         }
         h.Add(sites.Count);
         foreach (var s in sites) s.Hash(ref h);
+        if (towns.Count > 0)
+        {
+            h.Add(towns.Count);
+            foreach (var t in towns) t.Hash(ref h);
+        }
     }
 }
 

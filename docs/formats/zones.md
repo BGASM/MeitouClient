@@ -89,8 +89,8 @@ Building state writer/reader (**Verified** by code, no player-built building in 
 New instance ids are `<n>-<container name>-INGAME`, n from the container's id counter (**Verified**, `FUN_140386770`;
 e.g. `19765-zone39.16-INGAME`). Their instance Y equals the state's `world Y pos` (**Observed**: 11405 of 11405 in the sample saves). On import, non-player buildings are rebuilt complete
 ([construction](../game/buildings-production.md#construction-tick)). A `creates player town` building makes a TOWN
-"Your Outpost" ([placement](../game/buildings-production.md#placement)); its save keys are **Unknown** (presumably a
-GAMESTATE_TOWN in `0-townlist` like base towns).
+"Your Outpost" ([placement](../game/buildings-production.md#placement)), saved in `quick.save`'s town list, not in a
+zone file ([player outposts](save.md#player-outposts)); the buildings' `town` handle names it.
 
 `0-townlist` GAMESTATE_TOWN_INSTANCE_LIST: target TOWN, absolute XYZ, unused zero quaternion,
 GAMESTATE_TOWN state `-S5e`. **Verified**304 targets resolve;224 town states listing zones contain
