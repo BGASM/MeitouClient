@@ -14,4 +14,6 @@ public sealed record BuildingSnapshot(string Id, string Record, Vector3 Position
 {
     /// <summary>A builder is dismantling it.</summary>
     public bool Dismantling { get; init; }
+    /// <summary>The wall this short piece, connector or wedge is attached to (<see cref="BuildSite.WallParent"/>): its orders and materials are that wall's.</summary>
+    public string? WallParent { get; init; }
 }

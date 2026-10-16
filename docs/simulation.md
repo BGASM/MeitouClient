@@ -450,8 +450,8 @@ auto-job act on the root; its progress sets the children's (`min(p/target, 1) x 
 removal removes them. So an attached piece costs nothing; the link is not saved or hashed. A destroyed attached piece
 just follows its wall again (original **Unknown**). **Engine gaps**: level (NPC town) walls are not snap candidates;
 indoor lines (radius 25), the steep-climb straight extension, the offset clamp and the arrows are not built; the stretch
-is recomputed each frame from the signed overshoot; the host still shows an attached piece's own materials and
-offers Cancel on it (the snapshot has no `WallParent`), which cancels the whole wall.
+is recomputed each frame from the signed overshoot. The snapshot carries `WallParent`; picking an attached piece in the
+UI picks its wall (name, verbs and Cancel's nothing-delivered check are the wall's).
 
 **Saves.** `Saving/BuildingSave.cs` writes each site as a GAMESTATE_BUILDING (`<id>-S23`) plus its entry in the zone
 file's `0-buildinglist` (keys per [zones](formats/zones.md#placement-keys)); a zone without a file gets one, the slot

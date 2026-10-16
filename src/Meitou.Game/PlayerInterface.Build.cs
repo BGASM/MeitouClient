@@ -471,7 +471,14 @@ sealed partial class PlayerInterface
                 : RaySegment(ray.Origin, ray.Direction, site.Position, site.Position + new Vector3(0, 16, 0), 12);
             if (t is { } hit && hit < bestT) (bestT, best) = (hit, site);
         }
-        return best;
+        return best is null ? null : WallOf(best);
+    }
+
+    /// <summary>The wall an attached short piece, connector or wedge belongs to (its orders, name and materials are the wall's), else the site itself.</summary>
+    BuildingSnapshot WallOf(BuildingSnapshot site)
+    {
+        for (int guard = 0; guard < 64 && site.WallParent is { } up && session.CurrentSnapshot.Buildings.FirstOrDefault(s => s.Id == up) is { } wall; guard++) site = wall;
+        return site;
     }
 
     /// <summary>The distance at which a ray first enters a vertical prism over a convex polygon (the Y range grown a little), or null.</summary>
