@@ -90,13 +90,13 @@ public sealed partial class MedicalState
 
     /// <summary>
     /// One update of splinting (<c>FUN_140649d50</c>): with t = min(skill, kit quality) x 0.01, the first non-vital part (in part order) with h - s + rig &lt; 50, rig &lt; s + b and
-    /// rig &lt; cap = 1 + trunc(t x 100) gets rig += the first aid rate x dt, clamped to s + b and the cap. Returns the rig added (0: nothing left to splint).
+    /// rig &lt; cap = 1 - trunc(t x -100) (float rounding: quality 20 caps at 20, 50 at 51) gets rig += the first aid rate x dt, clamped to s + b and the cap. Returns the rig added (0: nothing left to splint).
     /// </summary>
     public float Splint(float dt, float skill, float kitQuality, in MedicalContext ctx)
     {
         if (Dead || ctx.Race.IsRobot) return 0;
-        float t = Math.Clamp(MathF.Min(skill, kitQuality) * 0.01f, 0, 1);
-        float cap = 1 + MathF.Truncate(t * 100);
+        float t = MathF.Min(skill, kitQuality) * 0.01f;
+        float cap = 1 - (int)(float)(t * -100.0);   // t in float, x -100 in double, back to float, truncated: quality 20 gives 20 (0.2f is just under 0.2)
         foreach (var p in Parts)
         {
             if (p.IsVital || p.Flesh - p.Stun + p.Rig >= SplintLimit || p.Rig >= p.Stun + p.Bandage || p.Rig >= cap) continue;

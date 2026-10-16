@@ -67,7 +67,7 @@ ITEM with `item function` 2 (Splint Kit q20, rebirth.mod q25; Advanced Splint Ki
 counts as health in the fraction, the down (h-s+rig<0) and sever tests, so a splinted broken leg walks again (leg speed reads the fraction).
 - `needsSplint`(X): patient not dead, race not `is robot`, some non-vital part with rig<b, (h-s+rig)*1.05<50 and rig+1<trunc(X). The
   menu asks with X=50 (verb "Splint Injuries", task 249 "Splinting"), a medic with min(medic, kit quality). Robotic limbs are not excluded.
-- Update: t=min(medic skill, kit quality)*0.01, cap=1+trunc(t*100). The first non-vital part in part order with h-s+rig<50, rig<s+b,
+- Update: t=min(medic skill, kit quality)*0.01, cap=1-trunc(t*-100), t in float and the product rounded to float, so quality 20 caps at 20 (**Verified**, `MULSS`/`CVTSD2SS` at 0x140649ddb..e1b). The first non-vital part in part order with h-s+rig<50, rig<s+b,
   rig<cap gets rig+=lerp(1,15,t)*medic speed mult*dt, clamped to s+b and cap; so only bandaged or stunned damage can be splinted.
   The kit drains like a medkit only when rig was added; medic XP (stat 9) each update. Ends when no part qualifies.
 - No time decay and hits do not touch rig. **Observed** (`FUN_14064f5c0`): once h-s+rig>50, rig=max(0, 50-(h-s)).

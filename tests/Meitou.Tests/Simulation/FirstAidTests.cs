@@ -37,9 +37,40 @@ public class FirstAidTests
         Assert.Equal(2 * 0.33f, MedicalState.KitDrain(c, 0, 1, true), 4);
     }
 
+    [Fact]
+    public void Splint_need_and_splinting_follow_the_documented_rules()
+    {
+        // docs/game/character-stats.md "Splints": a broken right leg, h = -20 with 60 bandaged.
+        var m = Healthy();
+        var leg = m.Parts[RLeg];
+        leg.Flesh = -20;
+        leg.Bandage = 60;
+        Assert.True(m.NeedsSplint(Human, 50));                // rig 0 < b, (h - s + rig) x 1.05 < 50, rig + 1 < trunc(50)
+        Assert.False(m.NeedsSplint(Human, 1));                // rig + 1 < trunc(X) fails
+        // Splint Kit quality 20, medic 50: t = 20 x 0.01f, just under 0.2, so the cap 1 - trunc(t x -100) is 20; rate lerp(1, 15, t) x medic speed mult 3 = 11.4 per unit of dt.
+        var ctx = Context();
+        Assert.Equal(11.4f, m.Splint(1, 50, 20, ctx), 3);
+        Assert.Equal(11.4f, leg.Rig, 3);
+        Assert.Equal(20 - 11.4f, m.Splint(1, 50, 20, ctx), 3); // clamped to the cap
+        Assert.Equal(20f, leg.Rig, 3);
+        Assert.Equal(0f, m.Splint(1, 50, 20, ctx));           // nothing else to splint
+        Assert.False(leg.IsDown);                             // h - s + rig = 0: the leg holds again
+        // rig never passes s + b: a part with only 5 bandaged takes 5.
+        var arm = m.Parts[LArm];
+        arm.Flesh = 0;
+        arm.Bandage = 5;
+        Assert.Equal(5f, m.Splint(1, 50, 20, ctx), 3);
+        // A vital part is never splinted.
+        var vital = Healthy();
+        vital.Parts[HeadIx].Flesh = 10;
+        vital.Parts[HeadIx].Bandage = 60;
+        Assert.False(vital.NeedsSplint(Human, 50));
+        Assert.Equal(0f, vital.Splint(1, 50, 20, ctx));
+    }
+
     // ------------------------------------------------------------------ in the world
 
-    const float KitQuality = 40, KitCharges = 400;
+    const float KitQuality = 40, KitCharges = 400, SplintQuality = 20;
 
     static GameDatabase KitDatabase()
     {
@@ -53,7 +84,7 @@ public class FirstAidTests
             return r;
         }
         var file = new FcsFile();
-        file.Records.AddRange([Kit("72-t", "Test kit", 1, KitQuality, KitCharges), Kit("73-t", "Test robot kit", 12, 50, 500)]);
+        file.Records.AddRange([Kit("72-t", "Test kit", 1, KitQuality, KitCharges), Kit("73-t", "Test robot kit", 12, 50, 500), Kit("74-t", "Test splint kit", 2, SplintQuality, 100)]);
         var db = new GameDatabase();
         db.Apply(file, "test.mod");
         return db;
@@ -151,6 +182,33 @@ public class FirstAidTests
         foreach (var p in rig.Body(patient).Parts) Assert.True(p.Flesh + p.Bandage >= p.MaxHp - 0.01f, $"{p.Template.Name} is bandaged up to its maximum");
         Assert.True(kit.Charges < charges && kit.Charges > 0, "the kit was used, not used up");
         Assert.True(rig.Cold(medic).Stats![StatsEnumerated.Medic] > medicBefore, "treating trains the medic skill");
+    }
+
+    [Fact]
+    public void A_splint_order_rigs_the_broken_leg_with_the_kit_and_a_medic_without_one_refuses()
+    {
+        using var rig = new Rig(settings: new FirstAidSettings { AutoNpcs = false });
+        var medic = rig.Add(1000, 2000, medic: 50, kits: "74-t");
+        var bare = rig.Add(1000, 2200, medic: 50);           // beyond the kit reach of its squad mate's kit
+        var patient = rig.Add(1060, 2000, squad: 1);
+        var leg = rig.Body(patient).Parts[RLeg];
+        leg.Flesh = -10;
+        leg.Bandage = 60;
+        rig.World.RunTicks(2);
+        Assert.True(leg.IsDown);
+        rig.Say(new SplintOrder([bare], patient) { Tick = rig.World.Tick });
+        rig.World.RunTicks(2);
+        Assert.Equal(CharacterTask.Idle, rig.Task(bare));   // "I don't have a splint kit."
+        var kit = rig.Cold(medic).Inventory!.All().First(i => i.ItemFunction == 2);
+        float charges = kit.Charges;
+        rig.Say(new SplintOrder([medic], patient) { Tick = rig.World.Tick });
+        rig.World.RunTicks(2);
+        Assert.Equal(CharacterTask.Treat, rig.Task(medic));
+        for (int t = 0; t < 3000 && rig.Task(medic) == CharacterTask.Treat; t++) rig.World.RunTick();
+        Assert.Equal(CharacterTask.Idle, rig.Task(medic));
+        Assert.Equal(SplintQuality, leg.Rig, 2);              // up to the cap, 20 for quality 20 (see the formula test)
+        Assert.False(leg.IsDown, $"h {leg.Flesh} s {leg.Stun} rig {leg.Rig}");
+        Assert.True(kit.Charges < charges, "the kit drained");
     }
 
     // ------------------------------------------------------------------ determinism
