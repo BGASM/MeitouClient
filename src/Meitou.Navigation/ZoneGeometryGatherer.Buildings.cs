@@ -104,12 +104,14 @@ internal sealed partial class ZoneGeometryGatherer
         var node = NodeMatrix(building, position, rotation);
 
         var placed = WorldObjectLayout.Building(db, building, placementId, position, rotation, new BuildingState(destroyed));
+        var doors = building.GetReferences("doors").Select(r => r.TargetStringId).ToHashSet();
         foreach (var mesh in placed)
         {
             var part = mesh.Source;
             string path = CollisionPathOf(part, destroyed);
             if (path.Length == 0) continue;
-            bool isDoor = part.GetBool("is door") || mesh.Owner.GetBool("is door");
+            // Every part of a building placed from a `doors` list is a door, flagged or not (Observed: the level 4 and 5 gates' door parts lack `is door`).
+            bool isDoor = part.GetBool("is door") || mesh.Owner.GetBool("is door") || doors.Contains(mesh.Owner.StringId);
             AddPart(g, mesh.Owner, part, path, node, isDoor, interiorMask: false, instanceId: placementId, interior, floor);
         }
         // The interior mask part is created apart from the parts list; its collision is the indoor hull.

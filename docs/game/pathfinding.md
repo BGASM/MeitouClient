@@ -70,9 +70,12 @@ every 36 units is steeper than 40°, water cells cost the agent's water factor, 
 buildings. The route's start is replaced by a navmesh path to the farthest point well inside loaded
 zones; the rest is provisional (`PathResult.Exact`) and asked again as the walker reaches it or is
 blocked on it. With both ends loaded but no navmesh path, the walker goes to the reachable point
-nearest the goal, then provisionally on. **Observed**: Hub→(-36000,-6000) arrives (~22k units);
-Squin's centre snaps to an isolated 1130-polygon region, unreachable even with 3×3 zones loaded
-(cause **Unknown**, perhaps a defensive wall closing the canyon).
+nearest the goal, then provisionally on. **Observed**: Hub→(-36000,-6000) arrives (~22k units).
+
+**Gate doors.** Every part of a building placed from a `doors` list is a door (group 5). **Observed**
+(all 35 door records): 33 flag every part `is door`; `Defensive Gate level 4/5 Door` flag none, yet
+open in the game. Reading the flag alone made their leaves solid and sealed Squin's canyon (both its
+gates are level 4): its floor was a 1017-polygon island; with the rule it joins the 3×3 zones.
 
 ### Generator (runtime and tool-time navmesh building)
 
