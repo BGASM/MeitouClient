@@ -75,6 +75,7 @@ public sealed partial class World : IDisposable
     IAnimationSource? animations;
     IProjectileSource? projectiles;
     Trading.ITradeSource? trades;
+    Ragdolls.IRagdollSource? ragdolls;
 
     public World(WorldSettings settings, IWalkability walkability, IEnumerable<ITickSystem>? systems = null, CharacterTable? characters = null)
     {
@@ -88,6 +89,7 @@ public sealed partial class World : IDisposable
         animations = this.systems.OfType<IAnimationSource>().FirstOrDefault();
         projectiles = this.systems.OfType<IProjectileSource>().FirstOrDefault();
         trades = this.systems.OfType<Trading.ITradeSource>().FirstOrDefault();
+        ragdolls = this.systems.OfType<Ragdolls.IRagdollSource>().FirstOrDefault();
         Characters = characters ?? new CharacterTable();
         Grid = new SpatialGrid(settings.GridCellSize);
         pool = new WorkerPool(settings.Threads);
@@ -137,6 +139,7 @@ public sealed partial class World : IDisposable
         animations ??= system as IAnimationSource;
         projectiles ??= system as IProjectileSource;
         trades ??= system as Trading.ITradeSource;
+        ragdolls ??= system as Ragdolls.IRagdollSource;
     }
 
     /// <summary>Runs one simulation tick.</summary>

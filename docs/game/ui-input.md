@@ -167,10 +167,10 @@ not read) shows the Windows cursor instead, applied at once.
 
 ### Character picking
 
-Meitou (engine choice; how the original picks is **Unknown**, its ragdoll `.phs` shapes are not decoded): clicks, quick orders, the hover
+Meitou (engine choice; how the original picks is **Unknown**, possibly by its ragdoll shapes, [phs](../formats/phs.md)): clicks, quick orders, the hover
 label, pointer and outline take the nearest character whose posed mesh the ray meets. Each mesh keeps, from its bind-pose vertices, one
 box per bone (vertices by their strongest weight; an unskinned part one box), grown 0.4 units; the boxes are posed by the live bone palette,
-so people and animals pick over their whole drawn body. **Verified** (sandbox probe, 2026-10-16): a person hits from the feet to 18 units
+so people and animals pick over their whole drawn body, a ragdoll where it lies. **Verified** (sandbox probe, 2026-10-16): a person hits from the feet to 18 units
 up and misses at 22; a bonedog hits up to 10. A character the renderer does not draw falls back to a capsule 18 units tall.
 
 ### Hover outline

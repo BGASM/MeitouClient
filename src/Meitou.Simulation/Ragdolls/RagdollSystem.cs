@@ -1,0 +1,552 @@
+using System.Collections.Concurrent;
+using System.Numerics;
+using BepuPhysics;
+using BepuPhysics.Collidables;
+using BepuPhysics.Constraints;
+using Meitou.Data.Characters;
+using Meitou.Data.Physics;
+using Meitou.Simulation.Carrying;
+
+namespace Meitou.Simulation.Ragdolls;
+
+/// <summary>The parts of a body that are a ragdoll (the game's <c>RagdollPart</c>, <b>Verified</b> in <c>fcs_enums.def</c>; LOCATIONAL_DAMAGE <c>collapse part</c> uses it).</summary>
+[Flags]
+public enum RagdollPart
+{
+    None = 0, Whole = 1, RightArm = 2, LeftArm = 4, Head = 8, RightLeg = 16, LeftLeg = 32, CarryMode = 2048,
+    Limbs = RightArm | LeftArm | Head | RightLeg | LeftLeg,
+}
+
+/// <summary>What the animation system asks about ragdolls (in its parallel phase: answers are the last tick's state or fixed data).</summary>
+public interface IRagdollState
+{
+    /// <summary>Whether the character's look has a ragdoll (its race names a ragdoll file that binds to its skeleton).</summary>
+    bool HasRagdoll(CharacterCold cold);
+    /// <summary>Whether the whole body was a ragdoll at the end of the last tick.</summary>
+    bool WasWhole(CharacterId id);
+}
+
+/// <summary>What the world asks to publish a character's ragdoll.</summary>
+public interface IRagdollSource
+{
+    /// <summary>The bones the ragdoll sets, in the model space of the character's drawn placement; null without a ragdoll.</summary>
+    BonePose? Publish(CharacterId id);
+}
+
+/// <summary>
+/// Physics ragdolls (docs/game/ragdolls.md; engine choices in docs/simulation.md "Ragdolls"): the whole body of a knocked-out or dead character, the forearms and head of a
+/// carried one (all but the carry bone of an animal), and a human's collapsed limbs. Bodies are built from the race's ragdoll file on the character's animated pose; bodies the
+/// part mask does not simulate are pinned to the animation (kinematic). While the whole body is a ragdoll the character's position follows the root body. Runs serially in the
+/// slow-world step after carrying and animation, and steps one Bepu scene on the calling thread, so the state hash does not depend on the thread count.
+/// </summary>
+public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IRagdollSource, IDisposable
+{
+    /// <summary>Getting up blends from the ragdoll's pose to the animation over this many seconds (<b>Observed</b>, <c>FUN_1407d3130</c>).</summary>
+    public const float GetUpBlend = 0.75f;
+    /// <summary>The edge of a square of static ground and buildings the scene is made of, in world units, on a grid from the origin (engine choice).</summary>
+    public const float TileSize = 32;
+    /// <summary>Freezing (docs/game/ragdolls.md "Sleep and limits"): not before this age, then when this share of the bodies is still; at the latest after <see cref="FreezeLatest"/>.</summary>
+    public const float FreezeEarliest = 2, FreezeShare = 0.6f, FreezeLatest = 7;
+    /// <summary>A body is still under these squared speeds (the game's PhysX sleep velocities: linear² 2.25, angular² 1.96).</summary>
+    const float StillLinear = 2.25f, StillAngular = 1.96f;
+
+    readonly CharacterRigs rigs;
+    IRagdollEnvironment? environment;
+    readonly RagdollPhysics physics = new();
+    readonly Dictionary<CharacterId, Ragdoll> ragdolls = [];
+    readonly List<CharacterId> order = [];
+    readonly ConcurrentDictionary<CharacterAppearance, Lazy<(PhysicsFile File, string Path)?>> files = new(ReferenceEqualityComparer.Instance);
+    readonly ConcurrentDictionary<(string Path, SkeletonRig Rig, int Scale), Lazy<RagdollDefinition?>> definitions = new();
+    readonly Dictionary<RagdollDefinition, (TypedIndex Shape, BodyInertia Inertia)[]> shapes = new(ReferenceEqualityComparer.Instance);
+    IAnimationSource? animations;
+    int nextTag = 1;
+
+    /// <param name="environment">Ground and buildings; null: the world's walkable ground (<see cref="WalkabilityEnvironment"/>).</param>
+    public RagdollSystem(CharacterRigs rigs, IRagdollEnvironment? environment = null)
+    {
+        this.rigs = rigs;
+        this.environment = environment;
+    }
+
+    /// <summary>Ragdolls in play (frozen ones included) and how many are moving.</summary>
+    public int Count => ragdolls.Count;
+    public int Moving { get; private set; }
+    public int Tiles => physics.TileCount;
+
+    sealed class Ragdoll
+    {
+        public required CharacterId Id;
+        public required RagdollDefinition Definition;
+        public required CharacterPoseSetup Setup;
+        public required float Scale;
+        /// <summary>An animal's carry bone (RACE <c>carry bone</c>, else the skeleton's root; <c>FUN_1407d3850</c>).</summary>
+        public string CarryBone = "";
+        public RagdollPart Mask;
+        public int Tag;
+        /// <summary>By body: its handle when it is in the scene.</summary>
+        public BodyHandle?[] Bodies = [];
+        public bool[] Dynamic = [];
+        public readonly List<ConstraintHandle> Joints = [];
+        /// <summary>By body: the last world pose (also kept for bodies not in the scene while getting up).</summary>
+        public RigidTransform[] Pose = [];
+        public bool Frozen;
+        public float Age;
+        /// <summary>Seconds of the get-up blend left (0: none), and the bones it blends from, in world space.</summary>
+        public float BlendLeft;
+        public BonePose? Published;
+        public bool InScene => Bodies.Any(b => b is not null);
+    }
+
+    // ---- what the animation system asks ----
+
+    public bool HasRagdoll(CharacterCold cold) => cold.Appearance is { } look && FileOf(look) is not null && rigs.For(look) is not null;
+
+    public bool WasWhole(CharacterId id) => ragdolls.TryGetValue(id, out var r) && (r.Mask & RagdollPart.Whole) != 0;
+
+    public BonePose? Publish(CharacterId id) => ragdolls.TryGetValue(id, out var r) ? r.Published : null;
+
+    (PhysicsFile File, string Path)? FileOf(CharacterAppearance look) => files.GetOrAdd(look, a => new(() =>
+    {
+        // RACE male ragdoll / female ragdoll (the female file only for a female look; docs/game/ragdolls.md "RagdollPart and requests").
+        var name = a.Race.GetPath(a.Female ? "female ragdoll" : "male ragdoll") is { Length: > 0 } f ? f : a.Race.GetPath("male ragdoll");
+        if (string.IsNullOrEmpty(name) || rigs.Find(name) is not { } path) return null;
+        try { return (PhysicsFile.ReadFile(path), path); }
+        catch (Exception e) when (e is FormatException or IOException) { return null; }
+    })).Value;
+
+    RagdollDefinition? DefinitionOf(CharacterAppearance look, SkeletonRig rig, float scale)
+    {
+        if (FileOf(look) is not { } file) return null;
+        int key = (int)MathF.Round(scale * 100);
+        return definitions.GetOrAdd((file.Path, rig, key), _ => new(() => RagdollDefinition.Build(file.File, rig, key / 100f, Hull))).Value;
+    }
+
+    Vector3[]? Hull(string cooked)
+    {
+        if (rigs.Find(cooked) is not { } path) return null;
+        try { return CookedMeshReader.ReadConvex(File.ReadAllBytes(path)).Vertices; }
+        catch (Exception e) when (e is FormatException or IOException or InvalidDataException) { return null; }
+    }
+
+    // ---- the tick ----
+
+    /// <summary>The parts that should be a ragdoll now (docs/game/ragdolls.md "Triggers").</summary>
+    static RagdollPart Wanted(CharacterCold cold)
+    {
+        bool carried = !cold.CarriedBy.IsNone;
+        if (cold.Medical is { Incapacitated: true }) return carried ? RagdollPart.CarryMode : RagdollPart.Whole;
+        if (carried) return RagdollPart.CarryMode;
+        // A human's collapsed limbs, not a robotic one (animals have none).
+        if (cold.Fighter is { IsAnimal: true } || cold.Medical is not { } medical || cold.Race is not { } race) return RagdollPart.None;
+        var parts = RagdollPart.None;
+        foreach (var p in medical.Parts)
+            if (p.Template.Collapses && p.IsDown && !p.IsRobotic(race)) parts |= (RagdollPart)p.Template.CollapsePart & RagdollPart.Limbs;
+        return parts;
+    }
+
+    public void SlowWorld(World world)
+    {
+        animations ??= world.Systems.OfType<IAnimationSource>().FirstOrDefault();
+        var table = world.Characters;
+        var env = environment ??= new WalkabilityEnvironment(world.Walkability);
+        float dt = world.TickSeconds;
+        long tick = world.Tick;
+
+        // Ragdolls of characters that are gone.
+        foreach (var id in order)
+            if (!table.TryResolveNext(id, out _)) Destroy(ragdolls[id]);
+        order.RemoveAll(id => !ragdolls.ContainsKey(id));
+
+        // 1. Masks, building and pinning.
+        var next = table.Next;
+        for (int i = 0; i < next.Length; i++)
+        {
+            if (!next[i].Alive || table.Cold(i) is not { } cold) continue;
+            var id = table.IdOf(i);
+            ragdolls.TryGetValue(id, out var r);
+            var wanted = cold.Appearance is null || !HasRagdoll(cold) ? RagdollPart.None : Wanted(cold);
+            if (r is null && wanted == RagdollPart.None) continue;
+            if (r is null)
+            {
+                float scale = cold is { Fighter.IsAnimal: true, Medical: { } size } ? size.ScaleK : 1;
+                var setup = rigs.For(cold.Appearance!)!;
+                if (DefinitionOf(cold.Appearance!, setup.Rig, scale) is not { } definition) continue;
+                var carryBone = cold.Appearance!.Race.GetString("carry bone");
+                if (string.IsNullOrEmpty(carryBone) || setup.Rig.Handle(carryBone) is null) carryBone = setup.Rig.Skeleton.Bones.FirstOrDefault(b => b.Parent is null)?.Name ?? "";
+                r = new Ragdoll { Id = id, Definition = definition, Setup = setup, Scale = scale, CarryBone = carryBone };
+                r.Pose = new RigidTransform[definition.Bodies.Length];
+                ragdolls[id] = r;
+                order.Add(id);
+            }
+            var placement = Placement(r, cold, next[i]);
+            RigidTransform[]? animated = null;
+            if (wanted != r.Mask)
+            {
+                // Getting up: the whole body leaves the ragdoll and blends back into the animation, facing from the root to the head.
+                if ((r.Mask & RagdollPart.Whole) != 0 && (wanted & RagdollPart.Whole) == 0 && (wanted & RagdollPart.CarryMode) == 0)
+                    StartGetUp(world, r, ref next[i]);
+                animated = Animated(r, cold, placement);
+                Rebuild(r, wanted, animated);
+            }
+            if (r.Mask == RagdollPart.None) continue;
+            if (!r.Frozen && r.Dynamic.Any(d => !d))
+                Pin(r, animated ?? Animated(r, cold, placement), dt);
+            if (!r.Frozen) physics.Cover(r.Pose[r.Definition.Root].Position, 12 * r.Scale, env, tick);
+        }
+
+        // 2. The step.
+        Moving = 0;
+        foreach (var id in order) if (ragdolls[id] is { Frozen: false, Mask: not RagdollPart.None }) Moving++;
+        if (Moving > 0) physics.Step(dt);
+
+        // 3. Poses back, the whole body's position, freezing, publishing.
+        foreach (var id in order)
+        {
+            var r = ragdolls[id];
+            if (!table.TryResolveNext(id, out int slot)) continue;
+            ref var hot = ref table.Next[slot];
+            var cold = table.Cold(slot)!;
+            if (r.Mask != RagdollPart.None && !r.Frozen)
+            {
+                ReadBack(r);
+                r.Age += dt;
+                if ((r.Mask & RagdollPart.Whole) != 0)
+                {
+                    var root = r.Pose[r.Definition.Root].Position;
+                    float ground = env.GroundHeight(root.X, root.Z, root.Y);
+                    // A root far under the ground is lifted back onto it (FUN_1407d4470: more than 200 below), and frozen.
+                    if (root.Y < ground - 200) { Shift(r, new Vector3(0, ground + 2 - root.Y, 0)); Freeze(r); }
+                    else if (r.Age >= FreezeLatest || r.Age >= FreezeEarliest && StillShare(r) >= FreezeShare) Freeze(r);
+                    hot.Position = r.Pose[r.Definition.Root].Position;
+                    hot.Velocity = Vector3.Zero;
+                }
+            }
+            if (r.BlendLeft > 0) r.BlendLeft = MathF.Max(0, r.BlendLeft - dt);
+            if (r.Mask == RagdollPart.None && r.BlendLeft <= 0) { Destroy(r); continue; }
+            r.Published = Build(r, Placement(r, cold, hot));
+        }
+        order.RemoveAll(id => !ragdolls.ContainsKey(id));
+        physics.Sweep(tick);
+    }
+
+    /// <summary>The character's drawn placement: position (a carried body's at <see cref="CarryPose"/> from its carrier), facing, size; the renderer's world matrix.</summary>
+    static Matrix4x4 Placement(Ragdoll r, CharacterCold cold, in CharacterHot hot)
+    {
+        var at = hot.Position + (cold.CarriedBy.IsNone ? Vector3.Zero : CarryPose.Offset(hot.Yaw));
+        return CharacterRigs.Placement(r.Setup, at, hot.Yaw, r.Scale);
+    }
+
+    /// <summary>Every body's pose where the character's animation puts its bone now, in world space.</summary>
+    RigidTransform[] Animated(Ragdoll r, CharacterCold cold, Matrix4x4 placement)
+    {
+        var rig = r.Setup.Rig;
+        var layers = new List<ActiveLayer>();
+        if (cold.Animation is { } animation && animations is not null)
+            foreach (var layer in animations.Publish(animation))
+                if (rig.Layer(rigs.Database, layer.Name, r.Setup.Animal) is { } def) layers.Add(new ActiveLayer(def, MathF.Max(layer.Time, 0), layer.Weight));
+        foreach (var (def, time) in r.Setup.Fixed) layers.Add(new ActiveLayer(def, time, 1));
+        var scratch = rig.Rent();
+        try
+        {
+            scratch.PoseDerived(r.Setup.Shape, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(layers));
+            var turn = Quaternion.CreateFromRotationMatrix(placement with { M41 = 0, M42 = 0, M43 = 0 });
+            turn = Quaternion.Normalize(turn);
+            var bodies = r.Definition.Bodies;
+            var poses = new RigidTransform[bodies.Length];
+            for (int b = 0; b < bodies.Length; b++)
+            {
+                int h = bodies[b].Bone;
+                var bone = new RigidTransform(Vector3.Transform(scratch.DerivedPosition[h], placement), Quaternion.Normalize(turn * scratch.DerivedRotation[h]));
+                poses[b] = bodies[b].BoneInBody.Inverse().Then(bone);
+            }
+            return poses;
+        }
+        finally { rig.Return(scratch); }
+    }
+
+    /// <summary>Which bodies a mask simulates (docs/game/ragdolls.md, "Bodies: kinematic or simulated").</summary>
+    static bool Simulates(Ragdoll r, RagdollPart mask, RagdollBody body)
+    {
+        if ((mask & RagdollPart.Whole) != 0) return true;
+        string n = body.Name;
+        if ((mask & RagdollPart.CarryMode) != 0)
+        {
+            if (r.Setup.Animal) return n != r.CarryBone;
+            return n is "Bip01 L Forearm" or "Bip01 R Forearm" or "Bip01 Head";
+        }
+        return (mask & RagdollPart.LeftArm) != 0 && n is "Bip01 L UpperArm" or "Bip01 L Forearm"
+            || (mask & RagdollPart.RightArm) != 0 && n is "Bip01 R UpperArm" or "Bip01 R Forearm"
+            || (mask & RagdollPart.LeftLeg) != 0 && n is "Bip01 L Thigh" or "Bip01 L Calf"
+            || (mask & RagdollPart.RightLeg) != 0 && n is "Bip01 R Thigh" or "Bip01 R Calf"
+            || (mask & RagdollPart.Head) != 0 && n is "Bip01 Head" or "Bip01 Neck";
+    }
+
+    /// <summary>
+    /// Replaces the bodies for <paramref name="mask"/>: simulated bodies, and pinned (kinematic) ones joined to them. A body that was in the scene keeps its pose and velocity, a
+    /// new one starts at the animated pose at rest (the game starts from the animated pose with no velocity and no hit impulse).
+    /// </summary>
+    void Rebuild(Ragdoll r, RagdollPart mask, RigidTransform[] animated)
+    {
+        var bodies = r.Definition.Bodies;
+        var velocities = new BodyVelocity[bodies.Length];
+        var had = new bool[bodies.Length];
+        for (int b = 0; b < r.Bodies.Length; b++)
+            if (r.Bodies[b] is { } handle)
+            {
+                var body = physics.Simulation.Bodies.GetBodyReference(handle);
+                r.Pose[b] = new RigidTransform(body.Pose.Position, body.Pose.Orientation);
+                velocities[b] = body.Velocity;
+                had[b] = r.Dynamic[b];
+            }
+        Clear(r);
+        r.Mask = mask;
+        r.Frozen = false;
+        if (mask == RagdollPart.None) return;
+        if ((mask & RagdollPart.Whole) != 0 && !r.InScene) r.Age = 0;
+        if ((mask & RagdollPart.Whole) == 0) r.Age = 0;
+
+        var dynamic = new bool[bodies.Length];
+        for (int b = 0; b < bodies.Length; b++) dynamic[b] = Simulates(r, mask, bodies[b]);
+        var needed = (bool[])dynamic.Clone();
+        foreach (var j in r.Definition.Joints)
+            if (dynamic[j.A] || dynamic[j.B]) needed[j.A] = needed[j.B] = true;
+        var kinds = Shapes(r.Definition);
+        r.Tag = nextTag++;
+        r.Bodies = new BodyHandle?[bodies.Length];
+        r.Dynamic = dynamic;
+        for (int b = 0; b < bodies.Length; b++)
+        {
+            // A simulated body carries on from where it was simulated (a body dropped from the shoulder falls from there); anything else starts from the animation,
+            // and so does everything when the body is lifted onto a shoulder.
+            bool keep = had[b] && dynamic[b] && (mask & RagdollPart.CarryMode) == 0;
+            var pose = keep ? r.Pose[b] : animated[b];
+            var velocity = keep ? velocities[b] : default;
+            if (!needed[b]) { r.Pose[b] = pose; continue; }
+            r.Pose[b] = pose;
+            var rigid = new RigidPose(pose.Position, pose.Rotation);
+            var collidable = new CollidableDescription(kinds[b].Shape, 0.5f * r.Scale);
+            var activity = new BodyActivityDescription(0.01f);
+            var description = dynamic[b]
+                ? BodyDescription.CreateDynamic(rigid, velocity, kinds[b].Inertia, collidable, activity)
+                : BodyDescription.CreateKinematic(rigid, collidable, activity);
+            r.Bodies[b] = physics.AddBody(description, new BodyTag { Ragdoll = r.Tag, Index = b, Joined = r.Definition.Joined[b] });
+        }
+        foreach (var j in r.Definition.Joints)
+            if (dynamic[j.A] || dynamic[j.B]) AddJoint(r, j);
+    }
+
+    void AddJoint(Ragdoll r, RagdollJoint j)
+    {
+        var a = r.Bodies[j.A]!.Value;
+        var b = r.Bodies[j.B]!.Value;
+        var solver = physics.Simulation.Solver;
+        var spring = new SpringSettings(30, 1);
+        switch (j.Type)
+        {
+            case PhysicsJointType.Revolute:
+                r.Joints.Add(solver.Add(a, b, new Hinge { LocalOffsetA = j.OffsetA, LocalHingeAxisA = j.AxisA, LocalOffsetB = j.OffsetB, LocalHingeAxisB = j.AxisB, SpringSettings = spring }));
+                if (j.Limits)
+                    r.Joints.Add(solver.Add(a, b, new TwistLimit { LocalBasisA = j.BasisA, LocalBasisB = j.BasisB, MinimumAngle = j.Low, MaximumAngle = j.High, SpringSettings = spring }));
+                break;
+            case PhysicsJointType.Spherical:
+                r.Joints.Add(solver.Add(a, b, new BallSocket { LocalOffsetA = j.OffsetA, LocalOffsetB = j.OffsetB, SpringSettings = spring }));
+                if (j.Limits)
+                {
+                    r.Joints.Add(solver.Add(a, b, new SwingLimit { AxisLocalA = j.AxisA, AxisLocalB = j.AxisB, MaximumSwingAngle = j.Swing, SpringSettings = spring }));
+                    r.Joints.Add(solver.Add(a, b, new TwistLimit { LocalBasisA = j.BasisA, LocalBasisB = j.BasisB, MinimumAngle = j.Low, MaximumAngle = j.High, SpringSettings = spring }));
+                }
+                break;
+            default:
+                var (ra, rb) = (r.Definition.Bodies[j.A].Bind, r.Definition.Bodies[j.B].Bind);
+                var relative = rb.Then(ra.Inverse());
+                r.Joints.Add(solver.Add(a, b, new Weld { LocalOffset = relative.Position, LocalOrientation = relative.Rotation, SpringSettings = spring }));
+                break;
+        }
+    }
+
+    (TypedIndex Shape, BodyInertia Inertia)[] Shapes(RagdollDefinition definition)
+    {
+        if (shapes.TryGetValue(definition, out var made)) return made;
+        var all = physics.Simulation.Shapes;
+        made = new (TypedIndex, BodyInertia)[definition.Bodies.Length];
+        for (int b = 0; b < made.Length; b++)
+        {
+            var body = definition.Bodies[b];
+            switch (body.Type)
+            {
+                case PhysicsShapeType.Sphere:
+                    var sphere = new Sphere(body.Size.X);
+                    made[b] = (all.Add(sphere), sphere.ComputeInertia(body.Mass));
+                    break;
+                case PhysicsShapeType.Capsule:
+                    var capsule = new Capsule(body.Size.X, body.Size.Y);
+                    made[b] = (all.Add(capsule), capsule.ComputeInertia(body.Mass));
+                    break;
+                case PhysicsShapeType.Mesh:
+                    var hull = new BepuPhysics.Collidables.ConvexHull(body.Hull, physics.Pool, out _);
+                    made[b] = (all.Add(hull), hull.ComputeInertia(body.Mass));
+                    break;
+                default:
+                    var box = new Box(body.Size.X, body.Size.Y, body.Size.Z);
+                    made[b] = (all.Add(box), box.ComputeInertia(body.Mass));
+                    break;
+            }
+        }
+        return shapes[definition] = made;
+    }
+
+    /// <summary>Drives the pinned bodies to the animated pose over the tick (as velocities, so the joints and contacts feel the motion).</summary>
+    void Pin(Ragdoll r, RigidTransform[] animated, float dt)
+    {
+        for (int b = 0; b < r.Bodies.Length; b++)
+        {
+            if (r.Bodies[b] is not { } handle || r.Dynamic[b]) continue;
+            var body = physics.Simulation.Bodies.GetBodyReference(handle);
+            var target = animated[b];
+            var from = body.Pose;
+            var turn = Quaternion.Normalize(target.Rotation * Quaternion.Inverse(from.Orientation));
+            if (turn.W < 0) turn = -turn;
+            float angle = 2 * MathF.Acos(Math.Clamp(turn.W, -1, 1));
+            float s = MathF.Sqrt(MathF.Max(0, 1 - turn.W * turn.W));
+            var axis = s > 1e-5f ? new Vector3(turn.X, turn.Y, turn.Z) / s : Vector3.Zero;
+            // A jump too big for one tick (a teleport, a new carry) is not swept through the scene.
+            if (Vector3.DistanceSquared(target.Position, from.Position) > 400)
+            {
+                body.Pose = new RigidPose(target.Position, target.Rotation);
+                body.Velocity = default;
+            }
+            else body.Velocity = new BodyVelocity((target.Position - from.Position) / dt, axis * (angle / dt));
+            if (!body.Awake) body.Awake = true;
+        }
+        // Partial ragdolls are woken every frame (FUN_1407d3c00, wake 20).
+        for (int b = 0; b < r.Bodies.Length; b++)
+            if (r.Bodies[b] is { } handle && r.Dynamic[b] && physics.Simulation.Bodies.GetBodyReference(handle) is { Awake: false } sleeping)
+                sleeping.Awake = true;
+    }
+
+    void ReadBack(Ragdoll r)
+    {
+        for (int b = 0; b < r.Bodies.Length; b++)
+            if (r.Bodies[b] is { } handle)
+            {
+                var pose = physics.Simulation.Bodies.GetBodyReference(handle).Pose;
+                r.Pose[b] = new RigidTransform(pose.Position, pose.Orientation);
+            }
+    }
+
+    float StillShare(Ragdoll r)
+    {
+        int still = 0, count = 0;
+        for (int b = 0; b < r.Bodies.Length; b++)
+        {
+            if (r.Bodies[b] is not { } handle) continue;
+            count++;
+            var v = physics.Simulation.Bodies.GetBodyReference(handle).Velocity;
+            if (v.Linear.LengthSquared() < StillLinear && v.Angular.LengthSquared() < StillAngular) still++;
+        }
+        return count == 0 ? 1 : still / (float)count;
+    }
+
+    /// <summary>Freezes a settled ragdoll: the joints go and the bodies stay as still kinematic ones, which others still land on.</summary>
+    void Freeze(Ragdoll r)
+    {
+        ReadBack(r);
+        foreach (var joint in r.Joints) physics.Simulation.Solver.Remove(joint);
+        r.Joints.Clear();
+        for (int b = 0; b < r.Bodies.Length; b++)
+            if (r.Bodies[b] is { } handle)
+            {
+                var body = physics.Simulation.Bodies.GetBodyReference(handle);
+                body.Velocity = default;
+                if (r.Dynamic[b]) body.BecomeKinematic();
+            }
+        r.Frozen = true;
+    }
+
+    void Shift(Ragdoll r, Vector3 by)
+    {
+        for (int b = 0; b < r.Bodies.Length; b++)
+            if (r.Bodies[b] is { } handle)
+            {
+                var body = physics.Simulation.Bodies.GetBodyReference(handle);
+                body.Pose.Position += by;
+                body.Velocity = default;
+            }
+        ReadBack(r);
+    }
+
+    /// <summary>Starts getting up: the character turns to face from the root to the head along the ground and stands where the root lies; the bones blend back.</summary>
+    void StartGetUp(World world, Ragdoll r, ref CharacterHot hot)
+    {
+        var rig = r.Setup.Rig;
+        var root = r.Pose[r.Definition.Root].Position;
+        if (rig.Handle("Bip01 Head") is int head && r.Definition.BodyOfBone[head] is int hb and >= 0)
+        {
+            var toward = r.Pose[hb].Position - root;
+            if (toward.X * toward.X + toward.Z * toward.Z > 1e-4f) hot.Yaw = MathF.Atan2(toward.X, toward.Z);
+        }
+        var walk = world.Walkability;
+        if (walk.IsWalkable(root.X, root.Z, root.Y)) hot.Position = new Vector3(root.X, walk.GroundHeight(root.X, root.Z, root.Y), root.Z);
+        r.BlendLeft = GetUpBlend;
+    }
+
+    /// <summary>The bones the ragdoll sets, in the model space of <paramref name="placement"/>: the simulated bodies' bones (all of them while getting up, blended).</summary>
+    static BonePose? Build(Ragdoll r, Matrix4x4 placement)
+    {
+        bool blending = r.Mask == RagdollPart.None;
+        if (!blending && !r.Dynamic.Any(d => d)) return null;
+        if (!Matrix4x4.Invert(placement, out var toModel)) return null;
+        var turn = Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(placement with { M41 = 0, M42 = 0, M43 = 0 }));
+        var unturn = Quaternion.Inverse(turn);
+        var pose = new BonePose(r.Setup.Rig.BoneCount) { Weight = blending ? r.BlendLeft / GetUpBlend : 1 };
+        var bodies = r.Definition.Bodies;
+        for (int b = 0; b < bodies.Length; b++)
+        {
+            if (!blending && (b >= r.Dynamic.Length || !r.Dynamic[b] || r.Bodies[b] is null)) continue;
+            var bone = bodies[b].BoneInBody.Then(r.Pose[b]);
+            int h = bodies[b].Bone;
+            pose.Set[h] = true;
+            pose.Rotation[h] = Quaternion.Normalize(unturn * bone.Rotation);
+            pose.Position[h] = Vector3.Transform(bone.Position, toModel);
+        }
+        return pose;
+    }
+
+    void Clear(Ragdoll r)
+    {
+        foreach (var joint in r.Joints) physics.Simulation.Solver.Remove(joint);
+        r.Joints.Clear();
+        for (int b = 0; b < r.Bodies.Length; b++)
+            if (r.Bodies[b] is { } handle) physics.Simulation.Bodies.Remove(handle);
+        r.Bodies = [];
+        r.Dynamic = [];
+    }
+
+    void Destroy(Ragdoll r)
+    {
+        Clear(r);
+        ragdolls.Remove(r.Id);
+    }
+
+    public void Hash(ref StateHasher hasher)
+    {
+        if (ragdolls.Count == 0) return;
+        hasher.Add(0x52616764);
+        foreach (var id in order)
+        {
+            var r = ragdolls[id];
+            hasher.Add(id);
+            hasher.Add((int)r.Mask);
+            hasher.Add(r.Frozen);
+            hasher.Add(r.Age);
+            hasher.Add(r.BlendLeft);
+            foreach (var p in r.Pose)
+            {
+                hasher.Add(p.Position);
+                hasher.Add(p.Rotation.X); hasher.Add(p.Rotation.Y); hasher.Add(p.Rotation.Z); hasher.Add(p.Rotation.W);
+            }
+        }
+    }
+
+    public void Dispose() => physics.Dispose();
+}

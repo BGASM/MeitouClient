@@ -1,7 +1,7 @@
 using System.Numerics;
 using Meitou.Content;
 using Meitou.Data.Ogre;
-using Meitou.Rendering.Characters;
+using Meitou.Data.Characters;
 
 namespace Meitou.Tests.Characters;
 

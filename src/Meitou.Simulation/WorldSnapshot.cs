@@ -100,6 +100,11 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     public PrisonView? Prison { get; init; }
     /// <summary>The hostile NPCs that noticed or detected this sneaking player character in the last 4 s.</summary>
     public IReadOnlyList<WatcherView> Watchers { get; init; } = [];
+    /// <summary>
+    /// The bones the character's ragdoll sets (<see cref="Ragdolls.RagdollSystem"/>), in the model space of its drawn placement (position, minus the shape's ground offset, a
+    /// carried body's <see cref="Carrying.CarryPose"/> offset, facing, size: <see cref="CharacterRigs.Placement"/>), to pose over the animation; null without a ragdoll. Immutable.
+    /// </summary>
+    public BonePose? Ragdoll { get; init; }
 }
 
 /// <summary>

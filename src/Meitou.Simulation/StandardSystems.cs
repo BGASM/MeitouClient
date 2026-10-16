@@ -62,6 +62,10 @@ public sealed class StandardSystemOptions
     public Meitou.Simulation.Crime.ArrestSettings? Arrest { get; init; }
     public Meitou.Simulation.Trading.TradeSettings? Trade { get; init; }
     public Meitou.Simulation.Ai.AiSettings? Ai { get; init; }
+    /// <summary>The rigs the characters are drawn with: given, the physics ragdolls run (after the animation); null, the fall and lying clips stand in for them.</summary>
+    public Meitou.Data.Characters.CharacterRigs? Ragdolls { get; init; }
+    /// <summary>What ragdolls fall onto (null: the walkable ground, no buildings).</summary>
+    public Meitou.Simulation.Ragdolls.IRagdollEnvironment? RagdollEnvironment { get; init; }
 }
 
 /// <summary>The built systems in tick order, with the ones the host talks to.</summary>
@@ -79,6 +83,7 @@ public sealed class StandardSystemSet
     public Meitou.Simulation.Locks.LockSystem? Locks { get; init; }
     public Meitou.Simulation.Trading.TradeSystem? Trade { get; init; }
     public Meitou.Simulation.Ai.AiSystem? Ai { get; init; }
+    public Meitou.Simulation.Ragdolls.RagdollSystem? Ragdolls { get; init; }
 }
 
 /// <summary>
@@ -134,6 +139,7 @@ public static class StandardSystems
         if (Has(StandardParts.FirstAid)) systems.Add(new FirstAid.FirstAidSystem(data.Bodies.Constants, data.BodyOptions, data.Items, o.FirstAid));
         if (Has(StandardParts.Body)) systems.Add(new BodySystem(data.Bodies.Constants, data.BodyOptions, o.BodyTimeScale));
         Meitou.Simulation.Carrying.CarrySystem? carry = null;
+        Meitou.Simulation.Ragdolls.RagdollSystem? ragdolls = null;
         if (Has(StandardParts.Carry))
         {
             // The lift takes the length of the shoulder lift left clip (1 s when the lengths are not known).
@@ -146,7 +152,11 @@ public static class StandardSystems
         {
             var library = o.AnimationLibrary ?? AnimationLibrary.FromDatabase(data.Db);
             var lengths = o.AnimationLengths ?? new AnimationLengths();
-            systems.Add(new AnimationSystem(library, lengths, o.AnimationBlendRate ?? 4, combat));
+            var animation = new AnimationSystem(library, lengths, o.AnimationBlendRate ?? 4, combat);
+            systems.Add(animation);
+            // Ragdolls right after the animation: they start from and pin to this tick's pose, and the whole body's position is theirs before anything later reads it.
+            if (o.Ragdolls is not null) systems.Add(ragdolls = new Meitou.Simulation.Ragdolls.RagdollSystem(o.Ragdolls, o.RagdollEnvironment));
+            animation.Ragdolls = ragdolls;
             // The stealth knock-out swing lasts the length of the knockout record's clip.
             if (carry is not null && library.IndexOf(Meitou.Simulation.Carrying.CarrySystem.KnockoutClip) is >= 0 and var ko) carry.KnockoutSeconds = lengths.Of(library.Definitions[ko].Clip);
         }
@@ -175,6 +185,6 @@ public static class StandardSystems
             systems.Add(trade = new Meitou.Simulation.Trading.TradeSystem(data, o.Trade));
             trade.Crimes = crime;
         }
-        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime, Arrest = arrest, Locks = locks, Trade = trade, Ai = ai };
+        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime, Arrest = arrest, Locks = locks, Trade = trade, Ai = ai, Ragdolls = ragdolls };
     }
 }

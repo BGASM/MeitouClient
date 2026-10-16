@@ -57,9 +57,9 @@ factories/database/relations and lazy body/combat/item assembly. Research owns o
 ## Systems and their order
 
 `StandardSystems.Build` is the single wiring authority. Ordered systems:
-Population, Player, AI, Pursuit, Movement, FirstAid, Body, Carry, Construction, Combat, Animation, Feed,
-Retaliation, Aggro, Flee, Crime, Arrest, Locks, Trade (Arrest and Locks come with the Crime part). Tests selecting subsets
-retain this relative order.
+Population, Player, AI, Pursuit, Movement, FirstAid, Body, Carry, Construction, Combat, Animation, Ragdoll
+(only with `StandardSystemOptions.Ragdolls`), Feed, Retaliation, Aggro, Flee, Crime, Arrest, Locks, Trade (Arrest and
+Locks come with the Crime part). Tests selecting subsets retain this relative order.
 Population spawns before later SlowWorld work; player selection precedes movement orders;
 AI writes tasks before movement; pursuit schedules paths before movement answers them.
 First aid reads patients in its own Act barrier and applies treatment during serial commit.
@@ -196,6 +196,28 @@ paths; preserve current ordering. Original threshold/sense/retreat facts:
 looting. Carried bodies follow the carrier and affect load. Loot can raise witnessed theft and
 stolen ownership marks. [carry-loot.md](game/carry-loot.md). It also runs the stealth knock-out
 (`StealthKo` task, reusing `CarryTarget`/`LiftTime`): [combat](game/combat.md#stealth-knock-out).
+
+## Ragdolls
+
+`Ragdolls/RagdollSystem` (game behaviour: [ragdolls](game/ragdolls.md)) runs serially after animation
+when the host passes `CharacterRigs` (the game does; tests and goldens do not). Engine choices:
+- **Physics**: BepuPhysics2, one scene stepped on the calling thread (deterministic, 2 solver
+  iterations, 4 substeps per tick). Bodies and joints come from the race's ragdoll `.phs`
+  (`RagdollDefinition`, scaled by the animal size); revolute → hinge + twist limit, spherical →
+  ball socket + swing + twist limits, fixed → weld. Joined pairs do not collide.
+- **Parts**: `Whole` when incapacitated, `CarryMode` when carried, a human's downed limbs by their
+  LOCATIONAL_DAMAGE `collapse part` (not robotic ones). Bodies outside the mask are kinematic, driven
+  by velocity to the animated pose. Animation holds its layers while the whole body is a ragdoll.
+- **Published pose**: `CharacterSnapshot.Ragdoll` (model-space `BonePose` overrides, weight for the
+  get-up blend); the renderer poses with it. While `Whole`, the character's position follows the root.
+- **Scene**: 32-unit tiles round each moving ragdoll, terrain sampled every 2 units, plus building
+  collision from `Meitou.Navigation.RagdollGeometry` (per zone on a worker, doors and passable parts
+  skipped, ≤16 zones). A tile has ground only until its zones are gathered. Tiles unused for 90 ticks go.
+- **Hash**: mask, frozen, age, blend and body poses in system order.
+
+Gaps: no ragdoll state in saves (a loaded downed character's ragdoll starts from the lying clip);
+ragdolls collide with each other but not with characters that have none; the building gather's
+timing can change a live game's hash (goldens have no environment).
 
 ## Crimes and bounties
 

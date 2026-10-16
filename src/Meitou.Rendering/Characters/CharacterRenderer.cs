@@ -76,6 +76,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public int BoneBase, AttachBase, LayerStart, LayerCount;
         public CharState State;
         public bool Repose, WeaponDrawn;
+        /// <summary>The ragdoll's bones over the animation (null: none).</summary>
+        public BonePose? Bones;
         public long Key;
         /// <summary>Beyond <see cref="DrawDistance"/> (or <see cref="CharacterInstance.Hidden"/>) but posed for its portrait (<see cref="PortraitRequests"/>): not drawn in the world.</summary>
         public bool PortraitOnly;
@@ -134,19 +136,25 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     float textureBias;
     uint textureStandIn;
 
-    public CharacterRenderer(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assetLocator)
+    public CharacterRenderer(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assetLocator, CharacterRigs? rigs = null)
     {
         Gpu = gpu;
         nativeFrame = new NativeFrame(gpu, extraStorage: 4);
         colourProg = new ReflectedProgram(gpu, nativeFrame, CharacterShaders.Vertex(), Gi.GiResolveShaders.WithAlbedo(CharacterShaders.Fragment(), inShader: true), "characters", CharacterShaders.InstanceLocation);
         depthProg = new ReflectedProgram(gpu, nativeFrame, CharacterShaders.DepthVertex(), CharacterShaders.DepthFragment(), "characters depth", CharacterShaders.InstanceLocation);
         motionProg = new ReflectedProgram(gpu, nativeFrame, CharacterShaders.MotionVertex(), CharacterShaders.MotionFragment(), "characters motion", CharacterShaders.InstanceLocation);
-        content = new CharacterContent(gpu, install, db, assetLocator);
+        content = new CharacterContent(gpu, install, db, assetLocator, rigs);
         colourTimer = new PassTimer(gpu);
         depthTimer = new PassTimer(gpu);
     }
 
     public VramGuard? Guard { get => content.Textures.Guard; set => content.Textures.Guard = value; }
+
+    /// <summary>The skeleton rigs and pose setups the characters are drawn with; the simulation's ragdolls pose from the same ones.</summary>
+    public CharacterRigs Rigs => content.Rigs;
+
+    /// <summary>Rigs that find files as the renderer does, to share with the simulation (<see cref="CharacterRenderer(GpuContext, GameInstall, GameDatabase, AssetLocator, CharacterRigs?)"/>).</summary>
+    public static CharacterRigs CreateRigs(GameDatabase db, AssetLocator assets) => CharacterContent.CreateRigs(db, assets);
 
     // ------------------------------------------------------------------ per frame
 
@@ -216,7 +224,9 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             (state.Asset, state.WeaponDrawn, state.InWorld, state.Centre, state.Radius) = (asset, inst.WeaponDrawn, !far, centre, l.Radius);
             state.PreviousWorld = state.HasWorld ? state.World : l.World;
             (state.World, state.HasWorld) = (l.World, true);
-            l.Repose = inst.FullRateAnimation || state.Posed < 0 || state.Bones.Length != asset.Rig.BoneCount || (updateStamp + inst.Key) % PoseInterval(Vector3.Distance(eye, centre) / MathF.Max(1, l.Radius / HumanRadius)) == 0;
+            l.Bones = inst.Bones;
+            // A ragdoll is posed every frame: its bones move by physics, not by a clip the distance rule could thin out.
+            l.Repose = inst.FullRateAnimation || inst.Bones is not null || state.Posed < 0 || state.Bones.Length != asset.Rig.BoneCount || (updateStamp + inst.Key) % PoseInterval(Vector3.Distance(eye, centre) / MathF.Max(1, l.Radius / HumanRadius)) == 0;
             l.LayerStart = layerCount;
             var rig = asset.Rig;
             if (inst.Poses is { } poses)
@@ -257,7 +267,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                     (state.Bones, state.Previous) = (state.Previous, state.Bones);
                     state.Attach.CopyTo(state.PreviousAttach, 0);
                     var scratch = rig.Rent();
-                    scratch.Pose(asset.Shape, layerArray.AsSpan(l.LayerStart, l.LayerCount), state.Bones);
+                    scratch.Pose(asset.Shape, layerArray.AsSpan(l.LayerStart, l.LayerCount), state.Bones, l.Bones);
                     foreach (var part in asset.Parts)
                         if (part.AttachIndex >= 0) state.Attach[part.AttachIndex] = part.Offset * scratch.BoneTransform(part.Bone);
                     rig.Return(scratch);

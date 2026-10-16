@@ -3,7 +3,10 @@
 Runtime behaviour of character ragdolls in `kenshi_x64.exe`. The `.phs` file layout is in
 [phs](../formats/phs.md); carrying/looting links in [carry-loot](carry-loot.md). Addresses are
 functions of `kenshi_x64.exe`. Units are world units (0.1 m). Everything is **Observed** (static
-reading of the cited function) unless marked otherwise.
+reading of the cited function) unless marked otherwise. Our implementation and its engine choices:
+[simulation](../simulation.md#ragdolls). **Verified** by `RagdollJointTests`: the human revolute
+joints' bases and limits hold ≥99% of the male skeleton's clip poses (knees and elbows bend the way
+the file allows).
 
 ## Middleware and scene
 
