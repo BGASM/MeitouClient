@@ -10,12 +10,15 @@ import Base from '../layouts/Base.astro';
         Fully compatible with FCS mods and vanilla save games. Requires original copy to run
       </p>
     </div>
+    <a class="mt-btn mt-btn-primary more" href="https://github.com/VlcekM/MeitouClient#readme">Learn More</a>
   </section>
 </Base>
 
 <style>
   /* Fills the first view, stack at the top left in place of the wordmark. */
-  .hero { display: flex; align-items: flex-start; min-height: 100svh; padding: var(--edge) 0; }
+  .hero { position: relative; display: flex; align-items: flex-start; min-height: 100svh; padding: var(--edge) 0; }
+  /* The one paper action, at the bottom left, level with the wordmark at the bottom right. */
+  .more { position: absolute; left: 0; bottom: var(--edge); }
   .stack { min-width: 0; }
   h1 { margin: 0 0 var(--space-6); color: #fff; text-shadow: 0 2px 12px rgba(8, 6, 5, .6); white-space: nowrap; font: 600 clamp(32px, 6vw, 52px)/1.1 var(--font-exo); }
   .lede { max-width: 620px; margin: 0; font-size: 18px; line-height: 27px; text-shadow: 0 1px 8px rgba(8, 6, 5, .8); }
