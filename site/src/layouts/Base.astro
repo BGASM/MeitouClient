@@ -1,0 +1,75 @@
+---
+import '@fontsource/exo-2/600.css';
+import '../styles/meitou.css';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description = 'MeitouClient: a .NET reimplementation of the Kenshi engine.' } = Astro.props;
+const path = Astro.url.pathname.replace(/\/$/, '') || '/';
+const nav = [
+  { href: '/', label: 'Overview' },
+  { href: '/build', label: 'Build' },
+];
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <link rel="icon" href="/favicon.ico" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <div class="mt-scene">
+      <header class="top">
+        <a class="brand" href="/">Meitou</a>
+        <nav class="mt-tabs" aria-label="Sections">
+          {nav.map((n) => (
+            <a class="mt-tab" href={n.href} aria-current={path === n.href ? 'page' : undefined}>{n.label}</a>
+          ))}
+        </nav>
+        <a class="mt-btn" href="https://github.com/VlcekM/MeitouClient"><span>Source</span></a>
+      </header>
+      <main>
+        <slot />
+      </main>
+      <footer class="foot mt-caption">
+        GPL-3.0-or-later · No game assets are distributed · Not affiliated with Lo-Fi Games
+      </footer>
+    </div>
+  </body>
+</html>
+
+<style>
+  .top {
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+    flex-wrap: wrap;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: var(--space-7) var(--space-6);
+  }
+  .brand {
+    margin-right: auto;
+    color: var(--paper-light);
+    font: 600 24px/30px var(--font-exo);
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    text-decoration: none;
+  }
+  main {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 0 var(--space-6) var(--space-7);
+  }
+  .foot {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: var(--space-7) var(--space-6) 36px;
+  }
+</style>
