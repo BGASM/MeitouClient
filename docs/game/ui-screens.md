@@ -201,17 +201,36 @@ decompile unless marked; Meitou's adapter is `PlayerInterface.Map.cs`.
   hidden at zoom level 0. Downed or dead get nothing special (**Observed**).
 - **Movement marker:** only after a map right click: at the order point, bottom-centre anchored, colour Movement, for 3 s of real time; opening the map
   hides it.
-- **Towns** (`140491700`, `14048e230`): every placed TOWN except type 8 (NestMarker) and 10, only when its state is `discovered`; a nest (type 0) also
-  needs a player character within √10616832 ≈ 3258. Group by type: Nest, Outpost (also Military, Prison), Town, Village, Ruin (Ruins), Workcamp
-  (SlaveCamp), SmallPlace (POI). Levels shown: Town and recently discovered ones always, types 1 and 3–7 from level 1, Nest and POI at level 2.
-  Size: group size × UI scale × 0.5 at level 0; Town × 0.75 / 1.0 at levels 1 / 2, others × 0.85. Explored: faction colour and the name;
-  unexplored: Neutral and `unexplored name` (the name when empty). Label: `Kenshi_StandardFont_Medium`, black shadow, the marker's colour, centred
-  round(3.2 × UI scale) below the icon, none at level 0 or for nests. A `recently discovered` town gets a `NewDiscovered` child icon; closing the
-  Overview on the map clears the flag (`14049c210`). Player-owned towns and camps (TownBase: Camp / Nest) are not modelled in Meitou.
-- **Discovery:** a character within 400 units (XZ) sets `discovered` and `explored` (`14092f6b0`; that the point is a player character's is
-  **Observed**); map items set `discovered` and `recently discovered` (`14075f550`, not modelled). Meitou checks with the population's zone refresh
-  (every 15 ticks), keeps the flags per placed town (`PlayerState.Towns`) and reads and writes the GAMESTATE_TOWN bools by `instance`.
-- **Unknown:** where `NewDiscovered` sits on the marker (Meitou: the top-right corner, half size), town tooltips (not drawn), MapRoad lines.
+- **Towns** (`140491700`, `14048e230`): every placed TOWN except type 8 (NestMarker) and 10, only when its state is `discovered`. Group by type: Outpost
+  (also Military, Prison), Town, Village, Ruin (Ruins), Workcamp (SlaveCamp), SmallPlace (POI). Levels shown: Town and recently discovered ones always,
+  types 1 and 3–7 from level 1, POI at level 2. Size: group size × UI scale × 0.5 at level 0; Town × 0.75 / 1.0 at levels 1 / 2, others × 0.85.
+  Explored: faction colour and the name; unexplored: Neutral and `unexplored name` (the name when empty). Label: `Kenshi_StandardFont_Medium`, black
+  shadow, the marker's colour, centred round(3.2 × UI scale) below the icon, none at level 0. A `recently discovered` one gets a `NewDiscovered` child
+  icon; closing the Overview on the map clears the flag (`14049c210`). Player-owned towns are not modelled in Meitou.
+- **Camps and nests:** a TOWN of type 0 is a `Nest` object (factory `140581770`), made by the area spawner (`1408f7310`) from the BIOME_GROUP `nests`
+  (Meitou: the wild nests, [factions-squads-towns.md](factions-squads-towns.md) 6.3). Group "Nest" when the TOWN's faction is `not real`, else "Camp"
+  (`14004bc6d`). Shown only when discovered and a player character is within √10616832 ≈ 3258; always level 2 (recently discovered does not lower it),
+  × 0.85 (× 0.5 at level 0), no label, faction colour when explored. The marker goes when the nest does (Meitou keeps it: its nests are not destroyed).
+  Saved as GAMESTATE_TOWN with `is nest` (`1403709d0`); the original's town loaders skip those. Meitou writes its own with `instance`
+  `meitou-nest:<wild site>:<TOWN id>` and reads them back; the place is filled in when the nest next loads.
+- **Discovery** (`14092f6b0`): a character within 400 units (XZ) sets `discovered` and `explored` (that it is a player character's is **Observed**);
+  else, not yet discovered, within 8500 (17000 for type Town, halved for Nest and Ruins) sets `discovered` with the message "Discovered {1}", none for
+  nests. Meitou checks with the population's zone refresh (every 15 ticks), a camp only after its nest has loaded; flags per placed town
+  (`PlayerState.Towns`) and per camp (`PlayerState.Camps`), read and written as the GAMESTATE_TOWN bools.
+- **Map items** (MAP_ITEM: `towns` with v0 = how many of that TOWN, 0 all, v1 = weight; `unlock count`, 0 all): only by right-clicking the item in a
+  player character's inventory (`140714a20` → `14075f550`). Candidates per link: the placed towns of that record (not types 0, 8, 10) not yet
+  discovered, v0 of them at random when 0 < v0 < their number; then `unlock count` weighted draws by v1 without repeats, or all when it is 0 or not
+  below the candidates (`14075e980`). Each gets `discovered` and `recently discovered` (not `explored`); "{1,num} location(s) added to the map." and the
+  item is used up; with none: "You already know all these locations, no new information can be learned." and it stays. Never camps or nests. Its
+  tooltip (`1407b4e50`) runs the same pick: "[Right-click to learn new map locations]", "Towns:" and the names (a count for repeats), or "[Location
+  already known]". The original seeds the draws from the item instance (field **Unknown**); Meitou from the world seed and the MAP_ITEM record.
+- **Tooltip** (`14048fd10`, `140922e60`): only an explored town or camp, in the Overview's `ToolTip` (`Kenshi_GenericTextBoxSkin`): the name, "Faction:"
+  name, "Relations:" the player faction's relation, then population rows ("Residents max:", "Actual Num Residents:", "Roaming currentMax/desiredMax:",
+  "Roaming Population:", "Num Roaming Squads:", "???" when the manager has no numbers) and, for towns, "Residents:" with a line per resident faction and
+  "Hostile Occupiers:". Meitou shows the first three rows only.
+- **Roads:** `1404931d0` would draw the level's road network (`4-roadlist`) as polylines (hidden roads `#a0a0a0`), but its only caller `1404939f0` is
+  never referenced in the exe: the base game shows no roads (**Verified**, xrefs and a raw pointer scan). Meitou draws none.
+- **Unknown:** where `NewDiscovered` sits on the marker (Meitou: the top-right corner, half size).
 
 ## 6. Inventory, trade, dialogue, build
 

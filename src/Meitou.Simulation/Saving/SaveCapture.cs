@@ -71,7 +71,7 @@ public static class SaveCapture
         if (data.PlayerFaction >= 0) camera.PlayerFactionName = data.Factions[data.PlayerFaction].Name;
 
         UpdateFactions(game, data, loaded);
-        WriteTownKnowledge(game, data, world.Player);
+        WriteTownKnowledge(builder, data, world.Player);
         var written = WritePlayerSquads(builder, world, data, loaded, options, clock);
         WriteSelection(game, world, written);
         if (loaded is not null) WriteRoaming(game, world, loaded);
@@ -109,12 +109,24 @@ public static class SaveCapture
 
     /// <summary>Writes the prosperity and counters of the loaded factions and the current relation table into the save's factions.</summary>
     /// <summary>Writes what the player knows of each placed town into its state, by instance id. Flags are only added: the world never forgets a town.</summary>
-    static void WriteTownKnowledge(SaveGame game, PopulationData data, PlayerState player)
+    /// <summary>The instance a camp's town state carries: Meitou's own key (wild site and TOWN record), as nests have none in the original.</summary>
+    internal const string CampInstancePrefix = "meitou-nest:";
+
+    static void WriteTownKnowledge(SaveBuilder builder, PopulationData data, PlayerState player)
     {
+        var game = builder.Game;
         var known = player.Towns;
         var byInstance = new Dictionary<string, TownKnowledge>(StringComparer.Ordinal);
         for (int i = 0; i < known.Length && i < data.Sites.Count; i++)
             if (known[i] != 0 && data.Sites[i].InstanceId.Length > 0) byInstance[data.Sites[i].InstanceId] = known[i];
+        foreach (var camp in player.Camps)
+        {
+            string instance = CampInstancePrefix + camp.Site.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + camp.TownId;
+            byInstance[instance] = camp.Known;
+            if (!game.Towns.Any(t => t.Instance == instance))
+                builder.AddTown("Town state " + camp.Name, instance, camp.FactionId, isNest: true,
+                    camp.Position is { } p ? WorldLayout.ZoneOf(p.X, p.Z) : null, (int)FcsRecordType.NEST);
+        }
         foreach (var town in game.Towns)
         {
             if (!byInstance.TryGetValue(town.Instance, out var flags)) continue;

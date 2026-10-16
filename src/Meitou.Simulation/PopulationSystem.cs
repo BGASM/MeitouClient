@@ -95,22 +95,49 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         StepRoaming(world);
     }
 
-    /// <summary>The XZ distance at which a player character discovers and explores a town (docs/game/ui-screens.md "Map").</summary>
-    public const float DiscoverRange = 400;
+    /// <summary>The XZ distance at which a player character explores a town (and discovers it).</summary>
+    public const float ExploreRange = 400;
+    /// <summary>The XZ distance at which a player character discovers a town: doubled for a TOWN of type Town, halved for Nest and Ruins (docs/game/ui-screens.md "Map").</summary>
+    public const float DiscoverRange = 8500;
+    static float DiscoverRangeOf(TownType type) => DiscoverRange * (type == TownType.Town ? 2 : type is TownType.Nest or TownType.Ruins ? 0.5f : 1);
 
-    /// <summary>A town a player character walks within <see cref="DiscoverRange"/> of becomes discovered and explored.</summary>
+    /// <summary>Where each wild nest stood when it last loaded (null before), for the map.</summary>
+    Vector2?[] wildCentres = [];
+
+    /// <summary>
+    /// Towns and camps a player character comes within <see cref="ExploreRange"/> of become discovered and explored; ones not yet discovered within
+    /// <see cref="DiscoverRangeOf"/> become discovered, with a "Discovered" message for a town (none for nests and camps).
+    /// </summary>
     void Discover(World world)
     {
         if (!world.Player.Exists) return;
         var prev = world.Characters.Previous;
+        var player = world.Player;
         for (int i = 0; i < prev.Length; i++)
         {
             if (!prev[i].Alive || world.Characters.Cold(i) is not { IsPlayer: true }) continue;
             var at = new Vector2(prev[i].Position.X, prev[i].Position.Z);
             foreach (var site in data.Sites)
-                if (Vector2.DistanceSquared(at, new(site.Position.X, site.Position.Z)) <= DiscoverRange * DiscoverRange)
-                    world.Player.Know(site.Index, TownKnowledge.Discovered | TownKnowledge.Explored);
+            {
+                float d2 = Vector2.DistanceSquared(at, new(site.Position.X, site.Position.Z)), far = DiscoverRangeOf(site.Town.Type);
+                if (d2 <= ExploreRange * ExploreRange) player.Know(site.Index, TownKnowledge.Discovered | TownKnowledge.Explored);
+                else if (d2 <= far * far && player.Know(site.Index, TownKnowledge.Discovered) && site.Town.Type != TownType.Nest) world.Post($"Discovered {site.Town.Name}");
+            }
+            var wild = WildSites;
+            for (int w = 0; w < wild.Count && w < wildCentres.Length; w++)
+            {
+                if (wild[w] is not { Kind: WildKind.Nest, Nest: { } nest } site || wildCentres[w] is not { } centre) continue;
+                float d2 = Vector2.DistanceSquared(at, centre), far = DiscoverRangeOf(TownType.Nest);
+                var flags = d2 <= ExploreRange * ExploreRange ? TownKnowledge.Discovered | TownKnowledge.Explored : d2 <= far * far ? TownKnowledge.Discovered : TownKnowledge.None;
+                if (flags == TownKnowledge.None) continue;
+                var faction = site.Faction >= 0 && site.Faction < data.Factions.Count ? data.Factions[site.Faction] : null;
+                player.KnowCamp(new CampView(w, nest.Id, nest.Name, faction?.Id ?? nest.Faction ?? "", faction?.NotReal ?? false, new Vector3(centre.X, 0, centre.Y), flags), flags);
+            }
         }
+        // A camp known from a save gets its place once its nest has loaded.
+        foreach (var camp in player.Camps)
+            if (camp.Position is null && camp.Site >= 0 && camp.Site < wildCentres.Length && wildCentres[camp.Site] is { } c)
+                player.KnowCamp(camp with { Position = new Vector3(c.X, 0, c.Y) }, TownKnowledge.None);
     }
 
     void RefreshZones(World world)

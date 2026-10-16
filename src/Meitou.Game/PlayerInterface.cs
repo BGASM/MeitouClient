@@ -65,6 +65,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
             dragging = false;
             return true;
         }
+        if (button == MouseButton.Right && InventoryRightClick(p)) return true;
         if (button == MouseButton.Right && CloseContextMenu()) return true;
         if (button == MouseButton.Right && MapRightDown(p)) return true;
         if (button == MouseButton.Middle && UiVisible && MapPointerDown(p)) return true;

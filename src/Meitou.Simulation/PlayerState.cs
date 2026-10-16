@@ -36,10 +36,27 @@ public sealed class PlayerState
         return true;
     }
 
+    /// <summary>The camps and nests known (<see cref="CampView"/>), by wild site. Replaced, never changed in place.</summary>
+    public IReadOnlyList<CampView> Camps { get; private set; } = [];
+
+    /// <summary>Adds <paramref name="flags"/> to a camp's knowledge (adding the camp when new) and fills in its position when it has none; true when that changed it.</summary>
+    public bool KnowCamp(CampView camp, TownKnowledge flags)
+    {
+        int i = -1;
+        for (int k = 0; k < Camps.Count; k++) if (Camps[k].Site == camp.Site) { i = k; break; }
+        var old = i >= 0 ? Camps[i] : null;
+        var next = (old ?? camp) with { Known = (old?.Known ?? 0) | flags, Position = old?.Position ?? camp.Position };
+        if (next == old) return false;
+        var list = Camps.ToList();
+        if (i >= 0) list[i] = next; else list.Add(next);
+        Camps = list;
+        return true;
+    }
+
     internal void SeeDiscoveries()
     {
-        if (!Towns.Any(t => (t & TownKnowledge.Recent) != 0)) return;
-        Towns = [.. Towns.Select(t => t & ~TownKnowledge.Recent)];
+        if (Towns.Any(t => (t & TownKnowledge.Recent) != 0)) Towns = [.. Towns.Select(t => t & ~TownKnowledge.Recent)];
+        if (Camps.Any(c => (c.Known & TownKnowledge.Recent) != 0)) Camps = [.. Camps.Select(c => c with { Known = c.Known & ~TownKnowledge.Recent })];
     }
 
     /// <summary>Drops characters that are gone (serial phases, after the commit).</summary>
@@ -96,6 +113,9 @@ public sealed class PlayerSystem(PopulationData? data = null) : ITickSystem
                         MovementSystem.Stop(table, slot);
                     }
                     break;
+                case Items.ReadMapItem read:
+                    ReadMap(world, read);
+                    break;
                 case Items.MoveInventoryItem move:
                     if (table.TryResolveNext(move.Character, out int owner) && table.Cold(owner) is { IsPlayer: true, Inventory: { } inventory } cold)
                     {
@@ -117,6 +137,22 @@ public sealed class PlayerSystem(PopulationData? data = null) : ITickSystem
     }
 
     public void SlowWorld(World world) => world.Player.Prune(world.Characters);
+
+    /// <summary>A map item of a player character's inventory: its towns become discovered and recently discovered, and it is used up; with nothing new it stays.</summary>
+    void ReadMap(World world, Items.ReadMapItem read)
+    {
+        var table = world.Characters;
+        if (data is null || !table.TryResolveNext(read.Character, out int owner) || table.Cold(owner) is not { IsPlayer: true, Inventory: { } inventory }) return;
+        var t = read.Item;
+        var item = inventory.All().ElementAtOrDefault(t.Index);
+        if (item is null || item.Record != t.Record || item.Section != t.Section || item.X != t.X || item.Y != t.Y || item.Type != Meitou.Data.Fcs.FcsRecordType.MAP_ITEM
+            || data.Db.Find(item.Record) is not { } record) return;
+        var sites = Items.MapItems.Reveals(data, record, world.Player.Towns, world.Seed);
+        if (sites.Count == 0) { world.Post("You already know all these locations, no new information can be learned."); return; }
+        foreach (int site in sites) world.Player.Know(site, TownKnowledge.Discovered | TownKnowledge.Recent);
+        inventory.RemoveOne(item);
+        world.Post($"{sites.Count} location(s) added to the map.");
+    }
 }
 
 /// <summary>What the player knows of a town (the GAMESTATE_TOWN bools <c>discovered</c>, <c>explored</c>, <c>recently discovered</c>; docs/game/ui-screens.md "Map").</summary>
@@ -131,3 +167,9 @@ public enum TownKnowledge : byte
     /// <summary>Found but the map not yet opened since: the map marks it as new.</summary>
     Recent = 4,
 }
+
+/// <summary>
+/// A camp or nest the player knows (a wild nest, docs/game/ui-screens.md "Map"): its wild site, TOWN record, name, owner faction, whether that faction is <c>not real</c>
+/// (the map calls it a nest, else a camp), where it is (null until it has loaded once) and what is known.
+/// </summary>
+public sealed record CampView(int Site, string TownId, string Name, string FactionId, bool Wildlife, System.Numerics.Vector3? Position, TownKnowledge Known);

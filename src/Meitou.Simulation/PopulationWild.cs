@@ -73,6 +73,7 @@ public sealed partial class PopulationSystem
         if (wildSites is not null || data.Biomes is not { } biomes) return;
         wildSites = BuildWildSites(data, settings, biomes, seed);
         wildStates = new SiteState[wildSites.Count];
+        wildCentres = new Vector2?[wildSites.Count];
         for (int i = 0; i < wildStates.Length; i++) wildStates[i] = new SiteState();
         foreach (var site in wildSites)
         {
@@ -226,6 +227,7 @@ public sealed partial class PopulationSystem
         var state = wildStates[b.Site];
         if (state.Status != SiteStatus.Loading || state.LoadId != b.LoadId) return;   // unloaded meanwhile
         var site = wildSites![b.Site];
+        if (site.Kind == WildKind.Nest && b.Squads.Count > 0) wildCentres[b.Site] = b.Centre;
         foreach (var built in b.Squads)
         {
             var squad = SpawnSquad(world, built, null, 0);

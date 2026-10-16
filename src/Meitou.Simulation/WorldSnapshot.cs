@@ -105,6 +105,8 @@ public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> C
     public Trading.TradeView? Trade { get; init; }
     /// <summary>What the player knows of each placed town (<see cref="PlayerState.Towns"/>).</summary>
     public IReadOnlyList<TownKnowledge> Towns { get; init; } = [];
+    /// <summary>The camps and nests the player knows (<see cref="PlayerState.Camps"/>).</summary>
+    public IReadOnlyList<CampView> Camps { get; init; } = [];
 }
 
 /// <summary>

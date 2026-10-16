@@ -97,10 +97,19 @@ public static class SaveLoader
         var sites = data.Sites.Where(s => s.InstanceId.Length > 0).ToDictionary(s => s.InstanceId, s => s.Index, StringComparer.Ordinal);
         foreach (var town in save.Towns)
         {
-            if (!sites.TryGetValue(town.Instance, out int site)) continue;
             var flags = (town.Discovered ? TownKnowledge.Discovered : 0) | (town.Record.Bools.GetValueOrDefault("explored") ? TownKnowledge.Explored : 0)
                 | (town.Record.Bools.GetValueOrDefault("recently discovered") ? TownKnowledge.Recent : 0);
-            if (flags != 0) player.Know(site, flags);
+            if (flags == 0) continue;
+            if (sites.TryGetValue(town.Instance, out int site)) player.Know(site, flags);
+            // A camp Meitou saved: its wild site and TOWN record; the position comes when the nest loads.
+            else if (town.IsNest && town.Instance.StartsWith(SaveCapture.CampInstancePrefix, StringComparison.Ordinal)
+                && town.Instance[SaveCapture.CampInstancePrefix.Length..].Split(':', 2) is [var index, var townId]
+                && int.TryParse(index, System.Globalization.CultureInfo.InvariantCulture, out int wild) && data.Db.Find(townId) is { } record)
+            {
+                var nest = TownData.From(record);
+                int faction = nest.Faction is { } id ? data.FactionIndex(id) : -1;
+                player.KnowCamp(new CampView(wild, townId, nest.Name, nest.Faction ?? "", faction >= 0 && data.Factions[faction].NotReal, null, flags), flags);
+            }
         }
     }
 

@@ -21,6 +21,8 @@ public enum RngPurpose : uint
     Ranged = 10,
     /// <summary>The economy: town market factors, shop stock, shop purses, fencing (docs/simulation.md "Trade").</summary>
     Trade = 11,
+    /// <summary>Which towns a map item reveals (<see cref="Items.MapItems"/>).</summary>
+    MapItem = 12,
 }
 
 /// <summary>

@@ -20,7 +20,7 @@ sealed partial class PlayerInterface
         {
             if (hit.Properties.TryGetValue("ItemTooltip", out string? tooltip))
             {
-                float scale = InventoryScale, width = Math.Min(Width, 280 * scale), height = (tooltip.Contains('\n') ? 76 : 48) * scale;
+                float scale = InventoryScale, width = Math.Min(Width, 280 * scale), height = (tooltip.Count(c => c == '\n') is var breaks and > 0 ? 56 + 20 * breaks : 48) * scale;
                 controls.Add(new("inventory-tooltip", "TextBox", new(Math.Clamp(mouse.X + 18 * scale, 0, Width - width), Math.Clamp(mouse.Y + 18 * scale, 0, Height - height), width, height),
                     tooltip, "", "Kenshi_GenericTextBoxSkin", true,
                     new Dictionary<string, string> { ["TextAlign"] = "Left Top", ["TextPadding"] = "8 6 8 6", ["TextColour"] = MyGuiColours.InkText, ["WordWrap"] = "true" }, Vector4.Zero, Pickable: false));

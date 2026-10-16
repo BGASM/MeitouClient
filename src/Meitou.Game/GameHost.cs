@@ -182,10 +182,19 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         player.Floor = (() => viewedFloor, StepFloor);
         player.FactionName = faction => popData is { } d && faction >= 0 && faction < d.Factions.Count ? d.Factions[faction].Name : null;
         player.MapTowns = () => popData?.Sites ?? [];
-        player.MapStandingOf = id =>
+        player.MapFactionOf = id =>
         {
-            if (popData is not { } d || id is null || d.FactionIndex(id) is not (>= 0 and var town) || session.World.Player.Faction is not (>= 0 and var mine)) return MapStanding.Neutral;
-            return town == mine ? MapStanding.Player : d.Relations.IsAlly(mine, town) ? MapStanding.Ally : d.Relations.Get(mine, town) < -30 ? MapStanding.Enemy : MapStanding.Neutral;
+            if (popData is not { } d || id is null || d.FactionIndex(id) is not (>= 0 and var town)) return null;
+            var faction = d.Factions[town];
+            if (session.World.Player.Faction is not (>= 0 and var mine)) return new MapFaction(faction.Name, 0, MapStanding.Neutral, faction.NotReal);
+            float relation = d.Relations.Get(mine, town);
+            var standing = town == mine ? MapStanding.Player : d.Relations.IsAlly(mine, town) ? MapStanding.Ally : relation < -30 ? MapStanding.Enemy : MapStanding.Neutral;
+            return new MapFaction(faction.Name, relation, standing, faction.NotReal);
+        };
+        player.MapItemTowns = record =>
+        {
+            if (popData is not { } d || d.Db.Find(record) is not { Type: Meitou.Data.Fcs.FcsRecordType.MAP_ITEM } map) return null;
+            return [.. Meitou.Simulation.Items.MapItems.Reveals(d, map, session.CurrentSnapshot.Towns, session.World.Seed).Select(i => d.Sites[i].Town.Name)];
         };
         if (IsSandbox) player.ReservedKeys.UnionWith([Meitou.Engine.Input.Key.Z, Meitou.Engine.Input.Key.X, Meitou.Engine.Input.Key.C, Meitou.Engine.Input.Key.Y, Meitou.Engine.Input.Key.P, Meitou.Engine.Input.Key.G]);
         player.ConfigureFrontend(scene.Database,
