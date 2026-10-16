@@ -26,7 +26,7 @@ public class ArrestTests
     static readonly RaceData Person = new() { StringId = "17-c", Name = "Greenlander", StatMultipliers = Human.StatMultipliers, Anatomy = Human.Anatomy, Carriable = true };
 
     /// <summary>A town of a faction that books bounties, with a house of two doors and two cages.</summary>
-    static PopulationData Town()
+    internal static PopulationData Town(IEnumerable<FcsRecord>? extra = null)
     {
         static FcsRecord Rec(string id, FcsRecordType type, string name) => SyntheticTown.Rec(id, type, name);
         var city = Rec("50-a", FcsRecordType.FACTION, "city");
@@ -48,6 +48,7 @@ public class ArrestTests
         town.References["faction"] = [SyntheticTown.Ref("50-a")];
         var file = new FcsFile();
         file.Records.AddRange([city, nameless, door, house, function, cage, town]);
+        if (extra is not null) file.Records.AddRange(extra);
         var db = new GameDatabase();
         db.Apply(file, "test.mod");
         TownBuilding B(string id, string record, Vector2 at) => new(id, record, record, Centre + new Vector3(at.X, 0, at.Y), 0, false, false, []);
