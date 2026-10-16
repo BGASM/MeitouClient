@@ -57,12 +57,18 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
 </html>
 
 <style>
-  /* First view: the video behind the header and hero. */
+  /* --frame: the page ground around the video; --edge: where content starts, just inside the frame. */
+  .mt-scene { --frame: 12px; --edge: calc(var(--frame) + 24px); }
+
+  /* First view: the video in a frame with rounded inner corners, behind the header and hero. */
   .bg {
     position: absolute;
-    inset: 0 0 auto;
-    height: 100svh;
+    top: var(--frame);
+    left: var(--frame);
+    right: var(--frame);
+    height: calc(100svh - 2 * var(--frame));
     overflow: hidden;
+    border-radius: var(--radius-card);
     pointer-events: none;
   }
   .bg video { display: block; width: 100%; height: 100%; object-fit: cover; }
@@ -82,9 +88,7 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
     align-items: center;
     gap: var(--space-7);
     flex-wrap: wrap;
-    max-width: 1080px;
-    margin: 0 auto;
-    padding: var(--space-7) var(--space-6);
+    padding: var(--edge);
   }
   .brand {
     margin-right: auto;
@@ -95,14 +99,6 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
   .brand span { font-weight: 400; }
   .gh { display: inline-flex; align-items: center; gap: var(--space-4); color: #fff; font: 600 16px/21px var(--font-exo); text-decoration: none; opacity: .85; transition: opacity .16s ease; }
   .gh:hover { color: #fff; opacity: 1; }
-  main {
-    max-width: 1080px;
-    margin: 0 auto;
-    padding: 0 var(--space-6) var(--space-7);
-  }
-  .foot {
-    max-width: 1080px;
-    margin: 0 auto;
-    padding: var(--space-7) var(--space-6) 36px;
-  }
+  main { padding: 0 var(--edge); }
+  .foot { padding: var(--space-7) var(--edge) 36px; }
 </style>
