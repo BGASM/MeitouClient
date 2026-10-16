@@ -112,7 +112,7 @@ identified; pause 0x12 is only blocked by the second). While the MainBar object 
 
 Meitou's first aid and rest bindings (2026-10-13, `PlayerInterface`, engine choices; simulation side in [simulation.md](../simulation.md#bodies)). The original's own: `medic` (NUM7, event 0x1f) and `rescue` (NUM8, 0x20) are
 orders-panel toggles forwarded to FUN_1407226e0 (the Medic and Rescue buttons of the panel, [ui-screens.md](ui-screens.md#4-hud-mainbargui)), i.e. job switches, not targeted orders (**Observed**); the targeted order is the context menu
-verb 25 "First Aid" (pointer mode 1 `med`, section 7; Meitou's context menu also provides it). The numpad belongs to the cinema camera (`Cinema`, docs/viewer.md), so:
+verb 25 "First Aid" (pointer mode 1 `med`, [pointers](#mouse-pointers); Meitou's context menu also provides it). The numpad belongs to the cinema camera (`Cinema`, docs/viewer.md), so:
 
 | Input | Effect |
 |---|---|
@@ -142,6 +142,25 @@ t ≤ 0. Shown only with `Movement marker` ([settings.md](../formats/settings.md
 Meitou (`MoveMarkerRenderer`) draws both passes after the tone map, so the colours show as given whatever the exposure, sorting fragments by
 the near slice's scene depth, multisampled (up to 8×) and resolved over the picture: the mesh's rough band at the cone's widest part
 and the notch on the stem are in `position.mesh` itself; on every ground move, following the cursor each frame while the button steers, always on (settings.cfg is not read yet).
+
+### Mouse pointers
+
+**Verified** (read `data/gui/pointer/kenshi_pointers.xml`, `images/kenshi_images.xml`): 25 `ResourceImageSetPointer`s (default `arrow`, layer
+`Pointer`, the last in `core_layer.xml`), each naming a `Size`, a hot spot `Point` (pixels from its top left) and an image set whose one frame
+(group and index `Pointer`) is a crop of `Kenshi_UI.png`. An entry with an empty name and no values also exists. Some frames differ from the
+pointer's `Size` (`lift` 34×30 in 35×35, `hand` 33×35 in 32×32, `pick_item` 32×32 in 35×35): **Observed** (MyGUI's pointer resource, not
+rechecked here) the frame is stretched to `Size`, placed at mouse − `Point`, in screen pixels (no UI scale).
+
+**Observed** (FUN_1406e3d60, which calls `PointerManager::setPointer`): pointer mode → name: 0 `arrow` (`invisible` with the free camera
+and the Esc menu hidden), 1 `med`, 2 `search`, 3 `lift`, 4 `pick_item`, 5 `attk`, 7 `talk`, 8 and 10 `s_talk`, 9 `use`, 0xb `build`,
+0xc `door`, 0xd `door_escape`, 0xe `lock`, 0xf `lockpick`, 0x10 `house`, 0x11 `green`, 0x12 `mine`, 0x13 `spanner`, 0x14 `light`,
+0x15 `steal`, 0x16 `hand`, 0x17 `invalidmove`, 0x18 `scavenge`, 0x19 `knockout`; 6 has no case. Which hover state sets each mode is
+**Unknown** (the function has no direct callers in the dump).
+
+Meitou (`PlayerInterface.Pointer.cs`, engine choices): the window's own cursor is hidden and the pointer drawn last in the frame (not in
+screenshots or cinema takes). It follows the quick right-click order, so it never disagrees with the click: with a selection, over a
+trader `talk`, another living character `attk`, an own hurt character `med`, an own downed one `lift`; Ctrl over a downed character
+`lift`, Alt `search`; otherwise, over the interface, the settings panel or the loading screen, `arrow`. `hardware_mouse` is not read.
 
 ## Unknowns
 

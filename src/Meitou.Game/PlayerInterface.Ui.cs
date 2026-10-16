@@ -196,6 +196,7 @@ sealed partial class PlayerInterface
         }
         AddInventoryDrag(controls);
         AddContextMenu(controls);
+        pointerOverUi = faithfulScreens.Contains(mouse) || MyGuiPresentation.HitTest(controls, mouse.X, mouse.Y) is not null;
         AddHoverLabel(controls);
         return controls;
     }

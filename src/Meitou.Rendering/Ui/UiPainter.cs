@@ -374,6 +374,25 @@ public sealed class UiPainter : IDisposable
     readonly HashSet<string> requestedIcons = new(StringComparer.Ordinal);
     readonly System.Collections.Concurrent.ConcurrentQueue<(string Name, RgbaImage Image)> decodedIcons = new();
 
+    readonly Dictionary<string, MyGuiPointer?> pointers = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Draws the mouse pointer <paramref name="name"/> (kenshi_pointers.xml) with its hot spot on <paramref name="mouse"/>, in screen pixels as MyGUI does; nothing for an unknown name.
+    /// Called last in a frame: the original's <c>Pointer</c> layer is above every other.
+    /// </summary>
+    public void DrawPointer(string name, Vector2 mouse, int width, int height)
+    {
+        if (!pointers.TryGetValue(name, out var pointer)) pointers[name] = pointer = MyGuiPointers.Resolve(resources, name);
+        if (pointer is null) return;
+        var loaded = LoadTexture(pointer.Image.Texture);
+        var at = pointer.At(MathF.Round(mouse.X), MathF.Round(mouse.Y));
+        var source = pointer.Image.Source;
+        float w = loaded.Texture.Desc.Width, h = loaded.Texture.Desc.Height;
+        overlay.Image(loaded.Sampled, new(at.X, at.Y, at.X + at.Width, at.Y + at.Height),
+            new(source.X / w, source.Y / h, (source.X + source.Width) / w, (source.Y + source.Height) / h), Vector4.One);
+        overlay.Flush(width, height);
+    }
+
     (Texture Texture, SampledTexture Sampled) LoadTexture(string name)
     {
         if (external.TryGetValue(name, out var given) || textures.TryGetValue(name, out given)) return given;

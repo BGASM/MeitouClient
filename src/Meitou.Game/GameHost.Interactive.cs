@@ -182,6 +182,8 @@ sealed partial class GameHost
         }
         foreach (var mouse in silkInput.Mice)
         {
+            // The game draws its own pointer (kenshi_pointers.xml) at the end of each frame, so Windows' arrow is hidden over the window.
+            if (overlay is not null) mouse.Cursor.CursorMode = Silk.NET.Input.CursorMode.Hidden;
             mouse.MouseDown += (m, b) =>
             {
                 if (Covered) return;
@@ -395,6 +397,17 @@ sealed partial class GameHost
                     if (skyArrival is null) loading.Draw(size.X, size.Y);
                     else if (loading.Exiting || !skyArrival.Arriving && sceneLoad?.Clock.Elapsed.TotalSeconds >= 2)
                         loading.Draw(size.X, size.Y, background: false);
+                }
+                // The mouse pointer over everything, as the original's Pointer layer; never in saved pictures. What the right button would do picks it,
+                // the arrow over the settings panel, the cinema's editor and the loading screen.
+                if (!shot && !take && overlay is not null && silkInput.Mice.FirstOrDefault() is { } pointerMouse)
+                {
+                    var at = Pixels(pointerMouse.Position);
+                    bool Held(SilkKey a, SilkKey b) => silkInput.Keyboards.Any(k => k.IsKeyPressed(a) || k.IsKeyPressed(b));
+                    player.CtrlHeld = Held(SilkKey.ControlLeft, SilkKey.ControlRight);
+                    player.AltHeld = Held(SilkKey.AltLeft, SilkKey.AltRight);
+                    bool world = !covered && !g.NoPopulation && !(PanelLive() && panel?.Visible == true) && !cinema.Contains(at);
+                    player.DrawPointer(world ? player.PointerName : "arrow", at, size.X, size.Y);
                 }
                 display.Present();
                 profiler?.EndFrame();
