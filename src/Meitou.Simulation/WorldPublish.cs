@@ -20,6 +20,8 @@ public sealed partial class World
             var cold = table.Cold(i);
             // The details only the selection shows: asked once per character, the selection is a list.
             bool selected = cold is { IsPlayer: true } && Player.Selection.Contains(id), inspected = !selected && id == Player.Inspected, detailed = selected || inspected;
+            bool sneaking = cold is { IsPlayer: true } && (cold.Orders & CharacterOrders.Sneak) != 0;
+            var watchers = sneaking ? WatchersOf(cold!) : [];
             list.Add(new CharacterSnapshot(id, cold?.Appearance, state[i].Position, state[i].Yaw, cold?.Animation is { } anim && animations is not null ? animations.Publish(anim) : AnimationLayers.For(state[i].Animation, state[i].AnimationTime))
             {
                 Faction = cold?.Faction ?? -1,
@@ -50,10 +52,23 @@ public sealed partial class World
                 RunSpeed = cold?.RunSpeed ?? SpeedMode.Free,
                 Scale = cold is { Fighter.IsAnimal: true, Medical: { } size } ? size.ScaleK : 1,
                 Activity = cold is { Ai.Goal: { } goal } && Ai.AiSystem.Holds(state[i], cold) ? Ai.TaskBehaviours.Text(goal.Task.Type) : null,
+                Stealth = sneaking ? watchers.Length == 0 ? StealthExposure.Unobserved : watchers.Max(w => w.Level) : null,
+                Watchers = watchers,
             });
         }
         PreviousSnapshot = Snapshot;
         Snapshot = new WorldSnapshot(Tick, list) { Projectiles = projectiles?.PublishProjectiles() ?? [], Trade = trades?.PublishTrade(), Towns = Player.Towns, Camps = Player.Camps };
+    }
+
+    /// <summary>The sneaker's watchers of the last <see cref="AggroSystem.WatcherSeconds"/> that are still about, where they stand now.</summary>
+    WatcherView[] WatchersOf(CharacterCold cold)
+    {
+        if (cold.Watchers is not { Count: > 0 } list) return [];
+        long lapse = Tick - (long)MathF.Ceiling(AggroSystem.WatcherSeconds / TickSeconds);
+        var views = new List<WatcherView>(list.Count);
+        foreach (var w in list)
+            if (w.Tick >= lapse && Characters.TryResolveNext(w.Looker, out int slot)) views.Add(new WatcherView(Characters.Previous[slot].Position, w.Level));
+        return [.. views];
     }
 
     /// <summary>

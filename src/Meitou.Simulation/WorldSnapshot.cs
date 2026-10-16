@@ -86,6 +86,13 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     public CharacterId Carrying { get; init; } = CharacterId.None;
     /// <summary>The goal the AI is acting out, in the game's words (<c>Patrolling town</c>, <c>Shopkeeper</c>); null when the AI does not run the character now.</summary>
     public string? Activity { get; init; }
+    /// <summary>
+    /// A sneaking player character's state for its stealth tag (docs/game/perception.md "Spotting a sneaker"): <see cref="StealthExposure.Detected"/> seen,
+    /// <see cref="StealthExposure.Noticed"/> almost seen, anything lower hidden; null when not a sneaking player character.
+    /// </summary>
+    public StealthExposure? Stealth { get; init; }
+    /// <summary>The hostile NPCs that noticed or detected this sneaking player character in the last 4 s.</summary>
+    public IReadOnlyList<WatcherView> Watchers { get; init; } = [];
 }
 
 /// <summary>The trained stats the HUD shows for the selection.</summary>

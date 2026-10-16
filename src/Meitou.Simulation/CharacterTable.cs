@@ -115,6 +115,8 @@ public sealed class CharacterCold
     /// </summary>
     public StealthExposure StealthExposure { get; set; }
     public long StealthExposureTick { get; set; } = long.MinValue;
+    /// <summary>The hostile NPCs noticing or detecting this sneaker lately (<see cref="AggroSystem"/>, serial commit; display only: not hashed, not saved).</summary>
+    public List<StealthWatcher>? Watchers { get; set; }
     /// <summary>Weapon and worn armour (track F, docs/simulation.md "Combat").</summary>
     public Meitou.Simulation.Combat.Fighter? Fighter { get; set; }
     /// <summary>The patient of the <see cref="CharacterTask.Treat"/> task (itself for self-treatment); meaningful only while the task is set (<see cref="FirstAid.FirstAidSystem"/>).</summary>

@@ -34,10 +34,17 @@ and stealth x 5). Each looker keeps a meter per target (`SensoryData::SpottingPe
   `FUN_1408586d0` draws, for entries younger than 4 s, a short pointer at the sneaker (12 up, length
   min(d - 7, 15) towards the looker): red 0xdd0000 detected, yellow 0xffdd00 noticing, green 0x00ff00 when a
   looker test (vtable +0x3f0, **Unknown**) passes. The sneaker's state +0xe8 becomes 1 (any red) or 2 (any yellow).
+- Name tag (`FUN_1406e8100`, colours loaded in `FUN_1406eb3a0`): shown within 10954 of the camera (1.2e8
+  squared). Tag state 1/2/3 tints a stealth icon with the GUI colours `NameTagStealthHidden` / `AlmostSeen` / `Seen`,
+  fallbacks (0.25, 0.521, 0.745), (0.745, 0.721, 0.25), (0.745, 0.25, 0.29) (**Verified** literals; the GUI XML may
+  override). A second icon's frame is round((1 - x) x (frames - 1)), x = clamp(character +0xd8, 0, 1), probably the light
+  level of the sun icon (tutorial text; **Observed**). How tag state 1-3 is derived from +0xe8 is **Unknown**.
 - Stealth XP: see [character-stats](character-stats.md#levelling-xp).
 
 Meitou: meters only for hostile/police lookers the aggro scan runs, no line-of-sight ray, f = 0.5, dt = the scan interval,
-a meter decays also when the target is out of range (the original's rule there is **Unknown**). No pointers yet.
+a meter decays also when the target is out of range (the original's rule there is **Unknown**). A sneaking player
+character gets the pointers (from 0.35 of their length to the tip, with a head) and a diamond over its head in the tag
+colours: seen if any watcher detects, almost seen if any notices, else hidden. No light model, so no sun icon.
 
 ## Hearing
 

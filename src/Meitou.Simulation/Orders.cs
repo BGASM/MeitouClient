@@ -43,6 +43,12 @@ public enum StealthExposure : byte
     Detected,
 }
 
+/// <summary>A hostile NPC noticing or detecting a sneaker (its <see cref="Level"/> at <see cref="Tick"/>); the original keeps these 4 s for its pointers.</summary>
+public readonly record struct StealthWatcher(CharacterId Looker, StealthExposure Level, long Tick);
+
+/// <summary>A watcher as the HUD draws it: where the looker stands and how far it got.</summary>
+public readonly record struct WatcherView(Vector3 Position, StealthExposure Level);
+
 /// <summary>Turns an order on, off (<paramref name="On"/>) or over (null) for the characters, or for the player's selection when the list is empty.</summary>
 public sealed record OrdersCommand(IReadOnlyList<CharacterId> Characters, CharacterOrders Order, bool? On = null) : SimCommand;
 

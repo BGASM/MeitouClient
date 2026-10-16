@@ -111,6 +111,7 @@ sealed partial class PlayerInterface
             }
         }
 
+        DrawStealth(o);
         FadeMarker();
 
         // The box.

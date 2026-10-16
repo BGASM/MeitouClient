@@ -374,6 +374,7 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
             var level = (StealthExposure)(int)e.Amount;
             if (sneaker.StealthExposureTick != world.Tick || level > sneaker.StealthExposure) sneaker.StealthExposure = level;
             sneaker.StealthExposureTick = world.Tick;
+            if (level >= StealthExposure.Noticed) Watch(world, sneaker, world.Characters.IdOf(e.Source), level);
             return;
         }
         if (e.Kind != SightEffect) return;
@@ -389,6 +390,18 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         world.Defer(new AttackOrder(fighters, targetId) { Tick = world.Tick + 1 });
         Started++;
         if (Settings.RecordLog) log.Add(new AggroEntry(world.Tick, fighters[0], targetId, table.Cold(i)!.Faction, target.Faction, e.Amount, fighters.Count - 1));
+    }
+
+    /// <summary>How long a watcher stays on a sneaker's list after its last look (<c>FUN_1408586d0</c>: entries older than 4 s are dropped, Verified literal).</summary>
+    public const float WatcherSeconds = 4;
+
+    /// <summary>Puts <paramref name="looker"/> on the sneaker's watcher list at <paramref name="level"/> (or updates it) and drops lapsed entries.</summary>
+    static void Watch(World world, CharacterCold sneaker, CharacterId looker, StealthExposure level)
+    {
+        var list = sneaker.Watchers ??= [];
+        long lapse = world.Tick - (long)MathF.Ceiling(WatcherSeconds / world.TickSeconds);
+        list.RemoveAll(w => w.Tick < lapse || w.Looker == looker);
+        list.Add(new StealthWatcher(looker, level, world.Tick));
     }
 
     /// <summary>
