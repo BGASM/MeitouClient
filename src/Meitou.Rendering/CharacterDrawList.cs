@@ -21,6 +21,8 @@ public readonly record struct CharacterInstance(long Key, CharacterAppearance Ap
     public bool Hidden { get; init; }
     /// <summary>Pose every frame regardless of distance, for presentation actors whose animation must stay smooth.</summary>
     public bool FullRateAnimation { get; init; }
+    /// <summary>The ragdoll's bones in model space, set over the animation (null: none); the host interpolates them between ticks.</summary>
+    public BonePose? Bones { get; init; }
 }
 
 /// <summary>

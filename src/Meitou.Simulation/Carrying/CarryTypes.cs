@@ -54,3 +54,15 @@ public sealed class CarrySettings
 
 /// <summary>What one loot took: the items moved into the looter's inventory, the ones that did not fit and stay, and whether a member of the victim's faction saw it.</summary>
 public readonly record struct LootEntry(long Tick, CharacterId Looter, CharacterId Victim, int Taken, int Left, bool Witnessed);
+
+/// <summary>
+/// Where a carried body is drawn and posed: it has its carrier's position and facing, and hangs this far from it, up to the shoulder and to the left (engine stand-in: the
+/// original hangs it from the carrier's attach bone; the numbers are a guess). The host draws it there and the ragdoll's pinned bones follow it there.
+/// </summary>
+public static class CarryPose
+{
+    public const float Height = 14, Side = 2;
+
+    /// <summary>The offset from the carrier's position for a body facing <paramref name="yaw"/>.</summary>
+    public static System.Numerics.Vector3 Offset(float yaw) => new(MathF.Cos(yaw) * Side, Height, -MathF.Sin(yaw) * Side);
+}

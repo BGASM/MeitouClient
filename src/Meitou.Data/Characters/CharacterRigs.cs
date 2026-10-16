@@ -44,6 +44,9 @@ public sealed class CharacterRigs(GameDatabase db, Func<string, string?> findMes
     /// <summary>The full path of a mesh file, or null.</summary>
     public string? FindMesh(string fcsPath) => findMesh(fcsPath);
 
+    /// <summary>The full path of any other art file (a ragdoll, a cooked mesh), or null.</summary>
+    public string? Find(string fcsPath) => find(fcsPath);
+
     /// <summary>The skeleton a body mesh file links, read from the file once per path; throws what the reader throws.</summary>
     public string? BodySkeletonName(string path) => skeletonNames.GetOrAdd(path, p => new Lazy<string?>(() => OgreMeshReader.ReadFile(p).SkeletonName)).Value;
 

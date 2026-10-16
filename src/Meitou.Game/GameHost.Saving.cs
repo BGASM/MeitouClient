@@ -54,6 +54,7 @@ sealed partial class GameHost
             AnimationLengths = animationLengths,
             AnimationLibrary = animationLibrary,
             AnimationBlendRate = popData!.Bodies.Constants.AnimationBlendRate,
+            Ragdolls = characterRigs,
         });
 
     /// <summary>Once per frame, between ticks: the notices of the write worker, the requests of the keys, a finished read.</summary>

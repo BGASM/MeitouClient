@@ -100,8 +100,8 @@ public sealed class CharacterAnimation
 /// <c>big stumble</c> and <c>stumble from</c>; <c>relocates</c> clips, attacks and dodges move the character by their <c>Bip01</c> track; getting up
 /// plays <c>standing up 3</c> to 86 %.</item>
 /// <item><b>Engine choice</b>: the blend rate is the same for every clip; in combat a standing character holds an upper-body guard idle over the
-/// lower movement blend; techniques cut a hit reaction short; a character going down falls with <c>dodgefall</c> and lies in <c>sleeponfloor</c>
-/// (the original switches to its ragdoll); a character counts as moving from <see cref="MovingSpeed"/> units per second.</item>
+/// lower movement blend; techniques cut a hit reaction short; a character going down without a ragdoll (<see cref="Ragdolls"/>) falls with <c>dodgefall</c>; down, it lies in <c>sleeponfloor</c>
+/// (under a ragdoll, the bones without a body); a character counts as moving from <see cref="MovingSpeed"/> units per second.</item>
 /// </list>
 /// </summary>
 public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths lengths, float blendRate = 4, CombatSystem? combat = null) : ITickSystem, IAnimationSource
@@ -115,6 +115,8 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     public AnimationLengths Lengths { get; } = lengths;
     /// <summary>The CONSTANTS <c>animation blend rate</c> (fcs.def default 4, "1 is very slow"): weight per second.</summary>
     public float BlendRate { get; } = blendRate;
+    /// <summary>The ragdolls (null: none; the fall and lying clips stand in for them). Read in the parallel phase: the last tick's state.</summary>
+    public Meitou.Simulation.Ragdolls.IRagdollState? Ragdolls { get; set; }
 
     /// <summary>The clip a knocked-out or dead character lies in: <c>sleeponfloor</c>, -1 when the data has none.</summary>
     int LyingClip { get; } = library.IndexOf("sleeponfloor");
@@ -137,7 +139,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         return true;
     }
 
-    // The fall (a stand-in for the ragdoll) and getting up.
+    // The fall (without a ragdoll) and getting up.
     readonly int fall = library.IndexOfAny("Dodge back fall"), getUp = library.IndexOf("standing up 3");
     // The crossbow clips (RANGED records, played by the combat system's timing).
     readonly int aimClip = library.IndexOf(AnimationLibrary.RangedAimRecord), defaultReload = library.IndexOf(AnimationLibrary.RangedReloadRecord);
@@ -170,7 +172,8 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             if (cold.InCombat) speed = v.X * MathF.Sin(next[i].Yaw) + v.Z * MathF.Cos(next[i].Yaw);
             speed = a.SmoothSpeed(speed, CharacterAnimation.WindowFor(dt));
             var id = table.IdOf(i);
-            var root = Update(a, cold, speed, dt, world.Seed, Rng.Key(id), world.Tick, wantedLower, wantedUpper, ViewOf(id, world.Tick, cold, dt), (CharacterTask)next[i].Task);
+            var ragdoll = Ragdolls is { } r ? new RagdollView(r.HasRagdoll(cold), r.WasWhole(id)) : default;
+            var root = Update(a, cold, speed, dt, world.Seed, Rng.Key(id), world.Tick, wantedLower, wantedUpper, ViewOf(id, world.Tick, cold, dt), (CharacterTask)next[i].Task, ragdoll);
             if (root != Vector2.Zero) Relocate(world, i, ref next[i], root);
         }
     }
@@ -250,23 +253,30 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     /// combat). Returns how far its relocating clips moved it this tick, in model space (X, Z; Z forward), weighted by their weights.
     /// </summary>
     public Vector2 Update(CharacterAnimation a, CharacterCold cold, float speed, float dt, ulong seed, ulong key, long tick,
-        List<(int Index, float Weight)>? lowerScratch = null, List<(int Index, float Weight)>? upperScratch = null, CombatView? combatView = null, CharacterTask task = CharacterTask.Idle)
+        List<(int Index, float Weight)>? lowerScratch = null, List<(int Index, float Weight)>? upperScratch = null, CombatView? combatView = null, CharacterTask task = CharacterTask.Idle,
+        RagdollView ragdoll = default)
     {
         var fight = combatView ?? CombatView.None;
         var lower = lowerScratch ?? [];
         var upper = upperScratch ?? [];
         lower.Clear();
         upper.Clear();
-        if (Library.Animal(cold.RecordId) is { } animal) return UpdateAnimal(a, cold, PlanOf(animal), speed, dt, seed, key, tick, lower, fight);
+        if (Library.Animal(cold.RecordId) is { } animal) return UpdateAnimal(a, cold, PlanOf(animal), speed, dt, seed, key, tick, lower, fight, ragdoll);
         if (a.Rate == 0) a.Rate = cold.Appearance is { } look ? 2 - CharacterShape.MovementScaleOf(look) : 1;
         // Carrying picks the "carrying left" clips and a carried body the "being carried" ones (the ANIMATION booleans, docs/animation.md).
         bool carried = !cold.CarriedBy.IsNone;
         var stance = StanceOf(cold);
         bool down = cold.Medical is { Incapacitated: true };
+        if (HoldsForRagdoll(a, down, carried, ragdoll)) return Vector2.Zero;
 
-        if (down && !a.WasDown && !carried) StartAction(a, fall, false);
+        if (down && !a.WasDown && !carried && !ragdoll.Has) StartAction(a, fall, false);   // a ragdoll falls instead
         if (carried) a.Action = -1;   // held on the shoulder: no falling or getting up
-        else if (!down && a.WasDown) StartAction(a, getUp, false);
+        else if (!down && a.WasDown)
+        {
+            StartAction(a, getUp, false);
+            // Out of a ragdoll the clip waits at its first key while the bones blend into it (docs/game/ragdolls.md "Getting up").
+            if (ragdoll.WasWhole) a.ActionTime = -Meitou.Simulation.Ragdolls.RagdollSystem.GetUpBlend;
+        }
         a.WasDown = down;
         // The hit reaction the combat system picked (it holds the character helpless for the clip's length; see ChooseStumble).
         if (!down && fight.StumbleClip >= 0 && fight.StumbleStart > a.SeenHit)
@@ -402,7 +412,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             bool synched = d.Synchs && d.MoveSpeed != 0;
             if (layer.Definition == lift) layer.Time = liftTime;
             else if (layer.Definition == technique) layer.Time = fight.Progress * length;   // the combat system's timing: the blow lands at its frame
-            else if (layer.Definition == a.Action) layer.Time = a.ActionTime;
+            else if (layer.Definition == a.Action) layer.Time = MathF.Max(a.ActionTime, 0);   // held at the start while getting up blends out of a ragdoll
             else if (synched) layer.Time = (a.Phase + d.SynchOffset - MathF.Floor(a.Phase + d.SynchOffset)) * length;
             else if (d.MoveSpeed != 0) layer.Time += dt * a.Rate * d.PlaySpeed * speed;
             else layer.Time += dt * (d.PlaySpeed > 0 ? d.PlaySpeed : d.Technique ? 1 : 0);
@@ -441,14 +451,15 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     /// frame held); no hit reactions (no animal record has <c>stumbles</c>) and no getting up (none exists: it fades back to standing). Root motion of an attack is scaled by
     /// the size.
     /// </summary>
-    Vector2 UpdateAnimal(CharacterAnimation a, CharacterCold cold, AnimalPlan plan, float speed, float dt, ulong seed, ulong key, long tick, List<(int Index, float Weight)> wanted, in CombatView fight)
+    Vector2 UpdateAnimal(CharacterAnimation a, CharacterCold cold, AnimalPlan plan, float speed, float dt, ulong seed, ulong key, long tick, List<(int Index, float Weight)> wanted, in CombatView fight, RagdollView ragdoll)
     {
         float size = cold.Medical?.ScaleK ?? 1;
         if (!(size > 0.01f)) size = 1;
         if (a.Rate == 0) a.Rate = 1 / size;
         bool carried = !cold.CarriedBy.IsNone;
         bool down = cold.Medical?.Incapacitated ?? false;
-        if (down && !a.WasDown && !carried) StartAction(a, plan.Fall, false);
+        if (HoldsForRagdoll(a, down, carried, ragdoll)) return Vector2.Zero;
+        if (down && !a.WasDown && !carried && !ragdoll.Has) StartAction(a, plan.Fall, false);
         if (carried || !down) a.Action = -1;   // the fall is an animal's only one-shot clip
         a.WasDown = down;
         int technique = down ? -1 : fight.Technique;
@@ -563,6 +574,18 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     }
 
     /// <summary>Starts a one-shot clip from its first frame (nothing when the data has no such clip).</summary>
+    /// <summary>
+    /// A character lying in its ragdoll keeps the layers it had when it went down, unchanged (engine choice): the ragdoll starts from that pose on the tick it goes down, and
+    /// the bones without a body (hands, feet, clavicles) keep it. One without layers yet (just loaded) takes the lying clip instead.
+    /// </summary>
+    static bool HoldsForRagdoll(CharacterAnimation a, bool down, bool carried, RagdollView ragdoll)
+    {
+        if (!down || carried || !ragdoll.Has || a.Count == 0) return false;
+        a.WasDown = true;
+        a.Action = -1;
+        return true;
+    }
+
     static void StartAction(CharacterAnimation a, int clip, bool stumble)
     {
         if (clip < 0) return;
@@ -645,3 +668,6 @@ public readonly record struct CombatView(int Technique, float Progress, int HitT
 {
     public static readonly CombatView None = new(-1, 0, -1, false, false, null);
 }
+
+/// <summary>What the animation of one character needs to know of its ragdoll: whether it has one (it falls by it, not by the fall clip) and whether the whole body was one.</summary>
+public readonly record struct RagdollView(bool Has, bool WasWhole);

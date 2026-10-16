@@ -51,14 +51,8 @@ sealed partial class GameHost
         return at + CarriedOffset(c, c.Yaw);
     }
 
-    /// <summary>
-    /// A carried body has its carrier's position; it is drawn this far from it: up to the shoulder and to the left (engine stand-in: the original hangs it from the carrier's
-    /// <see cref="CharacterSnapshot.AttachBone"/>, which the renderer does not do yet; the numbers are a guess, not checked in the viewer).
-    /// </summary>
-    static Vector3 CarriedOffset(CharacterSnapshot c, float yaw) =>
-        c.CarriedBy.IsNone ? Vector3.Zero : new Vector3(MathF.Cos(yaw) * CarriedSide, CarriedHeight, -MathF.Sin(yaw) * CarriedSide);
-
-    const float CarriedHeight = 14, CarriedSide = 2;
+    /// <summary>A carried body has its carrier's position; it is drawn at <see cref="Meitou.Simulation.Carrying.CarryPose"/> from it, where its ragdoll is posed too.</summary>
+    static Vector3 CarriedOffset(CharacterSnapshot c, float yaw) => c.CarriedBy.IsNone ? Vector3.Zero : Meitou.Simulation.Carrying.CarryPose.Offset(yaw);
 
     /// <summary>Fills the renderer's list from the last two snapshots, interpolated by the simulation's alpha.</summary>
     void FillDrawList(CharacterDrawList list)
@@ -118,8 +112,30 @@ sealed partial class GameHost
                         }
                 poses[i] = new CharacterPose(layer.Name, time, weight);
             }
-            list.Add(new CharacterInstance(DrawKey(c.Id), c.Appearance, position, yaw, poses) { WeaponDrawn = c.WeaponDrawn, Scale = c.Scale, Hidden = aboveFloor.Contains(c.Id), FullRateAnimation = c.IsPlayer });
+            list.Add(new CharacterInstance(DrawKey(c.Id), c.Appearance, position, yaw, poses)
+            {
+                WeaponDrawn = c.WeaponDrawn, Scale = c.Scale, Hidden = aboveFloor.Contains(c.Id), FullRateAnimation = c.IsPlayer,
+                Bones = Blend(before?.Ragdoll, c.Ragdoll, alpha),
+            });
         }
+    }
+
+    /// <summary>A ragdoll's bones between the last two ticks: rotations by nlerp, root positions and the get-up weight linearly; a bone only in the newer one as it is.</summary>
+    static Meitou.Data.Characters.BonePose? Blend(Meitou.Data.Characters.BonePose? from, Meitou.Data.Characters.BonePose? to, float alpha)
+    {
+        if (to is null || from is null || from.Set.Length != to.Set.Length) return to;
+        var pose = new Meitou.Data.Characters.BonePose(to.Set.Length) { Weight = from.Weight + (to.Weight - from.Weight) * alpha };
+        for (int h = 0; h < to.Set.Length; h++)
+        {
+            if (!to.Set[h]) continue;
+            pose.Set[h] = true;
+            if (!from.Set[h]) { (pose.Rotation[h], pose.Position[h]) = (to.Rotation[h], to.Position[h]); continue; }
+            var b = to.Rotation[h];
+            if (Quaternion.Dot(from.Rotation[h], b) < 0) b = -b;
+            pose.Rotation[h] = Quaternion.Normalize(Quaternion.Lerp(from.Rotation[h], b, alpha));
+            pose.Position[h] = Vector3.Lerp(from.Position[h], to.Position[h], alpha);
+        }
+        return pose;
     }
 
     /// <summary>Squares over the characters that have no drawing (a failed build, a world without looks), coloured by faction.</summary>

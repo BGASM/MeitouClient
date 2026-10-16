@@ -126,7 +126,7 @@ internal sealed class CharacterContent : IDisposable
     /// <param name="FirstMaterialName">The first submesh's material (script) name, which is all the material resolver takes of a submesh; null: no submesh.</param>
     sealed record LoadedMesh(GpuObjectMesh Gpu, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs = null, float[]? ShadowDistances = null, int ShadowFirst = 0, PickBox[]? PickBoxes = null);
 
-    public CharacterContent(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets)
+    public CharacterContent(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets, CharacterRigs? rigs = null)
     {
         this.gpu = gpu;
         this.assets = assets;
@@ -134,7 +134,7 @@ internal sealed class CharacterContent : IDisposable
         resolver = new MaterialResolver(db, OgreMaterialLibrary.LoadConfigured(install, out _), assets);
         Textures = new WorldTextureCache(gpu, assets, "character textures");
         Morphs = new MorphArena(gpu);
-        Rigs = new CharacterRigs(db, FindMesh, name => assets.Find(name));
+        Rigs = rigs ?? CreateRigs(db, assets);
     }
 
     public GameDatabase Database => db;
@@ -159,11 +159,12 @@ internal sealed class CharacterContent : IDisposable
     }
 
     /// <summary>Meshes are loaded by bare name (Kenshi reduces the path first), so resources.cfg's last location wins.</summary>
-    string? FindMesh(string fcsPath)
-    {
-        var bare = Path.GetFileName(fcsPath.Replace('\\', '/'));
-        return assets.Configured.Find(bare) ?? assets.Find(fcsPath);
-    }
+    string? FindMesh(string fcsPath) => FindMesh(assets, fcsPath);
+
+    static string? FindMesh(AssetLocator assets, string fcsPath) => assets.Configured.Find(Path.GetFileName(fcsPath.Replace('\\', '/'))) ?? assets.Find(fcsPath);
+
+    /// <summary>Rigs that find files as the characters' content does; the host makes one to share between the simulation and the renderer.</summary>
+    public static CharacterRigs CreateRigs(GameDatabase db, AssetLocator assets) => new(db, path => FindMesh(assets, path), name => assets.Find(name));
 
     /// <summary>Skeleton rigs and pose setups, shared with the simulation's ragdolls (<see cref="CharacterRenderer.Rigs"/>).</summary>
     public CharacterRigs Rigs { get; }
