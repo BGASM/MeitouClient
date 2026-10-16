@@ -1,13 +1,5 @@
 ---
 import Base from '../layouts/Base.astro';
-
-const features = [
-  'Streamed Vulkan world with sky, weather, water and probe global illumination',
-  'Characters, animation, movement, combat and body state',
-  'NPC population, factions and partial AI',
-  'Inventory, trade, building and ragdoll physics',
-  'Original saves, native UI and a Faithful mode for the game look',
-];
 ---
 <Base title="Meitou · Kenshi engine reimplementation" video>
   <section class="hero">
@@ -18,55 +10,10 @@ const features = [
         MeitouClient reimplements the engine to run original content, mods and saves unchanged.
         It reads the files of your installed copy and ships none of them.
       </p>
-      <div class="actions">
-        <a class="mt-btn mt-btn-primary" href="https://github.com/VlcekM/MeitouClient/releases">Download</a>
-        <a class="mt-btn" href="/build"><span>Build from Source</span></a>
-      </div>
     </div>
   </section>
 
   <section class="grid">
-    <article class="mt-plate">
-      <h2>Early Playable Slice</h2>
-      <ul class="mt-list">
-        {features.map((f) => <li>{f}</li>)}
-      </ul>
-    </article>
-
-    <article class="mt-plate">
-      <h2>Requirements</h2>
-      <dl class="mt-rows">
-        <div><dt>System</dt><dd>Windows 10 / 11</dd></div>
-        <div><dt>Graphics</dt><dd>Vulkan 1.3 GPU</dd></div>
-        <div><dt>Game</dt><dd>Installed copy of Kenshi</dd></div>
-        <div><dt>Runtime</dt><dd>Included in releases</dd></div>
-      </dl>
-      <hr />
-      <p class="mt-caption">
-        Steam installs are found automatically. Otherwise pick the Kenshi folder when prompted or set <code>KENSHI_PATH</code>.
-      </p>
-    </article>
-
-    <article class="mt-plate">
-      <h2>Keys</h2>
-      <dl class="mt-rows">
-        <div><dt>Settings</dt><dd><span class="mt-key">Tab</span></dd></div>
-        <div><dt>Save · Load</dt><dd><span class="mt-key">F5</span> <span class="mt-key">F9</span></dd></div>
-        <div><dt>Speed 1 · 2 · 5</dt><dd><span class="mt-key">F2</span> <span class="mt-key">F3</span> <span class="mt-key">F4</span></dd></div>
-        <div><dt>Pause</dt><dd><span class="mt-key">Space</span></dd></div>
-        <div><dt>Cinematic Camera</dt><dd><span class="mt-key">F6</span></dd></div>
-        <div><dt>Hide Interface</dt><dd><span class="mt-key">F7</span></dd></div>
-      </dl>
-    </article>
-
-    <article class="mt-card">
-      <h3>Two Modes</h3>
-      <p>
-        Faithful follows the original rendering and interface. Meitou, the default, adds longer view
-        ranges, better lighting and its own title screen. Each feature switches on its own.
-      </p>
-    </article>
-
     <article class="mt-plate community">
       <h2>Community</h2>
       <iframe
@@ -87,9 +34,7 @@ const features = [
   .stack { max-width: 620px; }
   .eyebrow { margin: 0 0 var(--space-4); letter-spacing: .1em; text-transform: uppercase; }
   h1 { margin: 0 0 var(--space-6); color: var(--paper-light); text-shadow: 0 2px 12px rgba(8, 6, 5, .6); font: 600 clamp(32px, 6vw, 52px)/1.1 var(--font-exo); }
-  .lede { margin: 0 0 var(--space-7); font-size: 18px; line-height: 27px; }
-  .actions { display: flex; flex-wrap: wrap; gap: var(--space-5); align-items: center; }
+  .lede { margin: 0; font-size: 18px; line-height: 27px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: var(--space-7); }
-  .mt-card p { margin: 0; }
   .community iframe { display: block; width: 100%; max-width: 350px; border: 0; border-radius: var(--radius-btn); }
 </style>

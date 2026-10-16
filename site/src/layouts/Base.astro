@@ -10,11 +10,6 @@ interface Props {
 }
 
 const { title, description = 'MeitouClient: a .NET reimplementation of the Kenshi engine.', video = false } = Astro.props;
-const path = Astro.url.pathname.replace(/\/$/, '') || '/';
-const nav = [
-  { href: '/', label: 'Overview' },
-  { href: '/build', label: 'Build' },
-];
 ---
 <!doctype html>
 <html lang="en">
@@ -36,12 +31,6 @@ const nav = [
       )}
       <header class="top">
         <a class="brand" href="/">Meitou</a>
-        <nav class="mt-tabs" aria-label="Sections">
-          {nav.map((n) => (
-            <a class="mt-tab" href={n.href} aria-current={path === n.href ? 'page' : undefined}>{n.label}</a>
-          ))}
-        </nav>
-        <a class="mt-btn" href="https://github.com/VlcekM/MeitouClient"><span>Source</span></a>
       </header>
       <main>
         <slot />
