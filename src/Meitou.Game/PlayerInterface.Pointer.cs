@@ -36,6 +36,7 @@ sealed partial class PlayerInterface
     {
         if (mapDrag is not null) return (-1, mouse, CtrlHeld, AltHeld, "hand", null);   // the map's pan
         if (UiVisible && pointerOverUi || UiCapturesPointer || ContextMenuOpen || dragging || settingsOpen || TitleOpen) return (-1, mouse, CtrlHeld, AltHeld, "arrow", null);
+        if (BuildPointer() is { } building) return (-1, mouse, CtrlHeld, AltHeld, building, null);
         var snapshot = session.CurrentSnapshot;
         if (pointer.Tick == snapshot.Tick && pointer.Mouse == mouse && pointer.Ctrl == CtrlHeld && pointer.Alt == AltHeld) return pointer;
         (string Name, CharacterId? Target) chosen = ("arrow", null);
@@ -43,6 +44,7 @@ sealed partial class PlayerInterface
         {
             if ((CtrlHeld || AltHeld) && PickDowned(mouse) is { } downed) chosen = (AltHeld ? "search" : "lift", downed);
             else if (QuickOrder(mouse) is { } order) chosen = (order.Pointer, order.Target);
+            else if (SitePointer(mouse) is { } siteMode) chosen = (siteMode, null);
         }
         chosen.Target ??= PickWhere(mouse, _ => true);
         return pointer = (snapshot.Tick, mouse, CtrlHeld, AltHeld, chosen.Name, chosen.Target);

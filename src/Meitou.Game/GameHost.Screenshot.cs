@@ -72,7 +72,7 @@ sealed partial class GameHost
         if (overlay is not null) { player.CreateUiPainter(overlay, assets.Find); ConnectItemIcons(); }
         if (gpu.Characters is { } portraits) { var (atlas, sampled) = portraits.PortraitAtlas; player.SetUiTexture(PlayerInterface.PortraitTexture, atlas, sampled); }
         string?[] panels = g.UiShowcase
-            ? [null, "hud-expanded", "inventory", "stats", "overview", "menu", "new-game", "save", "load", "title"] : [null];
+            ? [null, "hud-expanded", "inventory", "stats", "overview", "menu", "new-game", "save", "load", "title", "build"] : [null];
         foreach (string? panelName in panels)
         {
             // Item icons are drawn from the frame after a cell asks for them, and their textures stream in: show the panel until they are done.

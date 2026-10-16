@@ -27,6 +27,26 @@ opaque, discard-free colour only for no-cutout/non-fading parts. Draw solids fir
 cutout/dither shaders for other batches. Cache native state per program so solid/fading variants
 do not evict one another. Depth/caster coverage must remain compatible with colour.
 
+## Player buildings and the placement ghost
+
+Sites and finished buildings of `WorldSnapshot.Buildings` are runtime placements (`WorldObjects.AddRuntime/RemoveRuntime`,
+`BuildingPlacement` with `WorldY` absolute), merged into their zone's layout. Meitou adds one to an already loaded zone
+incrementally (`ObjectStreamer.AddRuntime`, no zone reload, so nothing flickers; a pending zone job falls back to a
+reload). Host diff: [simulation.md](simulation.md#buildings).
+
+**Scaffold.** The original clips each part at `1.2 f` of its mesh height and draws the scaffold grid (`construction.dds`)
+above it ([construction look](game/buildings-production.md#construction-look)). Meitou's approximation: the part's
+instance matrix carries `M44` = `ScaffoldBase` (10000) + the world-space clip height (`f` and the mesh top from its bounds);
+`BuildingLodShaders` keeps pixels below it as the building and above it only a procedural world-space grid
+(cell 0.12, line 0.06), discarding the rest. The shadow pass clips the same. Differences: no `construction.dds`
+texture, no fade of a grid over the built part, and the clip is a world height, so a tilted site clips level.
+Sites always use the fading (discard-capable) batch.
+
+**Ghost.** `WorldObjectRenderer.SetGhosts(GhostDraw[])` draws a building's parts (laid out once at the origin, exterior
+only) at a transform, from the `ObjectStreamer.Loose` pseudo-zone (never streamed out, scanned each frame like the
+landmarks), with 65 % dither coverage and a tint through the push `FlatColour` (`uTint` only reaches grey-channel
+materials): green valid, red invalid, blue queued. Not drawn in shadow or landmarks-only passes.
+
 ## Validation
 
 Main, reflection and shadow stages repeat object work; inspect all three. **Observed** swamp

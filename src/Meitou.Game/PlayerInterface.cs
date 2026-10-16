@@ -61,6 +61,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
             if (UiMouseDown(p)) return true;
             if (CloseContextMenu()) return true;   // a click beside the open menu only closes it
             if (OverHud(p)) return true;
+            if (BuildClick()) return true;
             dragFrom = p;
             dragging = false;
             return true;
@@ -69,6 +70,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         if (button == MouseButton.Right && CloseContextMenu()) return true;
         if (button == MouseButton.Right && MapRightDown(p)) return true;
         if (button == MouseButton.Middle && UiVisible && MapPointerDown(p)) return true;
+        if (button == MouseButton.Right && !OverHud(p) && SitePress(p)) return true;
         if (button == MouseButton.Right && !OverHud(p))
         {
             // Alt + right click on a downed or dead character: the nearest selected loots it (take all). Ctrl + right click: picks it up, or puts it down when a selected
@@ -126,7 +128,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         if (button == MouseButton.Left) { InventoryPointerUp(p); faithfulScreens.PointerUp(); mapDrag = null; }
         if (button == MouseButton.Middle) mapDrag = null;
         if (button == MouseButton.Right && MapRightUp(p)) return;
-        if (button == MouseButton.Right) ContextRelease();
+        if (button == MouseButton.Right) { ContextRelease(); SiteRelease(); }
         if (button == MouseButton.Right && steering)
         {
             Steer(final: true);
@@ -164,6 +166,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     {
         UpdateContextMenu();
         UpdateMap();
+        if (!final) UpdateBuild();
         if (!steering || OverHud(mouse)) return;
         if (Ray(mouse) is not { } ray || GroundHit(ray.Origin, ray.Direction) is not { } hit) return;
         PlaceMarker(hit);   // the marker follows the cursor every frame; the order only once a tick

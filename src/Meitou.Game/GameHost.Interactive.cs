@@ -135,7 +135,7 @@ sealed partial class GameHost
         {
             kb.KeyDown += (keyboard, k, _) =>
             {
-                if (k is SilkKey.ShiftLeft or SilkKey.ShiftRight) shiftDown = true;
+                if (k is SilkKey.ShiftLeft or SilkKey.ShiftRight) { shiftDown = true; player.SlowModifier = true; }
                 if (k == SilkKey.Enter && (keyboard.IsKeyPressed(SilkKey.AltLeft) || keyboard.IsKeyPressed(SilkKey.AltRight))) { BorderlessFullScreen.Toggle(window); return; }
                 if (Covered)
                 {
@@ -164,6 +164,7 @@ sealed partial class GameHost
                 if (KeyMap.Map(k) is { } key)
                 {
                     if (shiftDown && key == EngineKey.F1) { Console.WriteLine(meitou.Toggle()); return; }
+                    if (player.BuildKey(key, shiftDown)) return;
                     session.Input.SetKey(key, true);
                     player.Key(key, shiftDown);
                     SandboxKey(key);
@@ -172,8 +173,8 @@ sealed partial class GameHost
             };
             kb.KeyUp += (_, k, _) =>
             {
-                if (k is SilkKey.ShiftLeft or SilkKey.ShiftRight) shiftDown = false;
-                if (KeyMap.Map(k) is { } key) session.Input.SetKey(key, false);
+                if (k is SilkKey.ShiftLeft or SilkKey.ShiftRight) { shiftDown = false; player.SlowModifier = false; }
+                if (KeyMap.Map(k) is { } key) { session.Input.SetKey(key, false); player.BuildKeyUp(key); }
             };
             kb.KeyChar += (_, value) =>
             {

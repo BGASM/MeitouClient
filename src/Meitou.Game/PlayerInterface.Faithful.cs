@@ -71,6 +71,7 @@ sealed partial class PlayerInterface
         if (HandleFrontendAction(e)) UpdateMenuPause();
         else if (e.Screen == "stats" && e.Action == "select") selectedStat = e.Text;
         else if (e.Screen == "stats" && e.Action.StartsWith("stat:", StringComparison.Ordinal)) selectedStat = e.Action[5..];
+        else if (e.Screen == "build") BuildAction(e);
         else if (e.Screen == "overview") MapAction(e.Widget);
         else if (e.Screen is "inventory" or "bag")
         {
@@ -87,6 +88,7 @@ sealed partial class PlayerInterface
         foreach (var button in layout.Widgets.Where(w => w.Type == "Button" && !w.Properties.ContainsKey("TemplateEvent"))) b.Disabled.Add(button.Name);
         if (BindFrontend(id, b)) return b;
         else if (id == "trader") BindTraderScreen(b);
+        else if (id == "build") BindBuildScreen(b);
         else if (id is "inventory" or "stats" or "bag" or "limbs")
         {
             b.Text["Root"] = id == "stats" ? lead?.Name.ToUpperInvariant() ?? "CHARACTER STATS"
@@ -158,6 +160,7 @@ sealed partial class PlayerInterface
     {
         if (id == "title" && UiMode == UiMode.Meitou) { MeitouTitleMenu(controls); return; }
         if (id == "stats") { AddStatsContent(controls); return; }
+        if (id == "build") { AddBuildContent(controls); return; }
         AddMapContent(id, controls);
         if (id == "trader") { ArrangeContainerGrid(id, controls, session.CurrentSnapshot.Trade?.StockWidth ?? 0, session.CurrentSnapshot.Trade?.StockHeight ?? 0); AddTraderContent(controls); return; }
         if (id is not ("inventory" or "bag" or "limbs") || Selected().FirstOrDefault() is not { ItemGrid: { } grid } lead) return;

@@ -186,6 +186,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         gpu.HoverOutline ??= new HoverOutlineRenderer(context);
         player.MeshHit = (id, origin, direction) => gpu.Characters?.RayHit(DrawKey(id), origin, direction);
         player.Floor = (() => viewedFloor, StepFloor);
+        player.BuildHost = MakeBuildServices(heights);
         player.FactionName = faction => popData is { } d && faction >= 0 && faction < d.Factions.Count ? d.Factions[faction].Name : null;
         player.MapTowns = () => popData?.Sites ?? [];
         player.MapFactionOf = id =>

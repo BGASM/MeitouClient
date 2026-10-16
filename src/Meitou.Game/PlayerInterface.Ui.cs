@@ -59,6 +59,7 @@ sealed partial class PlayerInterface
         ("advanced", "Kenshi_AdvancedOptionsWindow", true), ("save", "Kenshi_SaveGamePanel", true),
         ("load", "Kenshi_LoadGamePanel", true), ("message", "Kenshi_MessageBox", true),
         ("bag", "Kenshi_InventoryGenericWindow", false), ("limbs", "Kenshi_LimbReplacementWindow", false), ("trader", "Kenshi_InventoryTraderWindow", false),
+        ("build", "Kenshi_BuildWindow", false),
     ];
 
     /// <summary>The expanded layout and the current bindings of the HUD (<c>"hud"</c>) or of a faithful screen, for the layout audit test.</summary>
@@ -127,6 +128,8 @@ sealed partial class PlayerInterface
         b.Text["FloorText"] = $"Floor {Floor?.Get() ?? 0}";
         b.Actions["FloorArrowUp"] = "meitou:floor-up";
         b.Actions["FloorArrowDown"] = "meitou:floor-down";
+        b.Actions["BuildButton"] = "meitou:build";
+        if (buildMode) foreach (string name in BuildHiddenHud) b.Hidden.Add(name);
         if (lead is null || lead.Bounties.Count == 0) b.Hidden.Add("BountyPanel");
         // The information panel starts collapsed (as the original's, docs/game/ui-screens.md section 4): the extending part (name, state lines, extended stats) slid down
         // until its bottom is the panel's, behind the stats panel, so only the name and the state lines show; the ^ button between them toggles it.
@@ -234,6 +237,7 @@ sealed partial class PlayerInterface
         }
         else if (action == "extendedstats") infoExpanded = !infoExpanded;
         else if (action is "floor-up" or "floor-down") Floor?.Step(action == "floor-up" ? 1 : -1);
+        else if (action == "build") ToggleBuildMode();
         else if (action == "context") ContextAction(argument);
         else if (action == "squad") Select(PlayerCharacters(), false);
         else if (action == "member")
@@ -278,6 +282,7 @@ sealed partial class PlayerInterface
             else { faithfulScreens.Open(panel); if (panel == "overview") faithfulScreens.SetTab(panel, "TabsMain", 0); }
             UpdateMenuPause(); return;
         }
+        if (panel == "build") { if (buildMode) faithfulScreens.Open("build"); else SetBuildMode(true); return; }
         if (panel is not ("inventory" or "stats")) throw new ArgumentException("Unknown UI panel.", nameof(panel));
         var control = ArrangeUi().First(c => c.Action == $"meitou:{panel}");
         uiHost.Dispatch(control);

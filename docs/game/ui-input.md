@@ -94,6 +94,10 @@ Binding maps: general map at Controls+0x28, build-mode map at +0x50 (checked fir
 | rebuild_navmesh | Ctrl+Shift+F11 | 0x386 | event |
 | gizmo_move / rotate / scale | H / J / K | 0x398 / 0x399 / 0x39a | event |
 
+Meitou's build map (`PlayerInterface.Build.cs`) is live only in build mode and takes its keys before anything else: the
+documented speeds, Shift as the slow modifier of the up/down move; the numpad aliases are not mapped (the numpad is the
+cinema camera's). `[` `]` tilt there, not character_next / prev. Left click queues the ghost.
+
 ### 6. Event dispatch
 
 GameLoop_InputActions (FUN_140788100; step 4 of [game-loop.md](game-loop.md#update-threads-and-budget)) drains the queue each frame. **Observed**: it does nothing while the loading

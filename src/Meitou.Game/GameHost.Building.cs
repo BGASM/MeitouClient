@@ -106,4 +106,38 @@ sealed partial class GameHost
         buildingsRevision = -1;
         if (gpu?.Objects is { } objects) objects.Construction = null;
     }
+
+    /// <summary>
+    /// What the player's build mode needs (docs/simulation.md "Buildings", PlayerInterface.Build.cs): the catalog of BUILDINGs, their texts and parts, the placement services
+    /// (terrain, collision footprints) and the ghost drawing. Null without a game database.
+    /// </summary>
+    Building.BuildServices? MakeBuildServices(Meitou.Data.World.GroundHeights heights)
+    {
+        if (scene.Database is not { } db) return null;
+        var footprints = new Meitou.Navigation.BuildingFootprints(install, db, IsSandbox || IsDuel ? null : scene.Objects?.Levels);
+        var parts = new Dictionary<string, IReadOnlyList<Meitou.Data.World.PlacedMesh>>(StringComparer.Ordinal);
+        IReadOnlyList<Meitou.Data.Gameplay.Construction.PlacementTown>? towns = null;
+        return new Building.BuildServices
+        {
+            Menu = new Building.BuildMenu([.. BuildData().Values]),
+            ItemName = id => db.Find(id)?.Name ?? id,
+            Description = id => db.Find(id)?.GetString("description") ?? "",
+            Parts = id =>
+            {
+                if (parts.TryGetValue(id, out var cached)) return cached;
+                return parts[id] = db.Find(id) is { } record
+                    ? Meitou.Data.World.WorldObjectLayout.Building(db, record, "ghost:" + id, System.Numerics.Vector3.Zero, System.Numerics.Quaternion.Identity, new Meitou.Data.World.BuildingState())
+                    : [];
+            },
+            Placement = new Building.PlacementServices
+            {
+                Ground = heights.HeightAt,
+                Footprint = footprints.Of,
+                StaticAround = footprints.StaticAround,
+            },
+            Towns = () => towns ??= popData is { } d ? [.. d.Sites.Select(s => new Meitou.Data.Gameplay.Construction.PlacementTown(s.Town, new(s.Position.X, s.Position.Z)))] : [],
+            PlayerFactionId = () => popData is { } d && d.PlayerFaction is >= 0 and var mine && mine < d.Factions.Count ? d.Factions[mine].Id : "",
+            DrawGhosts = draws => gpu.Objects?.SetGhosts(draws),
+        };
+    }
 }
