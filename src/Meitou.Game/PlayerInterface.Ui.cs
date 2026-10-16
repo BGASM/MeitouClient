@@ -253,7 +253,7 @@ sealed partial class PlayerInterface
         {
             int step = int.Parse(action[9..], CultureInfo.InvariantCulture);
             Say(new RunSpeedCommand(SelectedIds(), step) { Tick = session.World.Tick });
-            if (Selected().FirstOrDefault() is { } lead) Notice("Move speed: " + RunSpeedName((byte)((((lead.RunSpeed + step) % 3) + 3) % 3)));
+            if (Selected().FirstOrDefault() is { } lead) Notice("Move speed: " + RunSpeedName((byte)((((lead.RunSpeed + step) % SpeedMode.Count) + SpeedMode.Count) % SpeedMode.Count)));
         }
     }
 

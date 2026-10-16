@@ -205,8 +205,13 @@ sealed partial class PlayerInterface
         }
         b.Actions["SpeedArrowLeft"] = "meitou:runspeed.-1";
         b.Actions["SpeedArrowRight"] = "meitou:runspeed.1";
+        // The icon shows the lead's mode (docs/game/ui-screens.md); with nobody selected it keeps the layout's.
+        if (lead is not null) b.Properties["SpeedPanel"] = new Dictionary<string, string> { ["ImageName"] = RunSpeedIcons[Math.Min((int)lead.RunSpeed, RunSpeedIcons.Length - 1)] };
     }
 
-    /// <summary>The move speed modes' names (the original's <c>cycle_run_speed</c> strings are speed_1..speed_3; these words are Meitou's).</summary>
-    static string RunSpeedName(byte mode) => mode switch { SpeedMode.Walk => "walk", SpeedMode.Run => "run", _ => "full speed" };
+    /// <summary>The speed icon per mode: the <c>Kenshi_CharacterSpeedSet</c> image names, in mode order.</summary>
+    static readonly string[] RunSpeedIcons = ["Walk", "Jog", "Run", "Group"];
+
+    /// <summary>The move speed modes' names in the notice (the icons' names).</summary>
+    static string RunSpeedName(byte mode) => RunSpeedIcons[Math.Min((int)mode, RunSpeedIcons.Length - 1)].ToLowerInvariant();
 }

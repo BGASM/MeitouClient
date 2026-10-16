@@ -91,8 +91,8 @@ sealed partial class GameHost
                 overlay.Target = target;
                 UpdateView(w, h);
                 if (g.TitlePreview) player.ShowTitle(); else player.ShowUiPanel(panelName == "hud-expanded" ? null : panelName, panelName == "hud-expanded");
-                if (IsSandbox && !g.UiShowcase) DrawSandbox(overlay, w, h);
                 player.Draw(overlay, w, h);
+                if (IsSandbox && !g.UiShowcase) DrawSandbox(overlay, w, h);
                 if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.IsPlayer) is { } me && player.Project(DrawnPosition(me) + new Vector3(0, 1, 0)) is { } px)
                 {
                     var picked = player.Pick(px);

@@ -255,6 +255,25 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
         }
     }
 
+    /// <summary>
+    /// The group speed (<see cref="SpeedMode.Group"/>): the lowest top speed among the squad's members walking a path in that mode (last tick's, so the order the
+    /// partitions run in does not matter). Which characters the original counts as the group (the squad or the selection) is Unknown (docs/game/pathfinding.md).
+    /// </summary>
+    static float SlowestOfSquad(World world, CharacterCold cold)
+    {
+        var table = world.Characters;
+        float slowest = float.MaxValue;
+        if (cold.SquadId < 0 || world.Squads.Find(cold.SquadId) is not { } squad) return slowest;
+        foreach (var member in squad.Members)
+        {
+            if (!table.IsAlive(member)) continue;
+            ref readonly var p = ref table.Previous[member.Slot];
+            if (p.Mode != SpeedMode.Group || ((MoveFlags)p.Flags & MoveFlags.HasPath) == 0 || table.Cold(member.Slot)?.Medical is { Incapacitated: true }) continue;
+            slowest = MathF.Min(slowest, p.MaxSpeed);
+        }
+        return slowest;
+    }
+
     public void Move(World world, Partition part)
     {
         var table = world.Characters;
@@ -298,6 +317,7 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                     // A carrier in walk mode is raised to run mode (the original's speed selector, Observed; docs/game/carry-loot.md "Speed and weight").
                     if (mode == SpeedMode.Walk && !cold.Carrying.IsNone) mode = SpeedMode.Run;
                     desired = cold.SpeedOverride > 0 ? cold.SpeedOverride : MathF.Min(n.MaxSpeed, SpeedMode.Cap(mode, n.WalkSpeed));
+                    if (mode == SpeedMode.Group && cold.SpeedOverride <= 0) desired = MathF.Min(desired, SlowestOfSquad(world, cold));
                     if ((cold.Orders & CharacterOrders.Sneak) != 0 && cold.SpeedOverride <= 0) desired = MathF.Min(desired, Orders.SneakSpeed(desired, Orders.Stealth(cold)));
                 }
                 // On the provisional part of a long route: ask again (the zones ahead may have loaded), following this one until the answer comes.

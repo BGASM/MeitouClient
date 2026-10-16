@@ -41,10 +41,12 @@ public enum MoveFlags : ushort
     AnyPath = NeedPath | Pending | HasPath,
 }
 
-/// <summary>Speed modes (docs/game/pathfinding.md "Speed"): 0 caps at the race walk speed, 1 at 55, 2 and 3 do not cap.</summary>
+/// <summary>Speed modes (docs/game/pathfinding.md "Speed"), also the HUD speed icon's index (Walk, Jog, Run, Group): 0 caps at the race walk speed, 1 at 55, 2 does not cap, 3 keeps to the slowest of the squad.</summary>
 public static class SpeedMode
 {
-    public const byte Walk = 0, Run = 1, Free = 2;
+    public const byte Walk = 0, Run = 1, Free = 2, Group = 3;
+    /// <summary>The number of modes the HUD arrows cycle through.</summary>
+    public const int Count = 4;
     public const float RunCap = 55;
 
     public static float Cap(byte mode, float walkSpeed) => mode switch { Walk => walkSpeed, Run => RunCap, _ => 999 };

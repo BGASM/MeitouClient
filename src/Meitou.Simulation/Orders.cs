@@ -73,7 +73,7 @@ public static class Orders
         foreach (var (order, key) in SaveKeys)
             if (state.Bools.TryGetValue(key, out bool on)) cold.Orders = on ? cold.Orders | order : cold.Orders & ~order;
         if (state.Bools.TryGetValue(JobsKey, out bool jobs)) cold.Orders = jobs ? cold.Orders | CharacterOrders.Jobs : cold.Orders & ~CharacterOrders.Jobs;
-        if (state.Ints.TryGetValue(SpeedModeKey, out int mode) && mode is >= 0 and <= SpeedMode.Free) cold.RunSpeed = (byte)mode;
+        if (state.Ints.TryGetValue(SpeedModeKey, out int mode) && mode is >= 0 and <= SpeedMode.Group) cold.RunSpeed = (byte)mode;
     }
 
     /// <summary>
@@ -139,7 +139,7 @@ public static class Orders
                 foreach (var id in speed.Characters.Count > 0 ? speed.Characters : world.Player.Selection.ToArray())
                 {
                     if (!table.TryResolveNext(id, out int slot) || table.Cold(slot) is not { IsPlayer: true } cold) continue;
-                    mode ??= ((cold.RunSpeed + speed.Step) % 3 + 3) % 3;
+                    mode ??= ((cold.RunSpeed + speed.Step) % SpeedMode.Count + SpeedMode.Count) % SpeedMode.Count;
                     cold.RunSpeed = (byte)mode.Value;
                 }
                 break;

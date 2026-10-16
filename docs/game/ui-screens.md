@@ -140,12 +140,17 @@ to Jobs, independent of the saved `chase mode` flag whose relationship is **Unkn
 - `FloorPanel` stays as laid out and `FloorText` is "Floor {1,num}" of the viewed floor each frame; `BuildPanel` is always shown (**Verified** /
   **Observed**).
 - Orders panel (FUN_14072b540): buttons Block, Hold, Chase (`OrdersChaseButton`), Passive, Jobs, Ranged, Taunt,
-  Sneak, run-speed arrows (`SpeedArrowLeft/Right`; the layout has a symbol image `Run`, the labels Jog / Walk
-  were not found), Medic, Rescue, Prospect, a behaviour slider (captions AGRESSIVE / CONFIDENT / SUBMISSIVE,
+  Sneak, run-speed arrows (`SpeedArrowLeft/Right`, see below), Medic, Rescue, Prospect, a behaviour slider (captions AGRESSIVE / CONFIDENT / SUBMISSIVE,
   **Verified** in `Kenshi_MainPanel.layout`) and a jobs list ([ai.md](ai.md#packages-and-goals)) with the hint "To add jobs, hold shift key when
   giving an order". Hold = hold position; Block = defensive mode ([combat.md](combat.md#techniques-block-and-dodge) has a +20 guarding-state term in the block chance; whether it is this stance is **Unknown** there) (+20 melee defence, no attacks; **Verified**
   against the tooltip string in the exe: "gain 20 to his melee defense skill ... will not attempt to make any
   attacks"); Passive = non-combat mode (tooltip strings).
+- Speed selector: the `SpeedPanel` ImageBox shows an image of `Kenshi_CharacterSpeedSet` / `Icons`, indexed Walk, Jog, Run, Group;
+  the index is the movement mode ([pathfinding.md](pathfinding.md) "Speed"). Each arrow steps it by -1 / +1 with wrap over all four,
+  plays `General_Click` and applies the mode to every selected character; a refresh shows the lead's mode. Right after the panel is
+  built the index is 0 (Walk) until the first refresh. **Verified**: `kenshi_images.xml`, the panel's name list in FUN_14072b540 (exe bytes
+  `Run`/`Jog`/`Walk`), arrows FUN_140722580 / FUN_140722630, apply FUN_140722500, refresh FUN_140726930. While any selected
+  character's state at +0xe0 is 1 the arrows re-apply without stepping (FUN_1407f3a20); what that state is is **Unknown**.
 
 ### Character stats runtime layout
 

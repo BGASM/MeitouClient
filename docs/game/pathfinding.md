@@ -41,7 +41,10 @@ and water factors0.75/0.5/0.4 apply separately. No independent slope-speed term 
 Water states use Y+2 and size thresholds at6/15 belowY100. Shallow caps45; non-swimmers walk
 bottom at2*walk speed, swimmers waist=walk and deep uses swim factors/minimums. Disabled legs,
 body states and stealth modify distinct branches. Movement modes0 walk,1 cap55,2/3 cap999;
-mode3 follows group's slowest. FCS force-speed3 means NO_SPEED_CHANGE and remaps to4, not runtime
+mode3 follows group's slowest. The HUD sets them as character orders 2/1/0/0x10 → modes 0/1/2/3
+(Walk/Jog/Run/Group; **Verified**, character vtable slot 0x308 FUN_1405caa50, [ui-screens.md](ui-screens.md)). Whether
+"group" is the squad or the selection is **Unknown** (the Group choice also calls a selection-wide FUN_1407faa70); Meitou
+uses the squad members walking in mode3. FCS force-speed3 means NO_SPEED_CHANGE and remaps to4, not runtime
 mode3. Follow/avoidance/formation use character footprint and previous neighbour state.
 Original formation details and off-screen arrival remain partly unknown.
 

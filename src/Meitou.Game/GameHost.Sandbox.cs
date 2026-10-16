@@ -24,7 +24,7 @@ sealed partial class GameHost
     CharacterId sandboxHero = CharacterId.None, sandboxFoe = CharacterId.None;
     byte? sandboxMode;
     float sandboxSpeed;
-    bool sandboxPatrol, sandboxFollow = true;
+    bool sandboxPatrol, sandboxFollow;   // follow off: the camera stays on the middle of the floor until moved (Y follows the pair)
     float patrolTarget;
     long patrolIssued = -1;
 
@@ -201,7 +201,7 @@ sealed partial class GameHost
         camera.Target = drawn;
     }
 
-    /// <summary>The debug panel, over the finished picture (the floor's grid is the terrain's: <see cref="WorldRenderOptions.Grid"/>).</summary>
+    /// <summary>The debug panel, over the finished picture and the HUD (the floor's grid is the terrain's: <see cref="WorldRenderOptions.Grid"/>).</summary>
     void DrawSandbox(DebugOverlay o, int width, int height)
     {
         var white = DebugOverlay.TextColour;
@@ -215,7 +215,7 @@ sealed partial class GameHost
         Add($"patrol {(sandboxPatrol ? $"ON: x {-PatrolHalf:0} <-> {PatrolHalf:0} (to {patrolTarget:0})" : "off")}   follow {(sandboxFollow ? "on" : "off")}", dim);
         Add("Z walk  X run  C free  [ ] fixed speed +-5  P patrol  G fight  Y follow  R stop", dim);
         float pad = 8, textW = lines.Max(l => l.Text.Length) * o.CharWidth, w = textW + 2 * pad, h = lines.Count * o.LineHeight + 2 * pad;
-        float x0 = width - w - 10, y0 = height - h - 10;   // bottom right: the character stands in the middle of the view
+        float x0 = width - w - 10, y0 = 10;   // top right: the HUD holds the bottom and the top left, the character stands in the middle
         o.Rect(x0, y0, x0 + w, y0 + h, DebugOverlay.PanelColour);
         for (int i = 0; i < lines.Count; i++) o.Text(lines[i].Text, x0 + pad, y0 + pad + i * o.LineHeight, lines[i].Colour);
         o.Flush(width, height);
@@ -232,7 +232,7 @@ sealed partial class GameHost
         if (session.PreviousSnapshot.Characters.FirstOrDefault(c => c.Id == id) is { } before)
             measured = Vector3.Distance(new Vector3(before.Position.X, 0, before.Position.Z), new Vector3(snapshot.Position.X, 0, snapshot.Position.Z)) / (float)session.Simulation.TickSeconds;
         byte mode = cold.ModeOverride ?? hot.Mode;
-        string modeText = mode switch { SpeedMode.Walk => $"WALK (cap {hot.WalkSpeed:0.#})", SpeedMode.Run => $"RUN (cap {SpeedMode.RunCap:0})", _ => "FREE (no cap)" };
+        string modeText = mode switch { SpeedMode.Walk => $"WALK (cap {hot.WalkSpeed:0.#})", SpeedMode.Run => $"RUN (cap {SpeedMode.RunCap:0})", SpeedMode.Group => "GROUP (squad's slowest)", _ => "FREE (no cap)" };
         add($"{label}: {snapshot.Name}   {(CharacterTask)hot.Task}", heading);
         add($"v {v,6:0.00} u/s   measured {measured,6:0.00}   speed chain {hot.MaxSpeed:0.0}", null);
         if (!detailed) { AddLayers(snapshot, cold, add); return; }
