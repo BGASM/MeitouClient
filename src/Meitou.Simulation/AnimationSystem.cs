@@ -305,7 +305,13 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             moving = moving && (lower.Count > 0 || upper.Count > 0);
             if (!moving && !(stance.Combat && lower.Count > 0)) lower.Clear();
             legs = lower.Count;
-            if (moving) wanted.AddRange(upper);
+            if (moving)
+            {
+                wanted.AddRange(upper);
+                // In combat no upper walk clip fits a weapon (the sword ones are combat NO): the arms keep the guard over the footwork (engine choice; the
+                // original's upper pick while moving in combat was not traced, docs/animation.md), not the bare shuffle with the blade between the legs.
+                if (upper.Count == 0 && stance.Combat && technique < 0) StandingIdle(a, stance, true, dt, seed, key, tick, wanted);
+            }
             else if (technique < 0 && HeldClip(task) is >= 0 and var held) { wanted.Add((held, 1)); a.Idle = -1; }
             else if (technique < 0)
             {

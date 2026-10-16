@@ -29,8 +29,9 @@ of definitions and gives each a weight; zero-weight ones are dropped:
 - **Speed weight** (`@ 14051d100`): with the current speed v (the character's forward speed, signed, below)
   and the definition's speeds times the race's scale g (vtable 0x390 on the character, 1 for humans):
   a ramp `r(v)` = 0 below `min speed`; rising linearly from 0 at `min speed` to 1 at `move speed` (just 1 when
-  `min speed` < 1); falling linearly from 1 at `move speed` to 0 at `max speed` (stays 1 above `move speed`
-  when `max speed` < 0.5, i.e. the fastest clip); 0 above. If both v and `min speed` are below −40 the weight
+  `min speed` < 1); falling linearly from 1 at `move speed` to 0 at `max speed`, 0 above; when `max speed` < 0.5 the
+  falling line is followed past `max speed` too (`@ 14051cd10`): with a max of 0 it rises, so the fastest clip stays 1,
+  and with a negative max (the backing-off `walk lower combat shuffle long BK`, −99/−10/−6) it is 0 at forward speeds. If both v and `min speed` are below −40 the weight
   is 1. A positive r is then sharpened: **w = 1 / (1 + e^(−10 (2r − 1)))** (so r = 0.5 → 0.5, r = 1 → 0.99995).
 - **Leg weight**: the same ramp (without the sigmoid) over the health of the *more hurt* leg against
   `L/R leg damage min / ideal / max` of that side (left values if the left leg is worse). The loader forces

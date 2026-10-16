@@ -199,8 +199,8 @@ public sealed record AnimationDefinition
 
     /// <summary>
     /// The speed weight of a movement clip at speed <paramref name="v"/> (<b>Verified</b>, docs/animation.md "Choosing candidates"): a ramp rising from
-    /// <c>min speed</c> to <c>move speed</c> (1 throughout when <c>min speed</c> is under 1), falling to 0 at <c>max speed</c> (staying 1 when <c>max speed</c>
-    /// is under 0.5), 0 outside, sharpened by 1 / (1 + e^(-10 (2r - 1))); 1 when both the speed and <c>min speed</c> are under -40.
+    /// <c>min speed</c> to <c>move speed</c> (1 throughout when <c>min speed</c> is under 1), falling to 0 at <c>max speed</c> (when <c>max speed</c> is under 0.5
+    /// the line goes on past it: 1 for a max of 0, 0 at forward speeds for a backing-off clip), 0 outside, sharpened by 1 / (1 + e^(-10 (2r - 1))); 1 when both the speed and <c>min speed</c> are under -40.
     /// </summary>
     public float SpeedWeight(float v)
     {
@@ -223,11 +223,13 @@ public sealed record AnimationDefinition
         return Ramp(health, min, ideal, max, false, false);
     }
 
-    static float Ramp(float v, float min, float peak, float max, bool flatBelow, bool flatAbove)
+    static float Ramp(float v, float min, float peak, float max, bool flatBelow, bool lineAbove)
     {
         if (v < min) return 0;
         if (v <= peak) return flatBelow || peak <= min ? 1 : (v - min) / (peak - min);
-        if (flatAbove) return 1;
+        // Past the peak the original (FUN_14051cd10) falls along the line through (peak, 1) and (max, 0), also beyond max when max is under 0.5: with a max
+        // left at 0 that line rises (the fastest clip stays at 1), with a negative max (a backing-off clip) it falls on (0 at forward speeds).
+        if (lineAbove) return max == peak ? 0 : Math.Clamp(1 - (v - peak) / (max - peak), 0, 1);
         if (v >= max) return 0;
         return max <= peak ? 1 : (max - v) / (max - peak);
     }
