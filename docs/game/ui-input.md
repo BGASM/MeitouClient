@@ -175,7 +175,7 @@ up and misses at 22; a bonedog hits up to 10. A character the renderer does not 
 
 Meitou only (Advanced → Hover outline, `HoverOutline`, default on; the game has none). The character under the cursor is drawn alone into a
 mask (colour pass, live pose, picture levels, own depth planes round it) right after the portraits, then after the tone map an outline
-(about 2.5 px at 1080p, fading outward) is blended round the silhouette, through walls, and its visible part tinted, visible meaning its
+(about 2.5 px at 1080p, 60 % strength fading outward) is blended round the silhouette, through walls, and its visible part tinted at 11 %, visible meaning its
 linear depth within 1 % + 1 unit of the near slice's scene depth (jittered, render size). Outline and tint take the pointer's order's colour: attack red,
 treat green, talk gold, carry/loot blue, else white (no selection or no order). Off in the free camera, with the interface hidden and in
 screenshots and cinema takes. Not in the Shift+F1 switch list (a game setting, like Attackers per target).
