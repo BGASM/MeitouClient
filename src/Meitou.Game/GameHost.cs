@@ -248,7 +248,8 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         if (nav is null || population is null) return;
         long now = Stopwatch.GetTimestamp();
         var pending = new List<Task>();
-        foreach (var z in population.ActiveZones)
+        // The population's zones, and those the walkers' long routes lead into (NavmeshWalkability.RouteZones).
+        foreach (var z in population.ActiveZones.Concat(nav.Walkability.RouteZones(TimeSpan.FromSeconds(30))))
         {
             if (!navZones.ContainsKey(z)) pending.Add(nav.LoadZone(z));
             navZones[z] = now;

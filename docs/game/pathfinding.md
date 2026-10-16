@@ -62,7 +62,7 @@ heights snap to walkable collision (`NavSurfaces`) or zone terrain; the highest 
 `StandRise` of the character wins.
 **Long routes** (engine choice): goals in unloaded zones use `CoarseRoute` (terrain grid, slope and
 water costs, no buildings); the navmesh part ends inside loaded zones, the rest is provisional and
-re-asked. **Observed**: Hub→(-36000,-6000) arrives.
+re-asked; its zones within `Lookahead` load early. **Observed**: Hub→(-36000,-6000) and Hub→Squin arrive.
 
 ### Generator (runtime and tool-time navmesh building)
 
