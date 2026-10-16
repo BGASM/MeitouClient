@@ -103,7 +103,13 @@ public sealed class UiPainter : IDisposable
                 float border = 0;
                 bool bordered = !flip && float.TryParse(c.Properties.GetValueOrDefault("ImageBorder"), System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out border) && border > 0;
-                if (bordered)
+                // ImageAngle: radians clockwise about the box's centre (MyGUI's RotatingSkin, the map's camera marker).
+                if (float.TryParse(c.Properties.GetValueOrDefault("ImageAngle"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float angle) && angle != 0)
+                {
+                    overlay.ImageRotated(loaded.Sampled, new(b.X, b.Y, b.X + b.Width, b.Y + b.Height),
+                        new(source.X / loaded.Texture.Desc.Width, v0, (source.X + source.Width) / loaded.Texture.Desc.Width, v1), tint, angle);
+                }
+                else if (bordered)
                 {
                     float borderScale = float.TryParse(c.Properties.GetValueOrDefault("ImageBorderScale"), System.Globalization.NumberStyles.Float,
                         System.Globalization.CultureInfo.InvariantCulture, out float parsed) ? Math.Max(0, parsed) : 1;
@@ -122,7 +128,7 @@ public sealed class UiPainter : IDisposable
                 else
                     overlay.Image(loaded.Sampled, new(b.X, b.Y, b.X + b.Width, b.Y + b.Height),
                         new(source.X / loaded.Texture.Desc.Width, v0, (source.X + source.Width) / loaded.Texture.Desc.Width, v1), tint);
-                if (tint.W >= 1 && masks.TryGetValue(image.Texture, out var imageMask)) AddOpaque(imageMask, source, b, clip, allowCore: !flip && !bordered);
+                if (angle == 0 && tint.W >= 1 && masks.TryGetValue(image.Texture, out var imageMask)) AddOpaque(imageMask, source, b, clip, allowCore: !flip && !bordered);
                 overlay.Flush(width, height, clip);
             }
             if (resources.Skins.TryGetValue(c.Skin, out var skin) && textures.TryGetValue(skin.Texture, out var atlas))

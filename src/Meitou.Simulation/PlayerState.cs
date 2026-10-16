@@ -18,6 +18,29 @@ public sealed class PlayerState
     public int Squad { get; set; } = -1;
     /// <summary>The character of another faction the HUD shows (<see cref="InspectCommand"/>), or <see cref="CharacterId.None"/>. Display only: not hashed and not saved.</summary>
     public CharacterId Inspected { get; set; } = CharacterId.None;
+    /// <summary>
+    /// What the player knows of each placed town (<see cref="PopulationData.Sites"/> order): discovered, explored, recently discovered (docs/game/ui-screens.md "Map").
+    /// Replaced, never changed in place, so a snapshot may hold it. Not hashed: it follows from positions and nothing in the simulation reads it.
+    /// </summary>
+    public TownKnowledge[] Towns { get; private set; } = [];
+
+    /// <summary>Adds <paramref name="flags"/> to a town's knowledge; true when that changed it.</summary>
+    public bool Know(int site, TownKnowledge flags)
+    {
+        if (site < 0) return false;
+        if (site < Towns.Length && (Towns[site] & flags) == flags) return false;
+        var next = new TownKnowledge[Math.Max(Towns.Length, site + 1)];
+        Towns.CopyTo(next, 0);
+        next[site] |= flags;
+        Towns = next;
+        return true;
+    }
+
+    internal void SeeDiscoveries()
+    {
+        if (!Towns.Any(t => (t & TownKnowledge.Recent) != 0)) return;
+        Towns = [.. Towns.Select(t => t & ~TownKnowledge.Recent)];
+    }
 
     /// <summary>Drops characters that are gone (serial phases, after the commit).</summary>
     internal void Prune(CharacterTable table)
@@ -59,6 +82,9 @@ public sealed class PlayerSystem(PopulationData? data = null) : ITickSystem
                     foreach (var id in selectable)
                         if (!player.Selection.Contains(id)) player.Selection.Add(id);
                     break;
+                case SeenDiscoveriesCommand:
+                    player.SeeDiscoveries();
+                    break;
                 case InspectCommand inspect:
                     if (!inspect.Target.IsNone) player.Selection.Clear();
                     player.Inspected = inspect.Target;
@@ -91,4 +117,17 @@ public sealed class PlayerSystem(PopulationData? data = null) : ITickSystem
     }
 
     public void SlowWorld(World world) => world.Player.Prune(world.Characters);
+}
+
+/// <summary>What the player knows of a town (the GAMESTATE_TOWN bools <c>discovered</c>, <c>explored</c>, <c>recently discovered</c>; docs/game/ui-screens.md "Map").</summary>
+[Flags]
+public enum TownKnowledge : byte
+{
+    None = 0,
+    /// <summary>On the map.</summary>
+    Discovered = 1,
+    /// <summary>Visited: the map names it and shows its faction's colour.</summary>
+    Explored = 2,
+    /// <summary>Found but the map not yet opened since: the map marks it as new.</summary>
+    Recent = 4,
 }

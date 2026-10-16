@@ -66,7 +66,8 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
             return true;
         }
         if (button == MouseButton.Right && CloseContextMenu()) return true;
-        if (button == MouseButton.Right && MapMoveOrder(p, shift)) return true;
+        if (button == MouseButton.Right && MapRightDown(p)) return true;
+        if (button == MouseButton.Middle && UiVisible && MapPointerDown(p)) return true;
         if (button == MouseButton.Right && !OverHud(p))
         {
             // Alt + right click on a downed or dead character: the nearest selected loots it (take all). Ctrl + right click: picks it up, or puts it down when a selected
@@ -119,6 +120,8 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     {
         mouse = p;
         if (button == MouseButton.Left) { InventoryPointerUp(p); faithfulScreens.PointerUp(); mapDrag = null; }
+        if (button == MouseButton.Middle) mapDrag = null;
+        if (button == MouseButton.Right && MapRightUp(p)) return;
         if (button == MouseButton.Right) ContextRelease();
         if (button == MouseButton.Right && steering)
         {
@@ -156,6 +159,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     public void Steer(bool final = false)
     {
         UpdateContextMenu();
+        UpdateMap();
         if (!steering || OverHud(mouse)) return;
         if (Ray(mouse) is not { } ray || GroundHit(ray.Origin, ray.Direction) is not { } hit) return;
         PlaceMarker(hit);   // the marker follows the cursor every frame; the order only once a tick

@@ -386,6 +386,21 @@ public sealed unsafe class DebugOverlay : IDisposable
         Quad(destination.X, destination.Y, destination.Z, destination.W, uv.X, uv.Y, uv.Z, uv.W, colour);
     }
 
+    /// <summary>Queues a texture rectangle turned by <paramref name="angle"/> radians (clockwise on screen) about its centre.</summary>
+    public void ImageRotated(SampledTexture texture, Vector4 destination, Vector4 uv, Vector4 colour, float angle)
+    {
+        if (batch.Count > 0 && (imageBatch is null || imageBatch.Value != texture))
+            throw new InvalidOperationException("Flush before switching overlay textures.");
+        imageBatch = texture;
+        var centre = new Vector2(destination.X + destination.Z, destination.Y + destination.W) / 2;
+        var half = new Vector2(destination.Z - destination.X, destination.W - destination.Y) / 2;
+        var (sin, cos) = MathF.SinCos(angle);
+        Vector2 Corner(float sx, float sy) => centre + new Vector2(sx * half.X * cos - sy * half.Y * sin, sx * half.X * sin + sy * half.Y * cos);
+        var (a, b, c, d) = (Corner(-1, -1), Corner(1, -1), Corner(1, 1), Corner(-1, 1));
+        Emit(a.X, a.Y, uv.X, uv.Y, colour); Emit(b.X, b.Y, uv.Z, uv.Y, colour); Emit(c.X, c.Y, uv.Z, uv.W, colour);
+        Emit(a.X, a.Y, uv.X, uv.Y, colour); Emit(c.X, c.Y, uv.Z, uv.W, colour); Emit(d.X, d.Y, uv.X, uv.W, colour);
+    }
+
     /// <summary>Queues a solid triangle (pixels, top-left origin).</summary>
     public void Triangle(Vector2 a, Vector2 b, Vector2 c, Vector4 colour)
     {

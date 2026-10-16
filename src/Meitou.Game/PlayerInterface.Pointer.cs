@@ -34,6 +34,7 @@ sealed partial class PlayerInterface
 
     (long Tick, Vector2 Mouse, bool Ctrl, bool Alt, string Name, CharacterId? Target) Point()
     {
+        if (mapDrag is not null) return (-1, mouse, CtrlHeld, AltHeld, "hand", null);   // the map's pan
         if (UiVisible && pointerOverUi || UiCapturesPointer || ContextMenuOpen || dragging || settingsOpen || TitleOpen) return (-1, mouse, CtrlHeld, AltHeld, "arrow", null);
         var snapshot = session.CurrentSnapshot;
         if (pointer.Tick == snapshot.Tick && pointer.Mouse == mouse && pointer.Ctrl == CtrlHeld && pointer.Alt == AltHeld) return pointer;
