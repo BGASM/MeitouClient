@@ -21,7 +21,7 @@ Project rules: [AGENTS.md](AGENTS.md). Engine constraints: [DECISIONS.md](DECISI
 
 | Area | Remaining work / authoritative reference |
 | --- | --- |
-| Data | Derived `wall master` references and exact workshop subscription selection. [FCS](docs/formats/fcs-mod.md), [resource lookup](docs/formats/overview.md). |
+| Data | Exact workshop subscription selection. [FCS](docs/formats/fcs-mod.md), [resource lookup](docs/formats/overview.md). |
 | Characters | Remaining body/attachment/material parity and exact original random sequence. [Characters](docs/characters.md), [animation](docs/animation.md), [renderer](docs/character-renderer.md). |
 | Navigation | Global pathing, dynamic doors and navmesh cache/lifetime gaps. [Pathfinding](docs/game/pathfinding.md), [simulation](docs/simulation.md#navmesh). |
 | AI | Wars, prisoners/slavers, planner and full off-screen town simulation. [AI research](docs/game/ai.md), [runtime](docs/simulation.md#ai). |

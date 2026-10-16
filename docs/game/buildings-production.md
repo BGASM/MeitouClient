@@ -176,6 +176,57 @@ shows the first failing message in this order (**Verified** unless marked):
   area (`FUN_1404d2c80` -> `FUN_1403a66c0`, **Observed**). That a new building starts at progress 0 with nothing
   delivered is **Observed** (the factory's complete flag is false).
 
+### Walls
+
+Ghost class `PreviewBuilding_Wall` for `links together` buildings; **Verified** unless marked (slots 9/10/12/17/20/21/24/
+25 at `FUN_140428920`, `FUN_140428100`, `FUN_140427780`, `FUN_140429510`, `FUN_14042b660`, `FUN_14042b390`,
+`FUN_140428fe0`, `FUN_140428570`). Data: `link type` 0 normal, 1 connector, 2 lower wedge, 3 single (towers, gates), 4
+short; a piece runs from its position along its own +Z for `link length` x `scale` (base footprints match: Makeshift Wall
+155 x 1.1 reaches z 169.7). Subsections get a derived `wall master` ([loader](../formats/fcs-mod.md#game-loader)). The
+"left side"/"right side" actors of fcs.def's help text do not occur in the exe (**Observed**, absence).
+
+- **Controls**: click the start, move, click the end (no hold-drag). The first click starts a line for a normal wall, or
+  for a single only when snapped (unsnapped singles and selected subsections place as one ordinary ghost). The second
+  click queues every piece and, unless the end snapped or the wall is a single, a new line starts at the far end (clicks
+  chain a polyline). Right click drops the line. The first click posts "Blue arrows point outwards, towards enemy.";
+  arrows (`arrow.mesh`, "bluebuilding", at rot x (0, 30, len/2), turned 180 deg, scale 2) mark each piece, which way the
+  mesh points is **Unknown**. A global flag `DAT_1421337b8` can block the first click (**Unknown**).
+- **Pieces** (`FUN_14042b660`): the wall and its `wall subsections`; connector and lower wedge kept apart, the rest with a
+  length sorted longest first. A single is used once per line.
+- **Straight run** (`FUN_14042a4b0`): along the horizontal start->end, capped at 10000. Terrain profile every 0.5 x the
+  longest length (10 if 0), each point re-placed at that 3D distance along the slope, interior points lowered to
+  min(y, 0.25 prev + 0.5 y + 0.25 next). Height offsets so/eo = start/end y minus the profile there; piece end =
+  profile point at cur + dir x len plus `eo + (rem - len) / L x (so - eo)`, at 3D distance len - stretch from cur. Piece
+  = first with length < remaining + 10 (full pieces, then shorts; overshoot <= 10). A bend > 10 deg to the previous
+  piece puts the shortest piece centred on the joint along the bisector (crest, not when the shortest is a single), < -10
+  the wedge at the joint (valley). Stops when < 10 remains, past the end, or after 500 pieces; a leftover shorter than
+  the shortest piece - 10 stays open. A climb steeper than `max slope` continues straight until the hill rises
+  `building height` - 10 above it (`FUN_14042a2b0`, **Observed**). With a snapped end, later frames shorten every piece
+  by remaining / count so the run closes on the point (**Observed**).
+- **Orientation** (`FUN_1404278b0`): +Z towards the piece's end (pitching with the slope), +X level (Y x Z).
+- **Snapping** (`FUN_1404289f0`, `FUN_140427950`): candidates are the queued wall ghosts and every loaded building with
+  `links together` (no owner or family filter seen; Building slot 4 filters, **Unknown**). Link points: start =
+  position, end = position + rot x (0, 0, len); direction = the wall's +Z, a connector's end direction turned 48 deg
+  about Y. Points within sqrt(10) count as joined. Search in X/Z, radius 90 (25 inside a building): a free point scores
+  d^2 - r^2, a joined one d^2, best below r^2, so free points snap within 127 and win. Codes 1 free end, 2 free start, 3
+  joined. A line started on a start (code & 2) runs backwards: each piece is placed from the far point back towards the
+  joint. Its end snaps only to ends; a forward line's only to starts (a non-matching best hit is dropped).
+- **Snapped joints** (`FUN_140429cc0`): turn = angle from the snap direction to the line; trunc(turn / 60) shortest pieces
+  (none for a single) each turned an equal share; connectors at the joint and after each piece only when the line leaves
+  on one side (`dot(perp, b) > -0.01` xor backwards, perp = (D.z, 0, -D.x)). Straight runs get no connectors.
+- **Validity**: every piece runs the ordinary checks (footprint, slope as its own pitch: `rot x Y` within `max slope` of
+  up, `FUN_140429510`); one failure refuses the line, pieces are drawn by their own result. Near a snapped joint (pieces
+  within the first/last 120 of the run) walls with a link point within 20 of it do not block; connectors and wedges
+  never block (`FUN_140427b00`, **Observed**).
+- **Commit**: each piece is queued and becomes its own building and construction site from its own record (`is wall
+  gate` -> gate building, else `WallBuilding`). On Confirm and zone load a short/connector/wedge without a parent
+  attaches to a nearby wall (`FUN_14029ac50`, links not saved, **Observed**); a child forwards build work and deliveries
+  to the parent (slot 69), whose progress sets the children's (slots 71-73), so an attached subsection costs nothing of
+  its own (**Observed**). A wall with `build threshold` 0 rebuilds the navmesh when queued (see Commit above).
+- **Walls after building** (**Observed**): "Wall termites! - Your base became inaccessible. You need at least 1 gate in
+  your walls." (`FUN_1402ef1f0`) destroys a trapping wall with `destroyed navmesh`, else dismantles it; WallBuilding damage
+  `clamp((hit1 x 2 + hit0 x 0.5) x 0.5, 10, 60) x 0.003` off health (slot 62, **Verified**).
+
 ### Build menu
 
 **Verified** (`FUN_1406bff30`, `FUN_1404e4480`, `FUN_1404e4210`, `FUN_14082ea60`, `FUN_140830b40`): every BUILDING is a

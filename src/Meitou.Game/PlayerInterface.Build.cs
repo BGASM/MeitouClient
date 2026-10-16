@@ -40,6 +40,12 @@ sealed partial class PlayerInterface
     long buildClock;
     bool ghostsDrawn;
     string? buildMessage;
+    // Walls (docs/game/buildings-production.md "Walls"): the line being laid (its wall, start, the snap there and whether it runs backwards), its pieces this frame with their checks,
+    // the snap at its end, and the snap of the ghost before the first click.
+    (BuildingBuildData Master, Vector3 Start, WallSnap? StartSnap, bool Reversed)? wallLine;
+    readonly List<(WallPiece Piece, PlacementFailure Failure, Vector2[]? Hull)> wallPieces = [];
+    WallSnap? wallEndSnap, ghostSnap;
+    Dictionary<string, BuildingBuildData>? buildIndex;
 
     /// <summary>What build mode needs from the host (null: no build mode, B does nothing).</summary>
     public BuildServices? BuildHost { get => buildHost; set => buildHost = value; }
@@ -60,6 +66,8 @@ sealed partial class PlayerInterface
         ghost = null;
         buildMessage = null;
         buildClock = 0;
+        wallLine = null;
+        wallPieces.Clear();
         if (on)
         {
             buildQueue.Clear();
@@ -155,7 +163,12 @@ sealed partial class PlayerInterface
         ghostTilt = Math.Clamp(ghostTilt + Held(EngineKey.RightBracket, EngineKey.LeftBracket) * TiltPerSecond * dt, 0, 1);
 
         ghost = null;
-        if (CurrentBuilding() is { } building && !pointerOverUi && Ray(mouse) is { } ray && GroundHit(ray.Origin, ray.Direction) is { } hit)
+        wallPieces.Clear();
+        wallEndSnap = ghostSnap = null;
+        if (wallLine is { } line && line.Master != CurrentBuilding()) wallLine = null;
+        if (wallLine is { } active && !pointerOverUi && Ray(mouse) is { } lineRay && GroundHit(lineRay.Origin, lineRay.Direction) is { } lineEnd)
+            LayWall(host, active, lineEnd);
+        else if (wallLine is null && CurrentBuilding() is { } building && !pointerOverUi && Ray(mouse) is { } ray && GroundHit(ray.Origin, ray.Direction) is { } hit)
         {
             var parts = host.Parts(building.Id);
             var footprint = host.Placement.Footprint(building.Id);
@@ -169,13 +182,126 @@ sealed partial class PlayerInterface
             var tilt = axis.LengthSquared() < 1e-10f ? Quaternion.Identity : Quaternion.CreateFromAxisAngle(Vector3.Normalize(axis), angle);
             var rotation = tilt * Quaternion.CreateFromAxisAngle(Vector3.UnitY, ghostYaw);
             var position = new Vector3(hit.X, hit.Y + ghostLift, hit.Z);
+            float yaw = ghostYaw;
+            Func<string, Vector3, Quaternion, bool>? ignore = null;
+            // A wall ghost before its first click snaps to the nearest link point: it starts there, or ends there on a free start (Verified, FUN_140427950).
+            if (building is { LinksTogether: true, LinkType: 0 or 3 } && WallLine.Find(WallLinks(), position) is { } snap)
+            {
+                ghostSnap = snap;
+                rotation = WallLine.LookRotation(snap.Direction);
+                position = snap.Code == 2 ? snap.Point - Vector3.Transform(new Vector3(0, 0, building.LinkLength), rotation) : snap.Point;
+                yaw = PlacementCheck.YawOf(rotation);
+                ignore = WallIgnore(new WallPiece(building, position, rotation), [snap.Point]);
+            }
             var snapshot = session.CurrentSnapshot;
-            var failure = !Unlocked().Contains(building.Id) ? PlacementFailure.NotAvailable : PlacementCheck.Evaluate(new PlacementQuery(building, position, rotation, ghostYaw, 0, parts, buildQueue,
-                snapshot.Characters, snapshot.Buildings, host.Towns(), host.PlayerFactionId(), host.Placement));
-            ghost = (position, rotation, failure, building, footprint?.Place(position, Quaternion.CreateFromAxisAngle(Vector3.UnitY, ghostYaw)));
+            var failure = !Unlocked().Contains(building.Id) ? PlacementFailure.NotAvailable : PlacementCheck.Evaluate(new PlacementQuery(building, position, rotation, yaw, 0, parts, buildQueue,
+                snapshot.Characters, snapshot.Buildings, host.Towns(), host.PlayerFactionId(), host.Placement) { Ignore = ignore });
+            ghost = (position, rotation, failure, building, footprint?.Place(position, Quaternion.CreateFromAxisAngle(Vector3.UnitY, yaw)));
         }
-        buildMessage = ghost is { Failure: not PlacementFailure.None } g ? PlacementCheck.Message(g.Failure) : null;
+        buildMessage = ghost is { Failure: not PlacementFailure.None } g ? PlacementCheck.Message(g.Failure)
+            : wallPieces.FirstOrDefault(p => p.Failure != PlacementFailure.None) is { Piece.Data: not null } bad ? PlacementCheck.Message(bad.Failure) : null;
         ShowGhosts();
+    }
+
+    // ---- walls ----
+
+    BuildingBuildData? BuildData(string id)
+    {
+        buildIndex ??= buildHost?.Menu.Catalog.GroupBy(b => b.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        return buildIndex?.GetValueOrDefault(id);
+    }
+
+    /// <summary>The link points a line can snap to: the queued wall ghosts and the player's wall sites and buildings (the level's town walls are not candidates, an engine gap).</summary>
+    List<WallLink> WallLinks() => WallLine.Links(
+        buildQueue.Select(q => (q.Building, q.Position, q.Rotation))
+            .Concat(session.CurrentSnapshot.Buildings.Select(s => (Data: BuildData(s.Record), s.Position, s.Rotation)).Where(w => w.Data is not null).Select(w => (w.Data!, w.Position, w.Rotation))));
+
+    /// <summary>
+    /// What never blocks a wall piece (<b>Observed</b>, <c>FUN_140427b00</c>): connectors and wedges, and near a snapped joint the walls with a link point at that joint.
+    /// </summary>
+    Func<string, Vector3, Quaternion, bool> WallIgnore(WallPiece piece, IReadOnlyList<Vector3> joints) => (record, position, rotation) =>
+    {
+        if (BuildData(record) is not { LinksTogether: true } other) return false;
+        if (other.LinkType is 1 or 2) return true;
+        var (start, end) = WallLine.Ends(other, position, rotation);
+        foreach (var joint in joints)
+            if (WallLine.NearJoint(piece, joint) && (FlatDistance(start, joint) <= WallLine.JointReach || FlatDistance(end, joint) <= WallLine.JointReach)) return true;
+        return false;
+    };
+
+    static float FlatDistance(Vector3 a, Vector3 b) => Vector2.Distance(new(a.X, a.Z), new(b.X, b.Z));
+
+    /// <summary>
+    /// Lays the line from its start to the cursor (docs/game/buildings-production.md "Walls"): the end snaps to another wall's start (a backwards line: to an end), every piece is checked
+    /// on its own (one failure refuses the line, each is drawn by its own result).
+    /// </summary>
+    void LayWall(BuildServices host, (BuildingBuildData Master, Vector3 Start, WallSnap? StartSnap, bool Reversed) line, Vector3 hit)
+    {
+        var end = new Vector3(hit.X, hit.Y + ghostLift, hit.Z);
+        var endSnap = WallLine.Find(WallLinks(), end, line.Reversed ? 1 : 2);
+        if (endSnap is { } es && FlatDistance(es.Point, line.Start) < 1) endSnap = null;
+        wallEndSnap = endSnap;
+        var pieces = WallLine.Layout(line.Master, BuildData, host.Placement.Ground, line.Start, line.StartSnap, endSnap?.Point ?? end, endSnap, line.Reversed);
+        var joints = new List<Vector3>();
+        if (line.StartSnap is { } s) joints.Add(s.Point);
+        if (endSnap is { } e) joints.Add(e.Point);
+        var snapshot = session.CurrentSnapshot;
+        var towns = host.Towns();
+        string faction = host.PlayerFactionId();
+        bool available = Unlocked().Contains(line.Master.Id);
+        foreach (var piece in pieces)
+        {
+            float yaw = PlacementCheck.YawOf(piece.Rotation);
+            var failure = !available ? PlacementFailure.NotAvailable : PlacementCheck.Evaluate(new PlacementQuery(piece.Data, piece.Position, piece.Rotation, yaw, 0, host.Parts(piece.Data.Id),
+                buildQueue, snapshot.Characters, snapshot.Buildings, towns, faction, host.Placement) { WallPiece = true, Ignore = WallIgnore(piece, joints) });
+            wallPieces.Add((piece, failure, host.Placement.Footprint(piece.Data.Id)?.Place(piece.Position, Quaternion.CreateFromAxisAngle(Vector3.UnitY, yaw))));
+        }
+    }
+
+    /// <summary>
+    /// A click (or Space) for walls (<b>Verified</b>, <c>FUN_140428100</c>): the first starts a line at the ghost (a single piece, a tower or gate, only when snapped); the next queues every
+    /// piece when all can stand and, unless the end snapped or the wall is a single, goes on with a new line from the far end. False: not a wall click.
+    /// </summary>
+    bool WallClick()
+    {
+        if (wallLine is { } line)
+        {
+            if (wallPieces.Count == 0) return true;
+            if (wallPieces.FirstOrDefault(p => p.Failure != PlacementFailure.None) is { Piece.Data: not null } bad)
+            {
+                Notice(PlacementCheck.Message(bad.Failure), error: true);
+                return true;
+            }
+            foreach (var (piece, _, hull) in wallPieces) buildQueue.Add(new QueuedGhost(piece.Data, piece.Position, piece.Rotation, 0, hull));
+            wallLine = null;
+            if (wallEndSnap is null && line.Master.LinkType != 3)
+            {
+                // The chain goes on from the far end of the last piece, snapped to it.
+                var last = wallPieces[^1].Piece;
+                var (start, end) = WallLine.Ends(last.Data, last.Position, last.Rotation);
+                var forward = Vector3.Transform(Vector3.UnitZ, last.Rotation);
+                var dir = Vector3.Normalize(new Vector3(forward.X, 0, forward.Z));
+                wallLine = line.Reversed ? (line.Master, start, new WallSnap(start, dir, 2), true) : (line.Master, end, new WallSnap(end, dir, 1), false);
+            }
+            wallPieces.Clear();
+            return true;
+        }
+        if (ghost is { Building: { LinksTogether: true } wall } g && g.Failure != PlacementFailure.NotAvailable && (wall.LinkType == 0 || wall.LinkType == 3 && ghostSnap is not null))
+        {
+            var start = ghostSnap?.Point ?? g.Position;
+            wallLine = (wall, start, ghostSnap, ghostSnap?.Reverses ?? false);
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>A right click in build mode while a line is laid: drops the line (true: taken).</summary>
+    bool WallCancel()
+    {
+        if (!buildMode || wallLine is null) return false;
+        wallLine = null;
+        wallPieces.Clear();
+        return true;
     }
 
     /// <summary>Shift as the host last saw it: the slow modifier of the ghost's up and down move.</summary>
@@ -193,6 +319,9 @@ sealed partial class PlayerInterface
             if (ghost is { } g)
                 draws.Add(new(host.Parts(g.Building.Id), Matrix4x4.CreateFromQuaternion(g.Rotation) * Matrix4x4.CreateTranslation(g.Position),
                     g.Failure == PlacementFailure.None ? WorldObjectRenderer.GhostState.Valid : WorldObjectRenderer.GhostState.Invalid));
+            foreach (var (piece, failure, _) in wallPieces)
+                draws.Add(new(host.Parts(piece.Data.Id), Matrix4x4.CreateFromQuaternion(piece.Rotation) * Matrix4x4.CreateTranslation(piece.Position),
+                    failure == PlacementFailure.None ? WorldObjectRenderer.GhostState.Valid : WorldObjectRenderer.GhostState.Invalid));
         }
         host.DrawGhosts(draws);
         ghostsDrawn = draws.Count > 0;
@@ -204,6 +333,7 @@ sealed partial class PlayerInterface
     bool BuildClick()
     {
         if (!buildMode) return false;
+        if (WallClick()) return true;
         if (ghost is { Failure: not PlacementFailure.None } failed) Notice(PlacementCheck.Message(failed.Failure), error: true);
         else QueueGhost();
         return true;
@@ -212,6 +342,7 @@ sealed partial class PlayerInterface
     /// <summary>Queues the ghost as it stands (the original's click: the ghost joins the queue and a new one starts).</summary>
     void QueueGhost()
     {
+        if (WallClick()) return;
         if (ghost is not { Failure: PlacementFailure.None } g) return;
         buildQueue.Add(new QueuedGhost(g.Building, g.Position, g.Rotation, 0, g.Hull));
         ghostLift = 0;
@@ -219,6 +350,7 @@ sealed partial class PlayerInterface
 
     void BuildUndo()
     {
+        if (WallCancel()) return;
         if (buildQueue.Count > 0) buildQueue.RemoveAt(buildQueue.Count - 1);
     }
 
@@ -230,7 +362,9 @@ sealed partial class PlayerInterface
     }
 
     /// <summary>The pointer in build mode: <c>build</c> over the world while the ghost can stand, <c>invalidmove</c> while it cannot.</summary>
-    string? BuildPointer() => !buildMode || ghost is not { } g ? null : g.Failure == PlacementFailure.None ? "build" : "invalidmove";
+    string? BuildPointer() => !buildMode ? null
+        : wallLine is not null ? wallPieces.Exists(p => p.Failure != PlacementFailure.None) ? "invalidmove" : "build"
+        : ghost is not { } g ? null : g.Failure == PlacementFailure.None ? "build" : "invalidmove";
 
     // ---- the window ----
 
@@ -273,7 +407,7 @@ sealed partial class PlayerInterface
     /// <summary>The Commands box: the build map's keys (the original's own text is <b>Unknown</b>).</summary>
     static readonly string[] BuildCommandLines =
     [
-        "Left click / Space: place", "Backspace: undo", ", .: rotate", "- =: move down / up (Shift: slow)", "[ ]: tilt", "Confirm: build what is placed", "B: leave build mode",
+        "Left click / Space: place", "Walls: click the start, click the end; right click: drop the line", "Backspace: undo", ", .: rotate", "- =: move down / up (Shift: slow)", "[ ]: tilt", "Confirm: build what is placed", "B: leave build mode",
     ];
 
     /// <summary>The stats panel's lines, the failure message and the queue count, over the arranged window.</summary>

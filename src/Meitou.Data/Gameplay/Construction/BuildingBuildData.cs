@@ -42,6 +42,15 @@ public sealed record BuildingBuildData
     public bool CeilingPlacement { get; init; }
     /// <summary><c>is door</c>: build work x3, never completes itself, no refund (out of scope this milestone).</summary>
     public bool IsDoor { get; init; }
+    /// <summary><c>link type</c> (WallSectionLinkType): 0 normal, 1 connector, 2 lower wedge, 3 single (towers, gates), 4 short.</summary>
+    public int LinkType { get; init; }
+    /// <summary><c>link length</c> x <c>scale</c>: the piece runs from its position this far along its own +Z.</summary>
+    public float LinkLength { get; init; }
+    /// <summary><c>building height</c>.</summary>
+    public float BuildingHeight { get; init; } = 100;
+    public bool IsWallGate { get; init; }
+    /// <summary>The <c>wall subsections</c> (BUILDING ids): the shorter pieces, connector and wedge a line of this wall uses.</summary>
+    public IReadOnlyList<string> WallSubsections { get; init; } = [];
 
     /// <summary>The site's target: the sum of the required amounts (0 completes at once).</summary>
     public float Target
@@ -97,6 +106,11 @@ public sealed record BuildingBuildData
             IsNode = RecordReading.Bool(r, "is node", false),
             CeilingPlacement = RecordReading.Bool(r, "ceiling placement", false),
             IsDoor = RecordReading.Bool(r, "is door", false),
+            LinkType = RecordReading.Int(r, "link type", 0),
+            LinkLength = RecordReading.Float(r, "link length", 0) * RecordReading.Float(r, "scale", 1),
+            BuildingHeight = RecordReading.Float(r, "building height", 100),
+            IsWallGate = RecordReading.Bool(r, "is wall gate", false),
+            WallSubsections = [.. r.GetReferences("wall subsections").Select(s => s.TargetStringId)],
         };
     }
 

@@ -313,8 +313,8 @@ Arrests, the recognition meter and the marker are hashed only while set. What a 
 
 Player construction contract (Faithful UI). Facts: [construction](game/buildings-production.md#construction),
 [placement](game/buildings-production.md#placement), [build menu](game/buildings-production.md#build-menu),
-[build tasks](game/ai-tasks.md#build-tasks), [save keys](formats/zones.md#placement-keys). Out of scope: walls and
-snapping, outpost behaviour beyond the record (residents, raids, renaming, the map marker), the door x3 rule,
+[build tasks](game/ai-tasks.md#build-tasks), [save keys](formats/zones.md#placement-keys). Out of scope: the
+wall subsection parent links, outpost behaviour beyond the record (residents, raids, renaming, the map marker), the door x3 rule,
 production/power/storage, research progress, fetching from storage (task 247).
 
 **Shared types** (stubs f4cb78c, filled by the simulation track):
@@ -435,6 +435,17 @@ rounded up (rounding **Unknown**). Left click or Space queues a valid ghost, Bac
 on a site with characters selected gives `BuildOrder` (held 0.2 s: menu with Build, Dismantle -> `DismantleOrder`, Cancel
 Construction -> `CancelSite` while nothing is delivered); the pointer is `build` over a site.
 
+Walls (`Building/WallLine.cs`, facts in [walls](game/buildings-production.md#walls)): a `links together` normal wall, or
+a snapped tower/gate, is laid as a line: first click (or Space) starts it at the ghost, which snaps to the nearest link
+point of a queued wall or player wall site; each frame `WallLine.Layout` lays bend pieces at snapped ends and the
+straight run to the cursor (end snapped to a start, or an end for a backwards line), and every piece runs `Evaluate`
+as a `WallPiece` (own pitch for slope; `Ignore` skips connectors, wedges and walls at a snapped joint). The next click
+queues every piece as its own ghost and chains a line from the far end; right click or Backspace drops the line. Each
+piece becomes its own site; `ConstructionSystem` allows a subsection when a BUILDING listing it in `wall subsections`
+is unlocked. **Engine gaps**: level (NPC town) walls are not snap candidates; indoor lines (radius 25), the steep-climb
+straight extension, the offset clamp and the arrows are not built; the stretch is recomputed each frame from the signed
+overshoot; attached subsections are not children (each costs its own materials).
+
 **Saves.** `Saving/BuildingSave.cs` writes each site as a GAMESTATE_BUILDING (`<id>-S23`) plus its entry in the zone
 file's `0-buildinglist` (keys per [zones](formats/zones.md#placement-keys)); a zone without a file gets one, the slot
 list and the handle (`C` = zone container, `CS` 11111, next free `I`) follow, and player-built entries the world no
@@ -524,7 +535,7 @@ order. Renderer state lives in Rendering; snapshots are the simulation-to-host b
 
 Original-game unknowns are maintained in each linked subsystem reference; do not infer parity from our determinism tests.
 
-**Engine gaps:** remaining AI is listed in [AI](#ai); persistent town/world state, production, walls and outposts, full UI fidelity, dynamic doors and physics remain incomplete. Save and combat limitations are listed in their subsystem sections.
+**Engine gaps:** remaining AI is listed in [AI](#ai); persistent town/world state, production, outposts, full UI fidelity, dynamic doors and physics remain incomplete (walls: see [Buildings](#buildings)). Save and combat limitations are listed in their subsystem sections.
 
 **Behaviour and hash constraints.**
 - No end-of-tick hook: the combat system swaps its arrays at the end of its `SlowWorld`, so the result depends on the system order

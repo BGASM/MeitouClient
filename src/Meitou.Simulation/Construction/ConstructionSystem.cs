@@ -71,6 +71,24 @@ public sealed class ConstructionSystem : ITickSystem
     readonly IReadOnlyList<PlacementTown> towns;
     readonly string playerFactionId;
     readonly Dictionary<string, BuildingBuildData?> buildData = new(StringComparer.Ordinal);
+    // A wall subsection (short piece, connector, wedge) to the BUILDINGs that list it in `wall subsections`.
+    Dictionary<string, List<string>>? sectionOf;
+
+    /// <summary>
+    /// Research allows a plan: its record is unlocked, or it is a wall subsection of an unlocked BUILDING (a wall line lays those pieces; no research enables them, docs/game/buildings-production.md "Walls").
+    /// </summary>
+    bool Unlocked(World world, string record)
+    {
+        if (world.Research.IsUnlocked(record)) return true;
+        if (sectionOf is null)
+        {
+            sectionOf = new(StringComparer.Ordinal);
+            foreach (var r in db.OfType(Meitou.Data.Fcs.FcsRecordType.BUILDING))
+                foreach (var s in r.GetReferences("wall subsections"))
+                    (sectionOf.TryGetValue(s.TargetStringId, out var owners) ? owners : sectionOf[s.TargetStringId] = []).Add(r.StringId);
+        }
+        return sectionOf.TryGetValue(record, out var masters) && masters.Exists(world.Research.IsUnlocked);
+    }
     // Some character may still hold a site that is gone (the sweep in Schedule ends its task).
     bool sweep;
 
@@ -186,7 +204,7 @@ public sealed class ConstructionSystem : ITickSystem
     BuildSite? Place(World world, PlannedBuilding plan)
     {
         var data = Data(plan.Record);
-        if (data is null || !world.Research.IsUnlocked(plan.Record))
+        if (data is null || !Unlocked(world, plan.Record))
         {
             world.Post(PlacementRules.Message(PlacementFailure.NotAvailable));
             return null;

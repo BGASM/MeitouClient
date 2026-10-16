@@ -27,7 +27,13 @@ public sealed class PlacementServices
 /// <param name="Parts">The building's parts laid out at the origin with no rotation (<c>WorldObjectLayout.Building</c>), for the ground-type check.</param>
 public sealed record PlacementQuery(BuildingBuildData Building, Vector3 Position, Quaternion Rotation, float Yaw, int Floor, IReadOnlyList<PlacedMesh> Parts,
     IReadOnlyList<QueuedGhost> Queued, IReadOnlyList<CharacterSnapshot> Characters, IReadOnlyList<BuildingSnapshot> Sites,
-    IReadOnlyList<PlacementTown> Towns, string PlayerFactionId, PlacementServices Services);
+    IReadOnlyList<PlacementTown> Towns, string PlayerFactionId, PlacementServices Services)
+{
+    /// <summary>A piece of a wall line (docs/game/buildings-production.md "Walls"): its slope is its own pitch, not the ground under its box.</summary>
+    public bool WallPiece { get; init; }
+    /// <summary>Sites and queued ghosts (record, position, rotation) that never block this one: the walls at a snapped joint, connectors and wedges.</summary>
+    public Func<string, Vector3, Quaternion, bool>? Ignore { get; init; }
+}
 
 /// <summary>
 /// The host's half of the placement checks (docs/simulation.md "Buildings", "Placement validation"; the messages and their order are docs/game/buildings-production.md
@@ -56,7 +62,8 @@ public static class PlacementCheck
         var hull = q.Services.Footprint(b.Id) is { } footprint ? footprint.Place(q.Position, turned) : null;
         // A building under the ghost's centre: another town's or the level's (not ours), or an unfinished site of ours.
         foreach (var site in q.Sites)
-            if (q.Services.Footprint(site.Record) is { } siteFootprint && Contains(siteFootprint.Place(site.Position, site.Rotation), at))
+            if (q.Ignore?.Invoke(site.Record, site.Position, site.Rotation) != true && q.Services.Footprint(site.Record) is { } siteFootprint
+                && Contains(siteFootprint.Place(site.Position, site.Rotation), at))
                 return site.Complete ? PlacementFailure.TooCloseToBuilding : PlacementFailure.InsideIncomplete;
         foreach (var other in q.Services.StaticAround(at, 20))
             if (Contains(other.Hull, at)) return PlacementFailure.NotOwnedBuilding;
@@ -70,9 +77,11 @@ public static class PlacementCheck
             foreach (var other in q.Services.StaticAround(at, reach))
                 if (Overlap(hull, other.Hull)) return PlacementFailure.TooCloseToBuilding;
             foreach (var site in q.Sites)
-                if (q.Services.Footprint(site.Record) is { } f && Overlap(hull, f.Place(site.Position, site.Rotation))) return PlacementFailure.TooCloseToBuilding;
+                if (q.Ignore?.Invoke(site.Record, site.Position, site.Rotation) != true && q.Services.Footprint(site.Record) is { } f
+                    && Overlap(hull, f.Place(site.Position, site.Rotation))) return PlacementFailure.TooCloseToBuilding;
             foreach (var queued in q.Queued)
-                if (queued.Hull is not null && Overlap(hull, queued.Hull)) return PlacementFailure.TooCloseToBuilding;
+                if (queued.Hull is not null && q.Ignore?.Invoke(queued.Building.Id, queued.Position, queued.Rotation) != true && Overlap(hull, queued.Hull))
+                    return PlacementFailure.TooCloseToBuilding;
             foreach (var c in q.Characters)
             {
                 if (c.Body is { Dead: true } || !c.CarriedBy.IsNone) continue;
@@ -90,6 +99,9 @@ public static class PlacementCheck
             if (nodeY < q.Services.WaterLevel) return PlacementFailure.InvalidGround;
         }
 
+        // A wall piece pitches with the ground: its own up axis must be within `max slope` of the vertical (Verified, FUN_140429510).
+        if (q.WallPiece)
+            return b.MaxSlope > 0 && Vector3.Transform(Vector3.UnitY, Normalised(q.Rotation)).Y < MathF.Cos(b.MaxSlope * MathF.PI / 180) ? PlacementFailure.NotLevel : PlacementFailure.None;
         var bounds = q.Services.Footprint(b.Id)?.Bounds ?? (new Vector2(-4), new Vector2(4));
         float slope = SlopeDegrees(q.Services.Ground, at, q.Yaw, bounds, out float normalY);
         if (normalY < SteepestNormalY || b.MaxSlope > 0 && slope > b.MaxSlope) return PlacementFailure.NotLevel;

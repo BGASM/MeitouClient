@@ -56,6 +56,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     {
         mouse = p;
         if (button == MouseButton.Right && CancelInventoryDrag()) return true;
+        if (button == MouseButton.Right && !OverHud(p) && WallCancel()) return true;
         if (button == MouseButton.Left)
         {
             if (UiMouseDown(p)) return true;
