@@ -37,6 +37,10 @@ public struct CombatSlot
     public int StumbleClip, StumbleStart;
     /// <summary>How the last blow of the character's own attack ended (<see cref="BlowOutcome"/>), which sets the pause after the attack.</summary>
     public BlowOutcome LastOutcome;
+    /// <summary>The fighter it lost the initiative roll to (slot, -1: none) and until when: that one may swing at it at once, even in its pause.</summary>
+    public int YieldTo, YieldUntil;
+    /// <summary>The tick before which it starts no defence (a failed defence roll, 1.2 s; docs/game/combat.md "Pacing").</summary>
+    public int DefendReadyTick;
 
     // The ranged controller (docs/simulation.md "Combat", ranged; the original keeps it at Character +0x2f0). All zero for a character that never used a crossbow.
     /// <summary>Fighting with the crossbow rather than the melee weapon; the controller's state (<see cref="RangedStates"/>).</summary>
@@ -53,7 +57,7 @@ public struct CombatSlot
 
     public static CombatSlot Fresh(int generation) => new()
     {
-        Generation = generation, TargetSlot = -1, TargetGeneration = 0, AttackTech = -1, ReactTech = -1, ReactedSlot = -1, ReactedSeq = -1, HitTick = -1, HitPart = -1, StumbleClip = -1,
+        Generation = generation, TargetSlot = -1, TargetGeneration = 0, AttackTech = -1, ReactTech = -1, ReactedSlot = -1, ReactedSeq = -1, HitTick = -1, HitPart = -1, StumbleClip = -1, YieldTo = -1,
     };
 
     public readonly bool Fighting => TargetSlot >= 0;
@@ -94,6 +98,9 @@ public struct CombatSlot
         h.Add(StumbleClip);
         h.Add(StumbleStart);
         h.Add((int)LastOutcome);
+        h.Add(YieldTo);
+        h.Add(YieldUntil);
+        h.Add(DefendReadyTick);
         // The ranged controller goes in only once it has been used, so worlds without crossbows hash as they did before it existed.
         if (!RangedUsed) return;
         h.Add(Ranged);

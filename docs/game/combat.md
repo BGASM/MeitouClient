@@ -50,6 +50,16 @@ and the loser blocks (or circles 1.5–4.5 s at ±25 when the target does not fa
 slot (`max num attack slots` + race extra, `FUN_140666310`) → circling. `max simultaneous hits` caps the targets of
 one swing; `power N` multiplies hit N's packet; `limb N` picks the punch/kick sound.
 
+**Observed** (decompiled, not measured in game), with several attackers: a target answering a request is asked by
+anyone, not only its own target, and the winner of the roll turns to attack the asker (`FUN_140666a30`). Deciding
+(`FUN_14060c8b0`) tries attacking first and defends only when that fails; a waiting fighter that is attacked goes
+to deciding. During its own swing a fighter aborts to defend only while under 50% of it with an incoming blow past
+50% (`FUN_14060a970` → `FUN_1406083d0(0.5, 0.5)`); while anyone attacks it the swing ends at the current blow's stop
+frame (`FUN_14060a590`). The defence covers the most advanced incoming blow from anyone; a failed defence roll means
+no defence for 1.2 s (+0x14c). A dodge plays its whole clip at its own speed, then decides at once; a block that
+ends leaves 0.2 s.
+
+
 ## Armour and medical hit
 
 Coverage rolls, slot order, armour class/material quality and cut/blunt resist/efficiency affect
