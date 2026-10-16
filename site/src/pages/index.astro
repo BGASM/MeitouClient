@@ -4,7 +4,7 @@ import Base from '../layouts/Base.astro';
 <Base title="Meitou · Kenshi engine reimplementation" video>
   <section class="hero">
     <div class="stack">
-      <h1>Run Kenshi on a new engine.</h1>
+      <h1>Run Kenshi on a new engine</h1>
       <p class="lede">
         MeitouClient reimplements the engine to run original content, mods and saves unchanged.
         It reads the files of your installed copy and ships none of them.
@@ -16,7 +16,8 @@ import Base from '../layouts/Base.astro';
 <style>
   /* Fills the first view below the header (150px), stack at the bottom left like the main menu. */
   .hero { display: flex; align-items: flex-end; min-height: calc(100svh - 150px); padding: 72px 0 calc(var(--edge) + 24px); }
-  .stack { max-width: 620px; }
-  h1 { margin: 0 0 var(--space-6); color: var(--paper-light); text-shadow: 0 2px 12px rgba(8, 6, 5, .6); font: 600 clamp(32px, 6vw, 52px)/1.1 var(--font-exo); }
-  .lede { margin: 0; font-size: 18px; line-height: 27px; }
+  .stack { min-width: 0; }
+  h1 { margin: 0 0 var(--space-6); color: var(--paper-light); text-shadow: 0 2px 12px rgba(8, 6, 5, .6); white-space: nowrap; font: 600 clamp(32px, 6vw, 52px)/1.1 var(--font-exo); }
+  .lede { max-width: 620px; margin: 0; font-size: 18px; line-height: 27px; }
+  @media (max-width: 640px) { h1 { white-space: normal; } }
 </style>
