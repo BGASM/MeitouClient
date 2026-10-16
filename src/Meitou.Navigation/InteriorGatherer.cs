@@ -88,6 +88,9 @@ internal sealed partial class ZoneGeometryGatherer
 
         uint mask = site.Destroyed ? DestroyedInteriorGroupMask : InteriorGroupMask;
         AddBuilding(g, site.Record, site.Placement.InstanceId, site.Position, site.Placement.Rotation, site.Destroyed, new InteriorContext(site.Placement.InstanceId, site.Destroyed, mask, Own: true));
+        // Its layouts' furniture: walkable pieces give floor, the rest cut.
+        foreach (var (item, at, rotation) in LayoutObjects(site.Placement, site.Record, site.Position, site.Destroyed))
+            AddBuilding(g, item.Building, $"{site.Placement.InstanceId}/{item.InstanceId}", at, rotation, destroyed: false, new InteriorContext(site.Placement.InstanceId, false, mask, Own: false), item.Floor);
 
         // Other buildings standing inside the hull (furniture placed in the zone file): walkable ones give floor, the rest cut.
         var (ox, oz) = WorldLayout.ZoneOrigin(site.Placement.Zone);

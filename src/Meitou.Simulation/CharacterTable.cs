@@ -55,6 +55,14 @@ public sealed class CharacterCold
     public System.Numerics.Vector2 FormationOffset { get; set; }
     /// <summary>The path being followed (world positions, the next one at <c>CharacterHot.PathCursor</c>); replaced whole in a serial phase.</summary>
     public Vector3[] Path { get; set; } = [];
+    /// <summary>
+    /// The index into <see cref="Path"/> where its provisional long-range part begins (<see cref="PathResult.Exact"/>; int.MaxValue: none). Reaching it asks for
+    /// the path again, at most every <see cref="MovementSystem.ProvisionalRepathSeconds"/> (<see cref="ProvisionalRepathTick"/>). Set with the path, not hashed.
+    /// </summary>
+    public int PathExact { get; set; } = int.MaxValue;
+    public long ProvisionalRepathTick { get; set; }
+    /// <summary>Times the walker was stopped on the provisional part since a long route last gained a navmesh part (<see cref="MovementSystem.ProvisionalBlockedLimit"/>).</summary>
+    public int ProvisionalBlocked { get; set; }
     /// <summary>The path request in flight, so an answer to an older one is ignored.</summary>
     public long PathRequest { get; set; }
     /// <summary>
@@ -66,6 +74,12 @@ public sealed class CharacterCold
     public bool IsPlayer { get; set; }
     /// <summary>Queued move orders (X/Z) after the current one (shift + right click); changed only by the character's own partition or a serial phase.</summary>
     public List<System.Numerics.Vector2> OrderQueue { get; } = [];
+    /// <summary>
+    /// The height a move order was given at (the clicked ground), for the goal <see cref="GoalHeightAt"/>: it picks the floor where floors are stacked.
+    /// Other goals use the character's own height. Derived from orders and not hashed.
+    /// </summary>
+    public float GoalHeight { get; set; } = float.NaN;
+    public System.Numerics.Vector2 GoalHeightAt { get; set; }
     /// <summary>Animation layers in play (made by <see cref="AnimationSystem"/>; null before the first tick it runs).</summary>
     public CharacterAnimation? Animation { get; set; }
     /// <summary>The kind of weapon drawn in the right hand (None while sheathed): the stance animations are chosen for.</summary>

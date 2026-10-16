@@ -53,6 +53,27 @@ water/door costs. Unload of in-flight builds/cache invalidation remains imperfec
 are in [simulation](../simulation.md#open-questions-and-known-gaps). Original Havok tiles are
 reference evidence, not a runtime dependency or proof of DotRecast polygon parity.
 
+**Furniture.** Building interiors' furniture comes from the building's layouts (`interiors.level`
+INSTANCE_COLLECTION, the renderer's `BuildingLayouts`), skipped when destroyed. **Verified** (Hub,
+`meitou-tools navmesh`): parts with collision 189→309, furniture cut out of Squin's interiors.
+
+**Heights.** **Observed** (Hub gate stairs, the ramp north of it): a Recast polygon is planar only
+between its corners, up to ~15 units off the real surface over stairs, ramps and steep slopes; on the
+flat ~0.5. Standing heights therefore snap each polygon's height to the nearest walkable collision
+triangle (`NavSurfaces`, within 16) or the zone's terrain samples (within 30), then take the highest
+surface at most 12 above the character (stacked floors, walkways). Walkers off the mesh by ≤2 units
+(a path hugging a corner) stand on the nearest polygon.
+
+**Long routes** (engine choice, not the original's tile routing). A goal in a zone without a loaded
+navmesh routes over `CoarseRoute`: 192-unit cells over the world, steps barred where terrain sampled
+every 36 units is steeper than 40°, water cells cost the agent's water factor, A* weight 1.2, no
+buildings. The route's start is replaced by a navmesh path to the farthest point well inside loaded
+zones; the rest is provisional (`PathResult.Exact`) and asked again as the walker reaches it or is
+blocked on it. With both ends loaded but no navmesh path, the walker goes to the reachable point
+nearest the goal, then provisionally on. **Observed**: Hub→(-36000,-6000) arrives (~22k units);
+Squin's centre snaps to an isolated 1130-polygon region, unreachable even with 3×3 zones loaded
+(cause **Unknown**, perhaps a defensive wall closing the canyon).
+
 ### Generator (runtime and tool-time navmesh building)
 
 - Thread "NavMeshGenerator" (FUN_1403ce430): sleeps 100 ms when idle, works only when the manager's queues are empty

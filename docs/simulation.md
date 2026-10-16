@@ -93,13 +93,18 @@ boundaries, follow ordered path points, steer/separate using previous state and 
 New move orders preserve reusable paths; attack pursuit reschedules target paths. Turning can
 hold translation while facing changes. Original speeds/encumbrance and research are in
 [pathfinding.md](game/pathfinding.md); footprint clearance/water costs come from nav queries.
+Ground and walkability take the character's height (a move order's goal: the clicked height) to
+pick the floor where floors stack. Long-range paths have a provisional tail, repathed every 2 s
+while walked and up to 5 times when blocked on it.
 
 ## Navmesh
 
 Own DotRecast builder/cache (`Meitou.Navigation`), not Havok runtime. Default cells 2, height 1,
 48-cell tiles, agent height 18/max climb 5; ground/water/door areas. A* checks portal clearance
 `2*radius` (default radius 4), water factor and doors. `NavAdapter` exposes simulation interfaces;
-`ZoneGate` holds population until ready. Collision and world placement rules:
+`ZoneGate` holds population until ready. Meshes carry their zone's walkable collision triangles
+and terrain samples for exact standing heights; goals outside loaded zones use the coarse terrain
+grid (routing and heights: [pathfinding.md](game/pathfinding.md#own-builder)). Collision and world placement rules:
 [collision.md](formats/collision.md), [pathfinding.md](game/pathfinding.md).
 Cache validation, asynchronous unload races and key omissions are listed under known gaps.
 

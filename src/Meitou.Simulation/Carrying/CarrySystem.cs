@@ -322,7 +322,7 @@ public sealed class CarrySystem(GameConstants constants, BodyOptions options, fl
             // Beside the carrier, on its left (engine choice), when that ground is walkable.
             var side = new Vector2(MathF.Cos(cn.Yaw), -MathF.Sin(cn.Yaw)) * Settings.PutDownSide;
             float x = cn.Position.X + side.X, z = cn.Position.Z + side.Y;
-            if (world.Walkability.IsWalkable(x, z)) bn.Position = new Vector3(x, world.Walkability.GroundHeight(x, z), z);
+            if (world.Walkability.IsWalkable(x, z, cn.Position.Y)) bn.Position = new Vector3(x, world.Walkability.GroundHeight(x, z, cn.Position.Y), z);
             if (!Friendly(c, b)) KnockOutHeld(c, b);
         }
     }

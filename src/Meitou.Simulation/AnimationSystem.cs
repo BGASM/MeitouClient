@@ -219,8 +219,8 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         });
         float x = c.Position.X + block.Step.X, z = c.Position.Z + block.Step.Y;
         var walk = world.Walkability;
-        if (!walk.IsWalkable(x, z)) return;
-        c.Position = new Vector3(x, walk.GroundHeight(x, z), z);
+        if (!walk.IsWalkable(x, z, c.Position.Y)) return;
+        c.Position = new Vector3(x, walk.GroundHeight(x, z, c.Position.Y), z);
     }
 
     /// <summary>The largest footprint radius a body is tested against (a human's is 4; the biggest animals' are larger).</summary>

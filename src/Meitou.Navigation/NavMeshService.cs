@@ -89,6 +89,7 @@ internal sealed class NavMeshService : IDisposable
                     try { Cache.Save(mesh, hash, settingsHash); }
                     catch (IOException) { /* a read-only or full disk only costs the next build */ }
                 }
+                mesh.Terrain = gatherer.ZoneHeights(zone);
                 lock (publishLock) Walkability.SetWorld(Walkability.World.With(mesh));
                 var ready = new NavZoneReady(zone, origin, watch.Elapsed.TotalMilliseconds, mesh.PolygonCount);
                 if (pending.TryRemove(zone, out var tcs)) tcs.TrySetResult(ready);

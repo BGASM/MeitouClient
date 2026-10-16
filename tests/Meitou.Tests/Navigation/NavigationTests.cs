@@ -162,7 +162,10 @@ public class NavigationTests
         walk.SetWorld(world);
         Assert.True(walk.FindPath(a, b).Found);
         walk.Doors.Close("gate-1");
-        Assert.False(walk.FindPath(a, b).Found);
+        // Shut out: the walker goes as near as it can on its side, and the rest is only provisional.
+        var shut = walk.FindPath(a, b);
+        Assert.True(shut.IsProvisional);
+        Assert.True(shut.Points[shut.Exact - 1].Z < cz);
     }
 
     [Fact]

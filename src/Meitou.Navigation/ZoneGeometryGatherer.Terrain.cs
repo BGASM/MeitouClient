@@ -7,6 +7,13 @@ namespace Meitou.Navigation;
 
 internal sealed partial class ZoneGeometryGatherer
 {
+    /// <summary>The zone's heightmap samples at full resolution, one sample past each edge.</summary>
+    public HeightWindow ZoneHeights(ZoneCoordinate zone)
+    {
+        var (ox, oz) = WorldLayout.ZoneOrigin(zone);
+        var (c0, r0) = WorldLayout.ToSample(ox, oz);
+        return map.ReadWindow((int)Math.Floor(c0) - 1, (int)Math.Floor(r0) - 1, WorldLayout.SamplesPerZone + 3, WorldLayout.SamplesPerZone + 3);
+    }
 
     void AddTerrain(ZoneGeometry g)
     {

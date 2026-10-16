@@ -14,6 +14,7 @@ internal static class NavMeshPipeline
     {
         interiorMeshes = [];
         var exterior = ZoneNavMeshBuilder.Build(geometry, settings, out times);
+        exterior.Surfaces = new NavSurfaces(NavSurfaces.From(geometry, geometry.ZoneMin, geometry.ZoneMax));
         if (!interiors) return exterior;
         var watch = Stopwatch.StartNew();
         float tileWorld = settings.TileCells * settings.CellSize;
@@ -21,7 +22,10 @@ internal static class NavMeshPipeline
         var single = settings with { Threads = 1 };
         var built = new ZoneNavMesh[geometries.Count];
         Parallel.For(0, geometries.Count, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1) }, i =>
-            built[i] = ZoneNavMeshBuilder.Build(geometries[i], single, out _));
+        {
+            built[i] = ZoneNavMeshBuilder.Build(geometries[i], single, out _);
+            built[i].Surfaces = new NavSurfaces(NavSurfaces.From(geometries[i], geometries[i].ZoneMin, geometries[i].ZoneMax));
+        });
         if (log is not null)
             for (int i = 0; i < built.Length; i++) DescribeInterior(geometries[i], built[i], log);
         var nonEmpty = built.Where(m => m.PolygonCount > 0).ToList();

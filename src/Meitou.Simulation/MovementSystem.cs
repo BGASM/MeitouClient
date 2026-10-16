@@ -47,6 +47,12 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
     /// 0.15 s before it runs; docs/game/pathfinding.md "Turning").
     /// </summary>
     public const float TurnRate = 4 * MathF.PI;
+    /// <summary>
+    /// Seconds between the requests of a walker on the provisional part of a long route (<see cref="PathResult.Exact"/>), which ask for the path again as
+    /// zones load ahead of it, and how many times running it may be stopped there by ground the route did not know before it gives up (engine choices).
+    /// </summary>
+    public const float ProvisionalRepathSeconds = 2;
+    public const int ProvisionalBlockedLimit = 5;
 
     public PathService Paths { get; } = paths;
 
@@ -100,6 +106,7 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                     continue;
                 }
                 GoTo(table, slot, target, cold.RunSpeed);
+                (cold.GoalHeight, cold.GoalHeightAt) = (order.Target.Y, target);
             }
         }
     }
@@ -140,7 +147,9 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
         {
             if (!next[i].Alive || (next[i].Flags & (ushort)MoveFlags.NeedPath) == 0) continue;
             var cold = table.Cold(i)!;
-            var to = new Vector3(next[i].Goal.X, world.Walkability.GroundHeight(next[i].Goal.X, next[i].Goal.Y), next[i].Goal.Y);
+            // The goal's floor: the height the order was given at, else the character's own (a wander or follow goal on its level).
+            float nearY = cold.GoalHeightAt == next[i].Goal && !float.IsNaN(cold.GoalHeight) ? cold.GoalHeight : next[i].Position.Y;
+            var to = new Vector3(next[i].Goal.X, world.Walkability.GroundHeight(next[i].Goal.X, next[i].Goal.Y, nearY), next[i].Goal.Y);
             cold.PathRequest = Paths.Submit(new CharacterId(i, next[i].Generation), next[i].Position, to, cold.FootprintRadius, cold.WaterFactor);
             next[i].Flags = (ushort)((next[i].Flags & ~(ushort)MoveFlags.NeedPath) | (ushort)MoveFlags.Pending);
         }
@@ -163,6 +172,8 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                 bool waiting = (n.Flags & (ushort)(MoveFlags.NeedPath | MoveFlags.Pending)) != 0;
                 if (!answer.Path.Found || !waiting || n.Task != (byte)CharacterTask.GoTo || answer.Id <= cold.PathApplied) continue;
                 cold.Path = [.. answer.Path.Points.Skip(1)];
+                cold.PathExact = answer.Path.IsProvisional ? answer.Path.Exact - 1 : int.MaxValue;
+                if (answer.Path.Exact > 1) cold.ProvisionalBlocked = 0;
                 cold.PathApplied = answer.Id;
                 n.PathCursor = 0;
                 n.Flags |= (ushort)MoveFlags.HasPath;
@@ -172,6 +183,8 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
             if (answer.Path.Found)
             {
                 cold.Path = [.. answer.Path.Points.Skip(1)];
+                cold.PathExact = answer.Path.IsProvisional ? answer.Path.Exact - 1 : int.MaxValue;
+                if (answer.Path.Exact > 1) cold.ProvisionalBlocked = 0;
                 n.PathCursor = 0;
                 n.Flags |= (ushort)MoveFlags.HasPath;
             }
@@ -287,6 +300,8 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                     desired = cold.SpeedOverride > 0 ? cold.SpeedOverride : MathF.Min(n.MaxSpeed, SpeedMode.Cap(mode, n.WalkSpeed));
                     if ((cold.Orders & CharacterOrders.Sneak) != 0 && cold.SpeedOverride <= 0) desired = MathF.Min(desired, Orders.SneakSpeed(desired, Orders.Stealth(cold)));
                 }
+                // On the provisional part of a long route: ask again (the zones ahead may have loaded), following this one until the answer comes.
+                if (n.PathCursor >= cold.PathExact) Reroute(world, ref n, cold);
             }
             else if (((MoveFlags)n.Flags & MoveFlags.HasPath) != 0)
             {
@@ -347,13 +362,21 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
             float x = p.Position.X + step.X, z = p.Position.Z + step.Y;
             if (step != Vector2.Zero)
             {
-                if (walk.IsWalkable(x, z))
+                if (walk.IsWalkable(x, z, p.Position.Y))
                 {
-                    n.Position = new Vector3(x, walk.GroundHeight(x, z), z);
+                    n.Position = new Vector3(x, walk.GroundHeight(x, z, p.Position.Y), z);
                     if (speed > 0.1f) n.Yaw = MathF.Atan2(dir.X, dir.Y);
                 }
                 else
                 {
+                    // Blocked on the provisional part of a long route (the terrain-only route met a wall or a building): stand and ask again.
+                    if (n.PathCursor >= cold.PathExact && ++cold.ProvisionalBlocked <= ProvisionalBlockedLimit)
+                    {
+                        speed = 0;
+                        dir = Vector2.Zero;
+                        Reroute(world, ref n, cold, now: true);
+                        goto moved;
+                    }
                     // Blocked (water): drop the path and wait before trying again.
                     speed = 0;
                     n.Flags = (ushort)(n.Flags & ~(ushort)MoveFlags.HasPath);
@@ -361,10 +384,19 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                     if (n.Task == (byte)CharacterTask.GoTo) { n.Task = (byte)CharacterTask.Idle; cold.OrderQueue.Clear(); }
                 }
             }
+        moved:
             n.Velocity = new Vector3(dir.X * speed, 0, dir.Y * speed);
             n.Animation = (ushort)(speed < 1 ? 0 : speed <= n.WalkSpeed + 1 ? 1 : 2);
             n.AnimationTime = n.Animation == p.Animation ? p.AnimationTime + dt : 0;
         }
+    }
+
+    /// <summary>Asks for the path to the goal again (partition-safe: the character's own state), at most every <see cref="ProvisionalRepathSeconds"/> unless <paramref name="now"/>.</summary>
+    static void Reroute(World world, ref CharacterHot n, CharacterCold cold, bool now = false)
+    {
+        if ((n.Flags & (ushort)(MoveFlags.NeedPath | MoveFlags.Pending)) != 0 || !now && world.Tick < cold.ProvisionalRepathTick) return;
+        n.Flags |= (ushort)MoveFlags.NeedPath;
+        cold.ProvisionalRepathTick = world.Tick + (long)MathF.Ceiling(ProvisionalRepathSeconds / world.TickSeconds);
     }
 
     /// <summary>

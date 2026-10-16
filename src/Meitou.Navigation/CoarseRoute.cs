@@ -1,0 +1,223 @@
+using System.Numerics;
+using Meitou.Data.World;
+
+namespace Meitou.Navigation;
+
+/// <summary>
+/// Long trips across zones whose navmesh is not loaded (a move order on the map): A* over a coarse grid of the whole world built from the terrain
+/// alone. A step between two cells is barred where the terrain between them is steeper than <see cref="MaxSlopeDegrees"/>; cells under the water
+/// cost the agent's water factor. Buildings, walls and foliage are not in it: the navmesh path near the walker refines the route as its zones load
+/// (<see cref="NavmeshWalkability"/>). Engine choice, not the original's (which routes over its pre-built navmesh tiles, docs/game/pathfinding.md).
+/// Thread-safety: the grid is built once on first use; queries are serialised (one search buffer).
+/// </summary>
+public sealed class CoarseRoute
+{
+    /// <summary>Cell edge in units: 24 cells a zone, 1536 a world side (engine choice: about 2.4 M cells, a cross-map search in well under a second).</summary>
+    public const int Cell = 192;
+    public const int Side = WorldLayout.WorldSize / Cell;
+    /// <summary>The terrain's walkable slope (the navmesh builder's terrain limit), tested between samples <see cref="SlopeStep"/> apart along every step.</summary>
+    public const float MaxSlopeDegrees = 40;
+    /// <summary>Spacing (units) of the slope samples: two heightmap samples.</summary>
+    public const float SlopeStep = 2 * WorldLayout.SampleSpacing;
+    /// <summary>The heuristic's weight (engine choice: slightly greedy, so open-ground trips expand few cells; routes are at most this much longer than the best).</summary>
+    public const float HeuristicWeight = 1.2f;
+    /// <summary>Cells expanded at most per search.</summary>
+    public const int MaxExpanded = 3_000_000;
+
+    // Direction k: (dx, dz). Bits 0..7 of a cell: the step in direction k is barred. Bit 8: under the water.
+    static readonly (int Dx, int Dz)[] Directions = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)];
+    const ushort Water = 1 << 8;
+
+    readonly Func<float, float, float> terrain;
+    Func<Func<float, float, float>>? slopeTerrain;
+    readonly Lazy<ushort[]> cells;
+    readonly object searchLock = new();
+    float[]? g;
+    int[]? parent, stamp;
+    int generation;
+
+    /// <param name="terrainHeight">Heights of the route's points; must be safe from any thread.</param>
+    /// <param name="slopeTerrain">
+    /// Makes the height function the grid is built from (once, then dropped): it should be exact to about <see cref="SlopeStep"/>, or cliffs smooth into
+    /// ramps the walker cannot take. Null: <paramref name="terrainHeight"/>.
+    /// </param>
+    public CoarseRoute(Func<float, float, float> terrainHeight, Func<Func<float, float, float>>? slopeTerrain = null)
+    {
+        terrain = terrainHeight;
+        this.slopeTerrain = slopeTerrain;
+        cells = new Lazy<ushort[]>(Build, LazyThreadSafetyMode.ExecutionAndPublication);
+    }
+
+    static float Origin => -WorldLayout.HalfWorldSize;
+    static int CellOf(float v) => Math.Clamp((int)MathF.Floor((v - Origin) / Cell), 0, Side - 1);
+    static Vector2 Centre(int x, int z) => new(Origin + (x + 0.5f) * Cell, Origin + (z + 0.5f) * Cell);
+
+    ushort[] Build()
+    {
+        var height = slopeTerrain?.Invoke() ?? terrain;
+        slopeTerrain = null;
+        var result = new ushort[Side * Side];
+        float rise = MathF.Tan(MaxSlopeDegrees * MathF.PI / 180) * SlopeStep;
+        Parallel.For(0, Side, z =>
+        {
+            for (int x = 0; x < Side; x++)
+            {
+                var c = Centre(x, z);
+                ushort flags = height(c.X, c.Y) < WorldWater.Height ? Water : (ushort)0;
+                // Directions 0..3 are tested here; 4..7 are the same steps seen from the other end.
+                for (int k = 0; k < 4; k++)
+                {
+                    var (dx, dz) = Directions[k];
+                    int nx = x + dx, nz = z + dz;
+                    if (nx < 0 || nz < 0 || nx >= Side || nz >= Side) { flags |= (ushort)(1 << k); continue; }
+                    if (TooSteep(height, c, Centre(nx, nz), rise)) flags |= (ushort)(1 << k);
+                }
+                result[z * Side + x] = flags;
+            }
+        });
+        // The steps 4..7 from the cell at the other end.
+        for (int z = 0; z < Side; z++)
+            for (int x = 0; x < Side; x++)
+                for (int k = 0; k < 4; k++)
+                {
+                    var (dx, dz) = Directions[k];
+                    int nx = x + dx, nz = z + dz;
+                    if (nx < 0 || nz < 0 || nx >= Side || nz >= Side) continue;
+                    if ((result[z * Side + x] & (1 << k)) != 0) result[nz * Side + nx] |= (ushort)(1 << (k + 4));
+                }
+        for (int z = 0; z < Side; z++)
+            for (int x = 0; x < Side; x++) result[z * Side + x] |= Border(x, z);
+        return result;
+    }
+
+    static bool TooSteep(Func<float, float, float> terrain, Vector2 a, Vector2 b, float rise)
+    {
+        int steps = Math.Max(1, (int)MathF.Ceiling(Vector2.Distance(a, b) / SlopeStep));
+        float previous = MathF.Max(terrain(a.X, a.Y), WorldWater.Height);
+        for (int i = 1; i <= steps; i++)
+        {
+            var p = Vector2.Lerp(a, b, i / (float)steps);
+            float h = MathF.Max(terrain(p.X, p.Y), WorldWater.Height);   // the water surface is flat: swimming has no slope
+            if (MathF.Abs(h - previous) > rise * (Vector2.Distance(a, b) / steps) / SlopeStep) return true;
+            previous = h;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// A route from <paramref name="from"/> to <paramref name="to"/>: the points where it turns (X/Z, Y the terrain or the water surface), both ends included;
+    /// empty when the goal cannot be reached over the terrain (or the search ran out).
+    /// </summary>
+    public List<Vector3> Find(Vector3 from, Vector3 to, float waterFactor)
+    {
+        // A goal the slope test cuts off (a narrow ramp the coarse grid smooths into a cliff) is still routed to, over every slope: the navmesh near the
+        // walker finds the real way up.
+        var route = Find(from, to, waterFactor, slopes: true);
+        return route.Count > 0 ? route : Find(from, to, waterFactor, slopes: false);
+    }
+
+    List<Vector3> Find(Vector3 from, Vector3 to, float waterFactor, bool slopes)
+    {
+        var map = cells.Value;
+        int sx = CellOf(from.X), sz = CellOf(from.Z), gx = CellOf(to.X), gz = CellOf(to.Z);
+        int start = sz * Side + sx, goal = gz * Side + gx;
+        float waterCost = MathF.Max(1, waterFactor);
+        List<int> cellsOnRoute;
+        lock (searchLock)
+        {
+            g ??= new float[Side * Side];
+            parent ??= new int[Side * Side];
+            stamp ??= new int[Side * Side];
+            if (++generation == int.MaxValue) { Array.Clear(stamp); generation = 1; }
+            var open = new PriorityQueue<int, float>();
+            g[start] = 0; parent[start] = -1; stamp[start] = generation;
+            open.Enqueue(start, 0);
+            int expanded = 0;
+            bool found = false;
+            while (open.TryDequeue(out int cell, out float f))
+            {
+                if (cell == goal) { found = true; break; }
+                int cx = cell % Side, cz = cell / Side;
+                float gc = g[cell];
+                if (f > gc + HeuristicWeight * Heuristic(cx, cz, gx, gz) + 1e-3f) continue;   // a stale entry
+                if (++expanded > MaxExpanded) break;
+                ushort flags = map[cell];
+                ushort barred = slopes ? flags : Border(cx, cz);
+                for (int k = 0; k < 8; k++)
+                {
+                    if ((barred & (1 << k)) != 0) continue;
+                    var (dx, dz) = Directions[k];
+                    int next = (cz + dz) * Side + cx + dx;
+                    float step = (k & 1) == 0 ? 1 : MathF.Sqrt(2);
+                    // Half the step in each cell; water cells cost the water factor.
+                    float cost = step * 0.5f * (((flags & Water) != 0 ? waterCost : 1) + ((map[next] & Water) != 0 ? waterCost : 1));
+                    float gn = gc + cost;
+                    if (stamp[next] == generation && gn >= g[next]) continue;
+                    stamp[next] = generation; g[next] = gn; parent[next] = cell;
+                    open.Enqueue(next, gn + HeuristicWeight * Heuristic(cx + dx, cz + dz, gx, gz));
+                }
+            }
+            if (!found) return [];
+            cellsOnRoute = [];
+            for (int c = goal; c >= 0; c = parent[c]) cellsOnRoute.Add(c);
+        }
+        cellsOnRoute.Reverse();
+
+        // Keep only the cells where the route turns, then put the real ends on it.
+        var route = new List<Vector3> { from };
+        for (int i = 1; i + 1 < cellsOnRoute.Count; i++)
+        {
+            int a = cellsOnRoute[i - 1], b = cellsOnRoute[i], c = cellsOnRoute[i + 1];
+            if (b - a == c - b) continue;
+            var centre = Centre(b % Side, b / Side);
+            route.Add(new Vector3(centre.X, MathF.Max(terrain(centre.X, centre.Y), WorldWater.Height), centre.Y));
+        }
+        route.Add(to);
+        return Smooth(route, slopes ? map : null);
+    }
+
+    /// <summary>The steps out of the world from a cell on its edge.</summary>
+    static ushort Border(int x, int z) =>
+        (ushort)((z == 0 ? 0b1110_0000 : 0) | (z == Side - 1 ? 0b0000_1110 : 0) | (x == 0 ? 0b0011_1000 : 0) | (x == Side - 1 ? 0b1000_0011 : 0));
+
+    static float Heuristic(int x, int z, int gx, int gz)
+    {
+        int dx = Math.Abs(x - gx), dz = Math.Abs(z - gz);
+        return Math.Max(dx, dz) + (MathF.Sqrt(2) - 1) * Math.Min(dx, dz);
+    }
+
+    /// <summary>Drops turning points the walker can skip: a straight line between the neighbours that crosses only open, dry cells.</summary>
+    static List<Vector3> Smooth(List<Vector3> route, ushort[]? map)
+    {
+        if (route.Count <= 2 || map is null) return route;
+        var result = new List<Vector3> { route[0] };
+        int anchor = 0;
+        for (int i = 2; i < route.Count; i++)
+        {
+            if (Clear(route[anchor], route[i], map)) continue;
+            result.Add(route[i - 1]);
+            anchor = i - 1;
+        }
+        result.Add(route[^1]);
+        return result;
+    }
+
+    /// <summary>Whether the straight line steps only between neighbouring dry cells without a barred step (walked cell by cell).</summary>
+    static bool Clear(Vector3 a, Vector3 b, ushort[] map)
+    {
+        int x = CellOf(a.X), z = CellOf(a.Z), tx = CellOf(b.X), tz = CellOf(b.Z);
+        float length = Vector2.Distance(new(a.X, a.Z), new(b.X, b.Z));
+        int samples = Math.Max(1, (int)MathF.Ceiling(length / (Cell * 0.5f)));
+        for (int i = 1; i <= samples; i++)
+        {
+            var p = Vector3.Lerp(a, b, i / (float)samples);
+            int nx = CellOf(p.X), nz = CellOf(p.Z);
+            if (nx == x && nz == z) continue;
+            int k = Array.IndexOf(Directions, (Math.Sign(nx - x), Math.Sign(nz - z)));
+            if (Math.Abs(nx - x) > 1 || Math.Abs(nz - z) > 1 || k < 0) return false;
+            if ((map[z * Side + x] & (1 << k)) != 0 || (map[nz * Side + nx] & Water) != 0) return false;
+            (x, z) = (nx, nz);
+        }
+        return x == tx && z == tz;
+    }
+}

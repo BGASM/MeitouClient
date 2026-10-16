@@ -10,8 +10,8 @@ namespace Meitou.Navigation;
 public sealed class NavMeshCache
 {
     /// <summary>Bump when the builder's output changes for the same input (a new rule in the gatherer or the pruner).</summary>
-    public const int BuilderVersion = 3;
-    const int FormatVersion = 3;
+    public const int BuilderVersion = 4;
+    const int FormatVersion = 4;
     static readonly byte[] Magic = "MNAV"u8.ToArray();
 
     public string Directory { get; }
@@ -74,8 +74,10 @@ public sealed class NavMeshCache
                 }
                 if (doorOf is not null) doorOf[p] = r.ReadInt16();
             }
+            var corners = new Vector3[r.ReadInt32() * 3];
+            for (int i = 0; i < corners.Length; i++) corners[i] = new Vector3(r.ReadSingle(), r.ReadSingle(), r.ReadSingle());
             if (r.ReadInt32() != count) return null; // trailer: truncated writes fail here
-            return new ZoneNavMesh { ZoneX = zoneX, ZoneZ = zoneZ, Vertices = vertices, Polygons = polygons, Neighbours = neighbours, Areas = areas, Links = links, Kept = kept, BoundsMin = boundsMin, BoundsMax = boundsMax, DoorIds = doorIds.Length > 0 ? doorIds : null, DoorOf = doorOf };
+            return new ZoneNavMesh { ZoneX = zoneX, ZoneZ = zoneZ, Vertices = vertices, Polygons = polygons, Neighbours = neighbours, Areas = areas, Links = links, Kept = kept, BoundsMin = boundsMin, BoundsMax = boundsMax, DoorIds = doorIds.Length > 0 ? doorIds : null, DoorOf = doorOf, Surfaces = corners.Length > 0 ? new NavSurfaces(corners) : null };
         }
         catch (Exception e) when (e is IOException or EndOfStreamException or InvalidDataException or OverflowException or OutOfMemoryException)
         {
@@ -112,6 +114,9 @@ public sealed class NavMeshCache
                 foreach (int i in l) w.Write(i);
                 if (ids.Length > 0) w.Write((short)(m.DoorOf?[p] ?? -1));
             }
+            var corners = m.Surfaces?.Corners ?? [];
+            w.Write(corners.Length / 3);
+            foreach (var c in corners) { w.Write(c.X); w.Write(c.Y); w.Write(c.Z); }
             w.Write(m.PolygonCount);
         }
         File.Move(temp, path, overwrite: true);

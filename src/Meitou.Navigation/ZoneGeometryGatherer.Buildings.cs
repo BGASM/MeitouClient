@@ -46,6 +46,7 @@ internal sealed partial class ZoneGeometryGatherer
             hash = Combine(hash, (uint)BitConverter.SingleToInt32Bits(b.Rotation.W));
             hash = Combine(hash, (uint)BitConverter.SingleToInt32Bits(b.Rotation.Y));
             hash = Combine(hash, destroyed ? 1u : 0u);
+            if (StateOf(b) is { } state) hash = Combine(hash, (uint)Stable(state.GetString("exterior layout name") + "|" + state.GetString("interior layout name")));
         }
         return hash;
     }
@@ -57,6 +58,8 @@ internal sealed partial class ZoneGeometryGatherer
         {
             g.Stats.Buildings++;
             AddBuilding(g, record, b.InstanceId, position, b.Rotation, destroyed);
+            foreach (var (item, at, rotation) in LayoutObjects(b, record, position, destroyed))
+                AddBuilding(g, item.Building, $"{b.InstanceId}/{item.InstanceId}", at, rotation, destroyed: false, floor: item.Floor);
         }
         g.BuildingLastTriangle = g.TriangleCount;
         g.BuildingHash = knownHash ?? BuildingHash(g.Zone, g.Margin);
@@ -74,7 +77,29 @@ internal sealed partial class ZoneGeometryGatherer
         }
     }
 
-    void AddBuilding(ZoneGeometry g, GameRecord building, string placementId, Vector3 position, Quaternion rotation, bool destroyed, InteriorContext? interior = null)
+    /// <summary>The state record of a placement in its zone file (null when it has none).</summary>
+    GameRecord? StateOf(BuildingPlacement b) => b.StateId is not null && levels.Zones.TryGetValue(b.Zone, out var zoneDb) ? zoneDb.Find(b.StateId) : null;
+
+    /// <summary>
+    /// The objects of a building's layouts placed in the world (docs/formats/zones.md, "Building layouts"): the signs and stalls of its exterior layout and the
+    /// furniture of its interior layout, as the renderer lays them out. None for a destroyed building, whose layouts are not drawn either.
+    /// </summary>
+    IEnumerable<(LayoutItem Item, Vector3 Position, Quaternion Rotation)> LayoutObjects(BuildingPlacement b, GameRecord record, Vector3 position, bool destroyed)
+    {
+        if (destroyed || StateOf(b) is not { } state) yield break;
+        foreach (bool exterior in (bool[])[true, false])
+        {
+            if (state.GetString(exterior ? "exterior layout name" : "interior layout name") is not { Length: > 0 } name || layouts.Find(record, name, exterior) is not { } layout) continue;
+            foreach (var item in layouts.Items(layout))
+            {
+                var (at, rotation) = BuildingLayouts.Place(position, b.Rotation, item);
+                yield return (item, at, rotation);
+            }
+        }
+    }
+
+    /// <param name="floor">For a layout object: the floor it stands on (its state's <c>floornum</c>), which takes the place of its parts' own <c>building floor</c>.</param>
+    void AddBuilding(ZoneGeometry g, GameRecord building, string placementId, Vector3 position, Quaternion rotation, bool destroyed, InteriorContext? interior = null, int? floor = null)
     {
         var node = NodeMatrix(building, position, rotation);
 
@@ -85,7 +110,7 @@ internal sealed partial class ZoneGeometryGatherer
             string path = CollisionPathOf(part, destroyed);
             if (path.Length == 0) continue;
             bool isDoor = part.GetBool("is door") || mesh.Owner.GetBool("is door");
-            AddPart(g, mesh.Owner, part, path, node, isDoor, interiorMask: false, instanceId: placementId, interior);
+            AddPart(g, mesh.Owner, part, path, node, isDoor, interiorMask: false, instanceId: placementId, interior, floor);
         }
         // The interior mask part is created apart from the parts list; its collision is the indoor hull.
         // Gateways (is gateway: walk underneath) are not shells with an interior: their hull must not close the passage (Observed: the Hub's gates).
@@ -95,13 +120,13 @@ internal sealed partial class ZoneGeometryGatherer
                 AddPart(g, building, mask, maskPath, node, isDoor: false, interiorMask: true, instanceId: placementId);
     }
 
-    void AddPart(ZoneGeometry g, GameRecord owner, GameRecord part, string path, Matrix4x4 node, bool isDoor, bool interiorMask, string instanceId, InteriorContext? interior = null)
+    void AddPart(ZoneGeometry g, GameRecord owner, GameRecord part, string path, Matrix4x4 node, bool isDoor, bool interiorMask, string instanceId, InteriorContext? interior = null, int? floorOverride = null)
     {
         var prepared = collision.Get(path);
         if (prepared is null) return;
         g.Stats.PartsWithCollision++;
         var mode = (PathMode)owner.GetInt("path mode", (int)PathMode.Obstacle);
-        int floor = Math.Clamp(part.GetInt("building floor"), 0, 3);
+        int floor = floorOverride ?? Math.Clamp(part.GetInt("building floor"), 0, 3);
         int group;
         if (isDoor) group = 5;
         else if (interiorMask) group = 13;

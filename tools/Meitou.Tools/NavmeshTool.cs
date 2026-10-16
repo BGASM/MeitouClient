@@ -54,7 +54,7 @@ static class NavmeshTool
 
         var watch = Stopwatch.StartNew();
         var db = GameDatabase.Load(LoadOrder.FromInstall(install));
-        var levels = WorldLevelData.Load(install);
+        var levels = WorldLevelData.Load(install, includeInteriors: true);
         Console.WriteLine($"game data and levels loaded ({watch.ElapsedMilliseconds} ms)");
         if (fingerprint) return Fingerprint(install, db, levels, zone is { } only ? [only] : [new ZoneCoordinate(20, 32), new ZoneCoordinate(21, 32)], settings);
         if (zone is null)

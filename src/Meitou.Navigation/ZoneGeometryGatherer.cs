@@ -36,6 +36,7 @@ internal sealed partial class ZoneGeometryGatherer : IDisposable
     readonly TerrainHeightmap map;
     readonly Dictionary<ZoneCoordinate, List<BuildingPlacement>> buildingsByZone = [];
     readonly List<Vector3>[]? seedsByZone;
+    readonly BuildingLayouts layouts;
 
     public ZoneGeometryGatherer(GameInstall install, GameDatabase db, WorldLevelData levels, CollisionCache collision)
     {
@@ -50,6 +51,7 @@ internal sealed partial class ZoneGeometryGatherer : IDisposable
             list.Add(b);
         }
         seedsByZone = NavSeeds.Load(install);
+        layouts = new BuildingLayouts(db, levels.Interiors);
     }
 
     /// <summary>Whether foliage collision is gathered (it needs the biome data and costs a foliage placement per zone).</summary>

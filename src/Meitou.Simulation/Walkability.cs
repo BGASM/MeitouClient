@@ -8,6 +8,12 @@ public sealed record PathResult(IReadOnlyList<Vector3> Points)
 {
     public static readonly PathResult NotFound = new([]);
     public bool Found => Points.Count > 0;
+    /// <summary>
+    /// How many of the points, from the start, follow the real walkable surface; the rest are a provisional long-range route over the terrain through
+    /// zones whose navmesh is not loaded, to be asked for again on the way (all of them for an ordinary path).
+    /// </summary>
+    public int Exact { get; init; } = int.MaxValue;
+    public bool IsProvisional => Exact < Points.Count;
 }
 
 /// <summary>
@@ -22,6 +28,10 @@ public interface IWalkability
     /// <summary>Whether a character may stand at world X/Z.</summary>
     bool IsWalkable(float x, float z);
     PathResult FindPath(Vector3 from, Vector3 to);
+    /// <summary>Height a character now at height <paramref name="nearY"/> stands at: where floors are stacked (a walkway over a street, an upper storey), the one under it, not the highest.</summary>
+    float GroundHeight(float x, float z, float nearY) => GroundHeight(x, z);
+    /// <summary>Whether a character now at height <paramref name="nearY"/> may stand at world X/Z (a surface only far above it, such as a wall top, does not count).</summary>
+    bool IsWalkable(float x, float z, float nearY) => IsWalkable(x, z);
 }
 
 /// <summary>

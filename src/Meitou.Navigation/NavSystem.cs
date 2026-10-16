@@ -17,7 +17,14 @@ public sealed class NavSystem : IDisposable
 
     public NavSystem(GameInstall install, GameDatabase db, WorldLevelData levels, Func<float, float, float> terrainHeight, NavBuildSettings? settings = null, NavMeshCache? cache = null)
     {
-        Walkability = new NavmeshWalkability(terrainHeight);
+        // The long-range grid reads every second heightmap sample (36 units) when it is first needed: the simulation's own grid is coarse far from the start.
+        Walkability = new NavmeshWalkability(terrainHeight, routeTerrain: () =>
+        {
+            using var map = TerrainHeightmap.Open(install);
+            var raw = map.Downsample(2, out int size);
+            var grid = new HeightWindow(0, 0, 2, size, size, raw);
+            return (x, z) => grid.TryHeightAt(x, z, out float h) ? h : terrainHeight(x, z);
+        });
         service = new NavMeshService(install, db, levels, Walkability, settings, cache);
     }
 

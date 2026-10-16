@@ -63,8 +63,24 @@ public sealed class NavQuery(NavWorld world, NavDoors? doors = null)
         return new PathResult(Pull(corridor, agent));
     }
 
-    /// <summary>A* from the start polygon to the goal polygon; null when there is none (or the iteration limit ran out).</summary>
-    public Corridor? FindCorridor(NavRef start, Vector3 startPoint, NavRef goal, Vector3 goalPoint, NavAgent agent)
+    /// <summary>
+    /// A path to <paramref name="to"/>, or, when the goal cannot be reached (or is off the mesh), to the reachable point nearest it on the X/Z plane: the
+    /// first part of a long route, whose end is then left to the next query (docs/game/pathfinding.md, "Long routes").
+    /// </summary>
+    public PathResult FindPathToward(Vector3 from, Vector3 to, NavAgent? agent = null)
+    {
+        agent ??= NavAgent.Human;
+        if (!World.TryFindPolygon(from, StartSnap, out var start, out var startPoint)) return PathResult.NotFound;
+        if (!World.TryFindPolygon(to, GoalSnap, out var goal, out var goalPoint)) (goal, goalPoint) = (new NavRef(-1, -1), to);
+        var corridor = FindCorridor(start, startPoint, goal, goalPoint, agent, partial: true);
+        return corridor is null ? PathResult.NotFound : new PathResult(Pull(corridor, agent));
+    }
+
+    /// <summary>
+    /// A* from the start polygon to the goal polygon; null when there is none (or the iteration limit ran out). <paramref name="partial"/>: then the
+    /// corridor to the searched polygon nearest the goal point instead.
+    /// </summary>
+    public Corridor? FindCorridor(NavRef start, Vector3 startPoint, NavRef goal, Vector3 goalPoint, NavAgent agent, bool partial = false)
     {
         var nodes = new Dictionary<long, Node>();
         var open = new PriorityQueue<Node, float>();
@@ -72,7 +88,8 @@ public sealed class NavQuery(NavWorld world, NavDoors? doors = null)
         nodes[start.Key] = first;
         open.Enqueue(first, first.F);
         int iterations = 0;
-        Node? last = null;
+        Node? last = null, nearest = first;
+        float nearestDistance = float.MaxValue;
         float minFactor = Math.Min(1f, agent.WaterFactor);
 
         while (open.Count > 0 && iterations++ < MaxIterations)
@@ -84,6 +101,7 @@ public sealed class NavQuery(NavWorld world, NavDoors? doors = null)
 
             var mesh = World.Mesh(node.Ref.Zone);
             int p = node.Ref.Polygon;
+            if (partial && mesh.DistanceXZ(p, goalPoint.X, goalPoint.Z) is var d && d < nearestDistance) (nearest, nearestDistance) = (node, d);
             float factor = Factor(mesh.Areas[p], agent);
             var poly = mesh.Polygons[p];
             for (int e = 0; e < poly.Length; e++)
@@ -95,6 +113,11 @@ public sealed class NavQuery(NavWorld world, NavDoors? doors = null)
             for (int i = 0; i < tl.Length; i += 2) Relax(node, mesh, tl[i], new NavRef(node.Ref.Zone, tl[i + 1]), factor);
             foreach (var link in World.LinksOf(node.Ref))
                 Relax(node, mesh, link.Edge, link.To, factor);
+        }
+        if (last is null && partial && nearest != first)
+        {
+            last = nearest;
+            goalPoint = NavWorld.ClosestPoint(World.Mesh(nearest.Ref.Zone), nearest.Ref.Polygon, goalPoint);
         }
         if (last is null) return null;
 

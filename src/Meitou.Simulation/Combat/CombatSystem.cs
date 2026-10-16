@@ -223,9 +223,9 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
             float speed = n.MaxSpeed > 0 ? n.MaxSpeed : Settings.ApproachSpeed;
             float step = MathF.Min(speed * dt, gap - CombatTuning.CloseInGap);
             float x = prev[i].Position.X + dir.X * step, z = prev[i].Position.Z + dir.Y * step;
-            if (world.Walkability.IsWalkable(x, z))
+            if (world.Walkability.IsWalkable(x, z, prev[i].Position.Y))
             {
-                n.Position = new Vector3(x, world.Walkability.GroundHeight(x, z), z);
+                n.Position = new Vector3(x, world.Walkability.GroundHeight(x, z, prev[i].Position.Y), z);
                 n.Velocity = new Vector3(dir.X * step / dt, 0, dir.Y * step / dt);
             }
             else n.Velocity = default;
