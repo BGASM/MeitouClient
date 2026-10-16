@@ -6,8 +6,8 @@ import Base from '../layouts/Base.astro';
     <div class="stack">
       <h1>Run Kenshi on a new engine</h1>
       <p class="lede">
-        MeitouClient reimplements the engine to run original content, mods and saves unchanged.
-        It reads the files of your installed copy and ships none of them.
+        <span class="name">Meitou<span>Client</span></span> is an open-source GPL-3 reimplementation of the original engine.
+        Fully compatible with FCS mods and vanilla save games. Requires original copy to run
       </p>
     </div>
   </section>
@@ -19,5 +19,7 @@ import Base from '../layouts/Base.astro';
   .stack { min-width: 0; }
   h1 { margin: 0 0 var(--space-6); color: var(--paper-light); text-shadow: 0 2px 12px rgba(8, 6, 5, .6); white-space: nowrap; font: 600 clamp(32px, 6vw, 52px)/1.1 var(--font-exo); }
   .lede { max-width: 620px; margin: 0; font-size: 18px; line-height: 27px; }
+  /* The name set like the header wordmark: Meitou semibold, Client regular. */
+  .name > span { font-weight: 400; }
   @media (max-width: 640px) { h1 { white-space: normal; } }
 </style>
