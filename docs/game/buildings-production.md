@@ -31,7 +31,8 @@ unknown. Tested base generator/battery values remain in data/source checks, not 
 filters and stack bonuses apply separately from character backpacks. Research owns tech levels,
 prerequisites, costs/progress, unlock/improvement effects and blueprints; money prices are in
 [economy](economy.md). Additive versus multiplicative improvement semantics must be decoded per
-field. Building operational state, ownership and saved progress: [save](../formats/save.md).
+field. Building operational state, ownership and saved progress: [save](../formats/save.md). Cages, beds,
+doors and lockable containers: [locks](locks.md).
 
 ### Production and crafting
 

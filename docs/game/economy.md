@@ -142,12 +142,17 @@ Per-character hash map keyed by faction (`Character+0xf0`). Entry (`FUN_1405e7ee
 ### 11.2 How a bounty is gained
 
 - **Crime**: `FUN_140853ec0(crimeEvent, faction)`: if the crime code is nonzero and has not been processed yet (`+0xa4` flag), and the
-  character's **`NPC class`** (`+0x1a0 -> +0xdc`, the same read as the police test, carry-loot.md 4.3; corrected 2026-10-13, this was called a "state") is not 8 (BANDIT),
+  character's **`NPC class`** (`+0x1a0 -> +0xdc`, the same read as the police test, carry-loot.md 4.3) is not 8 (BANDIT),
   5 (DIPLOMAT) or 1 (LAW_ENFORCEMENT), then the crime's amount is **added** to a ledger entry chosen by `FUN_140852010` from the given faction: a caged character's prison
-  owner's, else the given faction's parent (`+0x38`, which field sets it is **Unknown**) when it has one, else the given faction itself when its `+0x40` flag is set (else none).
+  owner's, else the given faction's **`legal system`** (`+0x38`, the first FACTION `legal system` reference; **Observed**, its only reader `FUN_1407f4f40`
+  stores it there; e.g. Bounty Hunters and Medics Guild -> United Cities) when it has one, else the given faction itself when its `+0x40` flag is set (else none).
+  `FUN_140851fb0(faction)` is the same choice without the cage rule ("booking faction" below).
   The given faction is the **booking police witness's** (or the police in the hit rule of 11.6), not the victim's (**Observed**: both callers pass their own faction); the crime bit is set, the timestamp is reset to now, and the "wanted" UI is refreshed. The very first crime
-  code (1, Enslaving) sets the flag but adds nothing (**Observed**; the code returns before the add). The same function also sets a float (250.0) in a nearby object of the character at `+0x110` (purpose not traced).
-- **Crime amounts** (`FUN_140851e40`; **Verified**: a switch with no other inputs; names from the game's own name table `FUN_140856530`; the editor's enum is not in `fcs_enums.def`, so a match with it was not checked):
+  code (1, Enslaving) sets the flag but adds nothing (**Observed**; the code returns before the add). The same function also sets the status float `Character+0x1a0 -> +0x110` to 250.0: the **"recently wanted" marker** that makes a bounty
+  visible at once (11.8); setting or witnessing a pending crime (`FUN_140852e10`, `FUN_140851f40`) sets it too. Its decrement was not traced.
+- **Crime amounts** (`FUN_140851e40`; **Verified**: a switch with no other inputs; names from the game's own name table `FUN_140856530`). The editor's
+  `CrimeEnum` (FCS decompile) names the codes differently: 2 `CRIME_LOCKPICKING`, 6 `CRIME_ASSAULT_VIP`, 7 `CRIME_SLAVE_FREEING`, 9 `CRIME_TERRORISM`,
+  14 `CRIME_FARM_EATING`; the rest match the game's labels:
 
 | Code | Crime | Amount |
 | --- | --- | --- |
@@ -159,9 +164,9 @@ Per-character hash map keyed by faction (`Character+0xf0`). Entry (`FUN_1405e7ee
 | 0xc (12) | Escaping Prison | 2500 |
 | 0x10 (16) | Uniform Theft | 2500 |
 | 4 | Murder | 5000 |
-| 7 | Terrorism | 5000 |
+| 7 | "Terrorism" label; editor `CRIME_SLAVE_FREEING` (given for lifting a prisoner out of a cage, [locks](locks.md)) | 5000 |
 | 8 | Smuggling | 5000 |
-| 9 | "Terrorism" (a second code with the same label) | 5000 |
+| 9 | Terrorism | 5000 |
 | 0xf (15) | Kidnapping | 5000 |
 | 6 | Treason | 50000 |
 | 5, 10 (Looting), 0xe (14, Crop Theft), others | Assault, Looting, Crop Theft, default | 500 |
@@ -177,19 +182,49 @@ one expired entry per tick and is skipped while `Character+0x2f8 == 2` (imprison
 
 ### 11.4 Claiming
 
-`FUN_140330d50` (**Observed**): a player-faction captor hands a non-player captive to a police chief (designation 8, not of the
-player's faction, not state 7); if the captive's entry for the chief's faction has an amount and is unclaimed, the player gets it
-(halved, truncated, when `captive+0x5bc` is set; flag **Unknown**), the entry is marked claimed, "Received c.{1} reward." shows and
-`Bounty_Fulfilled` plays. A claimed entry pays once.
+Two paths pay the player a captive's bounty (**Observed**). Both read the captive's entry for a booking faction, pay only when it is
+nonzero and unclaimed, halve it (truncated) when the captive is **dead** (`+0x5bc`, [carry-loot](carry-loot.md)), add it to the player's
+money, mark the entry claimed (it never pays twice) and show "Received c.{1} reward.".
+
+- **Caging** (`FUN_140330d50`, called by `Task_PutInSomething` after a successful put-in): the *cage* is the first argument (its
+  building function, vtable slot 94 = `Building+0x158`, must be 8 `BF_CAGE`; the editor's `BuildingFunction`), the carrier the second,
+  the captive the third. Pays when the carrier is of the player faction, the captive is not, the cage owner's faction is not the
+  player's, not `not real` and not BANDIT (`fundamental type` 8, `CharacterTypeEnum`), neither carrier nor captive has the escaped flag
+  (status `+0xe8`), and not (cage faction SLAVER 7 or `FarmBuilding::vfunc_15(cage) +0xd8 == 5`, read as a town of type 5 `TOWN_SLAVE_CAMP`: the function walks the
+  cage's parent chain to its root, not verified as the town) unless the carrier's status type (`FUN_1405c8aa0`: status `+0`, 1 slave, 2 escaped) is 0.
+  The amount is the captive's bounty for the cage owner's faction; plays `Bounty_Fulfilled`. The same put-in also sets the sentence (11.5).
+- **Dialogue** `DA_PAY_BOUNTY` (10) (`FUN_140680560` case 10): pays for the body the talking player carries, with the speaker's
+  booking faction; then the speaker takes the body (tasks 213 `LIFT_PERSON_SNATCHING_ALLOWED` and 112 `FIND_CAGE_AND_PUT_IN`).
+  Base data uses it in `EV_PLAYER_TALK_TO_ME` dialogues gated by `DC_CARRYING_BOUNTY_ALIVE` / `_DEAD` (e.g. "shek bounty desk"),
+  together with `DA_ARREST_TARGETS_CARRIED_PERSON` (30) and +relations (**Verified** by probe of the merged data).
 
 ### 11.5 Bail and sentence
 
-- **Bail** (`CharacterTrading_PrisonerBailout` `FUN_1406ab890`, "Pay Bounty", **Observed**): `2 * bounty` (`FUN_140854080` with a
-  zero faction argument: which entry is **Unknown**); at least 2000 when the prisoner is not of the player's faction.
-- **Sentence** (`FUN_140854950`, the only reader of CONSTANTS `prison time` 1.0; reader **Verified**, formula **Observed**): caging a
-  prisoner with a bounty for the cage owner's faction sets `trunc(bounty * 0.02 * prison time)` (presumably game hours; 999999 above
-  25000) from now. Release and how bail ends it are not traced. `FUN_140851d10` (a lerp of 350/600 and 450/80-based values by a
-  health fraction) is a different, undecoded function.
+- **Sentence** (`FUN_140854950`, the only reader of CONSTANTS `prison time` 1.0; reader **Verified**, formula **Observed**): set by
+  `Task_PutInSomething` (`PUT_IN_CAGE` 108) only when the captive has a bounty with the cage owner's faction. It stores the start
+  (now, double game hours) at ledger `+0x98` and the length at ledger `+0xa0` (float): `trunc(bounty * 0.02 * prison time)` hours,
+  999999 above 25000, 16 when the bounty lookup returns 0. Saved as character keys `sentence` (start, truncated int) and `psts` (length,
+  float) by `FUN_1406262b0` / `FUN_140625e60`.
+- **Served** when `start + length <= now` (`FUN_1405c9f00`, also false for a character with a nonzero status type, e.g. a slave);
+  nothing counts down. A prisoner caged without a bounty gets no sentence: whether the ledger then reads start 0 / length 0 (served at
+  once, so goal 211 frees them immediately) is **Unknown** (the ledger constructor was not checked); Meitou should treat it as served. The status panel (`FUN_1405d2da0`) shows "Imprisoned, sentence time remaining: ceil(length - elapsed) hrs",
+  "FOREVER" for a length >= 2000, else "Waiting to be released" (**Observed**). Bounty expiry is paused meanwhile (11.3).
+- **Release** (`Task_ReleasePrisoner` 110, `FUN_1403570a0`; **Observed**): the jailer goal is AI_TASK "police free prisoners" (enum 211,
+  only in AI_PACKAGE "addon- law enforcement"; the "- no freeing prisoners" variant lacks it; **Verified** by probe). Its finder
+  `FUN_1408cf3c0` picks an occupied `BF_CAGE` the jailer may use whose occupant is not down, served and not an enemy. For every releaser the
+  cage is unlocked and status `+0xea = 1`; then, if the releaser's faction has `+0x40`, the prisoner's entries for the releaser's booking faction and for the
+  jail's booking faction are **erased** (`FUN_1408539f0`), the releaser says `EV_PRISONER_FREE_TO_GO`; if the releaser is a player
+  (non-`+0x40` player faction), the prisoner says `EV_UNLOCK_MY_CAGE_OR_SHACKLES`. In those two cases the prisoner gets 133
+  `GET_OUT_OF_CAGE_LEGIT`. Always: the restraint is freed; "{1} has been released from prison." for a player-faction prisoner of status type 0.
+- **Bail** (dialogue action 43 `CHOOSE_PRISONER_BAIL` opens `CharacterTrading_PrisonerBailout` `FUN_1406ab890`, "Pay Bounty", **Observed**): the list
+  is the living occupants of `BF_CAGE` furniture in the speaker's home town's buildings that are player-faction, or not hostile to
+  the speaker under further tests (`FUN_1405995d0`, `FUN_140599590`, `FUN_14059a920 < 36`). Price `2 * bounty` with a zero faction,
+  which through the cage rule of 11.2 is the jail's booking faction; at least 2000 when the prisoner is not of the player's faction.
+  Paying (`FUN_1406ae170`) unlocks the cage, erases the jail's entry (`FUN_1408539f0(ledger, 0)`), sets `+0xea = 1`, the prisoner says
+  `EV_BOUGHT_ME_FROM_SLAVERY` and gets 133 `GET_OUT_OF_CAGE_LEGIT`. Base data offers it in law dialogues ("I'm here to bail out a friend.").
+- **Escape**: leaving by 207/256, or being lifted out, gives a pending Escaping Prison (0xc) and the escaped flag ([locks](locks.md#cages-and-beds));
+  a pending crime becomes a bounty only when a booking witness sees it (11.2). Spotting the flag: 11.8.
+- `FUN_140851d10` (a lerp of 350/600 and 450/80-based values by a health fraction) is a different, undecoded function.
 
 ### 11.6 Booking factions and police hits (**Observed**)
 
@@ -201,6 +236,54 @@ player's faction, not state 7); if the captive's entry for the chief's faction h
 - **Attack order** (`FUN_140334070`): a pending Assault against the victim's faction unless the victim has a bounty with the attacker's
   faction, its status flag `+0x114` is set, it is a BANDIT, it has a pending crime, or `FUN_140436610(victim, 1)` (undecoded) holds.
 - **Murder**: no setter caller passes code 4 (25 checked); how a killing becomes Murder is **Unknown**.
+
+### 11.7 Arrest
+
+Arrests are started by **dialogue**, not by a crime test in code (**Verified** by probe of the merged data; enum numbers from the FCS
+decompile's `DialogActionEnum` / `DialogConditionEnum` / `EventTriggerEnum`, compare-by 0 `==`, 1 `<`, 2 `>`).
+
+- **Triggers**: law dialogue packages ("police", "Npc MILITARY Law 3", "... Holy Nation Law 3", "Npc TOUGH Vigilante Law 3", gate and city
+  guards) answer events 8 `THIEF_CAUGHT_STEALING_FROM_ME`, 41 `WITNESS_GENERIC_ASSAULT`, 43 `WITNESS_THIEF_OR_LOCKPICK`, 44 `BOUNTY_SPOTTED`,
+  45 `ESCAPED_PRISONER_SPOTTED`, 40 `ESCAPED_EX_SLAVE_SPOTTED`, 15 `I_DEFEATED_SQUAD` ("Law enforcement defeats squad (arrest them)",
+  gated by `DC_CARRYING_BOUNTY_ALIVE` false) and 1 `PLAYER_TALK_TO_ME` with lines carrying `DA_ARREST_TARGET` (29). Bounty dialogues
+  branch on `DC_BOUNTY_AMOUNT_ACTUAL`: "Small bounty" (0 < b < 1050) offers a fine (300..1000 by bracket; paying runs `DA_TAKE_MONEY`
+  + `DA_CLEAR_BOUNTY` 49); refusing or lacking money runs `DA_ARREST_TARGET`; "small fry" (1050 < b < 25000) and "super high" (> 25000)
+  arrest at once. "Surrender" exists only as these dialogue choices; there is no surrender state.
+- **`DA_ARREST_TARGET`** (`FUN_140680560` case 0x1d, **Observed**): when the speaker's ownership town (`Character+0x658 -> +0x30`) is set
+  and equals the speaker's status `+0x88` (read as "he is in his own town"), and the target's slot `0x248` is null: the speaker gets tasks 240 `LIFT_PERSON_SNATCHING_ALLOWED_IN_TOWN_ONLY`
+  ("Capture Target", needs `isTargetDown`) and 112 `FIND_CAGE_AND_PUT_IN` on the target, and the target's squad marks the speaker
+  (flag 5). Otherwise the speaker's squad marks the target (flag 4) and the speaker attacks it (task 4 `MELEE_ATTACK`). Either way the
+  guard fights until the target is down, then carries it. `DA_ARREST_TARGETS_CARRIED_PERSON` (30, case 0x1e) does the same for the body
+  the target carries (it is dropped and taken over). `DA_ASSIGN_BOUNTY` (32) adds its value as a bounty with the speaker's booking
+  faction, or books the pending crime when the value is 0.
+- **Arrest goal** (AI_TASK "Arrest bounties", enum 204 `HUNT_BOUNTIES`, in "addon- law enforcement" and the "Gate guard ... -arrests"
+  packages; **Verified** by probe): desire 1 when the cage finder finds a free cage, else 0 (AI slot 33 `FUN_140598a90`); target finder
+  `FUN_14099bfc0`: the first sensed character (mask 0x400e/0x221) not carried, not of a `not real` faction, slot `0x248` null, not
+  imprisoned, that has a perceived bounty with the guard (`FUN_140853fd0`: the entry for the guard's booking faction, visible while
+  `+0x110 > 0`, or when the target is down and an enemy), or that the guard's squad marks with flag 7, or regards as an enemy. Its effect
+  129 leads the planner to 203 Arresting (list B: target down, unarmed, carried) and then the cage goals.
+- **Caging** (goals 112 / 281 "Find and put in cage", subtask 108 `PUT_IN_CAGE`): desire `FUN_1405a1140` (0 unless carrying;
+  0.1 / 0.5 / 1.4 / 2.0 by status, death and bounty tests in `FUN_1405a0f10`); cage finder `FUN_1408d0770(ai, wantFree 1, function 8)`
+  over the buildings the AI knows (interiors included): usable (`FUN_140621230`), not reserved, free; weight
+  `clamp(1 - d^2 / 4608^2, 1e-5, 1)`, x100 if the cage is of the carrier's faction (otherwise it must be usable), x100 if in the
+  carrier's home, x1e-5 for a police carrier when the cage's building fails slot 0x290; the **highest** weight wins (**Observed**).
+  No free cage: the finder returns nothing; what the carrier then does is **Unknown**.
+
+### 11.8 Bounty spotting and bounty hunters
+
+- **Spotting** (`FUN_140856f00`, **Observed**): a non-player looker within 400 units (160000 squared) recognises a player-faction
+  character whose bounty with the looker's faction is at least a class threshold (`FUN_1408520c0`: LAW_ENFORCEMENT 1, MILITARY 4000
+  or 2000, ADVENTURER 1000, SLAVE never, others 10000), immediately while `+0x110 > 0`, else through a recognition meter
+  (`FUN_140856cb0`, fires above 1.0; rate `5 + 40 * k`, `k` a 1..2 value from the target's stats scaled by status factors 0.5 / 0.6 /
+  0.75 and x2, not decoded); not while the target is carried or imprisoned. Recognition fires `EV_BOUNTY_SPOTTED` (44). The same function
+  handles escaped slaves (events 36 / 40). `EV_ESCAPED_PRISONER_SPOTTED` (45) fires in `FUN_140859680` for a target with the
+  escaped flag, seen by a police-like looker (or one of a bandit town's faction) in his own town.
+- **Bounty hunters** (**Verified** by probe): squads "Bounty hunters wandering between towns", "Bounty hunters low", "Bounty Hunter
+  Solo Shek", rebirth "Bounty hunters" (faction Bounty Hunters, `legal system` United Cities) run "hang out in a bar" / "Wandering
+  from town to town" / "Patrol map (short range) LOOTING", none of which has goal 204 or a cage goal. Their dialogue answers
+  event 44 for bounties > 4000 (two dialogues, split at 35000) with `DA_ATTACK_CHASE_FOREVER` (6), never `DA_ARREST_TARGET`.
+  "Bounty Hunter" is NPC class 9 (ADVENTURER), "Bounty Hunter Low" class 1 (police-like). Whether a hunter delivers a captive
+  anywhere is **Unknown** (nothing in its data does).
 
 ### 12. Slaves, prisoners, animals
 
@@ -244,14 +327,14 @@ RACE `buy value` is 100 for most races (27 of 53 records); other values in the d
   that quantity 0 never spawns, but this was not re-verified for shops.
 - **The slave price override** (the fifth argument of the slave windows) and where it comes from.
 - **The artifact placement** (`ArtifactTown`, which squad carries which artifact) beyond the six field readers.
-- **The crime-witness faction selection** `FUN_140852010`: *mostly resolved 2026-10-13* (11.2: the prison owner's faction when `Character+0x2f8` is 2, which reads as
-  imprisoned; else the given faction's parent `+0x38`, else the faction itself with the `+0x40` flag). Still open: what sets a faction's `+0x38`.
 - **How a pending crime's timer counts down** (`+0x90`; set by `FUN_140851f40` / `FUN_140852e10`, the decrement was not found), and so how long an unseen crime stays pending.
 - **Whether CHARACTER `money min` / `money max`** exist in the data and are unused (the editor lists `money`; not found
   being read for NPC purses).
-- **The "Terrorism" label for code 9** (two crime codes share the name; the second may be a different crime in the editor enum).
-- **What `FUN_140851d10` computes** (`prison time`'s consumer is the cage sentence, 11.6), how a sentence counts down and ends, and how bail
-  ends it.
+- **What `FUN_140851d10` computes** (`prison time`'s consumer is the cage sentence, 11.5).
+- **Arrest and jail gaps** (11.5, 11.7, 11.8): what a guard carrying a captive does when no cage is free (`CAGES_ARE_ALL_FULL` 97 is
+  registered but no TaskData row uses it); how `+0x110` decays; the escaped flag's expiry ("Leave town to clear this status. Expires in
+  {1}", cleared by `FUN_1404ff060` for an undecoded reason);
+  whether NPC bounty hunters ever cage or hand in a captive; what the speaker-in-own-town branch of `DA_ARREST_TARGET` tests exactly.
 - **Research cost** beyond the formula of section 10, crafting costs, building purchase price, bed cost.
 - **The purpose of `FUN_1405d4260`** (the crime-in-progress tooltip function; its behaviour remains untraced).
 - **Which item records make a `MoneyItem`** (priced at their `value` alone, section 2): `Cats`, and probably `String of Cats` and the other value-only items, but the constructor's
@@ -289,3 +372,4 @@ Evidence scopes below apply only to their named sources/checks.
 - 9.1 SQUAD_TEMPLATE fields (data = **Verified** by probe over 959 templates)
 - 9.2 Stock size and money (`FUN_14095ab10`, squad shops; `FUN_14095b210`, building shops; **Observed**, decompile and
 - 9.3 Restock (**Observed**)
+- 11.4-11.8 Claiming, sentence, release, bail, arrest, spotting: code **Observed** (decompile); dialogue, AI_PACKAGE and squad facts **Verified** by a probe over the merged base-game data (DIALOG_ACTION `action name`, DIALOGUE_PACKAGE `dialogs` event value, AI_TASK `enum`)

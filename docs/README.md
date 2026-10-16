@@ -69,6 +69,7 @@ diaries, asset dumps or decompiled output. Current choices: [DECISIONS](../DECIS
 - [animals](game/animals.md)
 - [buildings-production](game/buildings-production.md)
 - [carry-loot](game/carry-loot.md)
+- [locks](game/locks.md): cages, beds, doors, lockable containers, lockpicking, shackles
 - [combat](game/combat.md)
 - [economy](game/economy.md)
 - [factions-squads-towns](game/factions-squads-towns.md)
