@@ -367,6 +367,7 @@ sealed partial class GameHost
                 statsTicks = session.Simulation.TotalTicks;
                 stats.Add($"simulation  {ticks / statsTimer:0} ticks/s, {session.CurrentSnapshot.Characters.Count} characters, dropped {session.Simulation.DroppedTicks} ticks in all");
                 WorldStats.Add(stats, display.Context, gpu, render, camera.Eye);
+                stats.Add($"ui          {(interfaceHidden ? 0 : player.OpaqueUiCoverage):P0} of the screen under opaque controls");
                 statsTimer = gpuSum = 0;
                 statsFrames = gpuSamples = 0;
             }

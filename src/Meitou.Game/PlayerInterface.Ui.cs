@@ -26,6 +26,8 @@ sealed partial class PlayerInterface
     /// <summary>The viewed floor of the interior view (the host's): read for the HUD's floor text, stepped by its arrows.</summary>
     public (Func<int> Get, Action<int> Step)? Floor { get; set; }
     public bool UiVisible { get; set; } = true;
+    /// <summary>The share of the screen under fully opaque controls in the last drawn UI frame (<see cref="UiPainter.OpaqueCoverage"/>); 0 without a painter.</summary>
+    public float OpaqueUiCoverage => uiPainter?.OpaqueCoverage ?? 0;
     internal IReadOnlyList<UiControl> UiFrame => ArrangeUi();
 
     public void LoadUi(UiMode mode, Func<string, string?> resolve)

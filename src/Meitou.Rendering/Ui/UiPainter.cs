@@ -19,6 +19,16 @@ public sealed class UiPainter : IDisposable
     readonly Dictionary<string, (Texture Texture, SampledTexture Sampled)> textures = new(StringComparer.Ordinal);
     /// <summary>Textures the host draws at run time (the squad portraits), shown by an ImageBox's <c>ImageTexture</c> under their name; not owned.</summary>
     readonly Dictionary<string, (Texture Texture, SampledTexture Sampled)> external = new(StringComparer.Ordinal);
+    /// <summary>Which texels of each uploaded texture are fully opaque, by name (<see cref="OpaqueCoverage"/>); textures given on the GPU have none and never count.</summary>
+    readonly Dictionary<string, OpacityMask> masks = new(StringComparer.Ordinal);
+    readonly List<UiRect> opaqueRects = new();
+
+    /// <summary>
+    /// The share of the viewport (0..1) under fully opaque pieces of the last <see cref="Draw"/>: solid backgrounds and atlas slices whose
+    /// texels are all alpha 255, drawn with alpha 1; text and translucent pieces do not count. Overlaps count once. The measure for how
+    /// much scene shading a UI depth stamp could skip.
+    /// </summary>
+    public float OpaqueCoverage { get; private set; }
 
     /// <summary>Makes <paramref name="texture"/> the image an ImageBox shows for <c>ImageTexture</c> <paramref name="name"/> (the caller keeps and frees it).</summary>
     public void SetTexture(string name, Texture texture, SampledTexture sampled) => external[name] = (texture, sampled);
@@ -75,6 +85,7 @@ public sealed class UiPainter : IDisposable
                     : c.Type == "Button" && b.Contains(mouse.X, mouse.Y) ? c.HoverColour ?? c.Background : c.Background;
                 if (!c.Enabled) colour = c.DisabledColour ?? colour * new Vector4(0.6f, 0.6f, 0.6f, 1);
                 overlay.Rect(b.X, b.Y, b.X + b.Width, b.Y + b.Height, colour);
+                if (colour.W >= 1) opaqueRects.Add(b.Intersect(clip));
             }
             overlay.Flush(width, height, clip);
             if (c.Type == "ImageBox" && MyGuiImages.Resolve(resources, c.Properties) is { } image && (!image.Texture.StartsWith(IconPrefix, StringComparison.Ordinal) || textures.ContainsKey(image.Texture)) && (!image.Texture.StartsWith(RenderedIconPrefix, StringComparison.Ordinal) || RenderedIconReady(image.Texture)))
@@ -85,14 +96,16 @@ public sealed class UiPainter : IDisposable
                 bool flip = c.Properties.GetValueOrDefault("ImageFlipV") == "true";
                 float v0 = source.Y / loaded.Texture.Desc.Height, v1 = (source.Y + source.Height) / loaded.Texture.Desc.Height;
                 if (flip) (v0, v1) = (v1, v0);
+                var imageTint = Colour(c.Properties.GetValueOrDefault("Colour"), Vector4.One) * new Vector4(1, 1, 1, Alpha(c.Properties));
                 overlay.Image(loaded.Sampled, new(b.X, b.Y, b.X + b.Width, b.Y + b.Height),
                     new(source.X / loaded.Texture.Desc.Width, v0,
-                        (source.X + source.Width) / loaded.Texture.Desc.Width, v1),
-                    Colour(c.Properties.GetValueOrDefault("Colour"), Vector4.One) * new Vector4(1, 1, 1, Alpha(c.Properties)));
+                        (source.X + source.Width) / loaded.Texture.Desc.Width, v1), imageTint);
+                if (imageTint.W >= 1 && masks.TryGetValue(image.Texture, out var imageMask) && imageMask.Covers(source)) opaqueRects.Add(b.Intersect(clip));
                 overlay.Flush(width, height, clip);
             }
             if (resources.Skins.TryGetValue(c.Skin, out var skin) && textures.TryGetValue(skin.Texture, out var atlas))
             {
+                var atlasMask = masks.GetValueOrDefault(skin.Texture);
                 // A toggled button (Checked) uses MyGUI's *_checked states, else looks pushed.
                 bool on = c.Properties.GetValueOrDefault("Checked") == "true";
                 string state = on ? widgetState + "_checked" : widgetState;
@@ -110,6 +123,7 @@ public sealed class UiPainter : IDisposable
                         float tileH = size?.Length == 2 ? float.Parse(size[1], System.Globalization.CultureInfo.InvariantCulture) : source.Height;
                         if (properties?.GetValueOrDefault("TileH") != "true") tileW = dest.Width;
                         if (properties?.GetValueOrDefault("TileV") != "true") tileH = dest.Height;
+                        if (tileW > 0 && tileH > 0 && tint.W >= 1 && atlasMask?.Covers(source) == true) opaqueRects.Add(dest.Intersect(clip));
                         if (tileW > 0 && tileH > 0)
                             for (float tileY = dest.Y; tileY < dest.Y + dest.Height; tileY += tileH)
                                 for (float tileX = dest.X; tileX < dest.X + dest.Width; tileX += tileW)
@@ -130,6 +144,7 @@ public sealed class UiPainter : IDisposable
                         (source.Y + (y0 - dest.Y) / dest.Height * source.Height) / th,
                         (source.X + (x1 - dest.X) / dest.Width * source.Width) / tw,
                         (source.Y + (y1 - dest.Y) / dest.Height * source.Height) / th), tint);
+                    if (tint.W >= 1 && atlasMask?.Covers(source) == true) opaqueRects.Add(new UiRect(x0, y0, x1 - x0, y1 - y0).Intersect(clip));
                 }
                 overlay.Flush(width, height, clip);
             }
@@ -186,6 +201,58 @@ public sealed class UiPainter : IDisposable
             font.Flush(width, height, textClip);
         }
         overlay.Flush(width, height);
+        OpaqueCoverage = width > 0 && height > 0 ? (float)(UnionArea(opaqueRects) / ((double)width * height)) : 0;
+        opaqueRects.Clear();
+    }
+
+    /// <summary>The area of the union of <paramref name="rects"/> (overlaps once): the cells of the grid their edges make, each in or out.</summary>
+    internal static double UnionArea(List<UiRect> rects)
+    {
+        rects.RemoveAll(r => r.Width <= 0 || r.Height <= 0);
+        if (rects.Count == 0) return 0;
+        var xs = rects.SelectMany(r => new[] { r.X, r.X + r.Width }).Distinct().Order().ToArray();
+        var ys = rects.SelectMany(r => new[] { r.Y, r.Y + r.Height }).Distinct().Order().ToArray();
+        var covered = new bool[(xs.Length - 1) * (ys.Length - 1)];
+        foreach (var r in rects)
+        {
+            int x0 = Array.BinarySearch(xs, r.X), x1 = Array.BinarySearch(xs, r.X + r.Width), y0 = Array.BinarySearch(ys, r.Y), y1 = Array.BinarySearch(ys, r.Y + r.Height);
+            for (int y = y0; y < y1; y++) for (int x = x0; x < x1; x++) covered[y * (xs.Length - 1) + x] = true;
+        }
+        double area = 0;
+        for (int y = 0; y + 1 < ys.Length; y++) for (int x = 0; x + 1 < xs.Length; x++)
+            if (covered[y * (xs.Length - 1) + x]) area += (double)(xs[x + 1] - xs[x]) * (ys[y + 1] - ys[y]);
+        return area;
+    }
+
+    /// <summary>One bit per texel of an uploaded texture: alpha 255. Answers whether a source rectangle (texels) is opaque throughout, remembering each rectangle asked.</summary>
+    sealed class OpacityMask
+    {
+        readonly ulong[] bits;
+        readonly int width, height;
+        readonly Dictionary<(int X0, int Y0, int X1, int Y1), bool> answers = new();
+
+        public OpacityMask(RgbaImage image)
+        {
+            (width, height) = (image.Width, image.Height);
+            bits = new ulong[(width * height + 63) / 64];
+            var pixels = image.Pixels;
+            for (int i = 0, n = width * height; i < n; i++)
+                if (pixels[i * 4 + 3] == 255) bits[i >> 6] |= 1UL << (i & 63);
+        }
+
+        public bool Covers(UiRect source)
+        {
+            (int X0, int Y0, int X1, int Y1) key = (Math.Max(0, (int)MathF.Floor(source.X)), Math.Max(0, (int)MathF.Floor(source.Y)), Math.Min(width, (int)MathF.Ceiling(source.X + source.Width)), Math.Min(height, (int)MathF.Ceiling(source.Y + source.Height)));
+            if (answers.TryGetValue(key, out bool known)) return known;
+            bool opaque = key.X1 > key.X0 && key.Y1 > key.Y0;
+            for (int y = key.Y0; opaque && y < key.Y1; y++)
+                for (int x = key.X0; x < key.X1; x++)
+                {
+                    int i = y * width + x;
+                    if ((bits[i >> 6] & 1UL << (i & 63)) == 0) { opaque = false; break; }
+                }
+            return answers[key] = opaque;
+        }
     }
 
     static float Alpha(IReadOnlyDictionary<string, string> properties) => float.TryParse(properties.GetValueOrDefault("Alpha"), System.Globalization.NumberStyles.Float,
@@ -259,6 +326,7 @@ public sealed class UiPainter : IDisposable
         var sampled = new SampledTexture(gpu.Samplers.Get(SamplerDesc.FromGl(TextureMinFilter.Linear, TextureMagFilter.Linear,
             TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge, false, DepthFunction.Lequal, false, 1, false, 0)), texture.View(), texture.Image);
         upload.Write(texture, 0, 0, new Rect2D(default, new Extent2D((uint)image.Width, (uint)image.Height)), image.Pixels);
+        masks[name] = new OpacityMask(image);
         return textures[name] = (texture, sampled);
     }
 
@@ -266,6 +334,7 @@ public sealed class UiPainter : IDisposable
     {
         foreach (var t in textures.Values) t.Texture.Dispose();
         textures.Clear();
+        masks.Clear();
         standardFont?.Dispose(); paintedFont?.Dispose(); titleFont?.Dispose(); standardLarge?.Dispose(); paintedLarge?.Dispose();
         standardFont = null; paintedFont = null; titleFont = null; standardLarge = null; paintedLarge = null;
     }
