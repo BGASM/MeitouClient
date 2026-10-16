@@ -95,6 +95,8 @@ Idle players self-defend unless Passive, and Hold prevents pursuit beyond attack
 New player characters start with Jobs and Ranged enabled. Jobs gates automatic medic/rescue
 work; direct orders still run. Saved toggles override defaults, including explicit false values.
 Jobs uses the Meitou-only bool `meitou jobs enabled`; the original save key is **Unknown**.
+Sneak: sneaking speed cap and clips, quieter, smaller view factor; a hostile looker sees the sneaker only once its
+spot meter fills ([perception](game/perception.md#spotting-a-sneaker)); the exposure feeds stealth XP.
 New games select the squad's first member. The game host also selects the first member after
 loading, before publishing the initial snapshot; the save reader itself retains saved selection.
 

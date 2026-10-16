@@ -109,6 +109,12 @@ public sealed class CharacterCold
     public bool InCombat { get; set; }
     /// <summary>The character is running away (set and cleared by the <see cref="FleeSystem"/>, serial phases only): it neither looks for fights nor answers attacks.</summary>
     public bool Fleeing { get; set; }
+    /// <summary>
+    /// How exposed a sneaking character was at <see cref="StealthExposureTick"/> (set by the <see cref="AggroSystem"/> in its serial commit): what its stealth XP
+    /// rate reads (<see cref="Bodies.XpService.Sneaking"/>).
+    /// </summary>
+    public StealthExposure StealthExposure { get; set; }
+    public long StealthExposureTick { get; set; } = long.MinValue;
     /// <summary>Weapon and worn armour (track F, docs/simulation.md "Combat").</summary>
     public Meitou.Simulation.Combat.Fighter? Fighter { get; set; }
     /// <summary>The patient of the <see cref="CharacterTask.Treat"/> task (itself for self-treatment); meaningful only while the task is set (<see cref="FirstAid.FirstAidSystem"/>).</summary>
@@ -319,6 +325,7 @@ public sealed class CharacterTable
             if (c.Task == (byte)CharacterTask.Treat) { hasher.Add(k.TreatTarget); hasher.Add((int)k.ResumeTask); }
             if (k.MedicJob) hasher.Add(true);
             if (k.Fleeing) hasher.Add(0x466C6565);   // only while set, so worlds without fleeing hash as before
+            if (k.StealthExposureTick != long.MinValue) { hasher.Add((int)k.StealthExposure); hasher.Add(k.StealthExposureTick); }   // likewise, once a sneaker was exposed
             // Carrying, looting and the rescue job add to the hash only while set, so worlds without them hash as before.
             if (!k.Carrying.IsNone) { hasher.Add(0x43617272); hasher.Add(k.Carrying); }
             if (!k.CarriedBy.IsNone) { hasher.Add(0x42726E65); hasher.Add(k.CarriedBy); }

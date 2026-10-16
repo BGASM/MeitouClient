@@ -540,7 +540,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     /// <summary>What a character holds and does, as the clips' conditions read it; leg health in per cent weighs the limp clips.</summary>
     static AnimationStance StanceOf(CharacterCold cold)
     {
-        var stance = new AnimationStance { Right = new HandHold(cold.DrawnWeapon), Combat = cold.InCombat, CarryingLeft = !cold.Carrying.IsNone, BeingCarried = !cold.CarriedBy.IsNone };
+        var stance = new AnimationStance { Right = new HandHold(cold.DrawnWeapon), Combat = cold.InCombat, Stealth = (cold.Orders & CharacterOrders.Sneak) != 0, CarryingLeft = !cold.Carrying.IsNone, BeingCarried = !cold.CarriedBy.IsNone };
         if (cold.Medical is not { } body) return stance;
         float left = 100, right = 100;
         foreach (var part in body.Parts)

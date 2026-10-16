@@ -24,10 +24,23 @@ public enum CharacterOrders : ushort
     Ranged = 16,
     /// <summary>Taunt mode: kept and saved; no effect yet.</summary>
     Taunt = 32,
-    /// <summary>Sneaking: slower, harder to see and to hear (docs/game/perception.md sections 3 and 5, docs/game/pathfinding.md "Sneaking").</summary>
+    /// <summary>Sneaking: slower, harder to see and to hear, seen only once a looker's spot meter fills, trains stealth (docs/game/perception.md, docs/game/pathfinding.md "Sneaking").</summary>
     Sneak = 64,
     /// <summary>Enables automatic assigned jobs; direct player orders remain available.</summary>
     Jobs = 128,
+}
+
+/// <summary>How exposed a sneaking character is to the hostile NPCs about (docs/game/perception.md "Spotting a sneaker"); ordered, the most exposed last.</summary>
+public enum StealthExposure : byte
+{
+    /// <summary>No hostile NPC has it within sight range.</summary>
+    Unobserved,
+    /// <summary>A hostile NPC has it within sight range but does not see it.</summary>
+    Near,
+    /// <summary>A hostile NPC sees it and its spot meter is filling (the original's yellow).</summary>
+    Noticed,
+    /// <summary>A hostile NPC's spot meter on it is full: it is seen (the original's red).</summary>
+    Detected,
 }
 
 /// <summary>Turns an order on, off (<paramref name="On"/>) or over (null) for the characters, or for the player's selection when the list is empty.</summary>
@@ -101,15 +114,30 @@ public static class Orders
     }
 
     /// <summary>
-    /// The sneaking target's view factor (docs/game/perception.md section 3, Verified constants): v x 0.75 when v is at least 0.5, else x 0.5, then x lerp(s, 1, 0.6).
-    /// The original's stealth detection that builds up over checks (section 4, step 5) is not modelled: a target that passes this test is seen at once.
+    /// The sneaking target's view factor (docs/game/perception.md "Sight", Verified constants): v x 0.75 when v is at least 0.5, else x 0.5, then x lerp(s, 1, 0.6).
+    /// Passing this test only fills the looker's spot meter (<see cref="SpotSeconds"/>); the target counts as seen once the meter is full.
     /// </summary>
     public static float SneakView(float v, float stealth) => v * (v >= 0.5f ? 0.75f : 0.5f) * (1 + (0.6f - 1) * stealth);
 
-    /// <summary>A sneaking mover's noise range: lerp(s, 450, 80) (section 5, Verified constants; clear weather).</summary>
+    /// <summary>
+    /// The looker's alertness f in the spot time (<c>FUN_140856cb0</c>): 0.5 when the looker has no current AI goal to read it from (Verified literal); the goal's own value
+    /// (<b>Unknown</b> meaning) is not modelled, so every looker uses 0.5.
+    /// </summary>
+    public const float SpotAlertness = 0.5f;
+
+    /// <summary>
+    /// The seconds a looker's spot meter takes to fill on a sneaking target it sees with view factor <paramref name="v"/> (docs/game/perception.md "Spotting a sneaker"):
+    /// lerp(v, 0.5 + 5 s, 0.5) x lerp(f, 4, 1), f = <see cref="SpotAlertness"/>. Clear in view a sneaker lasts 1.25 s; a master sneaker at the edge of sight about 14 s.
+    /// </summary>
+    public static float SpotSeconds(float v, float stealth) => (0.5f + 5 * stealth * (1 - Math.Clamp(v, 0, 1))) * (4 + (1 - 4) * SpotAlertness);
+
+    /// <summary>The seconds a full spot meter takes to empty once the looker no longer sees its target (<c>FUN_140853aa0</c>: it falls by dt / 260, Verified literal).</summary>
+    public const float SpotForgetSeconds = 260;
+
+    /// <summary>A sneaking mover's noise range: lerp(s, 450, 80) (docs/game/perception.md "Hearing", Verified constants; clear weather).</summary>
     public static float SneakNoise(float stealth) => 450 + (80 - 450) * stealth;
 
-    /// <summary>The chance to hear a sneaking target at <paramref name="distance"/>: 0.1 x (1 - s) x (1 - d^2 / N^2) (section 5; the 0.05 squad case is not modelled).</summary>
+    /// <summary>The chance to hear a sneaking target at <paramref name="distance"/>: 0.1 x (1 - s) x (1 - d^2 / N^2) ("Hearing"; the 0.05 squad case is not modelled).</summary>
     public static float SneakHearChance(float distance, float noise, float stealth) =>
         noise > 0 && distance < noise ? 0.1f * (1 - stealth) * (1 - distance * distance / (noise * noise)) : 0;
 

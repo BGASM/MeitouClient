@@ -45,6 +45,8 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
 {
     /// <summary>The <see cref="Effect.Kind"/> of a sighting: <c>Target</c> is the enemy, <c>Amount</c> the distance.</summary>
     public const int SightEffect = 1;
+    /// <summary>The <see cref="Effect.Kind"/> of a hostile looker's exposure of a sneaker: <c>Target</c> is the sneaker, <c>Amount</c> its <see cref="StealthExposure"/>.</summary>
+    public const int ExposureEffect = 2;
     const byte NoTask = 0xFF;
 
     /// <summary>The original's vision range outdoors before the race multiplier (<c>FUN_140851bc0</c>: race <c>vision range mult</c> x 1500; 500 flat inside a building).</summary>
@@ -70,15 +72,18 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         return v > MinVisibility && dist <= range * v ? v : 0;
     }
 
-    /// <summary>The sight test for a sneaking target: the view factor v of <see cref="Visibility"/>'s cone, scaled by <see cref="Orders.SneakView"/>, must reach the distance (d at most R x v').</summary>
-    public static bool SeenSneaking(Vector3 eye, float yaw, Vector3 target, float range, float stealth)
+    /// <summary>
+    /// The sight test for a sneaking target: the view factor v of <see cref="Visibility"/>'s cone, scaled by <see cref="Orders.SneakView"/>, must reach the distance
+    /// (d at most R x v'). Returns v' when it does, else 0; in view, the target still has to fill the looker's spot meter (<see cref="Orders.SpotSeconds"/>).
+    /// </summary>
+    public static float SneakVisibility(Vector3 eye, float yaw, Vector3 target, float range, float stealth)
     {
         var d = target - eye;
         float dist = d.Length();
-        if (dist < 1e-3f) return true;
-        if (dist > range) return false;
+        if (dist < 1e-3f) return 1;
+        if (dist > range) return 0;
         float v = Orders.SneakView(((MathF.Sin(yaw) * d.X + MathF.Cos(yaw) * d.Z) / dist - ConeEdge) / (1 - ConeEdge), stealth);
-        return v > MinVisibility && dist <= range * v;
+        return v > MinVisibility && dist <= range * v ? v : 0;
     }
 
     /// <summary>The noise a moving character makes reaches lerp(speed / max speed, 350, 600) units (<c>FUN_140851d10</c>, Verified constants; clear weather, not sneaking).</summary>
@@ -107,7 +112,24 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         public Vector2 Origin;
         public byte Task;
         public long CalmUntil;
+        /// <summary>The looker's spot meters on sneaking characters, in target slot order (null: none); written by its own partition only.</summary>
+        public List<Spot>? Spots;
     }
+
+    /// <summary>
+    /// One spot meter (the original's <c>SensoryData::SpottingPeopleMgr::Spot</c>): it fills by dt / <see cref="Orders.SpotSeconds"/> while the looker sees the sneaking target,
+    /// empties by dt / <see cref="Orders.SpotForgetSeconds"/> while it does not, and is dropped at 0. Above 1 the target counts as seen.
+    /// </summary>
+    struct Spot
+    {
+        public int Target, Generation;
+        public float Value;
+    }
+
+    /// <summary>A sneaking target the looker sees this scan, with its spot time.</summary>
+    readonly record struct Sighting(int Target, int Generation, float Seconds);
+
+    [ThreadStatic] static List<Sighting>? sightings;
 
     Slot[] slots = [];
     int size;
@@ -202,6 +224,10 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         public float HomeR2;
         public int Best;
         public float BestD2;
+        /// <summary>The looker's spot meters (read only during the query) and the sneakers it sees this scan.</summary>
+        public List<Spot>? Spots;
+        public List<Sighting> Sightings;
+        public EffectBuffer Effects;
     }
 
     public void Act(World world, Partition part, EffectBuffer effects)
@@ -230,10 +256,48 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
                 Seed = world.Seed, Key = Rng.Key(new CharacterId(i, prev[i].Generation)), Tick = (ulong)world.Tick,
                 Stance = stance,
                 Home = cold.Ai?.Squad.HomeCentre ?? default, HomeR2 = cold.Ai is { } mind ? mind.Squad.HomeRadius * mind.Squad.HomeRadius : 0,
+                Spots = slots[i].Spots, Sightings = sightings ??= [], Effects = effects,
             };
+            scan.Sightings.Clear();
             world.Grid.Query(scan.Eye.X, scan.Eye.Z, MathF.Max(range, NoiseFar), ref scan, Visit);
             if (scan.Best >= 0) effects.Emit(i, scan.Best, SightEffect, MathF.Sqrt(scan.BestD2));
+            if (scan.Spots is not null || scan.Sightings.Count > 0) slots[i].Spots = AdvanceSpots(scan.Spots, scan.Sightings, every * world.TickSeconds, table);
         }
+    }
+
+    /// <summary>
+    /// Moves a looker's spot meters on by one scan of <paramref name="dt"/> seconds: a seen sneaker's meter fills by dt / its spot time (a new one starts at 0), the others
+    /// empty by dt / <see cref="Orders.SpotForgetSeconds"/>; empty meters and gone targets are dropped. Returns the list in target slot order (null when empty).
+    /// </summary>
+    static List<Spot>? AdvanceSpots(List<Spot>? spots, List<Sighting> seen, float dt, CharacterTable table)
+    {
+        spots ??= [];
+        foreach (var x in seen)
+        {
+            int k = spots.FindIndex(p => p.Target == x.Target && p.Generation == x.Generation);
+            if (k < 0) spots.Add(new Spot { Target = x.Target, Generation = x.Generation, Value = dt / x.Seconds });
+            else spots[k] = spots[k] with { Value = spots[k].Value + dt / x.Seconds };
+        }
+        for (int k = spots.Count - 1; k >= 0; k--)
+        {
+            var p = spots[k];
+            if (!table.Next[p.Target].Alive || table.Next[p.Target].Generation != p.Generation) { spots.RemoveAt(k); continue; }
+            if (seen.Exists(x => x.Target == p.Target)) continue;
+            p.Value -= dt / Orders.SpotForgetSeconds;
+            if (p.Value <= 0) spots.RemoveAt(k);
+            else spots[k] = p;
+        }
+        if (spots.Count == 0) return null;
+        spots.Sort((a, b) => a.Target.CompareTo(b.Target));
+        return spots;
+    }
+
+    /// <summary>The looker's spot meter on <paramref name="slot"/> before this scan (0: none).</summary>
+    static float SpotOf(List<Spot>? spots, int slot, int generation)
+    {
+        if (spots is null) return 0;
+        foreach (var p in spots) if (p.Target == slot && p.Generation == generation) return p.Value;
+        return 0;
     }
 
     static void Visit(int slot, ref Scan s)
@@ -241,9 +305,11 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         if (slot == s.Self) return;
         ref readonly var other = ref s.Table.Previous[slot];
         float d2 = Vector3.DistanceSquared(other.Position, s.Eye);
+        if (d2 > s.Range * s.Range && d2 > NoiseFar * NoiseFar) return;
+        bool sneaking = (s.Table.Cold(slot)?.Orders & CharacterOrders.Sneak) != 0;
         // Strictly nearer only: the grid visits a cell's slots in ascending order, so a tie keeps the lower slot within a cell; across cells the
-        // order is the grid's fixed one. Either way it is a function of the state.
-        if (d2 >= s.BestD2 || (d2 > s.Range * s.Range && d2 > NoiseFar * NoiseFar)) return;
+        // order is the grid's fixed one. Either way it is a function of the state. A sneaker farther than the best still gets its spot meter.
+        if (d2 >= s.BestD2 && !sneaking) return;
         if (s.Table.Cold(slot) is not { Medical.Incapacitated: false } c) return;
         bool wanted = s.Police && Crime.CrimeSystem.IsWantedBy(c, s.Faction);
         bool enemy = s.Stance != Ai.AiStance.Passive
@@ -255,9 +321,22 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
             if (s.Stance == Ai.AiStance.Defensive && !c.InCombat) return;
             if (s.Stance == Ai.AiStance.Territorial && Vector2.DistanceSquared(new Vector2(other.Position.X, other.Position.Z), s.Home) > s.HomeR2) return;
         }
-        // A sneaking target is harder to see and to hear (the Sneak order; docs/game/perception.md sections 3 and 5).
-        float stealth = (c.Orders & CharacterOrders.Sneak) != 0 ? Orders.Stealth(c) : -1;
-        if (stealth >= 0 ? !SeenSneaking(s.Eye, s.Yaw, other.Position, s.Range, stealth) : Visibility(s.Eye, s.Yaw, other.Position, s.Range) <= 0)
+        // A sneaking target is harder to see and to hear (the Sneak order; docs/game/perception.md "Sight", "Spotting a sneaker" and "Hearing"): in view it fills the
+        // looker's spot meter and counts as seen only once the meter was full before this scan.
+        float stealth = sneaking ? Orders.Stealth(c) : -1;
+        bool seen;
+        if (sneaking)
+        {
+            float v = SneakVisibility(s.Eye, s.Yaw, other.Position, s.Range, stealth);
+            bool full = SpotOf(s.Spots, slot, other.Generation) > 1;
+            if (v > 0) s.Sightings.Add(new Sighting(slot, other.Generation, Orders.SpotSeconds(v, stealth)));
+            if (d2 <= s.Range * s.Range)
+                s.Effects.Emit(s.Self, slot, ExposureEffect, (float)(full && v > 0 ? StealthExposure.Detected : v > 0 ? StealthExposure.Noticed : StealthExposure.Near));
+            if (d2 >= s.BestD2) return;
+            seen = full && v > 0;
+        }
+        else seen = Visibility(s.Eye, s.Yaw, other.Position, s.Range) > 0;
+        if (!seen)
         {
             float speed = new Vector2(other.Velocity.X, other.Velocity.Z).Length();
             float p = stealth >= 0
@@ -288,6 +367,15 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
 
     public void Apply(World world, in Effect e)
     {
+        if (e.Kind == ExposureEffect)
+        {
+            // The sneaker keeps the highest exposure any looker gave it this tick.
+            if (world.Characters.Cold(e.Target) is not { } sneaker) return;
+            var level = (StealthExposure)(int)e.Amount;
+            if (sneaker.StealthExposureTick != world.Tick || level > sneaker.StealthExposure) sneaker.StealthExposure = level;
+            sneaker.StealthExposureTick = world.Tick;
+            return;
+        }
         if (e.Kind != SightEffect) return;
         if (takenTick != world.Tick) { taken.Clear(); takenTick = world.Tick; }
         var table = world.Characters;
@@ -394,6 +482,13 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
             hasher.Add(s.Origin.Y);
             hasher.Add(s.Task);
             hasher.Add(s.CalmUntil);
+            if (s.Spots is { } spots)   // only while a looker has meters, so worlds without sneakers hash as before
+                foreach (var p in spots)
+                {
+                    hasher.Add(p.Target);
+                    hasher.Add(p.Generation);
+                    hasher.Add(p.Value);
+                }
         }
         hasher.Add(Started);
     }

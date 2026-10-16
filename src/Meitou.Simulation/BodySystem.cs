@@ -70,6 +70,12 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
             medical.Tick(HoursPerTick, ctx, events);
             n.MaxSpeed = Speed.Run(race, stats, medical, encumbrance);
             TrainOnTheMove(stats, race, medical, in n, encumbrance, world.TickSeconds);
+            if ((cold.Orders & CharacterOrders.Sneak) != 0 && !medical.Incapacitated)
+            {
+                // An exposure older than a second (a looker's scan interval with room to spare) has lapsed.
+                var exposure = cold.StealthExposureTick >= world.Tick - (long)MathF.Ceiling(1 / world.TickSeconds) ? cold.StealthExposure : StealthExposure.Unobserved;
+                xp.Sneaking(stats, race, exposure, world.TickSeconds);
+            }
             if (cold.IsPlayer || table.IdOf(i) == world.Player.Inspected) cold.Extended = ExtendedOf(stats, race, medical, n.MaxSpeed, encumbrance, ctx.Resting);
             n.Health = Math.Clamp(medical.Blood / MathF.Max(MedicalState.BloodCapacity(race, stats.Strength), 1) * 100, 0, 100);
             foreach (var e in events)

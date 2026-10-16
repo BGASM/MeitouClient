@@ -19,6 +19,26 @@ building compatibility, NPC test/stealth accumulation and conditional physics ra
 not universal vision rules. Shared senses keep targets about two completed squad update rounds.
 Faction hostility/disguise/personal tags choose enemy; coexistence not read in this predicate.
 
+## Spotting a sneaker
+
+A sneaking target in view (v > 0.01) of an NPC is not seen at once (`FUN_140857b10` -> `FUN_140856cb0`, extra args 0.5
+and stealth x 5). Each looker keeps a meter per target (`SensoryData::SpottingPeopleMgr::Spot`, map at sense +0x150).
+**Verified** literals, flow **Observed**:
+
+- In view with line of sight: the meter fills by dt / T, T = lerp(v, 0.5 + 5 s, 0.5) x lerp(f, 4, 1). f is the looker's
+  alertness: 0.5 without a current goal, else a goal float (+0x3c, meaning **Unknown**); 0 when it is KO'd, busy
+  (+0x2f8 count > 0) or in state 1, and then the meter does not fill and the target is not seen.
+- Seen (result 1) when the meter was above 1 before this check; else result 2 (noticing). No line of sight: result 0.
+- Not in view: the meter empties by dt / 260 (`FUN_140853aa0`) and is dropped at 0.
+- The target keeps a watcher list (+0x1f0, `FUN_140855f30`): level and time per looker; level 0 removes it.
+  `FUN_1408586d0` draws, for entries younger than 4 s, a short pointer at the sneaker (12 up, length
+  clamp(d - 7, ..15) towards the looker): red 0xdd0000 detected, yellow 0xffdd00 noticing, green 0x00ff00 when a
+  looker test (vtable +0x3f0, **Unknown**) passes. The sneaker's state +0xe8 becomes 1 (any red) or 2 (any yellow).
+- Stealth XP: see [character-stats](character-stats.md#levelling-xp).
+
+Meitou: meters only for hostile/police lookers the aggro scan runs, no line-of-sight ray, f = 0.5, dt = the scan interval,
+a meter decays also when the target is out of range (the original's rule there is **Unknown**). No pointers yet.
+
 ## Hearing
 
 Moving-state gate; ordinary noise lerp(speed fraction,350*f,600*f), stealth noise
@@ -46,6 +66,7 @@ not be equated with the attack planner or discarded immediately after a lost sig
 | View cone | factor v = (cos a - 0.2) / 0.8; nothing beyond a = 78.5 degrees | **Verified** (literals) | `FUN_140852f70` |
 | Seen when | v > 0.01 and d <= lerp(light, 0.2 or 0.4, 1) x contrast x R x v | **Observed** (control flow), constants **Verified** | `FUN_140852f70`, `FUN_140857b10` |
 | Sneaking / crawling target | v x0.5 crawling; x0.75 or x0.5 sneaking; x lerp(stealth, 1, 0.6) | **Verified** (literals) | `FUN_140852f70` |
+| Spot time of a sneaker | lerp(v, 0.5 + 5 s, 0.5) x lerp(f, 4, 1) s; meter > 1 = seen; forgets at dt / 260 | **Verified** (literals), flow **Observed** | `FUN_140856cb0`, `FUN_140853aa0` |
 | Noise range of a mover | lerp(speed ratio, 350, 600); sneaking lerp(stealth, 450, 80); weather x0.25 / x0.75 | **Verified** (literals) | `FUN_140851d10` |
 | Hearing chance per check | 0.75 x (1 - d^2/N^2); sneaking 0.1 (0.05) x (1 - stealth) x ...; x2 if recently alerted | **Verified** (disassembly and bytes) | `FUN_140857500` |
 | Squad-shared sightings | a target a mate saw or heard counts as seen within 2 x R | **Observed** | `FUN_140857b10`, `GroupSense` |
@@ -62,7 +83,7 @@ not be equated with the attack planner or discarded immediately after a lost sig
 - Slot 14 `+0xb4`, `+0x2f8` = 1, `FUN_140436610`, `FUN_140856bc0`, slot 60's `+0xd5`, the hearing re-roll factor, the meaning of
   character `+0x5b8` and `+0x504`.
 - Whether the run-away ratios are read at all; the leash.
-- The full stealth detection store (`FUN_140855e80`) and the building rules of can-see and can-hear.
+- The building rules of can-see and can-hear; the alertness goal float and the +0x3f0 (green pointer) test of spotting.
 
 ## Evidence index
 
