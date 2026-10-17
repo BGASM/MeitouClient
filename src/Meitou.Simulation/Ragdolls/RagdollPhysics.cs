@@ -58,7 +58,7 @@ internal struct ContactRules : INarrowPhaseCallbacks
 internal struct Integration : IPoseIntegratorCallbacks
 {
     Vector3Wide gravityDt;
-    Vector<float> linear, angular;
+    Vector<float> linear, angular, maxSpeedSquared, maxSpinSquared;
 
     public readonly AngularIntegrationMode AngularIntegrationMode => AngularIntegrationMode.Nonconserving;
     public readonly bool AllowSubstepsForUnconstrainedBodies => false;
@@ -71,6 +71,8 @@ internal struct Integration : IPoseIntegratorCallbacks
         gravityDt = Vector3Wide.Broadcast(new Vector3(0, -RagdollPhysics.Gravity * dt, 0));
         linear = new Vector<float>(1 / (1 + RagdollPhysics.LinearDamping * dt));
         angular = new Vector<float>(1 / (1 + RagdollPhysics.AngularDamping * dt));
+        maxSpeedSquared = new Vector<float>(RagdollPhysics.MaxSpeed * RagdollPhysics.MaxSpeed);
+        maxSpinSquared = new Vector<float>(RagdollPhysics.MaxSpin * RagdollPhysics.MaxSpin);
     }
 
     public void IntegrateVelocity(Vector<int> bodyIndices, Vector3Wide position, QuaternionWide orientation, BodyInertiaWide localInertia, Vector<int> integrationMask,
@@ -78,6 +80,12 @@ internal struct Integration : IPoseIntegratorCallbacks
     {
         velocity.Linear = (velocity.Linear + gravityDt) * linear;
         velocity.Angular *= angular;
+        // A body is never faster than the ground can catch (see RagdollPhysics.MaxSpeed): a joint pushed past its limits would otherwise fling a limb through the terrain.
+        var speedSquared = Vector3Wide.Dot(velocity.Linear, velocity.Linear);
+        var keep = Vector.ConditionalSelect(Vector.GreaterThan(speedSquared, maxSpeedSquared), Vector.SquareRoot(maxSpeedSquared / speedSquared), Vector<float>.One);
+        velocity.Linear *= keep;
+        var spinSquared = Vector3Wide.Dot(velocity.Angular, velocity.Angular);
+        velocity.Angular *= Vector.ConditionalSelect(Vector.GreaterThan(spinSquared, maxSpinSquared), Vector.SquareRoot(maxSpinSquared / spinSquared), Vector<float>.One);
     }
 }
 
@@ -91,6 +99,17 @@ internal sealed class RagdollPhysics : IDisposable
     public const float Gravity = 98.1f, LinearDamping = 0.05f, AngularDamping = 0.01f, Friction = 1;
     /// <summary>The largest speed a contact pushes bodies apart with (engine choice: 2 m/s).</summary>
     public const float RecoverySpeed = 20;
+    /// <summary>
+    /// The fastest a body may move, in units per second, and the speculative margin of its collidable. The ground is a one-sided triangle mesh: a body that gets more than its own
+    /// radius past it in one 1/30 s tick has no contact left (it is behind the face) and falls on for ever. Bepu only makes contacts within the margin, so the margin must reach
+    /// a whole tick of the fastest motion (engine choice; 20 m/s is a fall of 20 m, far more than any in the game, and only a joint gone wrong gets there).
+    /// </summary>
+    public const float MaxSpeed = 200, SpeculativeMargin = 8;
+    /// <summary>The fastest a body may turn, in radians per second: a limb 4 units long then moves its tip by 4 × 30 = 120 units/s at most, inside <see cref="MaxSpeed"/> (engine choice).</summary>
+    public const float MaxSpin = 30;
+
+    /// <summary>The collidable of a ragdoll body of <paramref name="shape"/>.</summary>
+    public static CollidableDescription Collidable(TypedIndex shape) => new(shape, SpeculativeMargin);
     /// <summary>Solver substeps per tick and velocity iterations per substep: 4 substeps at 30 Hz is 120 Hz, finer than PhysX's 1/60 s maximum step (engine choice).</summary>
     const int Substeps = 4, Iterations = 2;
 

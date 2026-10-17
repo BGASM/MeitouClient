@@ -49,6 +49,8 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
     public const float FreezeEarliest = 2, FreezeShare = 0.6f, FreezeLatest = 7;
     /// <summary>A body is still under these squared speeds (the game's PhysX sleep velocities: linear² 2.25, angular² 1.96).</summary>
     const float StillLinear = 2.25f, StillAngular = 1.96f;
+    /// <summary>How far under the terrain a body's centre must get, in world units, to count as through it (engine choice; a resting limb's centre is at least its radius, 0.4 and up, above it).</summary>
+    const float SinkDepth = 1, MaxLift = 8;
 
     readonly CharacterRigs rigs;
     IRagdollEnvironment? environment;
@@ -208,6 +210,7 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
             var cold = table.Cold(slot)!;
             if (r.Mask != RagdollPart.None && !r.Frozen)
             {
+                Surface(r, env);
                 ReadBack(r);
                 r.Age += dt;
                 if ((r.Mask & RagdollPart.Whole) != 0)
@@ -311,6 +314,9 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
         foreach (var j in r.Definition.Joints)
             if (dynamic[j.A] || dynamic[j.B]) needed[j.A] = needed[j.B] = true;
         var kinds = Shapes(r.Definition);
+        // A whole body that starts in the ground (a foot on a slope: the animated pose is not clipped to the terrain) is lifted out of it as one, as the game snaps a new
+        // ragdoll up to the terrain: the ground is a one-sided mesh, and a body that starts behind it has nothing to land on.
+        float lift = (mask & RagdollPart.Whole) != 0 && !had.Contains(true) ? OutOfGround(animated, dynamic) : 0;
         r.Tag = nextTag++;
         r.Bodies = new BodyHandle?[bodies.Length];
         r.Dynamic = dynamic;
@@ -319,12 +325,12 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
             // A simulated body carries on from where it was simulated (a body dropped from the shoulder falls from there); anything else starts from the animation,
             // and so does everything when the body is lifted onto a shoulder.
             bool keep = had[b] && dynamic[b] && (mask & RagdollPart.CarryMode) == 0;
-            var pose = keep ? r.Pose[b] : animated[b];
+            var pose = keep ? r.Pose[b] : lift > 0 ? animated[b] with { Position = animated[b].Position + new Vector3(0, lift, 0) } : animated[b];
             var velocity = keep ? velocities[b] : default;
             if (!needed[b]) { r.Pose[b] = pose; continue; }
             r.Pose[b] = pose;
             var rigid = new RigidPose(pose.Position, pose.Rotation);
-            var collidable = new CollidableDescription(kinds[b].Shape, 0.5f * r.Scale);
+            var collidable = RagdollPhysics.Collidable(kinds[b].Shape);
             var activity = new BodyActivityDescription(0.01f);
             var description = dynamic[b]
                 ? BodyDescription.CreateDynamic(rigid, velocity, kinds[b].Inertia, collidable, activity)
@@ -333,6 +339,21 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
         }
         foreach (var j in r.Definition.Joints)
             if (dynamic[j.A] || dynamic[j.B]) AddJoint(r, j);
+    }
+
+    /// <summary>How far a new whole-body ragdoll must go up to have no body centre under the terrain (the lowest ends 0.25 above it); 0 when none is under it, or when it is more than <see cref="MaxLift"/> (a floor sunk into a hill, not a foot in a slope).</summary>
+    float OutOfGround(RigidTransform[] animated, bool[] dynamic)
+    {
+        if (environment is not { } env) return 0;
+        float lift = 0;
+        for (int b = 0; b < animated.Length; b++)
+        {
+            if (!dynamic[b]) continue;
+            var p = animated[b].Position;
+            float ground = env.GroundHeight(p.X, p.Z, p.Y);
+            if (p.Y < ground) lift = MathF.Max(lift, ground + 0.25f - p.Y);
+        }
+        return lift <= MaxLift ? lift : 0;
     }
 
     void AddJoint(Ragdoll r, RagdollJoint j)
@@ -422,6 +443,28 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
         for (int b = 0; b < r.Bodies.Length; b++)
             if (r.Bodies[b] is { } handle && r.Dynamic[b] && physics.Simulation.Bodies.GetBodyReference(handle) is { Awake: false } sleeping)
                 sleeping.Awake = true;
+    }
+
+    /// <summary>
+    /// A body that went through the ground between two ticks is put back on it. The ground is a one-sided mesh, so a body that tunnels (<see cref="RagdollPhysics.MaxSpeed"/> makes it
+    /// rare, not impossible: a thin limb spun hard onto a slope) has nothing left to stop it and would fall on until the freeze. Only a crossing counts, from at or above the
+    /// surface to more than <see cref="SinkDepth"/> under it: a body that starts below the terrain (a floor sunk into a hill) is left where it is.
+    /// </summary>
+    void Surface(Ragdoll r, IRagdollEnvironment env)
+    {
+        for (int b = 0; b < r.Bodies.Length; b++)
+        {
+            if (r.Bodies[b] is not { } handle || !r.Dynamic[b]) continue;
+            var body = physics.Simulation.Bodies.GetBodyReference(handle);
+            var now = body.Pose.Position;
+            float ground = env.GroundHeight(now.X, now.Z, now.Y);
+            if (now.Y >= ground - SinkDepth) continue;
+            var before = r.Pose[b].Position;
+            if (before.Y < env.GroundHeight(before.X, before.Z, before.Y) - SinkDepth) continue;
+            body.Pose.Position = new Vector3(now.X, ground + SinkDepth, now.Z);
+            body.Velocity.Linear = new Vector3(body.Velocity.Linear.X, MathF.Max(body.Velocity.Linear.Y, 0), body.Velocity.Linear.Z);
+            if (!body.Awake) body.Awake = true;
+        }
     }
 
     void ReadBack(Ragdoll r)

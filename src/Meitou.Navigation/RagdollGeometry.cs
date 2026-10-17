@@ -25,13 +25,36 @@ public sealed class RagdollGeometry : IRagdollEnvironment, IDisposable
     readonly ConcurrentDictionary<ZoneCoordinate, long> used = new();
     long clock;
 
+    /// <summary>Heightmap samples along a block of the ground cache, and blocks kept at most (65 × 65 samples each, about 8 KB; a block is 1152 units across).</summary>
+    const int BlockSamples = 64, MaxBlocks = 256;
+    readonly TerrainHeightmap? map;
+    readonly Dictionary<(int, int), HeightWindow> blocks = [];
+
+    /// <param name="terrainHeight">The simulation's ground height, used only where the full heightmap cannot be opened: it is the coarse world grid away from the loaded area.</param>
     public RagdollGeometry(GameInstall install, GameDatabase db, WorldLevelData levels, Func<float, float, float> terrainHeight)
     {
         gatherer = new ZoneGeometryGatherer(install, db, levels, new CollisionCache(install)) { IncludeFoliage = false };
         terrain = terrainHeight;
+        try { map = TerrainHeightmap.Open(install); }
+        catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException) { }
     }
 
-    public float GroundHeight(float x, float z, float nearY) => terrain(x, z);
+    /// <summary>
+    /// The terrain at full resolution, from blocks of the heightmap read as they are needed (the simulation's own height is the coarse grid, a sample in every 144 units, outside
+    /// the area the game loaded at the start: a body would meet a ground metres off the one the character stands on and drawn terrain). Called from the simulation thread only.
+    /// </summary>
+    public float GroundHeight(float x, float z, float nearY)
+    {
+        if (map is null) return terrain(x, z);
+        var (column, row) = WorldLayout.ToSample(x, z);
+        int bx = (int)Math.Floor(column / BlockSamples), bz = (int)Math.Floor(row / BlockSamples);
+        if (!blocks.TryGetValue((bx, bz), out var block))
+        {
+            if (blocks.Count >= MaxBlocks) blocks.Clear();
+            blocks[(bx, bz)] = block = map.ReadWindow(bx * BlockSamples, bz * BlockSamples, BlockSamples + 1, BlockSamples + 1);
+        }
+        return block.TryHeightAt(x, z, out float height) ? height : terrain(x, z);
+    }
 
     public bool Buildings(Vector3 min, Vector3 max, List<Vector3> triangles)
     {
@@ -88,6 +111,7 @@ public sealed class RagdollGeometry : IRagdollEnvironment, IDisposable
     public void Dispose()
     {
         foreach (var task in zones.Values) try { task.Wait(); } catch (AggregateException) { }
+        map?.Dispose();
         lock (gatherLock) gatherer.Dispose();
     }
 }

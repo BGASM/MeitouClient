@@ -359,6 +359,13 @@ when the host passes `CharacterRigs` (the game does; tests and goldens do not). 
 - **Scene**: 32-unit tiles round each moving ragdoll, terrain sampled every 2 units, plus building
   collision from `Meitou.Navigation.RagdollGeometry` (per zone on a worker, doors and passable parts
   skipped, ≤16 zones). A tile has ground only until its zones are gathered. Tiles unused for 90 ticks go.
+  The terrain is the full-resolution heightmap (blocks of 64 samples read on demand), not the simulation's `GroundHeights`:
+  outside the area loaded at the start that is a coarse grid (a sample per 144 units) off the real ground by 2.4 units
+  at the median and 15 at the 90th percentile over the land, so bodies met a ground the character was not standing on.
+- **Falling through**: the ground is a one-sided mesh. A new whole-body ragdoll with a body centre under the terrain (a
+  foot on a slope; 4% of starts) is lifted as one to 0.25 above it (up to 8 units); speed is capped at 200 units/s and
+  spin at 30 rad/s and the contact margin is 8 units (Bepu, 30 Hz ticks: a thin limb moving more than its radius per tick
+  tunnels); a dynamic body that crosses from above the terrain to more than 1 unit under it is put back on it.
 - **Hash**: mask, frozen, age, blend and body poses in system order.
 
 Gaps: no ragdoll state in saves (a loaded downed character's ragdoll starts from the lying clip);
