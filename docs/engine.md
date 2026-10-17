@@ -44,7 +44,7 @@ Meitou UI mode presents title controls over a live view of the real world; Faith
 the original title image and loading screen. Advanced settings persist two independent scene-transition
 toggles in `meitou.user.json`, both on by default: `mainMenuTransitions` covers entering a new game/save
 from the main menu and returning to it; `inGameTransitions` covers save loads/new games during play.
-Each has a persisted speed slider (`mainMenuTransitionSpeed` / `inGameTransitionSpeed`, 0.25–4x, default1x).
+Each has a persisted speed slider (`mainMenuTransitionSpeed` / `inGameTransitionSpeed`, 0.25–4x, default 1.5x).
 Disabling either uses the regular loading screen and warm-up. Enabled scene loads in Meitou use `SkyArrival`: 3.4s ascent
 about a fixed eye (lighting takes the shorter way to midnight by halfway up, so the dawn title rewinds), a midnight
 sky hold, then 2.4s descent at the destination, both durations divided by the selected speed.

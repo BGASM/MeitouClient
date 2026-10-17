@@ -370,8 +370,8 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         frameLimit.Set(240);
         config.MainMenuTransitions = true;
         config.InGameTransitions = true;
-        config.MainMenuTransitionSpeed = 1;
-        config.InGameTransitionSpeed = 1;
+        config.MainMenuTransitionSpeed = 1.5f;
+        config.InGameTransitionSpeed = 1.5f;
         AttackSlotsSlider.Set(UserConfig.MeitouAttackSlots);
         config.LateDefences = true;
         LateDefencesChanged?.Invoke(true);

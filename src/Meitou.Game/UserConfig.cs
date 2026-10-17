@@ -25,8 +25,8 @@ sealed class UserConfig
     public FloaterMode Floaters { get; set; } = FloaterMode.Simple;
     public bool MainMenuTransitions { get; set; } = true;
     public bool InGameTransitions { get; set; } = true;
-    public float MainMenuTransitionSpeed { get; set; } = 1;
-    public float InGameTransitionSpeed { get; set; } = 1;
+    public float MainMenuTransitionSpeed { get; set; } = 1.5f;
+    public float InGameTransitionSpeed { get; set; } = 1.5f;
     /// <summary>Borderless full screen (the Tab panel, Alt+Enter); <c>--windowed</c> starts in a window for one run.</summary>
     public bool FullScreen { get; set; } = true;
     public int TickRate { get; set; } = 30;
