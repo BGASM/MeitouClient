@@ -35,4 +35,19 @@ public class InventoryCommandTests
         inventory.Items.Remove(tooBig);
         Assert.True(InventoryCommands.Arrange(inventory)); Assert.Equal((0, 0), (item.X, item.Y));
     }
+    [Fact]
+    public void TryEquipFillsTheBackThenTheHipAndRefusesWhenBothAreFull()
+    {
+        var inventory = new Inventory();
+        ItemInstance Weapon(int width) => new() { Record = "w", Type = Meitou.Data.Fcs.FcsRecordType.WEAPON, Width = width, Height = 1 };
+        var (a, b, c, d, e) = (Weapon(5), Weapon(5), Weapon(10), Weapon(7), Weapon(7));
+        Assert.True(InventoryCommands.TryEquip(inventory, a));
+        Assert.True(InventoryCommands.TryEquip(inventory, b));
+        Assert.True(InventoryCommands.TryEquip(inventory, c));
+        Assert.True(InventoryCommands.TryEquip(inventory, d));
+        Assert.False(InventoryCommands.TryEquip(inventory, e));
+        Assert.Equal(("back", 0, 0, "back", 5, 0), (a.Section, a.X, a.Y, b.Section, b.X, b.Y));
+        Assert.Equal(("back", 0, 1, "hip", 0, 0), (c.Section, c.X, c.Y, d.Section, d.X, d.Y));
+        Assert.DoesNotContain(e, inventory.Items);
+    }
 }
