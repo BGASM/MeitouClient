@@ -10,10 +10,10 @@ public enum UpscalerKind { Off, Taa, Fsr, Dlss }
 /// <summary>The upscaler options of <see cref="PostOptions"/>: which one, the render scale (per axis) and the sharpening.</summary>
 public sealed class UpscaleOptions
 {
-    /// <summary>TAA by default: the Meitou anti-aliasing (Off is the game's FXAA).</summary>
-    public UpscalerKind Kind = UpscalerKind.Taa;
-    /// <summary>The temporal method the Meitou anti-aliasing switch turns on (the last one chosen; TAA until then).</summary>
-    public UpscalerKind Preferred = UpscalerKind.Taa;
+    /// <summary>DLSS by default (TAA runs instead where it is not available): the Meitou anti-aliasing (Off is the game's FXAA).</summary>
+    public UpscalerKind Kind = UpscalerKind.Dlss;
+    /// <summary>The temporal method the Meitou anti-aliasing switch turns on (the last one chosen; DLSS until then).</summary>
+    public UpscalerKind Preferred = UpscalerKind.Dlss;
     /// <summary>Render size over display size per axis; null selects Ultra Quality for temporal Meitou rendering, native when off.</summary>
     public float? Scale;
     public const float MeitouDefaultScale = 0.83f;

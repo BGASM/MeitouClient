@@ -3,6 +3,11 @@
 What changed in each release, newest first. The release workflow copies the section of the version it builds into the GitHub release
 notes and refuses to release a version without one: add a `## vX.Y.Z` section with one `- ` line per change before running it.
 
+## v0.12.1
+
+- Fixed a crash on loading a save (door update on the empty world state)
+- DLSS is the default anti-aliasing (TAA where DLSS is not available)
+
 ## v0.12.0
 
 - Audio: ambience, biome music, the title theme, interior reverb and building emitters, footsteps, combat, voices, task and interface sounds, with an Audio settings page (volumes, music frequency) and pause ducking
