@@ -72,6 +72,24 @@ public sealed class WorldWeather
         return state;
     }
 
+    /// <summary>
+    /// Continues the regions of a save (docs/formats/save.md "BIOMES") at the game <paramref name="day"/> and <paramref name="hour"/>: the schedules first run up to
+    /// that time (so a region the save lacks has its own weather there), then the saved ones take over and the sky snaps to them. The next frame does not replay.
+    /// </summary>
+    public void Restore(IReadOnlyList<WeatherRegionSnapshot> regions, int day, double hour)
+    {
+        Day = day;
+        var now = new WeatherTime(day, hour);
+        double from = last?.Minutes ?? 0;
+        for (double m = Math.Floor(from) + 1; m <= now.Minutes; m++)
+        {
+            var t = WeatherTime.FromHours(m / 60);
+            foreach (var region in World.Regions) region.Update(t);
+        }
+        World.Restore(regions, now);
+        last = now;
+    }
+
     WeatherRegion? Here => World.CameraRegion ?? (eye is { } e ? World.RegionAt(e.X, e.Z) : null);
 
     /// <summary>The Tab panel's weather list: the weathers of the camera region's season, in its order (empty before the first frame).</summary>

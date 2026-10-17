@@ -126,7 +126,7 @@ A queued request (kind at +0xA0 of the request object) is run on the next frame;
 | --- | --- |
 | `version` (string) | "1.0.68", the game version that wrote the save (**Verified** equals `currentVersion.txt`); compared by `FUN_14047acf0` |
 | `time day`, `time hour`, `time minute` (ints) | **Observed**: in-game clock (sample: day 1, 13:39); how the clock advances and wraps is in [game-loop.md](../game/game-loop.md#frame-clocks) (**Verified** there). Written by `FUN_14066d7d0` |
-| `sky update current time`, `sky update total time`, `sky updating`, `sky ambient color mult`, `sky ambient color mult speed`, `sky clouds density`, `sky clouds density speed` | state of the sky transition ([sky.md](sky.md)); **Observed** |
+| `sky update current time`, `sky update total time`, `sky updating`, `sky ambient color mult`, `sky ambient color mult speed`, `sky clouds density`, `sky clouds density speed` | state of the camera's 30 s sky transition ([sky.md](sky.md)); **Observed**. The regions' weather is in [BIOMES](#biomes-type-28-quicksave-weather-per-region) |
 | `player money` (int), `squads` (1), `members` (1), `floor num`, `formation` | player squad summary (`FUN_140375360` reads them from the player object) |
 | `pfaction name` ("Nameless") | the player's faction name; **Verified** it equals the name of the GAMESTATE_FACTION whose `gamedata stringID` is `204-gamedata.base` (record 670) |
 | `pos` (vec3), `rot` (vec4 x y z w), `zoom`, `alt` | camera pivot position, rotation and zoom ([camera.md](camera.md)); **Observed** |
@@ -137,6 +137,32 @@ A queued request (kind at +0xA0 of the request object) is run on the next frame;
 | bools `bl ditch eject ep feed heal help rescue share shootfirst sit sleep stay`, floats `bs cod gdm ht nnm ps rs`, `formation` | squad behaviour toggles and short-key game toggles (`FUN_1403eb710`, `FUN_1403ee910`): **Observed**; meaning of the short keys **Unknown** |
 | reference list `zones` | one entry per zone **that has a file**, written in grid order (X outer, Y inner; `FUN_140375360` loops 64 x 64): target = the list index in **hexadecimal** ("0".."9", "a", "b", "c" for 13 entries), values `(x, y, 1)` = (zone X, zone Y, has-file flag). **Verified**: the 13 entries equal the 13 files of `zone/` (probe), and the key spelling is seen in the sample |
 | reference list `mods` | one entry per loaded data file, target = the file's name without extension for the `.mod` files (`Newwworld`, `Dialogue`, `rebirth`) and `base` for `gamedata.base`, values `(-1, 0, 0)`; **Verified** (probe, `GameDatabase.Files`) that the four entries are in the load order of the base game (`gamedata.base`, `Newwworld.mod`, `Dialogue.mod`, `rebirth.mod`). **Unknown** whether `loadGame` compares it with the current mod list (no such string seen) |
+
+### BIOMES (type 28, `quick.save`): weather per region
+
+Written per region by `FUN_1408fad60` (region list walk `FUN_1408faf40`), read by `FUN_1408fae70` (walk `FUN_1408fafc0`); the weather part by
+`FUN_1409ddfe0` / `FUN_1409de200`, the weather instance by `FUN_1409dd250` / `FUN_1409dd5e0`. **Verified** by code and by a census of the owner's six
+saves (71 regions each, mods included):
+
+| Key (`p` = prefix) | Meaning |
+| --- | --- |
+| string `<BIOME_GROUP id>` = `p` | the region's prefix: its index in the save's walk of the region table. The loader finds a region by its id and reads `p`'s keys; a region the record lacks keeps a fresh schedule. So `p` only pairs keys within one save |
+| int `p_nestcount` | the BIOME_GROUP's `num nests` (equal in 71 of 71 regions, all saves) |
+| string `p_w_s_id`, int `p_w_s_end` | current SEASON id and the day it ends (absolute day count). An id the region does not list: season 0 from now, a new weather |
+| string `p_w_w_id` | current WEATHER id; one the season does not list: a new weather is chosen |
+| int `p_w_wi_start`, `p_w_wi_end` | weather start / end in game minutes, `day × 1440 + hour × 60 + minute` (start ≤ now < end in 426 of 426) |
+| float `p_w_wi_str`; int `p_w_wi_ef_str` | strength; the WEATHER's `effect strength min`, truncated to int (426 of 426) |
+| float `p_w_wi_speed`, vec3 `p_w_wi_dir` | current wind speed and direction; direction = `(cos a, 0, −sin a)` of the angle below (rotation about Y of +X; every settled region) |
+| int `p_w_wi_udp` | game minute of the next wind update |
+| int `p_w_wi_bu_t_s` / `_t_e`, float `_bu_s_s` / `_s_e`, `_bu_a_s` / `_a_e` | the last wind change: start/end minute, speed and angle (radians) at each end, lerped linearly. On load one not running at the current minute is marked done and its times zeroed |
+| float `p_w_wi_time` | game-speed seconds the weather has run (dt × speed, `FUN_1409dc0e0`); **Observed** = (now − start) × 20/11 in 57 of 71 regions of the later saves, larger for a new game's first weathers |
+| float `p_w_fog_a` | written for the camera's region only (one per save, 0 in every sample): a fog value read from and restored into the fog manager; meaning **Unknown** |
+| `p_<nest TOWN id>_count` / `_start` (int), `_respawn` (float) | the region's nests (`FUN_140103700`, `FUN_140104290`); **Unknown** |
+
+Meitou (`Data/Save/SaveWeather`, the host's `WorldWeather.Restore`): reads every region's season, weather, strength and wind into `WeatherRegionSnapshot`
+(heading = −angle; the fog fade is not saved, so a restored weather starts faded in) and writes them back at save time, with `_w_wi_time` as
+(now − start) × 20/11 and a new region's `_nestcount` from its BIOME_GROUP. Nest keys, `_w_fog_a` and the `E<n>` effect instances are carried as read.
+The CAMERA's sky transition is written as finished (`sky updating` false, both times 30, the current sky multiplier and cloud density); the loader snaps the sky.
 
 ### Saved, derived and regenerated
 
@@ -225,7 +251,7 @@ Buildings name it by their `town` handle. Whether the loader takes the name from
 
 - What `byteSize` encodes beyond "child count for some record classes", and whether the game ever reads it (it does not at load).
 - The two long slot lists (2503 and 2969 ints) at the end of `quick.save`; the `S` serial's use when a handle goes stale (what happens on a mismatch).
-- The roles of BIOMES `E<n>` instances (EffectHandler state fields), the short-key CAMERA floats and bools (`bs cod gdm ht nnm ps rs`, `bl ep`), `TI day/dat0`, `sqt`, `towntime`, `jobhr`, `ssct`, and whether MEDICAL `fed` / `KO` are the stomach buffer and the KO timer (the other MEDICAL floats are explained above).
+- The roles of BIOMES `E<n>` instances (EffectHandler state fields) and nest keys, `_w_fog_a`, the short-key CAMERA floats and bools (`bs cod gdm ht nnm ps rs`, `bl ep`), `TI day/dat0`, `sqt`, `towntime`, `jobhr`, `ssct`, and whether MEDICAL `fed` / `KO` are the stomach buffer and the KO timer (the other MEDICAL floats are explained above).
 - Whether `loadGame` rejects or adapts to a `mods` list that differs from the current load order (nothing in the sample: single base-game save).
 - Prisoners, dead characters, bounties, trade and mission state, and player outposts: not present in an early-game sample. Player-built building and outpost keys are known from the code only ([zones](zones.md#placement-keys), [outposts](#player-outposts)).
 - Exactly when platoon files are written to the working folder between saves (only at save time is certain) and which zones are written on unload ("Delaying saving zone").

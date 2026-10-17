@@ -313,7 +313,6 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         // The heat haze's gameTime: game hours since the start (it stops while paused, as in the game).
         gpu.GameHours = session.Clock.HoursSinceStart;
         // The weather's three time bases: the game day and time of day (the hour below), the game speed (the last non-zero one while paused) and the paused flag.
-        // TODO(save): the regions' schedules are not saved yet (WeatherWorld.Snapshot() / Restore() exist; the save format has no place for them), so a loaded game rolls the weather anew.
         if (gpu.Weather is { } weather)
         {
             var sim = session.Simulation;

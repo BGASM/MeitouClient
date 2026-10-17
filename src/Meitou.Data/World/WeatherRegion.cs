@@ -7,8 +7,8 @@ public readonly record struct RegionFog(float Enabled, Vector3 Colour, float Dis
 
 /// <summary>
 /// A region's wind change in progress: from (speed, heading) at <see cref="StartMinute"/> to the targets over <see cref="DurationMinutes"/> (docs/formats/weather.md
-/// "Wind"). The heading is an angle in the ground plane, direction = (cos h, sin h) in (x, z); the interpolation takes the shorter way round
-/// (<b>Observed</b>: the game's interpolation of an angle that wraps was not traced).
+/// "Wind"). The heading is an angle in the ground plane, direction = (cos h, sin h) in (x, z); the angle is lerped linearly, so a change across ±π
+/// goes the long way round as the game's does (<b>Verified</b>: <c>FUN_1409dc0e0</c> lerps with <c>FUN_1409b1cd0</c>; a save caught mid-change agrees).
 /// </summary>
 public readonly record struct WindInterpolation(double StartMinute, double DurationMinutes, float Speed0, float Heading0, float Speed1, float Heading1)
 {
@@ -16,7 +16,7 @@ public readonly record struct WindInterpolation(double StartMinute, double Durat
     {
         float u = DurationMinutes <= 0 ? 1 : (float)Math.Clamp((minute - StartMinute) / DurationMinutes, 0, 1);
         float speed = Speed0 + (Speed1 - Speed0) * u;
-        float heading = Heading0 + WeatherRegion.WrapPi(Heading1 - Heading0) * u;
+        float heading = Heading0 + (Heading1 - Heading0) * u;
         return (speed, new Vector2(MathF.Cos(heading), MathF.Sin(heading)));
     }
 }

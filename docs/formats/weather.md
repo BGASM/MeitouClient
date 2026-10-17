@@ -31,6 +31,10 @@ exactly the centre on mixed border blocks. Seasonless regions use Default.
 Every wind-update-time minutes, target speed moves limit/360 toward weather speed; heading adds
 random[-pi,pi]*limit/360. Interpolate over rounded 5% of update time. Unsigned angleBetween
 folds headings (**Observed** consequence). Foliage sway uses object wind factors, not weather.
+**Verified** (`FUN_1409dc0e0`, six saves' BIOMES): the game's wind angle `a` gives direction `(cos a, 0, −sin a)` (rotation of +X about Y)
+and is lerped linearly, not the short way round. Meitou's heading `h` gives `(cos h, sin h)` in (x, z), so a save's angle is −h; but Meitou
+reads the unsigned angle back as `h` at a retarget, so its retargeted wind is the game's mirrored in z (open). Saved state per region:
+[save.md BIOMES](save.md#biomes-type-28-quicksave-weather-per-region).
 
 Camera region changes 500 units beyond current cell; squared displacement>8000 is teleport.
 Fog samples four ±1300 corners, weights `1-min(1,distanceToCell²/1300²)`, combines duplicates

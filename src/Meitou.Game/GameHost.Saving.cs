@@ -98,6 +98,7 @@ sealed partial class GameHost
             var prepared = ahead ? preparedBase!.Result : null;
             preparedBase = null;   // used, or stale
             game = SaveCapture.Capture(world, popData!, new SaveClock((int)clock.Day, clock.Hour, clock.Minute), loadedSave, CaptureOptions(), prepared);
+            WriteWeather(game, (int)clock.Day, clock.HourOfDay);
         }
         catch (Exception e)
         {
@@ -122,6 +123,23 @@ sealed partial class GameHost
                 saveNotices.Enqueue(($"Save failed: {e.Message}", true));
             }
         });
+    }
+
+    /// <summary>
+    /// The regions' weather into the save's BIOMES record, and the CAMERA's sky transition as finished at the current sky (docs/formats/save.md "BIOMES", "CAMERA"):
+    /// the loader snaps the sky to the camera region's weather, so a transition in progress is not carried.
+    /// </summary>
+    void WriteWeather(SaveGame game, int day, double hour)
+    {
+        if (gpu.Weather is not { } weather || game.Biomes is not { } biomes || weather.World.ForcedWeather is not null) return;
+        SaveWeather.Write(biomes, weather.World.Snapshot(), new Meitou.Data.World.WeatherTime(day, hour), popData?.Db);
+        var camera = game.Camera;
+        var state = weather.State;
+        camera.SkyUpdating = false;
+        camera.SkyUpdateTotalTime = Meitou.Data.World.WeatherWorld.SkyTransitionSeconds;
+        camera.SkyUpdateCurrentTime = Meitou.Data.World.WeatherWorld.SkyTransitionSeconds;
+        camera.SkyAmbientColorMult = state.SkyColourMultiplier;
+        camera.SkyCloudsDensity = state.CloudDensity;
     }
 
     /// <summary>Starts loading a save under the loading screen (GameHost.Transition.cs): the files are read on a worker, the new world is made, the navmesh round the player waits.</summary>
@@ -183,6 +201,12 @@ sealed partial class GameHost
         worldEpoch++;
         var world = session.World;
         session.Clock.SetTime(loaded!.Clock.Day, loaded.Clock.HourOfDay);
+        // The regions' weather the save holds (docs/formats/save.md "BIOMES"); a save without (an old Meitou one) keeps the schedule rolled from day 0.
+        if (gpu.Weather is { } weather && read.Result.Biomes is { } biomes && SaveWeather.Read(biomes) is { Count: > 0 } regions)
+        {
+            weather.Restore(regions, loaded.Clock.Day, loaded.Clock.HourOfDay);
+            Console.WriteLine($"load      weather of {regions.Count} region(s) from the save");
+        }
         playerSquad = world.Squads.Find(world.Player.Squad);
         foreach (var note in loaded.Notes) Console.WriteLine($"load      {note}");
 

@@ -507,7 +507,7 @@ handles and original saved/derived/regenerated state.
 F5/F9 and named save menus share mapping. Restore clock, player money/faction, relation/prosperity,
 player squads, character transforms/names/roles, stats/medical parts, appearance, inventories,
 bounties, bed/cage state and sentence, and registered buildings' locks and doors (into existing zone records only; a
-new save has none, [save.md](formats/save.md#locks-cages-and-sentences)) and selection. Town/roaming populations regenerate. Weather, orders/paths, animation,
+new save has none, [save.md](formats/save.md#locks-cages-and-sentences)) and selection; the host restores and writes every region's season, weather, strength and wind ([BIOMES](formats/save.md#biomes-type-28-quicksave-weather-per-region)). Town/roaming populations regenerate. Orders/paths, animation,
 combat engagement, wound-list/pain, base-game building state, ground items, camera/speed are not
 fully restored. Loaded hashes need not match captured hashes: compare carried fields and agreement
 between repeated loads. QuickSaveTests checks carried fields and repeatable loading.
