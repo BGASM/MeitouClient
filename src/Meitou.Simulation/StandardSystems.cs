@@ -24,7 +24,7 @@ public enum StandardParts
     Aggro = 1024,
     /// <summary>NPC squads running away from a lost fight (<see cref="FleeSystem"/>), by the relations of the data.</summary>
     Flee = 2048,
-    /// <summary>Carrying downed characters, the rescue job and looting (<see cref="Meitou.Simulation.Carrying.CarrySystem"/>).</summary>
+    /// <summary>Carrying downed characters, the rescue job and looting (<see cref="Meitou.Simulation.Carrying.CarrySystem"/>); with the population, raiders kidnapping the downed too (<see cref="Meitou.Simulation.Kidnap.KidnapSystem"/>).</summary>
     Carry = 4096,
     /// <summary>Crimes and bounties (<see cref="Meitou.Simulation.Crime.CrimeSystem"/>): pending crimes from the player's deeds, witnesses, the police; the arrests, fines and jail (<see cref="Meitou.Simulation.Crime.ArrestSystem"/>) and the lock orders (<see cref="Meitou.Simulation.Locks.LockSystem"/>) come with it.</summary>
     Crime = 8192,

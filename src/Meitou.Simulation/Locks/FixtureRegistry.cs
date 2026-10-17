@@ -402,8 +402,9 @@ public sealed class FixtureRegistry
             crimes.SetPending(world, s, CrimeCode.EscapingPrison, cage.Owner, CharacterId.None, CrimeSystem.MinTimer);
         }
         if (cage is not null && cage.Occupant == prisoner) cage.Occupant = CharacterId.None;
+        bool kidnapped = c.Kidnapped;   // a kidnap victim lifted out is no escapee (the lifter's crime stays)
         Clear(c);
-        c.Escaped = foreign;
+        c.Escaped = foreign && !kidnapped;
         return true;
     }
 
@@ -453,7 +454,7 @@ public sealed class FixtureRegistry
         if (cage?.Lock is { EffectivelyLocked: true }) return false;
         bool escape = cage is not null && !c.Kidnapped && !SentenceServed(c, world.GameHours);   // a kidnap victim getting out is no escape
         if (escape) crimes?.SetPending(world, s, CrimeCode.EscapingPrison, cage!.Owner, CharacterId.None, CrimeSystem.MinTimer);
-        bool escaped = escape || cage is not null && crimes is not null && crimes.Factions.Lawless(cage.Owner);
+        bool escaped = escape || !c.Kidnapped && cage is not null && crimes is not null && crimes.Factions.Lawless(cage.Owner);
         if (cage is not null && cage.Occupant == prisoner) cage.Occupant = CharacterId.None;
         Clear(c);
         c.Escaped = escaped;

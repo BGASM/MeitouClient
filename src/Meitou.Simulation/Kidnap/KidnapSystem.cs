@@ -46,10 +46,12 @@ public sealed class Abduction
     public int Tries { get; set; }
     /// <summary>The cage chosen (reserved while the abduction lasts).</summary>
     public string? Cage { get; set; }
+    /// <summary>The kidnapper was a campaign squad's when it lifted: it marches home with its squad and keeps the victim until a town of its faction (the campaign ending on the way does not drop it).</summary>
+    public bool Marching { get; init; }
 
     internal void Hash(ref StateHasher h)
     {
-        h.Add(Carrier); h.Add(Victim); h.Add(Faction); h.Add((int)Phase); h.Add(Time); h.Add(Tries); h.Add(Cage is { } c ? Rng.StableHash(c) : 0UL);
+        h.Add(Carrier); h.Add(Victim); h.Add(Faction); h.Add((int)Phase); h.Add(Time); h.Add(Tries); h.Add(Marching); h.Add(Cage is { } c ? Rng.StableHash(c) : 0UL);
     }
 }
 
@@ -156,7 +158,7 @@ public sealed class KidnapSystem(PopulationData data, PopulationSystem populatio
                 if (!carry.BeginPickUp(world, slot, victimId, task is CharacterTask.Wander or CharacterTask.Follow ? task : CharacterTask.Idle)) continue;
                 cold.Engaged = true;
                 reserved.Add(victimId);
-                abductions.Add(new Abduction { Carrier = member, Victim = victimId, Faction = cold.Faction });
+                abductions.Add(new Abduction { Carrier = member, Victim = victimId, Faction = cold.Faction, Marching = campaign });
             }
         }
     }
@@ -222,12 +224,10 @@ public sealed class KidnapSystem(PopulationData data, PopulationSystem populatio
                 // Every look the best free cage of its faction in range. A campaign squad marches home first (nothing to look for outside a town of its faction) and drops the captive when
                 // its home town has no free cage; any other carrier waits a while for one (engine choices; the original's give-up rule is Unknown).
                 if ((world.Tick + g) % Math.Max(1, Settings.LookEveryTicks) != 0) return true;
-                var squad = world.Squads.Find(gc.SquadId);
-                bool campaign = squad is { PlatoonId: >= 0 } && world.Platoons.Find(squad.PlatoonId)?.Campaign is not null;
                 bool home = TownOf(world, gn.Position, gc.Faction) >= 0;
-                if (campaign && !home) return true;
+                if (a.Marching && !home) return true;
                 if (CageFor(world, gn.Position, gc.Faction, a) is { } found) return ToCage(world, a, g, found);
-                return campaign || a.Time > Settings.PatienceSeconds ? Drop(world, a, g) : true;
+                return a.Marching || a.Time > Settings.PatienceSeconds ? Drop(world, a, g) : true;
             }
             case KidnapPhase.Walk:
             {
