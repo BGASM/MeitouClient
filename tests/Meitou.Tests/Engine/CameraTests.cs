@@ -66,4 +66,67 @@ public class CameraTests
         Assert.Equal(Vector3.Distance(eye, look.Value), rig.Strategy.Distance, 1);
         Assert.Equal(eye.Y, rig.Current.Eye.Y, 0); // same view
     }
+
+    StrategyCamera Placed(Func<float, float, float> ground, float pitch = 30 * MathF.PI / 180, float boom = 600)
+    {
+        var cam = new StrategyCamera(ground);
+        cam.Place(Vector2.Zero, 0, pitch, boom);
+        return cam;
+    }
+
+    [Fact]
+    public void Pan_speed_follows_the_boom_the_diagonal_leans_with_the_pitch_and_a_notch_is_1_2()
+    {
+        var cam = Placed(Flat);
+        input.SetKey(Key.W, true);
+        input.SetKey(Key.D, true);
+        for (int i = 0; i < 30; i++) cam.Update(1 / 30f, Tick());
+        Assert.Equal(500, cam.PivotXZ.Length(), 1);   // camera speed 500 at a boom of 600, one second
+        Assert.Equal(49, MathF.Atan2(cam.PivotXZ.X, -cam.PivotXZ.Y) * 180 / MathF.PI, 0);   // forward shrinks by cos 30 degrees
+
+        var zoom = Placed(Flat);
+        input.SetKey(Key.W, false);
+        input.SetKey(Key.D, false);
+        input.AddWheel(1);
+        zoom.Update(1 / 30f, Tick());
+        Assert.Equal(600 - 125 * 1.2f * 0.75f, zoom.Distance, 1);
+    }
+
+    [Fact]
+    public void Keys_turn_54_degrees_a_second_and_a_100_pixel_drag_turns_15_through_the_smoothing()
+    {
+        var keys = Placed(Flat);
+        input.SetKey(Key.Q, true);
+        for (int i = 0; i < 90; i++) keys.Update(1 / 30f, Tick());
+        Assert.InRange(keys.Yaw * 180 / MathF.PI, -162, -160);   // Q turns the view right; the 20-frame average only delays the start
+
+        var drag = Placed(Flat);
+        input.SetKey(Key.Q, false);
+        input.SetMouseButton(MouseButton.Middle, true);
+        input.AddMouseDelta(100, 0);
+        for (int i = 0; i < 40; i++) drag.Update(1 / 30f, Tick());
+        Assert.Equal(-15, drag.Yaw * 180 / MathF.PI, 1);
+    }
+
+    [Fact]
+    public void The_pivot_eases_onto_a_step_in_the_ground_edges_pan_and_the_eye_is_never_below_the_clearance()
+    {
+        Func<float, float, float> step = (x, _) => x > 0 ? 100 : 0;
+        var cam = Placed(step, 0.52f, 300);
+        input.SetKey(Key.D, true);
+        cam.Update(1 / 30f, Tick());
+        Assert.InRange(cam.Pivot.Y, 1, 99);   // on its way, not there at once
+        for (int i = 0; i < 20; i++)
+        {
+            cam.Update(1 / 30f, Tick());
+            var eye = cam.State.Eye;
+            Assert.True(eye.Y >= step(eye.X, eye.Z) + 10, $"tick {i}");
+        }
+        Assert.Equal(100, cam.Pivot.Y, 1);
+
+        var edge = Placed(Flat);
+        edge.EdgePointer = new Vector2(0.005f, 0.5f);
+        edge.Update(1 / 30f, ActionState.None);
+        Assert.True(edge.PivotXZ.X < -10);   // the left edge pans left
+    }
 }
