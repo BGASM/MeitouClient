@@ -1,5 +1,63 @@
 ---
 import Base from '../layouts/Base.astro';
+import DiscordIcon from '../components/DiscordIcon.astro';
+import GithubIcon from '../components/GithubIcon.astro';
+
+// Placeholder: the hero video again. Swap in the real performance video.
+const performanceVideo = '/bgvideo.webm';
+
+// Roadmap to 1.0.0 (feature parity with the base game), from ROADMAP.md, docs/simulation.md and CHANGELOG.md.
+// done: works in the game today. Partly finished areas are split into a done row and a missing row.
+const roadmap = [
+  { area: 'Data and mods', items: [
+    { name: 'Original game data, FCS mods and load order', done: true },
+    { name: 'Original saves load', done: true },
+    { name: 'Exact Steam Workshop subscription selection', done: false },
+    { name: 'Runtime code-module loading', done: false },
+  ] },
+  { area: 'World and rendering', items: [
+    { name: 'Streamed terrain, objects and foliage', done: true },
+    { name: 'Water, sky, weather and clouds', done: true },
+    { name: 'Lights and shadows', done: true },
+    { name: 'Characters and animals: meshes, animation, drawn weapons', done: true },
+    { name: 'Remaining body, attachment and material parity', done: false },
+  ] },
+  { area: 'Characters and combat', items: [
+    { name: 'Movement and pathfinding on a navmesh', done: true },
+    { name: 'Melee and ranged combat, body parts, medical state', done: true },
+    { name: 'First aid, resting, carrying, rescue and looting', done: true },
+    { name: 'Crimes, bounties, arrests, cages and locks', done: true },
+    { name: 'Ragdolls', done: true },
+    { name: 'Global pathing and dynamic doors', done: false },
+    { name: 'Thrown bodies, physics props and character collision', done: false },
+  ] },
+  { area: 'World simulation', items: [
+    { name: 'NPC population, AI tasks, senses and fleeing, wild animals', done: true },
+    { name: 'Wars, prisoners and slavers, full AI planner', done: false },
+    { name: 'Full off-screen town simulation', done: false },
+    { name: 'Dialogue, recruiting and events', done: false },
+    { name: 'Restore towns, NPC squads and world state from saves', done: false },
+  ] },
+  { area: 'Economy and bases', items: [
+    { name: 'Inventories, trade and shops', done: true },
+    { name: 'Building placement and construction', done: true },
+    { name: 'Building shops, production, farming and research', done: false },
+  ] },
+  { area: 'Interface and audio', items: [
+    { name: 'Menus, HUD, inventory and map panels', done: true },
+    { name: 'Full control, font and mod UI fidelity', done: false },
+    { name: 'Audio: ambient, music, speech and events', done: false },
+  ] },
+];
+const roadmapItems = roadmap.flatMap((g) => g.items);
+const roadmapDone = roadmapItems.filter((i) => i.done).length;
+
+// Placeholder pairs: the same frame twice, the left side filtered. Swap in real before/after images.
+const pairs = [
+  { name: 'Pair 1', before: '/bgvideo.jpg', after: '/bgvideo.jpg', beforeFilter: 'grayscale(1)' },
+  { name: 'Pair 2', before: '/bgvideo.jpg', after: '/bgvideo.jpg', beforeFilter: 'sepia(1) brightness(.8)' },
+  { name: 'Pair 3', before: '/bgvideo.jpg', after: '/bgvideo.jpg', beforeFilter: 'blur(6px) saturate(.5)' },
+];
 ---
 <Base title="Meitou · Kenshi engine reimplementation" video>
   <section class="hero">
@@ -10,57 +68,243 @@ import Base from '../layouts/Base.astro';
         Fully compatible with FCS mods and vanilla save games. Requires original copy to run
       </p>
     </div>
-    <a class="mt-btn more" href="#about">
-      <svg class="more-icon" viewBox="0 0 24 20" width="24" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M9 5l5 5-5 5"/></svg>
-      <span>Learn More</span>
-    </a>
+    <div class="actions">
+      <a class="mt-btn mt-btn-primary" href="https://github.com/VlcekM/MeitouClient/releases">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M12 4v11m0 0l-5-5m5 5l5-5M5 20h14" /></svg>
+        <span>Download</span>
+      </a>
+      <a class="mt-btn more" href="#ai">
+        <svg class="more-icon" viewBox="0 0 24 20" width="24" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M9 5l5 5-5 5"/></svg>
+        <span>Learn More</span>
+      </a>
+    </div>
   </section>
 
-  <section id="about" class="band">
+  <section id="ai">
+    <div class="ai">
+      <img class="ai-head" src="/skeleton.png" alt="The Dancing Skeleton sign from Kenshi" width="180" height="180" loading="lazy" />
+      <div class="ai-text">
+        <h2>AI Disclaimer</h2>
+        <p>
+          Agentic coding was used liberally on this codebase. Much of the code, the tests and the documentation was written
+          by AI coding agents, directed and reviewed by a human. The result is open source, so judge it by reading it.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="about">
     <div class="about">
-      <div class="about-text">
-        <h2>Subsection Title</h2>
+      <h2>About</h2>
+      <p class="lead">
+        MeitouClient is an open-source reimplementation of the Kenshi engine in C# and .NET 10 with a Vulkan renderer. It is a
+        drop-in replacement: the original game content, FCS mods and vanilla save games run unchanged. It needs your own copy
+        of Kenshi, and no game assets are distributed.
+      </p>
+      <div class="modes">
+        <div class="mode">
+          <h3>Faithful</h3>
+          <p>The game as it ships: its look, behaviour and formulas, kept close to the original.</p>
+        </div>
+        <div class="mode mode-meitou">
+          <h3>Meitou <span>default</span></h3>
+          <p>Our graphical and gameplay enhancements in the theme of vanilla Kenshi.</p>
+        </div>
+      </div>
+      <p class="switches">
+        <svg viewBox="0 0 36 20" width="36" height="20" aria-hidden="true"><rect x="1" y="1" width="34" height="18" rx="9" fill="none" stroke="currentColor" stroke-width="2" /><circle cx="26" cy="10" r="5" fill="currentColor" /></svg>
+        Every enhancement is its own switch, so the two modes can be mixed freely.
+      </p>
+      <div class="divider" role="separator"></div>
+      <p class="belief">
+        We are of the belief that Kenshi is a phenomenal game held back by its technology. The MeitouClient project seeks to
+        enhance the experience while keeping the spirit of the base game intact, while allowing the player the freedom to
+        customize the experience to be as close to vanilla as they want.
+      </p>
+      <div class="divider" role="separator"></div>
+      <p class="license">The project is free, fully open-source and licensed under GPL-3.</p>
+      <div class="links">
+        <a class="mt-btn" href="https://discord.gg/DVAHH2n9DR"><DiscordIcon /><span>Discord</span></a>
+        <a class="mt-btn" href="https://github.com/VlcekM/MeitouClient"><GithubIcon /><span>GitHub</span></a>
+      </div>
+    </div>
+  </section>
+
+  <section id="compare">
+    <div class="cmp-head">
+      <h2>Enhanced Graphics</h2>
+      <p>advanced graphics features such as global illumination, long-distance shadows, vastly increased render distances and DLSS possible. All enhancements are fully configurable.</p>
+    </div>
+    <div class="mt-tabs cmp-tabs" role="tablist">
+      {pairs.map((p, i) => <button class="mt-tab" type="button" role="tab" aria-selected={i === 0 ? 'true' : 'false'} data-tab={i}>{p.name}</button>)}
+    </div>
+    <div class="cmp-stage">
+      {pairs.map((p, i) => (
+        <div class="cmp" role="tabpanel" hidden={i > 0}>
+          <img class="cmp-img" src={p.before} style={`filter: ${p.beforeFilter}`} alt="" loading="lazy" />
+          <img class="cmp-img cmp-after" src={p.after} alt="" loading="lazy" />
+          <span class="cmp-label cmp-left">Before</span>
+          <span class="cmp-label cmp-right">After</span>
+          <span class="cmp-bar" aria-hidden="true"></span>
+          <input class="cmp-range" type="range" min="0" max="100" value="50" aria-label={`${p.name} comparison position`} />
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <section id="performance">
+    <div class="perf">
+      <div class="perf-text">
+        <h2>Improved loading times and performance</h2>
         <p>Placeholder text for this section.</p>
       </div>
-      <img class="about-image" src="/bgvideo.jpg" alt="" width="1920" height="1080" loading="lazy" />
+      <video class="perf-video" controls muted loop playsinline preload="metadata" poster="/bgvideo.jpg">
+        <source src={performanceVideo} type="video/webm" />
+      </video>
+    </div>
+  </section>
+
+  <section id="roadmap">
+    <div class="road">
+      <h2>Roadmap to 1.0.0</h2>
+      <p>1.0.0 means feature parity with the base game. {roadmapDone} of {roadmapItems.length} items work today.</p>
+      <div class="road-bar" role="img" aria-label={`${roadmapDone} of ${roadmapItems.length} roadmap items done`}>
+        <span style={`width: ${(100 * roadmapDone) / roadmapItems.length}%`}></span>
+      </div>
+      <table class="road-table">
+        {roadmap.map((g) => (
+          <tbody>
+            {g.items.map((item, i) => (
+              <tr>
+                {i === 0 && <th scope="rowgroup" rowspan={g.items.length}>{g.area}</th>}
+                <td>{item.name}</td>
+                <td class="road-state">
+                  <span class={item.done ? 'is-done' : 'is-todo'} role="img" aria-label={item.done ? 'Done' : 'Not yet'}>
+                    {item.done
+                      ? <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+                      : <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" d="M6 6l12 12M18 6L6 18" /></svg>}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        ))}
+      </table>
     </div>
   </section>
 </Base>
+
+<script>
+  const tabs = document.querySelectorAll<HTMLElement>('.cmp-tabs [role=tab]');
+  const panels = document.querySelectorAll<HTMLElement>('.cmp');
+  tabs.forEach((tab, i) => tab.addEventListener('click', () => {
+    tabs.forEach((t, j) => t.setAttribute('aria-selected', String(i === j)));
+    panels.forEach((p, j) => { p.hidden = i !== j; });
+  }));
+  document.querySelectorAll<HTMLInputElement>('.cmp-range').forEach((r) => r.addEventListener('input', () => {
+    r.closest<HTMLElement>('.cmp')!.style.setProperty('--pos', `${r.value}%`);
+  }));
+</script>
 
 <style>
   /* Fills the first view, stack at the top left in place of the wordmark. */
   .hero { position: relative; display: flex; align-items: flex-start; min-height: 100svh; padding: var(--edge) 0; }
   /* A main menu plate button (320 x 38, icon column 24 at 12, label at 48), bottom left, level with the wordmark. */
-  .more { position: absolute; left: 0; bottom: var(--edge); width: 320px; max-width: 100%; justify-content: flex-start; padding: 0 12px; }
+  .actions { position: absolute; left: 0; bottom: calc(var(--edge) - 5px); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-6); max-width: 100%; }
+  .more { max-width: 100%; justify-content: flex-start; padding: 0 20px 0 12px; }
   .more-icon { position: relative; flex: none; opacity: .8; transition: opacity .16s ease; }
   .more:hover .more-icon { opacity: 1; }
   .stack { min-width: 0; }
   h1 { margin: 0 0 var(--space-6); color: #fff; text-shadow: 0 2px 12px rgba(8, 6, 5, .6); white-space: nowrap; font: 600 clamp(32px, 6vw, 52px)/1.1 var(--font-exo); }
   .lede { max-width: 620px; margin: 0; font-size: 18px; line-height: 27px; text-shadow: 0 1px 8px rgba(8, 6, 5, .8); }
   /* The name set like the wordmark: Meitou semibold, Client regular. */
+  .name { font-weight: 600; }
   .name > span { font-weight: 400; }
-  /* Below the video, where Learn More scrolls: a worn paper band framed like the video (the kit's paper drawn in CSS,
-     with a fine grain standing in for the texture). */
-  .band {
-    margin: 0 calc(var(--frame) - var(--edge));
-    padding: 0 calc(var(--edge) - var(--frame));
-    border-radius: calc(4 * var(--radius-card));
-    background:
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .24 0 0 0 0 .14 0 0 0 0 .08 0 0 0 .22 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
-      radial-gradient(ellipse at 15% 20%, rgba(217, 206, 184, .35), transparent 60%),
-      radial-gradient(ellipse at 85% 90%, rgba(60, 35, 20, .3), transparent 55%),
-      var(--paper);
-    box-shadow: var(--paper-border);
-    color: var(--secondary);
-  }
-  /* Text left, image right, at most 1280px wide and centred. */
-  .about { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; max-width: 1280px; margin: 0 auto; padding: 72px 0; }
-  .about h2 { margin: 0 0 var(--space-5); color: var(--secondary); font: 600 32px/40px var(--font-exo); }
-  .about p { max-width: 620px; margin: 0; font-size: 18px; line-height: 27px; }
-  .about-image { display: block; width: 100%; height: auto; border-radius: calc(2 * var(--radius-card)); }
-  @media (max-width: 800px) { .about { grid-template-columns: 1fr; } }
+  /* Below the video, where Learn More scrolls: each section a slightly lighter band that runs to the page edges (out of
+     main's side padding), its content at most 1280px wide and centred. */
+  section:not(.hero) { margin: 0 calc(-1 * var(--edge)); padding: 0 var(--edge); }
+  #ai, #compare { background: #151010; }
+  #about, #performance { background: #0e0a08; }
+  /* Performance: title and text on the left, the video filling the rest, at most 1280px wide and centred. */
+  .perf { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 24px; align-items: center; max-width: 1280px; margin: 0 auto; padding: 48px 0; }
+  .perf h2 { margin: 0 0 var(--space-5); color: #fff; font: 600 32px/40px var(--font-exo); }
+  .perf p { margin: 0; font-size: 18px; line-height: 27px; }
+  .perf-video { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: calc(2 * var(--radius-card)); background: #000; }
+  @media (max-width: 800px) { .perf { grid-template-columns: 1fr; } }
+  /* Roadmap: a table grouped by area, a green check for what works and a red cross for what is missing. */
+  #roadmap { background: #151010; }
+  .road { max-width: 1280px; margin: 0 auto; padding: 64px 0; }
+  .road h2 { margin: 0 0 var(--space-5); color: #fff; font: 600 32px/40px var(--font-exo); }
+  .road > p { margin: 0 0 var(--space-6); font-size: 18px; line-height: 27px; }
+  .road-bar { height: 8px; margin-bottom: var(--space-7); overflow: hidden; border-radius: 4px; background: rgba(8, 6, 5, .6); box-shadow: var(--plate-border); }
+  .road-bar span { display: block; height: 100%; border-radius: 4px; background: var(--good); }
+  .road-table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: calc(2 * var(--radius-card)); background: rgba(8, 6, 5, .45); box-shadow: var(--plate-border); }
+  .road-table tbody + tbody { border-top: 1px solid rgba(175, 166, 139, .3); }
+  .road-table tr + tr td { border-top: 1px solid var(--plate-rim); }
+  .road-table th { width: 220px; padding: var(--space-5) var(--space-7); vertical-align: top; text-align: left; color: #fff; font: 600 16px/24px var(--font-exo); }
+  .road-table td { padding: var(--space-4) var(--space-6); font-size: 16px; line-height: 24px; }
+  .road-state { width: 64px; text-align: center; }
+  .road-state span { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; vertical-align: middle; }
+  .road-state .is-done { background: rgba(168, 183, 116, .18); color: var(--good); box-shadow: inset 0 0 0 1px rgba(168, 183, 116, .5); }
+  .road-state .is-todo { background: rgba(191, 72, 52, .18); color: var(--bad-bright); box-shadow: inset 0 0 0 1px rgba(191, 72, 52, .5); }
+  @media (max-width: 640px) { .road-table th { width: 110px; padding: var(--space-4); font-size: 14px; } .road-table td { padding: var(--space-4); } }
+  /* About: as tall as its content, the text centred. */
+  /* About: a centred column. The lead and the belief are set larger, the modes are two cards (Meitou lit in brass), the
+     dividers carry a brass diamond, and the links are plate buttons. */
+  .about { max-width: 960px; margin: 0 auto; padding: 88px 0 96px; text-align: center; }
+  .about h2 { margin: 0 0 var(--space-7); color: #fff; font: 600 44px/52px var(--font-exo); }
+  .about h2::after { content: ""; display: block; width: 56px; height: 3px; margin: var(--space-6) auto 0; border-radius: 2px; background: var(--brass); }
+  .about p { margin: 0 auto; }
+  .about .lead { max-width: 780px; color: var(--paper-light); font-size: 21px; line-height: 33px; }
+  .modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin: 48px 0 var(--space-7); text-align: left; }
+  .mode { position: relative; padding: var(--space-7) 28px 28px; border-radius: calc(2 * var(--radius-card)); background: rgba(8, 6, 5, .45); box-shadow: var(--plate-border); }
+  .mode::before { content: ""; position: absolute; top: 0; left: 28px; width: 40px; height: 3px; border-radius: 0 0 2px 2px; background: var(--greyed-bright); }
+  .mode-meitou { box-shadow: inset 0 0 0 1px rgba(196, 160, 98, .55), var(--plate-drop); }
+  .mode-meitou::before { background: var(--brass-light); }
+  .mode h3 { margin: 0 0 var(--space-4); color: #fff; font: 600 26px/32px var(--font-exo); }
+  .mode h3 span { margin-left: var(--space-4); padding: 0 8px; border-radius: var(--radius-portrait); background: var(--brass); color: var(--secondary); font: 600 11px/18px var(--font-exo); letter-spacing: .08em; text-transform: uppercase; vertical-align: middle; }
+  .about .mode p { margin: 0; font-size: 17px; line-height: 26px; }
+  .about .switches { display: flex; align-items: center; justify-content: center; gap: var(--space-5); font-size: 17px; line-height: 26px; }
+  .switches svg { flex: none; color: var(--brass-light); }
+  /* A hairline with a brass diamond in the middle. */
+  .divider { position: relative; height: 1px; margin: 56px auto; background: linear-gradient(90deg, transparent, rgba(175, 166, 139, .4) 20%, rgba(175, 166, 139, .4) 80%, transparent); }
+  .divider::after { content: ""; position: absolute; top: 50%; left: 50%; width: 9px; height: 9px; background: var(--brass-light); box-shadow: 0 0 0 6px #0e0a08; transform: translate(-50%, -50%) rotate(45deg); }
+  /* The belief reads as a pull quote. */
+  .about .belief { position: relative; max-width: 780px; color: var(--paper-light); font-size: 23px; line-height: 36px; }
+  .about .license { display: inline-block; padding: var(--space-4) var(--space-7); border-radius: 999px; box-shadow: inset 0 0 0 1px rgba(196, 160, 98, .5); color: #fff; font-size: 20px; line-height: 30px; }
+  .links { display: flex; justify-content: center; gap: var(--space-6); margin-top: 32px; }
+  .links .mt-btn { min-width: 160px; }
+  @media (max-width: 640px) { .modes { grid-template-columns: 1fr; } .about h2 { font-size: 36px; line-height: 44px; } .about .belief { font-size: 20px; line-height: 32px; } .about .license { border-radius: calc(2 * var(--radius-card)); } }
+  .ai { display: flex; align-items: center; justify-content: center; gap: 40px; max-width: 1280px; margin: 0 auto; padding: 48px 0; }
+  .cmp-head h2, .ai h2 { margin: 0 0 var(--space-5); color: #fff; font: 600 32px/40px var(--font-exo); }
+  .cmp-head p, .ai p { max-width: 620px; margin: 0; font-size: 18px; line-height: 27px; }
+  .cmp-head p { max-width: 1000px; }
+  /* The disclaimer sits below the first section, a cropped skeleton head beside the text. */
+  .ai-head { flex: none; display: block; width: 180px; height: 180px; border-radius: calc(2 * var(--radius-card)); box-shadow: var(--plate-border); }
+  /* Compare: title, description and tabs on top, the slider filling what is left of one viewport. It runs as wide as the
+     video (frame to frame) and the images are cropped to fit the height. */
+  #compare { display: flex; flex-direction: column; height: 100svh; min-height: 480px; padding: 32px var(--frame); }
+  .cmp-head { padding: 0 calc(var(--edge) - var(--frame)); margin-bottom: var(--space-6); }
+  .cmp-tabs { align-self: flex-start; margin: 0 calc(var(--edge) - var(--frame)) var(--space-6); }
+  .cmp-tabs .mt-tab { border: 0; background: none; cursor: pointer; }
+  .cmp-tabs .mt-tab[aria-selected="true"] { color: var(--paper-light); background: linear-gradient(#241f1c, #3a3430); box-shadow: inset 0 0 0 1px var(--metal-edge), inset 0 -2px 0 var(--brass); }
+  .cmp-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; border-radius: calc(4 * var(--radius-card)); }
+  .cmp { position: absolute; inset: 0; --pos: 50%; }
+  .cmp-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; user-select: none; -webkit-user-drag: none; }
+  .cmp-after { clip-path: inset(0 0 0 var(--pos)); }
+  .cmp-bar { position: absolute; top: 0; bottom: 0; left: var(--pos); width: 2px; margin-left: -1px; background: var(--paper-light); box-shadow: 0 0 8px rgba(0, 0, 0, .6); pointer-events: none; }
+  .cmp-bar::after { content: "\2039 \203A"; position: absolute; top: 50%; left: 50%; display: grid; place-items: center; width: 40px; height: 40px; margin: -20px 0 0 -20px; border-radius: 50%; background: var(--plate); box-shadow: 0 0 0 2px var(--paper-light), var(--plate-drop); color: var(--paper-light); font: 600 22px/1 var(--font-exo); white-space: pre; }
+  .cmp-label { position: absolute; top: var(--space-6); padding: 0 10px; border-radius: var(--radius-portrait); background: rgba(8, 6, 5, .6); color: var(--paper-light); font: 600 12px/24px var(--font-exo); letter-spacing: .08em; text-transform: uppercase; pointer-events: none; }
+  .cmp-left { left: var(--space-6); }
+  .cmp-right { right: var(--space-6); }
+  /* The native range sits invisibly over the whole image: it takes the drag and the arrow keys. */
+  .cmp-range { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; }
+  .cmp:has(.cmp-range:focus-visible) .cmp-bar::after { outline: 2px solid var(--brass-light); outline-offset: 4px; }
+  @media (max-width: 640px) { .ai { flex-direction: column; align-items: flex-start; gap: 24px; } }
   @media (prefers-reduced-motion: no-preference) { :global(html) { scroll-behavior: smooth; } }
   /* Narrow screens: drop the stack below the links at the top right. */
   @media (max-width: 900px) { .hero { padding-top: calc(var(--edge) + 48px); } }
+  /* Too narrow for the buttons side by side beside the wordmark: stack them. */
+  @media (max-width: 860px) { .actions { flex-direction: column; align-items: flex-start; } }
   @media (max-width: 640px) { h1 { white-space: normal; } }
 </style>

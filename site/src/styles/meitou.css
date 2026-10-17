@@ -48,7 +48,7 @@ body {
   min-height: 100vh;
   background: var(--vignette);
   color: var(--main);
-  font: 600 16px/21px var(--font-exo);
+  font: 400 16px/21px var(--font-exo);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -223,6 +223,6 @@ a:focus-visible, .mt-btn:focus-visible, .mt-tab:focus-visible {
   font: 500 13px/20px var(--font-mono);
 }
 
-.mt-caption { font: 600 12px/15px var(--font-exo); opacity: .75; }
+.mt-caption { font: 400 12px/15px var(--font-exo); opacity: .75; }
 .mt-good { color: var(--good); }
 .mt-bad { color: var(--bad-bright); }
