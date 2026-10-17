@@ -426,7 +426,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         config.HardwareMouse = false;
         config.HoverOutline = true;
         config.LuckyrenMode = false;
-        player.SetUiMode(UiMode.Faithful);
+        player.SetUiMode(UiMode.Meitou);
         player.SpeedUnit = config.SpeedUnit = SpeedUnit.Mph;
         player.Floaters = config.Floaters = FloaterMode.Simple;
         bindings.ResetToDefaults();
