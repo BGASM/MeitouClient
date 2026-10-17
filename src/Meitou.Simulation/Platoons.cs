@@ -72,6 +72,10 @@ public sealed class Platoon
     public CampaignInstance? Campaign { get; set; }
     /// <summary>Where its campaign sends it (the target for the leader platoon, the leader for the others; set each population look).</summary>
     public Vector2? CampaignGoal { get; set; }
+    /// <summary>The roads it takes off screen to <see cref="RouteGoal"/> (null: straight there; <see cref="PopulationSystem"/> roads), and the next point of it. Not saved: worked out again.</summary>
+    public List<Vector2>? Route { get; set; }
+    public int RouteStep { get; set; }
+    public Vector2? RouteGoal { get; set; }
 }
 
 /// <summary>

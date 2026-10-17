@@ -92,6 +92,8 @@ public sealed class PopulationData
     public IReadOnlyList<int> SiteFactions { get; init; } = [];
     /// <summary>The area sectors and their BIOME_GROUPs (6.2, 6.3): when set, zones get their homeless squads and the biome groups their nests; null: no wild population (the worlds of the pinned tests).</summary>
     public BiomeMap? Biomes { get; init; }
+    /// <summary>The road network off-screen squads may travel by (null: none, they go straight).</summary>
+    public RoadNetwork? Roads { get; init; }
     /// <summary>The new-game options that change the body mechanics (hunger time, chance of death...).</summary>
     public BodyOptions BodyOptions { get; init; } = BodyOptions.Default;
     Dictionary<string, int>? factionIndex;
@@ -131,7 +133,7 @@ public sealed class PopulationData
 
     /// <param name="buildings">The towns' buildings by placement id (<see cref="TownBuildings.Build"/>), for the AI's homes; null: none.</param>
     public static PopulationData Create(GameDatabase db, IEnumerable<TownPlacement> placements, IAppearanceSource? appearances = null, BodyOptions? bodyOptions = null, BiomeMap? biomes = null,
-        IReadOnlyDictionary<string, List<TownBuilding>>? buildings = null)
+        IReadOnlyDictionary<string, List<TownBuilding>>? buildings = null, IEnumerable<RoadPath>? roads = null)
     {
         var sites = new List<TownSite>();
         foreach (var p in placements)
@@ -150,7 +152,7 @@ public sealed class PopulationData
         relations.PlayerFaction = player;
         return new PopulationData
         {
-            Db = db, Sites = sites, Factions = factions, Appearances = appearances, Biomes = biomes, BodyOptions = bodyOptions ?? BodyOptions.Default, PlayerFaction = player,
+            Db = db, Sites = sites, Factions = factions, Appearances = appearances, Biomes = biomes, Roads = roads is null ? null : new RoadNetwork(roads), BodyOptions = bodyOptions ?? BodyOptions.Default, PlayerFaction = player,
             Relations = relations,
             SiteFactions = [.. sites.Select(s => s.Town.Faction is { } fid ? byId.GetValueOrDefault(fid, -1) : -1)],
         };

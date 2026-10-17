@@ -243,12 +243,18 @@ no path re-running the initial resident placement was found (**Unknown** whether
   ([ai.md](ai.md)); job 0 becomes 2 for a non-persistent platoon and 4 (GOHOME) for a persistent one. No character data is read or changed:
   no healing, needs or fights (**Observed**).
   - GOHOME: to the home only once within 2000, else to the object of a platoon handle (+0xb8, meaning **Unknown**) at 55.
-  - TRAVEL_TARGET / _FAST: to the blackboard's mission target; a campaign's `travel speed unloaded` WALK / JOG / RUN gives 25 / 55 / 90;
+  - TRAVEL_TARGET / _FAST: to the mission target: the blackboard's override package's, else the campaign's target, else the current
+    package's saved `mission target`, else a fallback (`FUN_140269cd0`); no move when it is the town the squad is in (**Observed**); a campaign's `travel speed unloaded` WALK / JOG / RUN gives 25 / 55 / 90;
     otherwise (GROUPED, NO_SPEED_CHANGE, no campaign) FAST 60 (90 beyond 25000), TRAVEL_TARGET 25. The mover caps speed at 70 (**Observed**: no other writer of the cap).
   - PATROL_SHORTRANGE: picks a point in a neighbouring 4608 sector of the same biome group (sometimes a town, `patrol approaches towns`)
     but sets no speed, so it does not move (**Observed**). PATROL_TOWN, PATROL_LONGRANGE: no branch, no movement.
-  - Movement is a straight line; a destination over 10000 away takes the road network when the faction's `road preference` > 0 and the
-    road (weighted by `1 - preference`, clamped 0.2..0.9) beats the straight line (`0x14065f940`). No navmesh.
+  - Movement is a straight line, no navmesh. Roads (`0x14065f940`, **Verified** unless marked): for a destination over 10000 away with
+    w = max(0, 1 - `road preference`) < 1, the entry and exit are the nearest projected points on any road within 20000 (X/Z; roads with
+    the +8 flag skipped), scored by distance minus a pull towards the travel direction (reversed for the exit) of clamp(w, 0.2, 0.9). The road is
+    taken when the two access legs together, and the legs plus w × the A* road length (`FUN_14045da60`; cost **Unknown**), are each no longer
+    than the straight line; the mover then heads for the first waypoint, keeping the final destination. Road data: ROAD records (`start`, `end`,
+    `length`, `width`, `weight`, `hidden`), their instances the polyline points; `start`/`end` are junction numbers, each road one edge costing its
+    `length` (not its polyline; `weight` unread), the A* heuristic the straight distance to the goal, and `hidden` never read by routing (**Verified**).
 - **Meetings**: nothing looks at other platoons; there is no off-screen combat. Off-screen outcomes are campaign phases and despawning.
 - **Pool growth** (`FUN_1408f4c20`): each pool's current max (`pop`) grows `+0.21818` per game hour (5.24 a day) up to its desired max
   (`popd`), for every town whether loaded or not; roaming grows only once residents are within 1 of full. Towns never spawn squads over
@@ -345,10 +351,33 @@ or population); a failed start retries each run, up to 100 times; a gone target 
 - Redirect (`FUN_1409d62f0`): every 0.2 h, a target town gone (or a player town failing slot 70) is replaced by a new target: "{1} has
   redirected to {2}".
 - Packages: phase 0 `pt1 AI`, 1 `pt2 AI`, 2 `retreat AI`; the leader platoon uses `... leader`, others `... others` (else the leader's).
-  How fast a loaded squad switches is **Unknown**.
+  Installed (`FUN_140272570`, **Verified**) at the platoon's next AI update: when the phase's package differs from the blackboard's override
+  (+0x210) the old one is torn down (dialogue event 30 on the leader) and the new one built by its `signal func` (0 → 33 Contract_Timed),
+  timed for 24 h and run ahead of the template's packages until its finished test passes (WarBase: the platoon is out of the campaign).
+  Classes by `signal func` (**Verified**): 19 Package_WarBase (pt1 "Military Assemble leader/forces"; activate sets job 5 TRAVEL_TARGET
+  for the leader, 6 TRAVEL_TARGET_FAST for the others, and the target and mission target from the campaign), 20 Package_WarAssault (pt2
+  assault, slave raid, loot food; speed mode 2, the base's 4), 32 Package_WarAssault_Cannibal; retreat packages use 1, 5 or 0 with
+  `clears existing jobs`. Goals (**Observed**, data): pt1 leader 215 TRAVEL_TO_TARGET_PACKAGE, 143, 129 MAKE_ANNOUNCEMENT_FAST; pt1
+  others 215, 15; pt2 16 (attack enemies), 15, 216, 270, 276 or 131; cannibal 216, 254, 270.
+  - Enemies: the base package, in a hostile campaign's phase 1, tags each seen target-faction character with squad memory 4 (TEMP_ENEMY,
+    as DA 21); WarAssault tags every seen character except those of another town, with an engine flag (slot 0x248), or of factions with
+    +0x1d0 or +0x34 == 8 set (meanings **Unknown**).
+  - Cannibal: from the first member carrying someone (+0x348, **Observed**) a timer runs; phase 2 at 3 carriers or after 15 game minutes.
+  - Dialogue (`FUN_140680560`, **Verified**): DA 37 sets phase 1 (2 without a pt2 leader package), DA 38 phase 2, DA 39 phase 3, which no
+    phase handles (only a leader wipe ends it; the data never uses DA 39).
 - Moving: unloaded, the leader travels to the target (TRAVEL_TARGET), the others to the leader (TRAVEL_TARGET_FAST), speeds as the
-  unloaded step above. Loaded, followers march on the leader's recorded trail; the leader uses `travel speed loaded` only while all intact
-  platoons are within 6000, else waits (what the mover does with RUN/GROUPED/NO_SPEED_CHANGE: **Unknown**).
+  unloaded step above. Loaded (`GatherAndMove`, **Verified**): each run the leader's trail gains its position when over 150 from the newest
+  point (seeded with slots + 1 points within ±100; slots 5, or N + 1 past N platoons) and drops its oldest while longer than N; follower i's
+  point is i × slots × 150 / N back along it. Whether followers steer to it or to the leader platoon's position is **Unknown** (the task
+  prefers the handle's). Task 215 (`Task_TravelToMissionTarget_ArmyFormation`): followers 100 or more from their point JOG, closer match
+  the leader (× 0.9 under 70); the leader uses `travel speed loaded` while every intact platoon (loaded, or unloaded on job 5/6) is within
+  6000, else stops within 8294.4 of its target (plain distance), else walks. Speed modes: WALK default, JOG 55, RUN and GROUPED 999 (no
+  cap), NO_SPEED_CHANGE unchanged.
+- Announcement (task 129 in the pt1 leader package, **Verified**): "{1} has arrived at {2}" once; with the leader within 2500 of the camera
+  and a target-faction member within 2500 of it, `dialog announcement` fires as event 2 ANNOUNCEMENT with no target; phase 0 then waits on
+  the leader's event-2 state (which state: **Unknown**). Talking to a campaign member (event 1) is refused without a pending `interrupt`.
+  "Invasion with demands" (data): the announcement sets the negotiation as `interrupt`; paying 2000 (DA 8 + DA 38) retreats and requests it
+  again in 42-56 h; refusing is DA 37 (attack); stabbing the speaker is DA 21 + DA 38 and the "EXTRA ANGRY" campaign in 20-50 h.
 
 **End effects** (the only callees): victory: "{1} against {2} has ended" (hostile) and one `victory trigger` roll. Defeat: "{1} was defeated
 on their way to {2}" (not hostile), "{1} against {2} has been defeated" (its leader fought a player squad) or "{1} to {2} has failed"; a
@@ -376,7 +405,7 @@ every message {1} is the campaign's name and {2} the target town's (the cancel m
 - Nest respawn delay after "wiped out", the default of `DAT_142133588` (the Number of nests multiplier option; **Unknown**, the exe image holds zeros there), the rule that makes `TownPopulationManager::vfunc_4`
   declare a town wiped out (**Observed** gates: roaming pool cap <= 3 and <= 25 roaming members).
 - Campaigns: Town +0x128, Town +0x388 (tech level), TownBase slots 70 / 92 / 96, the disabled-town flag,
-  the "fought a player squad" test, the announcement wait, whether spawned campaign squads are `persistent`, DIPLOMATIC_ASSAULTS.
+  the "fought a player squad" test, the announcement wait's event-2 state, the follower steering, the A* road cost, `Platoon::vfunc_25` (sends phase 0 to 2), whether spawned campaign squads are `persistent`, DIPLOMATIC_ASSAULTS.
 - `faction gen` at game start, `NEW_GAME_STARTOFF.faction relations`.
 - Unique characters: the `Character +0x279 & 7` gate and the 0.1 roll against a town list at platoon unload, platoon +0xac, the unit of
   `replacement time` (constant 2618.18 from `FUN_14066cd50`), UNIQUE_SQUAD_TEMPLATE `persistent` use and `missions` (DIPLOMATIC_ASSAULTS),

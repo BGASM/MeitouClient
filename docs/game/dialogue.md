@@ -345,7 +345,7 @@ A recruit into a full player squad ends the conversation with "It looks like you
 | 33 CRIME_ALARM | the target is hostile, its crime timer 30 s, the town alarm may be raised |
 | 35 INCREASE_FACTION_RANK | rank +1 up to val0 (0: no cap) |
 | 36 LOCK_THIS_DIALOG | locks the current dialogue |
-| 37 / 38 / 39 ASSAULT / RETREAT / VICTORY_PHASE | the speaker's campaign sub-state |
+| 37 / 38 / 39 ASSAULT / RETREAT / VICTORY_PHASE | the speaker's campaign phase: 1 (2 without a pt2 leader package), 2, 3 (unhandled) ([campaigns](factions-squads-towns.md#campaigns)) |
 | 41, 42, 43, 48 CHOOSE_* | the character trading window (slaves sold / bought, bail, animals; val0 price override) |
 | 54 OPEN_NEAREST_GATE | opens the speaker's town's nearest gate |
 | 56 MASSIVE_ALARM | every squad of the speaker's faction attacks and fires event 66 |

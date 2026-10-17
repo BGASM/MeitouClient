@@ -860,7 +860,9 @@ public sealed partial class PopulationSystem : IStateHashed
                     float d = to.Length() - (leads ? 0 : CampaignFollowDistance);
                     if (d <= 0) continue;
                     float speed = MathF.Min(CampaignSpeed(c.TravelSpeedUnloaded, leads, d), StandInSpeedCap);
-                    p.Position += to / to.Length() * MathF.Min(speed * dt, d);
+                    // The leader takes the roads by the original's rule; followers go straight for it (engine choice: their goal moves every look).
+                    if (leads) Travel(p, goal, speed * dt);
+                    else p.Position += to / to.Length() * MathF.Min(speed * dt, d);
                 }
             }
     }

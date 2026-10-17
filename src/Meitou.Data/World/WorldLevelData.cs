@@ -151,7 +151,7 @@ public sealed class WorldLevelData
 
     /// <summary>Road segments: <see cref="FcsRecordType.ROAD"/> records whose instances are the path's points.</summary>
     public IEnumerable<RoadPath> Roads() =>
-        Level.OfType(FcsRecordType.ROAD).Select(r => new RoadPath(r.StringId, r.GetFloat("width"), r.GetInt("start"), r.GetInt("end"),
+        Level.OfType(FcsRecordType.ROAD).Select(r => new RoadPath(r.StringId, r.GetFloat("width"), r.GetInt("start"), r.GetInt("end"), r.GetFloat("length"),
             r.Instances.Values.Where(i => !i.IsCleared).Select(i => i.Position).ToList()));
 }
 
@@ -188,7 +188,8 @@ public sealed record BuildingPlacement(ZoneCoordinate Zone, string InstanceId, s
 /// <param name="Position">World position; Y is an absolute height.</param>
 public sealed record TownPlacement(string InstanceId, string TownId, Vector3 Position, string? StateId);
 
-/// <param name="Start">Value of the road's <c>start</c> field (Unknown meaning; a node number).</param>
-/// <param name="End">Value of the road's <c>end</c> field.</param>
+/// <param name="Start">The road's <c>start</c> junction number (roads sharing a number meet there).</param>
+/// <param name="End">Its <c>end</c> junction number.</param>
+/// <param name="Length">Its <c>length</c> field: what the original's road search counts it as.</param>
 /// <param name="Points">World positions of the road's points in instance order; Y is absolute.</param>
-public sealed record RoadPath(string StringId, float Width, int Start, int End, List<Vector3> Points);
+public sealed record RoadPath(string StringId, float Width, int Start, int End, float Length, List<Vector3> Points);

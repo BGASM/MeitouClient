@@ -146,8 +146,37 @@ public sealed partial class PopulationSystem
             Arrive(world, p);
             return;
         }
-        float speed = StandInSpeed(p, d);
-        p.Position += to / d * MathF.Min(speed * dt, d);
+        Travel(p, goal, StandInSpeed(p, d) * dt);
+    }
+
+    /// <summary>
+    /// Moves a stand-in <paramref name="step"/> units on its way to <paramref name="goal"/> (any thread; only this platoon changes): by the roads when the original's rule takes
+    /// them (<see cref="RoadNetwork.Route"/>, worked out when the goal changes), point after point, else straight.
+    /// </summary>
+    void Travel(Platoon p, Vector2 goal, float step)
+    {
+        if (p.RouteGoal != goal)
+        {
+            p.RouteGoal = goal;
+            p.Route = data.Roads is { } roads && p.Faction >= 0 && p.Faction < data.Factions.Count ? roads.Route(p.Position, goal, data.Factions[p.Faction].RoadPreference) : null;
+            p.RouteStep = 0;
+        }
+        while (step > 0)
+        {
+            bool onRoute = p.Route is { } route && p.RouteStep < route.Count;
+            var next = onRoute ? p.Route![p.RouteStep] : goal;
+            var to = next - p.Position;
+            float d = to.Length();
+            if (d > step)
+            {
+                p.Position += to / d * step;
+                return;
+            }
+            p.Position = next;
+            step -= d;
+            if (!onRoute) return;
+            p.RouteStep++;
+        }
     }
 
     /// <summary>

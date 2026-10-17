@@ -142,8 +142,15 @@ Implemented (`PopulationRoaming.cs`):
   id order. Town squads do no off-screen work (the original's GOHOME at home).
 - **Speeds**: per job as the original (GOHOME 55, TRAVEL_TARGET 25, TRAVEL_TARGET_FAST 60 or 90 beyond 25000), the engine's travel stand-in (job
   NONE) 25 or 90, all capped at the original mover's 70 (`StandInSpeedCap`); straight lines. A short-range patrol keeps walking at 25 (the
-  original's stands still). Destinations are still the engine's (towns, patrol points near home); roads (the level data's ROAD records, the
-  faction's `road preference`) are not used yet.
+  original's stands still). Destinations stay the engine's (towns, patrol points near home): the original keeps no roaming squad off screen,
+  and saves give no usable target (**Observed**, 4 owner saves: `mission target` always type 0, `target town` on 1-3 platoons, `mission town`
+  mostly a TOWN).
+- **Roads** (`RoadNetwork`, `PopulationData.Roads` from the level's ROAD records): a stand-in, or a campaign's leader, takes the roads by the
+  original's rule ([roads](game/factions-squads-towns.md#off-screen-world)), worked out when its goal changes and walked point by point; a
+  campaign's followers go straight for their leader (engine choice: their goal moves every look). Hidden roads count. Engine reading: the
+  join pull is clamp(w) × the point's forward distance. **Observed** (base data): 2109 roads, built in 33 ms; a route takes 0.5-16 ms; 193 of
+  200 random town pairs go by road at preference 0.6; about 10 % of roads have a `length` well under their drawn length (0.17-0.44 ×, median
+  1.00), which the original's cost uses as is, so a faction with preference 0.3 still takes the Hub-Stack road (walked 34000 vs 16900 straight).
 - **Hand-off**: a stand-in that travelled comes back on the nearest walkable point (`WalkableSpots.Nearest`: rings of 4 to 128 units, eight
   directions each); its kept characters keep their offsets round it, each moved to a walkable point within 32 if needed, else onto it. A town's
   own or wild platoon, or one that did not move, keeps its characters' exact places.
@@ -203,10 +210,6 @@ the player has one; requests (victory/loss chains, ally help) can follow.
 - **Observed** (headless, real data, `raidFrequencyMult` 1000): Dust Bandits "Invasion with demands" against an outpost 1500 from Dust King
   Tower gathers 1 squad of 12 for 10 men, arrives after 0.28 h, survives a save and load in phase 1 (campaign, id, phase, squads), wins at 4 h,
   is removed 3 h later and queues its follow-up. The 9 owner saves' 103 war states each come out with the same keys and values.
-
-Proposed (awaiting review):
-
-- **Jobs**: the original's destinations (the blackboard's target, GOHOME's home within 2000) and roads.
 
 ## Player
 

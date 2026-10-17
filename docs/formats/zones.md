@@ -96,7 +96,7 @@ zone file ([player outposts](save.md#player-outposts)); the buildings' `town` ha
 GAMESTATE_TOWN state `-S5e`. **Verified**304 targets resolve;224 town states listing zones contain
 their town,80 list none. Keys `zones_count`, `zone_x_<i>`, `zone_y_<i>`, handle `hand*`, string
 `instance`=list entry ID. ROAD keys: `hidden`, `width`46..200, `length`, `weight`, `start`, `end`
-(node meaning Unknown); ordered instances target `-`, absolute positions, rotation w1/y0/z0,
+(junction numbers, [roads](../game/factions-squads-towns.md#off-screen-world)); ordered instances target `-`, absolute positions, rotation w1/y0/z0,
 x0..1 (**Observed**, purpose Unknown). `5-roadfoliage` target- points use quaternion w as
 size0.1..3590 (**Observed**, likely clearing radius). Furnished interiors use GAMESTATE_BUILDING,
 ITEM_PLACEMENT_GROUP, inventory states and collections, often `<n>-[basedata]-INGAME` IDs;
