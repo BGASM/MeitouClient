@@ -39,7 +39,7 @@ public sealed class SavedMember
 /// <summary>
 /// An NPC platoon of a loaded save that the world keeps as itself (docs/simulation.md "Saves"): a <see cref="Platoon"/> stand-in until a zone near it is active, then
 /// its saved characters (not ones made again from the template), and back to a stand-in that remembers them. <see cref="Pinned"/> platoons are their town's own
-/// (residents, bar squads, slaves, farm animals): they never travel, and the town makes that many fewer of its own squads.
+/// (residents, bar squads, slaves, farm animals): they never travel, and a town holding any makes no squads of its own.
 /// </summary>
 public sealed class SavedPlatoon
 {

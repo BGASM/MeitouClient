@@ -188,7 +188,7 @@ public static class SaveLoader
 
     /// <summary>
     /// An NPC platoon of a placed town: a <see cref="Platoon"/> stand-in at its saved place carrying its saved characters (<see cref="SavedPlatoon"/>), made when a zone
-    /// near it is active. Town-bound platoons (<see cref="Travels"/> false) are pinned to their town and count against its residents and bar squads; the others travel.
+    /// near it is active. Town-bound platoons (<see cref="Travels"/> false) are pinned to their town and are its whole population (it makes none of its own); the others travel.
     /// </summary>
     static void LoadNpcPlatoon(World world, SavePlatoon platoon, PopulationData data, LoadedSave loaded, SavedPopulation context)
     {
@@ -206,7 +206,7 @@ public static class SaveLoader
         string? saved = platoon.Record.Strings.TryGetValue("currentPackage", out var current) && current.Length > 0 ? current : null;   // a string: the AI_PACKAGE id (docs/formats/save.md)
         var (package, job) = data.Db.Find(platoon.SquadTemplate) is { } templateRecord && SquadFactory.IsTemplate(templateRecord)
             ? Ai.PlatoonJobs.For(data.Ai, Meitou.Data.Gameplay.SquadTemplate.From(templateRecord), saved) : (null, Ai.PlatoonJob.None);
-        // Town-bound platoons are the town's own: its residents, bar squads, slaves and farm animals. They stay home, and the town makes that many fewer of its own.
+        // Town-bound platoons are the town's own: its residents, bar squads, slaves and farm animals. They stay home, and the town makes none of its own.
         int siteFaction = data.SiteFactions.Count > origin ? data.SiteFactions[origin] : -1;
         bool travels = Travels(platoon, job, data.Sites[origin].Town, siteFaction >= 0 ? data.Factions[siteFaction] : null);
         int faction = data.FactionIndex(platoon.FactionId);

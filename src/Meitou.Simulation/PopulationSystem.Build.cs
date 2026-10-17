@@ -39,20 +39,21 @@ public sealed partial class PopulationSystem
     internal sealed record BuiltSquad(SquadPlan Plan, Vector2 Position, int Faction, List<BuiltMember> Members, float? NearY = null, TownBuilding? Home = null);
     sealed record BuiltTown(int Site, long LoadId, List<BuiltSquad> Squads);
 
-    /// <summary>What a loaded save already holds of a town: its pinned squads by template, and the buildings they live in.</summary>
-    internal sealed record SavedHold(Dictionary<string, int> Templates, HashSet<TownBuilding> Homes);
-
-    BuiltTown BuildTown(TownSite site, long loadId, ulong seed, IWalkability walk, SavedHold? saved = null)
+    /// <summary>
+    /// The town's residents and bar squads. <paramref name="held"/>: a loaded save holds squads of the town (its pinned saved platoons), which are then its whole
+    /// population and nothing is made (docs/formats/save.md "NPC platoons").
+    /// </summary>
+    BuiltTown BuildTown(TownSite site, long loadId, ulong seed, IWalkability walk, bool held = false)
     {
+        if (held) return new BuiltTown(site.Index, loadId, []);
         var town = site.Town;
         int factionIndex = town.Faction is { } fid ? data.FactionIndex(fid) : -1;
         var faction = factionIndex >= 0 ? data.Factions[factionIndex] : null;
         var squads = new List<BuiltSquad>();
-        var counts = saved is null ? null : new Dictionary<string, int>(saved.Templates, StringComparer.Ordinal);
         var entries = ResidentEntries(town, faction);
         List<TownBuilding>? bars = null;
         if (site.Buildings.Any(b => b.CanHouse))
-            bars = HouseResidents(site, entries, faction, factionIndex, seed, walk, counts, saved?.Homes, squads);
+            bars = HouseResidents(site, entries, faction, factionIndex, seed, walk, squads);
         else
         {
             // No building data (headless worlds): every entry's squads at spots round the centre (engine choice).
@@ -62,7 +63,6 @@ public sealed partial class PopulationSystem
                 var template = SquadTemplate.From(record);
                 for (int k = 0; k < entries[e].V0; k++)
                 {
-                    if (TakeSaved(counts, entries[e].Id)) continue;   // the save holds this squad of the town
                     ulong key = Rng.Mix((ulong)site.Index << 40 ^ (ulong)e << 20 ^ (uint)k);
                     if (BuildOne(template, factionIndex, faction, key, seed, Place(site, seed, key, walk)) is { } one) squads.Add(one);
                 }
@@ -70,8 +70,7 @@ public sealed partial class PopulationSystem
         }
         // Bar squads (Observed, FUN_1409fcd20): per entry floor(v0 x v1 / 200) when v0 > 2, plus one more for each roll of 0..100 that is at most v1, stopping at the
         // first that is not, at most v0 in all. The original puts each at a random node of the town; Meitou at a node of one of its bars (engine choice), else round the centre.
-        // A town the save holds keeps the save's bar squads and rolls no more (engine choice: its roll was made when it was populated).
-        var barEntries = counts is null ? BarEntries(town, faction) : [];
+        var barEntries = BarEntries(town, faction);
         for (int e = 0; e < barEntries.Count; e++)
         {
             if (data.Db.Find(barEntries[e].Id) is not { } record || !SquadFactory.IsTemplate(record)) continue;
@@ -110,14 +109,6 @@ public sealed partial class PopulationSystem
     {
         var nodes = bars.SelectMany(b => b.Spots).Where(s => s.NodeType == NodeGeneral).ToList();
         return nodes.Count == 0 ? null : nodes[Rng.Int(Rng.Hash(seed, key, RngPurpose.Spawn, SeedSalts.HomeSpot), nodes.Count)].Position;
-    }
-
-    /// <summary>Takes one squad of <paramref name="template"/> off the saved count (true: there was one, the slot is the save's).</summary>
-    static bool TakeSaved(Dictionary<string, int>? saved, string template)
-    {
-        if (saved is null || !saved.TryGetValue(template, out int n) || n <= 0) return false;
-        saved[template] = n - 1;
-        return true;
     }
 
     /// <summary>

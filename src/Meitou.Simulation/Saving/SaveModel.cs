@@ -66,7 +66,7 @@ public sealed class LoadedSave
     public float[] RelationBaseline { get; set; } = [];
     /// <summary>The travelling stand-ins made from the save's NPC platoons: the world's platoon id to the save's platoon name.</summary>
     public Dictionary<int, string> RoamingPlatoons { get; } = [];
-    /// <summary>NPC platoons that stay in their placed town (residents, bar squads, slaves): pinned stand-ins, made when the town loads, and that many fewer of the town's own.</summary>
+    /// <summary>NPC platoons that stay in their placed town (residents, bar squads, slaves): pinned stand-ins, made when the town loads, which then makes none of its own.</summary>
     public int TownBoundPlatoons { get; set; }
     /// <summary>Wild NPC platoons (a nest's or homeless): stand-ins that stay where they are, made when their zone loads, counted by their nest or sector.</summary>
     public int WildPlatoons { get; set; }

@@ -192,15 +192,15 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         long loadId = state.LoadId;
         ulong seed = world.Seed;
         var walk = world.Walkability;
-        var saved = SavedSquadsOf(world, site.Index);
+        bool held = HoldsSquads(world, site.Index);
         if (work is null)
         {
-            Spawn(world, BuildTown(site, loadId, seed, walk, saved));
+            Spawn(world, BuildTown(site, loadId, seed, walk, held));
             state.Status = SiteStatus.Loaded;
         }
         else
         {
-            work.Add(() => built.Enqueue(BuildTown(site, loadId, seed, walk, saved)));
+            work.Add(() => built.Enqueue(BuildTown(site, loadId, seed, walk, held)));
         }
     }
 
@@ -220,20 +220,14 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
     }
 
     /// <summary>
-    /// The town's own squads a loaded save already holds (pinned saved platoons of the site, whether made now or not), by template: the town makes that many fewer of
-    /// each resident and bar squad entry (docs/simulation.md "Saves"), and the buildings they live in are not given to fresh squads. Null when there are none.
+    /// Whether a loaded save holds squads of the town: a pinned saved platoon of the site, made now or not. They are then the town's whole population and it makes no
+    /// residents or bar squads of its own (<see cref="BuildTown"/>, docs/simulation.md "Saves").
     /// </summary>
-    SavedHold? SavedSquadsOf(World world, int site)
+    bool HoldsSquads(World world, int site)
     {
-        SavedHold? have = null;
         foreach (var p in world.Platoons.All)
-            if (p.Pinned && p.Origin == site)
-            {
-                have ??= new SavedHold(new Dictionary<string, int>(StringComparer.Ordinal), new HashSet<TownBuilding>(ReferenceEqualityComparer.Instance));
-                have.Templates[p.TemplateId] = have.Templates.GetValueOrDefault(p.TemplateId) + 1;
-                if (p.Saved is { } sp && Saving.SavedCharacters.SavedHome(world, sp, data.Sites[site]) is { } home) have.Homes.Add(home);
-            }
-        return have;
+            if (p.Pinned && p.Origin == site) return true;
+        return false;
     }
 
 

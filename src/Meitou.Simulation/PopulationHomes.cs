@@ -27,7 +27,6 @@ public sealed partial class PopulationSystem
     /// Houses the town's resident entries in its buildings and builds their squads into <paramref name="squads"/>; returns the town's bars (for the bar squads).
     /// Order of the buildings: a seeded shuffle (the original's is its handles' serials, which are random). Steps:
     /// <list type="number">
-    /// <item>the buildings the save's own squads live in are theirs (<paramref name="savedHomes"/>), and their templates' counts are spent (<paramref name="counts"/>);</item>
     /// <item>priorities 5 down to 0: first (<b>engine choice</b>) a building whose level-data state names a template of this priority keeps it while the entry has
     /// squads left (the level data's assignment is one the original's rules made, and Meitou draws interiors from its layout names; the original rerolls at a new
     /// game); then the original's rule (Observed, <c>FUN_1409370d0</c>, <c>FUN_14092e870</c>): each entry of the priority one building per pass,
@@ -38,10 +37,10 @@ public sealed partial class PopulationSystem
     /// </list>
     /// </summary>
     List<TownBuilding> HouseResidents(TownSite site, List<RecordLink> table, FactionData? faction, int factionIndex, ulong seed, IWalkability walk,
-        Dictionary<string, int>? counts, HashSet<TownBuilding>? savedHomes, List<BuiltSquad> squads)
+        List<BuiltSquad> squads)
     {
         string? player = data.PlayerFaction >= 0 ? data.Factions[data.PlayerFaction].Id : null;
-        var order = site.Buildings.Where(b => b.CanHouse && (player is null || b.OwnerFactionId != player) && savedHomes?.Contains(b) != true).ToList();
+        var order = site.Buildings.Where(b => b.CanHouse && (player is null || b.OwnerFactionId != player)).ToList();
         for (int i = order.Count - 1; i > 0; i--)
         {
             int j = Rng.Int(Rng.Hash(seed, (ulong)site.Index, RngPurpose.Spawn, SeedSalts.HomeOrder + (ulong)i), i + 1);
@@ -53,7 +52,6 @@ public sealed partial class PopulationSystem
             if (data.Db.Find(link.Id) is not { } record || !SquadFactory.IsTemplate(record)) continue;
             var t = SquadTemplate.From(record);
             int count = link.V0;
-            while (count > 0 && TakeSaved(counts, link.Id)) count--;
             entries.Add(new Entry
             {
                 Id = link.Id, Template = t, Count = count, Priority = link.V1 == 100 ? 0 : link.V1,

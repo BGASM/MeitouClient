@@ -199,14 +199,18 @@ one changed in the character editor (its keys replaced by the edited copy's, so 
 
 ### NPC platoons (Meitou mapping)
 
-Every saved NPC platoon with a `basetown` naming a placed town is restored (a characterless town-bound one is skipped); town-bound ones (template does not travel) are pinned to their town and replace
-that many of its resident squads of the same template; a town holding any rolls no bar squads; it is made with its town (when the town's zone is active, as the
+Every saved NPC platoon with a `basetown` naming a placed town is restored (a characterless town-bound one is skipped); town-bound ones (template does not travel) are pinned to their town, and a town holding any
+is made of them alone: it makes no residents, default residents, housemates or bar squads (**engine rule**, after the original's: a zone with a save file makes no town
+population, [Zone files](#zone-files) Load; Meitou keys it on the saved platoons, since a town it unloaded before saving is not in the save and is made again). A count per
+template would not do: housing spends a building on a slot whose rolled squad is empty (68 of 200 `hub squatters` plans), so a town's saved squads are fewer than its entries' `v0`, and the rest rolled
+again at load makes new squads (**Observed**, headless new game with town buildings: The Hub 4 of 7 `hub squatters` slots, 36 NPCs; reloaded 42, three more). Each platoon is made with its town (when the town's zone is active, as the
 town's fresh squads are). On save, a restored platoon is rewritten
 only once loaded (its characters from the world), otherwise only its position/package; a squad the population made is written as a new PLATOON with the
 `SaveBuilder` key set plus `basetown` (town id), `hometown` (the town state's `hand`), `homebuilding` (below), `is resident`, `sqt`, `map area sid` / `map area name`
 (the BIOME_GROUP of its cell) and `currentPackage`. **Observed** (headless load of saves 1, 2,
 wade): NPCs within 5 units of their saved positions (save 2: 4 of 107 differ in Y only, flat test ground); a Meitou save → load restores them
-exactly with no fresh squads for save 2 and a new game. A pinned platoon is homed in the building its `homebuilding` handle names (state `<id>-S23`
+exactly with no fresh squads for save 2 and a new game (with town buildings: 36 NPCs after two save → load cycles for a new game at The Hub; saves 1, 2, 3, wade keep
+86, 116, 18, 114). A pinned platoon is homed in the building its `homebuilding` handle names (state `<id>-S23`
 of zone C-1, X = c % 64, Y = c / 64; ids repeat across zones; a zone without a file: the building whose level state has that handle); that building is taken
 out of the town's free homes. **Unknown:** how the original reuses the saved package.
 
