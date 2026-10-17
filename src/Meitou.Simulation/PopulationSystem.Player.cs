@@ -58,7 +58,7 @@ public sealed partial class PopulationSystem
             {
                 var t = SquadTemplate.From(record);
                 template ??= t;
-                first.AddRange(SquadFactory.Plan(data.Db, t, settings.SquadSizeMultiplier, world.Seed, Rng.Mix(key ^ (uint)first.Count), data.States).Members);
+                first.AddRange(SquadFactory.Plan(data.Db, t, settings.SquadSizeMultiplier, world.Seed, Rng.Mix(key ^ (uint)first.Count), States).Members);
             }
             else
             {

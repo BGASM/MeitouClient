@@ -63,6 +63,8 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         KeepRoamers = this.settings.KeepRoamers;
         OffscreenFights = this.settings.OffscreenFights;
         OffscreenHealing = this.settings.OffscreenHealing;
+        CampaignAncestorsOnce = this.settings.CampaignAncestorsOnce;
+        live = new WorldStates(data.Db, data.Relations);
         if (!this.settings.Background) return;
         work = [];
         worker = new Thread(() => { foreach (var job in work.GetConsumingEnumerable()) job(); }) { IsBackground = true, Name = "Meitou.Sim population" };
@@ -73,6 +75,15 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
     public bool KeepRoamers { get; set; }
     public bool OffscreenFights { get; set; }
     public bool OffscreenHealing { get; set; }
+    /// <summary>The campaign inheritance switch (<see cref="PopulationSettings.CampaignAncestorsOnce"/>), changed live by the host.</summary>
+    public bool CampaignAncestorsOnce { get; set; }
+
+    readonly WorldStates live;
+    /// <summary>The world states the population's spawns and campaigns read: the data's fixed ones when it has any, else the live ones of this world (<see cref="WorldStates"/>).</summary>
+    public IWorldStates States => ReferenceEquals(data.States, IWorldStates.None) ? live : data.States;
+
+    /// <summary>The live world states take the unique table and the player's faction (serial; every look, and before the loading screen's builds).</summary>
+    void RefreshStates(World world) => live.Refresh(world.Uniques, world.Player.Faction >= 0 ? world.Player.Faction : data.PlayerFaction);
 
     public PopulationData Data => data;
     public PopulationSettings Settings => settings;
@@ -104,9 +115,13 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
     public void SlowWorld(World world)
     {
         if (world.Tick % settings.CheckEveryTicks != 0) return;
+        world.Uniques.SeedPrisoners(data.Db);
+        RefreshUniques(world);
+        RefreshStates(world);
         RefreshZones(world);
         Discover(world);
         StepRoaming(world);
+        StepCampaigns(world);
     }
 
     /// <summary>The XZ distance at which a player character explores a town (and discovers it).</summary>
@@ -248,6 +263,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         foreach (int id in state.Squads)
         {
             if (world.Squads.Find(id) is not { } squad) continue;
+            ReleaseUniques(world, squad);
             foreach (var m in squad.Members) table.Remove(m);
             world.Squads.Remove(id);
         }
@@ -327,9 +343,10 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
             HomeRadius = Math.Max(radius * 0.8f, 40),
             HomeBuilding = built.Home,
         };
-        var leaderPlan = built.Members.FirstOrDefault(m => m.Plan.Role == SquadRole.Leader)?.Plan;
+        var builtMembers = player || idle ? built.Members : GateUniques(world, built, squad.Id);
+        var leaderPlan = builtMembers.FirstOrDefault(m => m.Plan.Role == SquadRole.Leader)?.Plan;
         bool hasLeader = leaderPlan is not null;
-        foreach (var member in built.Members)
+        foreach (var member in builtMembers)
         {
             var plan = member.Plan;
             float x = built.Position.X + plan.Offset.X, z = built.Position.Y + plan.Offset.Y;
@@ -364,6 +381,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
             // A new NPC's bounties (economy.md 11.2; engine: not the player's characters, nor the sandbox's idle spawns).
             if (!player && !idle) cold.Bounties = Crime.SpawnBounties.Roll(data, record, world.Seed, table.PeekNextId(), world.Tick);
             var id = table.Spawn(hot, cold, world.Tick);
+            if (UniqueCharacters.IsUnique(record)) world.Uniques.Bind(plan.RecordId, id);
             squad.Members.Add(id);
             if (plan.Role == SquadRole.Leader && squad.Leader.IsNone) squad.Leader = id;
         }
@@ -373,6 +391,113 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         return squad;
     }
 
+
+    /// <summary>
+    /// The unique-character gate (<c>FUN_1405836e0</c>, docs/game/factions-squads-towns.md "Unique characters") on the members of a squad about to be made, in the serial
+    /// phase so two squads planned at once cannot both make one: a free unique is claimed and made; a claimed one (made elsewhere, dead) is replaced by its first
+    /// <c>unique replacement spawn</c> (not gated, with a look rolled now) or by nobody. Animals are not gated. When the leader is gone the first member left leads.
+    /// </summary>
+    List<BuiltMember> GateUniques(World world, BuiltSquad built, int squadId)
+    {
+        List<BuiltMember>? gated = null;
+        for (int i = 0; i < built.Members.Count; i++)
+        {
+            var member = built.Members[i];
+            if (member.Plan.IsAnimal || data.Db.Find(member.Plan.RecordId) is not { } record || !UniqueCharacters.IsUnique(record)
+                || world.Uniques.TryClaim(member.Plan.RecordId))
+            {
+                gated?.Add(member);
+                continue;
+            }
+            gated ??= [.. built.Members.Take(i)];
+            var replacements = record.GetReferences("unique replacement spawn");
+            if (replacements.Count == 0 || data.Db.Find(replacements[0].TargetStringId) is null) continue;
+            string replacement = replacements[0].TargetStringId;
+            string? faction = built.Faction >= 0 && built.Faction < data.Factions.Count ? data.Factions[built.Faction].Id : null;
+            var look = data.Appearances?.Create(replacement, faction, (int)(Rng.Hash(world.Seed, Rng.StableHash(replacement) ^ (ulong)squadId << 32, RngPurpose.Spawn, SeedSalts.MemberLook + (ulong)i) & 0x7FFFFFFF));
+            gated.Add(new BuiltMember(member.Plan with { RecordId = replacement }, look));
+        }
+        if (gated is null) return built.Members;
+        if (gated.Count > 0 && !gated.Any(m => m.Plan.Role == SquadRole.Leader)) gated[0] = gated[0] with { Plan = gated[0].Plan with { Role = SquadRole.Leader } };
+        return gated;
+    }
+
+    /// <summary>
+    /// The unique members of a platoon that leaves the world for good without being kept (despawned, or remade from its template): the living are freed to be made again,
+    /// as the original's unload does for a free and well unique (<c>FUN_1409a8120</c>); with <paramref name="killed"/> (an off-screen defeat) they die instead.
+    /// </summary>
+    void ReleaseUniques(World world, Platoon p, bool killed = false)
+    {
+        if (world.Squads.Find(p.SquadId) is { } squad) ReleaseUniques(world, squad, killed);
+        else if (p.Stored is { } stored)
+            foreach (var m in stored.Members) ReleaseUnique(world, m.Cold.RecordId, CharacterId.None, m.Cold.Medical is { Dead: true } || killed);
+        else if (p.Saved is { } saved)
+            foreach (var m in saved.Members)
+                if (!m.Gone) ReleaseUnique(world, m.Source.RecordId, CharacterId.None, m.Dead || killed);
+    }
+
+    /// <summary>The same for the characters of a squad in the world.</summary>
+    void ReleaseUniques(World world, Squad squad, bool killed = false)
+    {
+        var table = world.Characters;
+        foreach (var m in squad.Members)
+            if (table.TryResolveNext(m, out int slot) && table.Cold(slot) is { } cold)
+                ReleaseUnique(world, cold.RecordId, m, killed || cold.DiedTick >= 0 || cold.Medical is { Dead: true });
+    }
+
+    /// <summary>
+    /// One member: dead, it dies in the registry; alive, its entry is erased when this character holds it (<paramref name="holder"/>, or none for one not in the world), so a
+    /// copy made as another's replacement (a unique naming itself) never frees the first.
+    /// </summary>
+    void ReleaseUnique(World world, string recordId, CharacterId holder, bool dead)
+    {
+        if (world.Uniques.Find(recordId) is not { } entry || !UniqueCharacters.IsUnique(data.Db.Find(recordId))) return;
+        if (!holder.IsNone && !entry.Handle.IsNone && entry.Handle != holder) return;
+        world.Uniques.Left(holder);
+        if (dead) world.Uniques.Died(recordId, false);
+        else world.Uniques.Release(recordId);
+    }
+
+    /// <summary>
+    /// The unique characters in the world, at every population look (the original's per-character refresh <c>FUN_1405cf470</c> and its death and imprisonment hooks,
+    /// docs/game/factions-squads-towns.md "Unique characters"): dead → 0 (killed by the player's: set by the combat commit); in a cage or restraint → 2 (player: the cage's
+    /// owner is the player's); alive and carried by one of a faction neither its own nor allied → 2 (player: the carrier is the player's); captured but neither held nor
+    /// carried → 1, player cleared (engine summary of the original's ally and town tests); in the player's faction and alive though marked dead → 1.
+    /// </summary>
+    void RefreshUniques(World world)
+    {
+        var uniques = world.Uniques;
+        if (uniques.Count == 0) return;
+        var table = world.Characters;
+        var relations = data.Relations;
+        int playerFaction = world.Player.Faction;
+        List<CharacterId>? gone = null;
+        foreach (var (recordId, e) in uniques.All)
+        {
+            if (e.Handle.IsNone) continue;
+            if (!table.TryResolveNext(e.Handle, out int slot) || table.Cold(slot) is not { } cold)
+            {
+                (gone ??= []).Add(e.Handle);
+                continue;
+            }
+            bool dead = cold.DiedTick >= 0 || cold.Medical is { Dead: true };
+            if (dead)
+            {
+                if (e.State != UniqueState.Dead) uniques.Died(recordId, false);
+            }
+            else if (cold.IsImprisoned)
+            {
+                if (e.State != UniqueState.Imprisoned) uniques.Captured(recordId, cold.InWhat is { } cage && world.Fixtures.Find(cage) is { } f && f.Owner >= 0 && f.Owner == playerFaction);
+            }
+            else if (!cold.CarriedBy.IsNone && table.TryResolveNext(cold.CarriedBy, out int carrierSlot) && table.Cold(carrierSlot) is { } carrier)
+            {
+                bool friend = carrier.Faction == cold.Faction || relations.Contains(carrier.Faction) && relations.Contains(cold.Faction) && relations.IsAlly(cold.Faction, carrier.Faction);
+                if (e.State == UniqueState.Alive && !friend) uniques.Captured(recordId, carrier.IsPlayer);
+            }
+            else if (e.State == UniqueState.Imprisoned || e.State == UniqueState.Dead && cold.IsPlayer) uniques.Freed(recordId);
+        }
+        if (gone is not null) foreach (var id in gone) uniques.Left(id);
+    }
 
     /// <summary>The floor at X/Z: the one under <paramref name="nearY"/> inside a building, else the ground.</summary>
     static float Ground(IWalkability walk, float x, float z, float? nearY) => nearY is { } y ? walk.GroundHeight(x, z, y) : walk.GroundHeight(x, z);

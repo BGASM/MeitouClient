@@ -123,9 +123,9 @@ public static class BuildingSave
 
     /// <summary>
     /// Writes the registry into the save: every site's instance and state in its zone file (a zone without a file gets one), and removes the player-built entries the world no longer has (a
-    /// dismantled building). Everything else in the zone files is left as it was.
+    /// dismantled building). Everything else in the zone files is left as it was. Returns the town handle each player town (by number) was written with.
     /// </summary>
-    public static void Write(SaveGame game, World world, string playerFactionId, ulong seed = 0)
+    public static IReadOnlyDictionary<int, Hand> Write(SaveGame game, World world, string playerFactionId, ulong seed = 0)
     {
         var reg = world.Buildings;
         var live = new HashSet<string>(reg.All.Select(s => s.Id), StringComparer.Ordinal);
@@ -146,7 +146,7 @@ public static class BuildingSave
             }
         }
         var townHands = WriteTowns(game, world, playerFactionId, seed);
-        if (reg.Count == 0) return;
+        if (reg.Count == 0) return townHands;
         foreach (var site in reg.All) WriteSite(game, site, playerFactionId, seed, townHands.GetValueOrDefault(site.Town, Hand.Null));
 
         // Parents last: they may be sites written above.
@@ -167,6 +167,7 @@ public static class BuildingSave
                 Hand.Null.Write(state, "isInsideBuilding");
             }
         }
+        return townHands;
     }
 
     static void WriteSite(SaveGame game, BuildSite site, string playerFactionId, ulong seed, Hand town)

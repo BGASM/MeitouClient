@@ -149,7 +149,7 @@ public class DialogueTests
 public class DialogueInstallTests
 {
     [Fact]
-    public void The_hub_barman_offers_his_goods()
+    public void The_hub_barman_talks_and_offers_two_replies()
     {
         Assert.SkipWhen(InstallData.Install is null, "Kenshi install not found");
         var install = InstallData.Install!;
@@ -187,6 +187,7 @@ public class DialogueInstallTests
         var talk = dialogue.PublishConversation();
         Assert.NotNull(talk);
         Assert.Equal("Barman", talk.SpeakerName);
-        Assert.Contains("Show me your goods.", talk.Choices);
+        Assert.NotEmpty(talk.Text);
+        Assert.Equal(2, talk.Choices.Count);   // trade or decline; their texts are picked at random
     }
 }

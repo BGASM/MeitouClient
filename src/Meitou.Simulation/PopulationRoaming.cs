@@ -54,7 +54,7 @@ public sealed partial class PopulationSystem
         // nothing another one changes, so the result does not depend on the order. What changes the registry or the world follows, serially, in id order.
         movers.Clear();
         foreach (var p in platoonBuffer)
-            if (p.State == PlatoonState.Unloaded && !p.Pinned) movers.Add(p);
+            if (p.State == PlatoonState.Unloaded && !p.Pinned && p.Campaign is null) movers.Add(p);   // a campaign's are moved by it (they follow their leader)
         world.ParallelFor((movers.Count + MoversPerJob - 1) / MoversPerJob, job =>
         {
             for (int i = job * MoversPerJob, end = Math.Min(movers.Count, i + MoversPerJob); i < end; i++) StepOffscreen(world, movers[i], dt);
@@ -108,8 +108,9 @@ public sealed partial class PopulationSystem
     /// Takes a platoon out of the world for good (serial phase), as the original does with one it does not keep: its characters (if made) and its stand-in; a save's platoon
     /// is marked so a save leaves it out.
     /// </summary>
-    void Despawn(World world, Platoon p)
+    void Despawn(World world, Platoon p, bool killed = false, bool release = true)
     {
+        if (release) ReleaseUniques(world, p, killed);
         if (world.Squads.Find(p.SquadId) is { } squad)
         {
             foreach (var m in squad.Members) world.Characters.Remove(m);
@@ -126,7 +127,7 @@ public sealed partial class PopulationSystem
     /// <summary>The unloaded half: moves a stand-in for the squad towards its target, with no physics (the original's <c>UnloadedPlatoon</c>).</summary>
     void StandIn(World world, Platoon p, float dt)
     {
-        if (p.Pinned || p.Wild) return;   // a town's own saved squad, or a wild one, stays where it was
+        if (p.Pinned || p.Wild || p.Campaign is not null) return;   // a town's own saved squad, or a wild one, stays where it was; a campaign moves its own
         if (p.WaitLeft > 0)
         {
             p.WaitLeft -= dt;
@@ -183,8 +184,8 @@ public sealed partial class PopulationSystem
         p.GoingHome = p.Target != p.Origin;   // having reached another town, the way home is next
     }
 
-    /// <summary>Where a platoon is heading: its patrol point, else its target town's centre; null when it has neither.</summary>
-    Vector2? Goal(Platoon p) => p.Point ?? (p.Target >= 0 ? SiteCentre(p.Target) : null);
+    /// <summary>Where a platoon is heading: its campaign's goal, else its patrol point, else its target town's centre; null when it has none.</summary>
+    Vector2? Goal(Platoon p) => p.CampaignGoal ?? p.Point ?? (p.Target >= 0 ? SiteCentre(p.Target) : null);
 
     /// <summary>Picks where a platoon goes next: home after a visit, else one of the 4 nearest settlements that are not hostile to it.</summary>
     void ChooseNext(World world, Platoon p)
@@ -268,8 +269,8 @@ public sealed partial class PopulationSystem
         else if (p.UnloadAtTick < 0) p.UnloadAtTick = world.Tick + (long)Math.Ceiling((p.Pinned ? settings.UnloadGraceSeconds : settings.RoamUnloadGraceSeconds) / world.TickSeconds);
         else if (world.Tick >= p.UnloadAtTick)
         {
-            // Faithful: a platoon the original does not keep (not a town's own) is despawned as it leaves.
-            if (!KeepRoamers && !p.Pinned)
+            // Faithful: a platoon the original does not keep (not a town's own, not in a campaign) is despawned as it leaves.
+            if (!KeepRoamers && !p.Pinned && p.Campaign is null)
             {
                 Despawn(world, p);
                 return;
@@ -284,11 +285,16 @@ public sealed partial class PopulationSystem
                 stored.Package = p.Package = squad.Ai?.Current?.Id ?? stored.Package;
                 p.Position = Store(world, squad, stored);
             }
-            foreach (var m in squad.Members) table.Remove(m);
+            foreach (var m in squad.Members) { world.Uniques.Left(m); table.Remove(m); }
             world.Squads.Remove(squad.Id);
             p.State = PlatoonState.Unloaded;
             p.SquadId = -1;
             p.UnloadAtTick = -1;
+            return;
+        }
+        if (p.Campaign is not null)
+        {
+            StepCampaignLoaded(world, p, squad, dt);
             return;
         }
         if (p.Pinned || p.Wild) return;   // a town's own or a wild one: its AI runs it, it has no trips
@@ -470,7 +476,7 @@ public sealed partial class PopulationSystem
             if (factionIndex < 0) continue;
             int cap = (int)MathF.Floor(settings.RoamingShare * data.Factions[factionIndex].RoamingPopulation * settings.PopulationMultiplier);
             int members = 0;
-            foreach (var p in world.Platoons.All) if (p.Origin == site.Index && !p.Pinned) members += p.Size;   // a town's own saved squads are not its roaming ones
+            foreach (var p in world.Platoons.All) if (p.Origin == site.Index && !p.Pinned && p.Campaign is null) members += p.Size;   // a town's own saved squads are not its roaming ones, nor campaign squads
             if (members >= cap) continue;
 
             var weights = new List<(RecordLink Entry, float Weight)>();
@@ -479,7 +485,7 @@ public sealed partial class PopulationSystem
             {
                 if (entry.V0 <= 0 || !SquadFactory.IsTemplate(data.Db.Find(entry.Id))) continue;
                 int existing = 0;
-                foreach (var p in world.Platoons.All) if (p.Origin == site.Index && !p.Pinned && p.TemplateId == entry.Id) existing++;
+                foreach (var p in world.Platoons.All) if (p.Origin == site.Index && !p.Pinned && p.Campaign is null && p.TemplateId == entry.Id) existing++;
                 float w = MathF.Max(0, entry.V0 - existing);
                 if (w <= 0) continue;
                 weights.Add((entry, w));
@@ -495,7 +501,7 @@ public sealed partial class PopulationSystem
                 if ((pick -= w) < 0) { chosen = entry; break; }
             }
             var template = SquadTemplate.From(data.Db.Find(chosen.Id)!);
-            var plan = SquadFactory.Plan(data.Db, template, settings.SquadSizeMultiplier, world.Seed, key, data.States);
+            var plan = SquadFactory.Plan(data.Db, template, settings.SquadSizeMultiplier, world.Seed, key, States);
             if (plan.TotalMembers == 0 || members + plan.TotalMembers > cap) continue;
             var position = Place(site, world.Seed, key, world.Walkability);
             // Not on top of the player (6.3: within 35.4 of the view point).

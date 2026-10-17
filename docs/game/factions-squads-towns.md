@@ -9,8 +9,13 @@ checks. Tables/expressions retain fields and event values. Runtime: [simulation]
 **Verified** initial A→B: explicit A.relations v0, otherwise min(A.default,B.default); self100.
 Hostile<=-30, ally>=50; directional flags/coexistence and event changes are distinct. Storage,
 trust/known/player-faction branches and dialogue/reaction events remain scoped Observed where
-not independently checked. Start-off relation overrides and initial WORLD_EVENT_STATE values
-are not fully decoded; false as an engine default is not original-game proof.
+not independently checked. Start-off relation overrides are not fully decoded.
+
+WORLD_EVENT_STATE (`FUN_1409a7e00`, **Observed** by code): holds when every `NPC is` CHARACTER has unique state v0 (0 dead, 1 alive,
+2 imprisoned), no `NPC is NOT` one has its v0, each `player ally` FACTION is (v0 1) or is not (v0 0) the player's ally and each `player
+enemy` hostile to it. With `player involvement`, an `NPC is` other than alive or an `NPC is NOT` alive also needs the unique's player
+flag. A unique with no entry counts as alive, so a new game answers by the data alone; nothing is stored. A `world state` list entry
+(`FUN_1409a9a70`: spawn gates, weighted picks, campaigns) passes when the state's answer equals (v0 == 1); a missing record is skipped.
 
 ## Squad factory
 
@@ -19,12 +24,75 @@ v0..v1, reversed range givesv0. Apply size multiplier/truncation/min1 unless don
 Create leader role2, random choosefrom then squad role0/squad2 role1, animals/animals2, slaves
 role4 as recursive squads, prisoners into available home cages. First member can become leader.
 Offsets `(3*(i%8),3*floor(i/8)+(i%2))`, animals2 spacing5. Age=max(0,r*animal-age-random-0.1+v2/100).
-Unique-leader replacement/recreation needs saved used-unique/state semantics, not duplicate spawn.
+Unique members go through one gate: [unique characters](#unique-characters).
 
 Generic weighted refs: v0=0 means100; exclude nonpositive weights and false world states,
 first cumulative weight exceeding uniform roll wins; single candidate no roll. SpawnInfoList
 instead drops v0<=0 and budgets expected squad sizes using its separate sentinel/range rules.
 Do not reuse one zero-weight convention for both.
+
+## Unique characters
+
+**Data** (merged base files, throwaway survey): 155 of 639 CHARACTERs have `unique`; 13 of them have exactly one `unique replacement spawn`
+(no record has more, no non-unique has one). Uniques are named by SQUAD_TEMPLATE `leader` 99, `squad` 54, `choosefrom list` 51, `squad2` 1,
+FACTION_CAMPAIGN `special leader` 57, WORLD_EVENT_STATE `NPC is` 113 / `NPC is NOT` 60 and dialogue conditions; 34 by more than one template
+(Dust King leads 3; recruits sit in several towns' recruit lists); 9 by none. Templates with a unique leader are listed by TOWN `residents` (99)
+and `bar squads` (33). Two UNIQUE_SQUAD_TEMPLATEs exist (`General Epson Army`, `UNIQUE bandit test`), each in one FACTION's `special squads`.
+
+**State** (`UniqueNPCManager`: one global map CHARACTER record → entry, `FUN_140354560`; **Verified** by code, meanings of `state` from `fcs.def`
+`NPC is`; the 9 sample saves hold 302 entries, all state 1 / player false):
+
+| Field | Meaning |
+| --- | --- |
+| claimed | the CHARACTER record once a squad created it; null or no entry = free to create (`FUN_1405921b0`) |
+| handle | the live character, recorded when it gets its handle (`Character` slot 16, `FUN_140623920`) |
+| state | 1 alive (also for a new or absent entry), 0 dead, 2 imprisoned/captured |
+| player | the player was involved (killed, imprisoned, holds it) |
+
+**Transitions** (**Verified** by code unless marked):
+- Create (`FUN_1405836e0`, used by `FUN_140583a10` for `leader`, `choosefrom list`, `squad` and `squad2` alike): a claimed unique is replaced by
+  its first `unique replacement spawn` (created without the gate, recorded by slot 16 like any unique if it is one; all 13 targets are
+  non-unique except `Protector Of The Flame`, which names itself, so it can be duplicated), or by nobody; a free one is claimed (handle
+  reset) and created.
+  So a dead unique (claimed stays set) never comes back, a v0 > 1 entry yields one copy plus replacements, and a missing leader does not stop the
+  squad (the first member made leads). The platoon's +0xac is set when a unique member is made (use **Unknown**).
+- Death (`FUN_1407a6200`): state 0; player set (never cleared here) when the killer's faction is the player's. The dead unique's faction's
+  "prosperity" (`FactionUniqueSquadManager` +8) drops by 100, floor 0.
+- Imprisoned in a cage or restraint (`FUN_140330600`): state ≠ 0 → 2, player set when the cage's owner is the player's. `DA_ENSLAVE_TARGETS_CARRIED_PERSON` / `DA_ARREST_TARGETS_CARRIED_PERSON` (0x28 / 0x1e), which
+  take a carried unique off its carrier, do the same, player set when the carrier is the player's (`FUN_140680560`).
+- Periodic refresh (`FUN_1405cf470`, from the character's slot-80 update `FUN_1405d00b0`): state 1 and carried by a non-ally → 2 (player = carrier
+  is the player's); state 2, not carried, not imprisoned, and in the player's faction or allied with its squad's → 1, player cleared; state 0, in
+  the player's faction and not dead → 1 (**Observed**: the ally/town tests are summarised).
+- Unload of an active platoon (`FUN_1407ef4b0` → `FUN_1409a8120`), for each unique member in state 2 or away from its ownership town: dead, down,
+  carried by a non-friend or `+0x279 & 7` → state 0; free and well → entry erased (`FUN_1405067e0`, only if state ≠ 0 and the stored handle's container (C, CS) is
+  this platoon: a unique registered to another squad is not released) and the platoon re-creates its members from the template on activation (+0x118 = 1), which claims the unique again;
+  imprisoned away from friends → 2 (**Observed**; a 0.1 roll against the faction's town list in the free branch is **Unknown**).
+- An activating platoon in spawn mode 3 (home no longer valid) whose template leader is unique releases the template's unique
+  leader/squad/squad2 entries registered to it (`FUN_1404ffad0` → `FUN_1404ff760`) (**Observed**).
+- New game and every load (`FUN_1409a8970`): map cleared, then the unique leader/squad/squad2 of each SQUAD_TEMPLATE's first `prisoners`
+  template → state 2 unclaimed (base game: Cat of `Dust King Prisoner`, `Tengu's vault prisoners`, `agnu`). Import marks every imported unique
+  claimed (`FUN_140378a30`).
+
+**Queries**:
+- WORLD_EVENT_STATE (`FUN_1409a7e00`): `NPC is` needs state = v0, `NPC is NOT` state ≠ v0; with `player involvement` the player flag must
+  also be set (`NPC is` with v0 ≠ 1, `NPC is NOT` with v0 = 1) (**Verified** by code).
+- Campaign check (`FUN_1409c4ed0`): passes with no `special leader` or one in state 1 (a never-made one counts). Gathering (`FUN_1409c5040`),
+  leaders in list order, first usable wins: a registered handle → its platoon; else the SQUAD_TEMPLATEs naming it `leader` (more than one only
+  logs "ERROR: unique NPC with more than 1 squad referencing it", the first is used) are spawned if the unique is free. Lord Mirage (a
+  non-unique `special leader`) has no entry, so `UC town racists fort` (the template he leads) can be spawned for every campaign;
+  Yayoi has no template. `specific target NPC`s count when state ≠ 0 and the handle
+  has a non-zero position (`FUN_1409c5e80`, `FUN_1409a7d90`) (**Observed**).
+- Towns have no extra rule: a `residents`/`bar squads` template with a unique leader passes the create gate above, so while the unique is
+  claimed elsewhere or dead the squad comes with the replacement or without the leader (**Observed**).
+
+**Special squads** (FACTION `special squads` → UNIQUE_SQUAD_TEMPLATE, v0 = number to keep per `fcs.def`): `FUN_1402ddc90` makes per entry
+{template, v0, timer, live platoon handles}. The update `FUN_1402dd680` (each war-manager run, `FUN_1406b97c0`, with the faction's accumulated
+time) raises prosperity by 0.1·dt toward 1000 and counts timers down; when a timer is 0 and fewer than v0 live, it returns: **nothing spawns
+them** (**Verified**: by code, the only spawn-near-own-town helper `FUN_1402dda60` has no callers; 0 of 3,502 PLATOON records in 9 saves are
+`special`, every `sqtime` is 0). A `UniquePlatoon` (`FUN_14057c6f0`: UNIQUE_SQUAD_TEMPLATE, or a saved PLATOON with `special`) adds a
+mission ticker (every 10 s pick a `missions` DIPLOMATIC_ASSAULTS entry by its `conditions`: `FUN_1409a7930`; not decoded), saves
+`missionTimer` and `missionRepeatsCount` per mission (slot 23), and on destruction unless kept tells the manager, which drops its handle and
+sets the timer to 2618.18 × `replacement time` / 24 (`FUN_1402de9b0`; unit **Unknown**).
 
 ## Population and contents
 
@@ -41,8 +109,8 @@ of platoons whose `hometown` is it, by `sqt` (1 residents, 2 roaming), counted i
 
 Loot/building inventories, artifacts, shop stock, prisoners/slaves and placed debris derive
 from different reference lists. Preserve slot/count/quality/owner fields and forbidden-item
-rules rather than treating every list as uniform random loot. The unique-squad survey is data,
-not decoded behaviour; campaigns: [campaigns](#campaigns).
+rules rather than treating every list as uniform random loot. Story NPCs: [unique characters](#unique-characters);
+campaigns: [campaigns](#campaigns).
 
 ### 1. Object model
 
@@ -50,7 +118,7 @@ not decoded behaviour; campaigns: [campaigns](#campaigns).
 | --- | --- | --- |
 | `Faction` | one per FACTION record (103 in the base game, the player's included); owns its record (+0x240), a `FactionRelations` (+0x78), the platoon lists, `FactionUniqueSquadManager` | `FUN_1407fe270` is the loader from the record (**Observed**). Player flag: the field at +0x250 is non-null only for the player's faction (**Observed**, also in [game-loop.md](game-loop.md)) |
 | `FactionRelations` / `PlayerFactionRelations` | the relation table of one faction towards all others | section 3 |
-| `Platoon` -> `ActivePlatoon` (characters exist) / `UnloadedPlatoon` (abstract) / `UniquePlatoon` | a squad | per-frame stepping is in [game-loop.md](game-loop.md#update-threads-and-budget); creation is section 5 |
+| `Platoon` -> `ActivePlatoon` (characters exist) / `UnloadedPlatoon` (abstract) / `UniquePlatoon` | a squad; `UniquePlatoon` only from an UNIQUE_SQUAD_TEMPLATE ([special squads](#unique-characters)) | per-frame stepping is in [game-loop.md](game-loop.md#update-threads-and-budget); creation is section 5 |
 | `TownBase` -> `Town`, `Nest` | a TOWN record placed in the world; nests are TOWN records of `type` 0 spawned by the game | section 7; `Town`/`Nest` share almost all virtuals, the nest overrides slot 103 (wiped out) |
 | `BasePopulationManager` -> `TownPopulationManager`, `NestPopulationManager` | per town: two pools (residents, roaming) with a population budget and a `SpawnInfoList` | section 6.4 |
 | `SpawnInfoList` | the weighted list of squad templates a pool or biome group may spawn | section 6.1 |
@@ -252,7 +320,9 @@ state change. Drafted and new platoons stay kept while the campaign is not ended
 **Unknown**.
 
 **Requests** (`FUN_1409c9410`): victory/loss trigger rolls, retries, ally help and DIALOGUE_LINE `trigger campaign` (to the speaker's
-faction; target: the player town nearest the speaker, or the other party's town) queue a campaign with a due time, target, home and
+faction; target: talking to the player's side, the player-faction town nearest the speaker (XZ, nests excluded, `FUN_140927bb0`),
+and nothing is queued when the player owns none, so a homeless player gets no dialogue campaign, e.g. no crab tournament; another party:
+its platoon's town; no other party: speaker +0x1a0 → +0x88, **Unknown**; **Observed**, `FUN_140680560`) queue a campaign with a due time, target, home and
 target faction. A weighted list [v0, v1, v2] fires one entry when uniform[0,100) < Σ v2 (v2 = percent), due after uniform[v0, v1) hours
 (**Verified** for dialogue by disassembly, **Observed** for the rest). `faction override` hands the request to that faction; a duplicate
 (same campaign and target) pending or active is dropped. Due requests check only world states and the leader (no chance, range, cooldown
@@ -283,7 +353,8 @@ or population); a failed start retries each run, up to 100 times; a gone target 
 **End effects** (the only callees): victory: "{1} against {2} has ended" (hostile) and one `victory trigger` roll. Defeat: "{1} was defeated
 on their way to {2}" (not hostile), "{1} against {2} has been defeated" (its leader fought a player squad) or "{1} to {2} has failed"; a
 `loss trigger` roll when it reached the town or fought the player, else a hostile one is requested again in uniform[40, 96) h. No relation,
-world state, ownership, building or town state changes; looting or occupation are only what the loaded `pt2` packages do.
+world state, ownership, building or town state changes; looting or occupation are only what the loaded `pt2` packages do. In
+every message {1} is the campaign's name and {2} the target town's (the cancel message has only {1}; **Observed**).
 
 ### 9. Settings and constants that matter
 
@@ -304,9 +375,12 @@ world state, ownership, building or town state changes; looting or occupation ar
 - What `building designation` changes beyond the bar (it does not enter the chooser); the town node map bar squads use.
 - Nest respawn delay after "wiped out", the default of `DAT_142133588` (the Number of nests multiplier option; **Unknown**, the exe image holds zeros there), the rule that makes `TownPopulationManager::vfunc_4`
   declare a town wiped out (**Observed** gates: roaming pool cap <= 3 and <= 25 roaming members).
-- Campaigns: Town +0x128, Town +0x388 (tech level), TownBase slots 70 / 92 / 96, the disabled-town flag, unique-NPC state values,
+- Campaigns: Town +0x128, Town +0x388 (tech level), TownBase slots 70 / 92 / 96, the disabled-town flag,
   the "fought a player squad" test, the announcement wait, whether spawned campaign squads are `persistent`, DIPLOMATIC_ASSAULTS.
-- The unique squad replacement logic, `faction gen` at game start, `NEW_GAME_STARTOFF.faction relations`.
+- `faction gen` at game start, `NEW_GAME_STARTOFF.faction relations`.
+- Unique characters: the `Character +0x279 & 7` gate and the 0.1 roll against a town list at platoon unload, platoon +0xac, the unit of
+  `replacement time` (constant 2618.18 from `FUN_14066cd50`), UNIQUE_SQUAD_TEMPLATE `persistent` use and `missions` (DIPLOMATIC_ASSAULTS),
+  the polarity of the import handle test; other readers of `unique` (`FUN_14067b070` dialogue conditions, `FUN_1407609e0` / `FUN_140761550`) not opened.
 - Who enforces CONSTANTS `max squads`, `max squad size`, `max faction size`.
 - Which override town wins among several qualifying candidates; what exactly repopulating a town from its override does.
 - Whether the 1250 radius of the proximity helper is squared.
@@ -331,3 +405,7 @@ Evidence scopes below apply only to their named sources/checks.
   `1409c8bd0` / `read_is_hostile_n11` `1409c7e40` / `read_campaigns_n3` `1409cabd0`, start `FUN_1409c9830` with `uses_leader` `1409c5040` and
   `FUN_1409c4150`, requests `FUN_1409c9410` / `FUN_1409d27a0`, instance update `CampaignInstance::vfunc_10` `1409c70f0`, end `vfunc_2` / `vfunc_3`,
   redirect `FUN_1409d62f0`; enum names from the editor (`WarCampaignEnum`, `MoveSpeed`); data census with a throwaway tool over the merged base files
+- Unique characters: manager `FUN_140354560` / `FUN_140349950`, gate `FUN_1405836e0`, transitions `FUN_1407a6200`, `FUN_140330600`, `FUN_140680560`,
+  `FUN_1405cf470`, `FUN_1409a8120`, `FUN_1404ff760`, `FUN_1409a8970`, queries `FUN_1409a7e00`, `FUN_1409c4ed0`, `FUN_1409c5040`; special squads
+  `FUN_1402ddc90`, `FUN_1402dd680`, `FUN_1402de9b0`, `FUN_14057c6f0`; save `FUN_1409a8660` / `FUN_1409aa270`, `FUN_1402deea0` / `FUN_1402df0c0`;
+  `fcs.def` texts; throwaway survey of the merged base files and census of 9 saves (302 usedUniques entries, 3,502 PLATOON records)

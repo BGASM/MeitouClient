@@ -150,6 +150,9 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
                 Toggle: new("Fights far away", () => config.OffscreenFights, v => { config.OffscreenFights = v; OffscreenChanged?.Invoke(); }, Remaster: true, OnOff: true)));
             result.Add(new("Healing far away", "A squad coming back into the area around your squads has healed for the time it was away. In the game it comes back as it left.",
                 Toggle: new("Healing far away", () => config.OffscreenHealing, v => { config.OffscreenHealing = v; OffscreenChanged?.Invoke(); }, Remaster: true, OnOff: true)));
+            result.Add(new("Raids as written", "Raid and campaign data that builds on a base campaign counts the base's squads and follow-up campaigns once. "
+                + "The game counts them twice, so inherited squads come up more often and follow-up raids are about twice as likely.",
+                Toggle: new("Raids as written", () => config.CampaignAncestorsOnce, v => { config.CampaignAncestorsOnce = v; OffscreenChanged?.Invoke(); }, Remaster: true, OnOff: true)));
             result.Add(new("Hover outline", "Outline and tint the character under the cursor, in the colour of what a right click would do.",
                 Toggle: new("Hover outline", () => config.HoverOutline, v => config.HoverOutline = v, Remaster: true, OnOff: true)));
             result.Add(new("Main menu scene transitions", "Sky flight to/from the main menu (Meitou UI).",
@@ -369,7 +372,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         AttackSlotsSlider.Set(UserConfig.MeitouAttackSlots);
         config.LateDefences = true;
         LateDefencesChanged?.Invoke(true);
-        config.KeepRoamers = config.OffscreenFights = config.OffscreenHealing = true;
+        config.KeepRoamers = config.OffscreenFights = config.OffscreenHealing = config.CampaignAncestorsOnce = true;
         OffscreenChanged?.Invoke();
         config.HardwareMouse = false;
         config.HoverOutline = true;

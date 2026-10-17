@@ -29,8 +29,10 @@ public enum RngPurpose : uint
     Lock = 14,
     /// <summary>The refund counts of a dismantled site (<see cref="Construction.ConstructionSystem"/>), keyed by the site's id and the material entry.</summary>
     Build = 15,
+    /// <summary>The faction campaigns (<c>PopulationCampaigns.cs</c>): rolls, follow-ups, request delays and the campaign squads' places, keyed by the faction.</summary>
+    Campaign = 16,
     /// <summary>Dialogue: line and text picks, chance rolls, interjectors, personalities (<see cref="Dialogue.DialogueSystem"/>).</summary>
-    Dialogue = 16,
+    Dialogue = 17,
 }
 
 /// <summary>

@@ -124,6 +124,8 @@ public sealed partial class World : IDisposable
     public PlayerState Player { get; } = new();
     /// <summary>Doors, lockable containers, cages and beds of the registered towns, with their occupants (docs/simulation.md "Cages, beds and locks").</summary>
     public Locks.FixtureRegistry Fixtures { get; } = new();
+    /// <summary>The unique (story) characters made, dead or captured (docs/game/factions-squads-towns.md "Unique characters").</summary>
+    public UniqueCharacters Uniques { get; } = new();
     /// <summary>The player-built buildings and construction sites, in creation order (docs/simulation.md "Buildings").</summary>
     public Construction.BuildingRegistry Buildings { get; } = new();
     /// <summary>
@@ -299,6 +301,7 @@ public sealed partial class World : IDisposable
         Squads.Hash(ref h);
         Platoons.Hash(ref h);
         Player.Hash(ref h);
+        if (Uniques.Count > 0) Uniques.Hash(ref h);   // only once a unique is tracked, so worlds without one hash as before
         if (Fixtures.Count > 0) Fixtures.Hash(ref h);   // only once a town with buildings registered, so worlds without them hash as before
         if (Buildings.Count > 0 || Buildings.Towns.Count > 0) Buildings.Hash(ref h);   // only once the player has a site, so worlds without one hash as before
         foreach (var s in systems) if (s is IStateHashed hashed) hashed.Hash(ref h);

@@ -5,13 +5,20 @@ using Meitou.Data.Gameplay;
 
 namespace Meitou.Simulation;
 
-/// <summary>Which WORLD_EVENT_STATE records hold. The start state of a new game is Unknown (docs/game/factions-squads-towns.md section 3.5), so the default holds none.</summary>
+/// <summary>
+/// Which WORLD_EVENT_STATE records hold (the population's own answers them live, <see cref="WorldStates"/>). A <c>world state</c> list entry passes when its state's answer is
+/// V0 = 1 (<see cref="Passes"/>; the original's <c>FUN_1409a9a70</c>), so V0 0 asks for a state that does not hold.
+/// </summary>
 public interface IWorldStates
 {
     bool IsTrue(string worldStateId);
 
-    /// <summary>No state holds: templates and characters gated by a world state do not spawn.</summary>
+    /// <summary>No state holds (a plan given it); a population given it answers live instead (<see cref="PopulationSystem.States"/>).</summary>
     public static IWorldStates None { get; } = new NoStates();
+
+    /// <summary>One <c>world state</c> list entry: the state holds exactly when <paramref name="v0"/> is 1. A record the data lacks passes, as the original skips it.</summary>
+    public static bool Passes(IWorldStates states, GameDatabase db, string worldStateId, int v0) =>
+        db.Find(worldStateId) is not { Type: FcsRecordType.WORLD_EVENT_STATE } || states.IsTrue(worldStateId) == (v0 == 1);
 
     sealed class NoStates : IWorldStates
     {
@@ -42,8 +49,8 @@ public sealed record SquadPlan(SquadTemplate Template, IReadOnlyList<MemberPlan>
 /// squads of their own (role 4).</item>
 /// <item>Layout: member number i (every member so far; the leader is 0) stands at (3 x (i mod 8), 3 x floor(i / 8) + (i mod 2)) from the squad
 /// position; animals2 use spacing 5.</item>
-/// <item>Not made yet (Unknown or later stages): <c>prisoners</c> (they need cages in the home building), <c>housemates</c>, the unique-character
-/// replacement of a story-unique leader, and the squad's AI packages.</item>
+/// <item>Not made yet (Unknown or later stages): <c>prisoners</c> (they need cages in the home building), <c>housemates</c> and the squad's AI
+/// packages. Unique characters are gated when the squad is made (<c>PopulationSystem.GateUniques</c>), not here, so a plan stays pure.</item>
 /// </list>
 /// </summary>
 public static class SquadFactory
@@ -80,10 +87,10 @@ public static class SquadFactory
             members.Add(new MemberPlan(recordId, role, i, Offset(i, spacing), animal, age));
         }
 
-        bool Gated(string recordId) => db.Find(recordId) is { } r && r.GetReferences("world state").Any(w => !states.IsTrue(w.TargetStringId));
+        bool Gated(string recordId) => db.Find(recordId) is { } r && r.GetReferences("world state").Any(w => !IWorldStates.Passes(states, db, w.TargetStringId, w.Values.Value0));
 
         // The squad itself can be gated by its own world state (section 4: the AND gate for the spawn).
-        if (template.WorldState.Any(w => !states.IsTrue(w.Id)))
+        if (template.WorldState.Any(w => !IWorldStates.Passes(states, db, w.Id, w.V0)))
         {
             problems.Add($"squad '{template.Name}' is gated by a world state that does not hold");
             return new SquadPlan(template, [], [], problems);

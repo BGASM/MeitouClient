@@ -123,7 +123,12 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
         var table = world.Characters;
         for (int i = 0; i < table.HighWater; i++)
         {
-            if (table.Next[i].Alive && table.Cold(i) is { DiedTick: >= 0 } cold && world.Tick - cold.DiedTick >= CorpseTicks) table.Remove(new CharacterId(i, table.Next[i].Generation));
+            if (table.Next[i].Alive && table.Cold(i) is { DiedTick: >= 0 } cold && world.Tick - cold.DiedTick >= CorpseTicks)
+            {
+                var corpse = new CharacterId(i, table.Next[i].Generation);
+                world.Uniques.Left(corpse);
+                table.Remove(corpse);
+            }
         }
     }
 }

@@ -9,6 +9,8 @@ public sealed partial class PopulationSystem
     internal bool PrepareLoading(World world, Vector3 cameraFocus)
     {
         focus = cameraFocus;
+        world.Uniques.SeedPrisoners(data.Db);
+        RefreshStates(world);
         Inputs(world, []);
         RefreshZones(world);
         foreach (var platoon in world.Platoons.All)

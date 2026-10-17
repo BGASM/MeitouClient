@@ -206,7 +206,12 @@ a:focus-visible, .mt-btn:focus-visible, .mt-tab:focus-visible {
 .mt-rows > div { display: flex; justify-content: space-between; gap: var(--space-5); padding: var(--space-3) 0; border-top: 1px solid var(--plate-rim); font: 600 14px/18px var(--font-exo); }
 .mt-rows > div:first-child { border-top: 0; }
 .mt-rows dt { color: var(--main); }
-.mt-rows dd { margin: 0; color: var(--paper-light); text-align: right; font-variant-numeric: tabular-nums; }
+.mt-rows dd { margin: 0; color: var(--paper-light); text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  .mt-rows > div { flex-direction: column; gap: 0; }
+  .mt-rows dd { text-align: left; }
+}
 
 .mt-list { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-3); }
 .mt-list li { position: relative; padding-left: 18px; }
