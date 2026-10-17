@@ -159,7 +159,7 @@ sealed partial class PlayerInterface
         if (lead.ItemGrid?.CarryCapacity is { } capacity) weight += "/" + capacity.ToString("0", CultureInfo.InvariantCulture);
         var (burdenWord, burdenColour) = BurdenText(lead.Hud?.Encumbrance ?? 1);
         const string muted = "0.3 0.28 0.25";
-        AddLines(controls, "datapanel", [new("Total Weight:", weight), new("", burdenWord, ValueColour: burdenColour), new("Disguise:", "-"), new("", ""),
+        AddLines(controls, "datapanel", [new("Total Weight:", weight), new("", burdenWord, ValueColour: burdenColour), new("Disguise:", "None"), new("", ""),
             new("Slave of:", "-", muted, muted), new("Looks like slave:", "-", muted, muted)], 20 * InventoryScale);
     }
 

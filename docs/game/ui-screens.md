@@ -260,7 +260,7 @@ decompile unless marked; Meitou's adapter is `PlayerInterface.Map.cs`.
   - Placement (**Observed**, `FUN_1406e4960` decompile and the 2026-10-17 screenshot): margin = 5 % of the smaller screen side; inventory windows open at y = margin, the first at x = margin
     (a bag window first when attached), each next one where the previous ends: the character window at the top left, the trader directly right of it, same top.
   - Reference screenshot (**Observed**, 2026-10-17, from a video): `Money:` label left and `c.442,269` right in the money box, stock icons at their footprints with plain counts bottom
-    right, a vertical scrollbar, no other panels; the HUD stays. Its text boxes and empty cells are dark, where the install's skins draw parchment; the cause (a UI mod or setting) is **Unknown**.
+    right, a vertical scrollbar, no other panels; the HUD stays. The character panel reads `Disguise: None`. Its text boxes and empty cells are dark, where the install's skins draw parchment; the cause (a UI mod or setting) is **Unknown**.
 - **Item tooltip** (**Observed**, decompile): name, then `Value` (`c.{1,num}` with ` (+N%)`/` (-N%)` when the price factor is not 1) and `Sell value` (`FUN_14079e7a0`); weight `{1,num} kg`,
   quality, charges, damage, nutrition and kind lines (`FUN_1407ae130`); armour classes and resistances (`FUN_1407a1650`); `Stolen` / `Stolen from:` (`FUN_1407a0ea0`); `Buyback` (`FUN_1407a13a0`).
   Meitou shows name, Value, Sell value (stack prices) and weight while trading, name and weight otherwise, plus `Stolen`.
