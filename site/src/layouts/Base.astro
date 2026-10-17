@@ -110,4 +110,21 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
   .gh:hover { color: #fff; opacity: 1; }
   main { padding: 0 var(--edge); }
   .foot { padding: var(--space-7) var(--edge) 36px; text-align: center; }
+
+  /* Phones: no frame, the video fills the whole first view and the content gets nearly the full width. The wordmark
+     moves to the bottom left under the buttons, and a darker scrim keeps the hero text readable on any frame. */
+  @media (max-width: 640px) {
+    .mt-scene { --frame: 0px; --edge: 20px; }
+    .bg { border-radius: 0; }
+    .bg::after {
+      background:
+        linear-gradient(rgba(8, 6, 5, .7), rgba(8, 6, 5, .3) 45%, rgba(8, 6, 5, .65)),
+        radial-gradient(ellipse at center, transparent 55%, rgba(8, 6, 5, .5) 100%);
+    }
+    .top { gap: var(--space-6); padding: calc(var(--edge) - 12px) var(--edge); }
+    .gh { min-height: 44px; }
+    .brand { font-size: 26px; line-height: 32px; }
+    .brand.is-corner { right: auto; left: var(--edge); top: calc(100svh - var(--edge) - 32px); }
+    .foot { padding-bottom: var(--space-7); }
+  }
 </style>
