@@ -91,6 +91,7 @@ public static partial class SaveCapture
         var races = new Dictionary<string, RaceData?>(StringComparer.Ordinal);
         var written = WritePlayerSquads(builder, world, data, loaded, options, clock, buildings, races);
         WriteSelection(game, world, written);
+        WriteUniques(game, world, written);
         // The NPC platoons: the save's as they are now, and the population's own squads in the world as new platoons (docs/simulation.md "Saves").
         if (loaded is not null) WriteRoaming(game, world, loaded);
         WriteSavedNpcs(builder, world, data, options, clock, buildings, races);
@@ -549,6 +550,36 @@ public static partial class SaveCapture
         if (db.Find(cold.RecordId) is { } record)
             foreach (var r in record.GetReferences("race"))
                 if (r.Values.Value0 > 0) { target.References["race"] = [new FcsReference(r.TargetStringId, 0, 0, 0)]; break; }
+    }
+
+    /// <summary>
+    /// The unique-character table into the CAMERA record (docs/formats/save.md, <c>FUN_1409a8660</c>): <c>num usedUniques</c>, then per entry the CHARACTER id, state,
+    /// player flag and handle; unclaimed imprisoned entries (the <c>prisoners</c> uniques) are left out, the load derives them again. The handle is the written character's
+    /// when it is one of the player's squads, else the one the loaded save gave it, else null (engine: NPC handles are not tracked back from the writer).
+    /// </summary>
+    static void WriteUniques(SaveGame game, World world, Dictionary<CharacterId, SaveCharacter> written)
+    {
+        var record = game.Camera.Record;
+        int old = record.Ints.GetValueOrDefault("num usedUniques");
+        for (int k = 0; k < old || record.Strings.ContainsKey($"usedUniques{k}"); k++)
+        {
+            record.Strings.Remove($"usedUniques{k}");
+            record.Ints.Remove($"usedUniquesState{k}");
+            record.Bools.Remove($"usedUniquesPlayer{k}");
+            foreach (var part in new[] { "TYPE", "C", "CS", "I", "S" }) record.Ints.Remove($"usedUniques{k}handle{part}");
+        }
+        int n = 0;
+        foreach (var (id, e) in world.Uniques.All)
+        {
+            if (!e.Claimed && e.State == UniqueState.Imprisoned) continue;
+            record.Strings[$"usedUniques{n}"] = id;
+            record.Ints[$"usedUniquesState{n}"] = (int)e.State;
+            record.Bools[$"usedUniquesPlayer{n}"] = e.Player;
+            var hand = !e.Handle.IsNone && written.TryGetValue(e.Handle, out var sc) && !sc.Handle.IsNull ? sc.Handle : e.SavedHandle;
+            hand.Write(record, $"usedUniques{n}handle");
+            n++;
+        }
+        record.Ints["num usedUniques"] = n;
     }
 
     static void WriteSelection(SaveGame game, World world, Dictionary<CharacterId, SaveCharacter> written)

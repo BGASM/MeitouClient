@@ -170,6 +170,8 @@ public sealed partial class PopulationSystem
         var site = data.Sites[p.Origin];
         float radius = site.Town.SizeRadius * site.Town.TownRadiusMult;
         var home = p.Stored?.HomeBuilding ?? (p.Saved is { } sp ? Saving.SavedCharacters.SavedHome(world, sp, site) : null);
+        // Its unique members are freed first, so the fresh squad makes them again rather than their replacements.
+        ReleaseUniques(world, p);
         // A template whose members are each by chance can plan no one: a few rolls (engine choice).
         BuiltSquad? built = null;
         ulong key = 0;
@@ -189,7 +191,7 @@ public sealed partial class PopulationSystem
         squad.Money = p.Money;
         fresh.SquadId = squad.Id;
         world.Platoons.Add(fresh);
-        Despawn(world, p);
+        Despawn(world, p, release: false);   // its uniques were freed above and the fresh squad holds them
         if (townLog.Count >= 256) townLog.RemoveAt(0);
         townLog.Add($"{site.Town.Name}: {fresh.Stored.Name} made afresh ({squad.Members.Count})");
         return squad;

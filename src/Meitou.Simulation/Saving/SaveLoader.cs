@@ -62,6 +62,7 @@ public static class SaveLoader
         world.Player.Faction = playerIndex;
         world.Player.Money = camera.PlayerMoney;
         LoadTownKnowledge(save, data, world.Player);
+        LoadUniques(camera.Record, data, world.Uniques);
 
         // Building locks and doors are taken from the zones when their town registers; held characters name their bed or cage by building instance.
         var buildingStates = HeldSave.BuildingStates(save);
@@ -113,6 +114,21 @@ public static class SaveLoader
         for (int a = 0; a < n; a++)
             for (int b = 0; b < n; b++) all[a * n + b] = relations.Get(a, b);
         return all;
+    }
+
+    /// <summary>
+    /// The unique-character table of the CAMERA record (docs/formats/save.md, <c>FUN_1409aa270</c>): each entry claimed with its state, player flag and handle; one whose
+    /// CHARACTER id does not resolve is dropped. Live handles are bound when the characters are made.
+    /// </summary>
+    static void LoadUniques(Meitou.Data.Fcs.FcsRecord camera, PopulationData data, UniqueCharacters uniques)
+    {
+        int n = camera.Ints.GetValueOrDefault("num usedUniques");
+        for (int k = 0; k < n; k++)
+        {
+            if (camera.Strings.GetValueOrDefault($"usedUniques{k}") is not { } id || data.Db.Find(id) is null) continue;
+            int state = camera.Ints.GetValueOrDefault($"usedUniquesState{k}", 1);
+            uniques.Load(id, state is >= 0 and <= 2 ? (UniqueState)state : UniqueState.Alive, camera.Bools.GetValueOrDefault($"usedUniquesPlayer{k}"), Hand.Read(camera, $"usedUniques{k}handle"));
+        }
     }
 
     /// <summary>The towns' <c>discovered</c>, <c>explored</c> and <c>recently discovered</c> bools, matched to the placed towns by instance id.</summary>
