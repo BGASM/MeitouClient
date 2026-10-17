@@ -214,6 +214,8 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
             (lastSelectKey, lastSelectAt) = (doubleTap ? default : key, now);
             SelectMember(key - Meitou.Engine.Input.Key.D1, shift, doubleTap);
         }
+        // toggle_build (B): the build window and the placement ghost; not over the title, the editor or while the free camera flies.
+        else if (key == Meitou.Engine.Input.Key.B && !session.Camera.IsFree && !TitleOpen && !EditorOpen) ToggleBuildMode();
         // focus_char (F): put the pivot on the lead selected character without following it (the free camera's F is its down key).
         else if (key == Meitou.Engine.Input.Key.F && !session.Camera.IsFree && Selected().FirstOrDefault() is { } lead) CentreOn(lead.Id, follow: false);
         else if (key == Meitou.Engine.Input.Key.Grave) Select(PlayerCharacters(), shift);
