@@ -15,6 +15,7 @@ sealed class NavAdapter(NavmeshWalkability nav) : IAgentWalkability, Meitou.Simu
     /// <summary>A building whose doors are all locked is closed for every path (docs/simulation.md "Cages, beds and locks").</summary>
     public void SetDoorsBlocked(string buildingInstance, bool blocked) => nav.Doors.Set(buildingInstance, blocked);
     public void ResetDoors() => nav.Doors.Clear();
+    public Vector3? DoorCentre(string buildingRecordId, int doorIndex) => nav.DoorGeometry?.Centre(buildingRecordId, doorIndex);
     public float GroundHeight(float x, float z) => nav.GroundHeight(x, z);
     public bool IsWalkable(float x, float z) => nav.IsWalkable(x, z);
     public float GroundHeight(float x, float z, float nearY) => nav.GroundHeight(x, z, nearY);

@@ -53,12 +53,16 @@ public sealed partial class LockSystem(GameConstants constants, BodyOptions opti
                         else if (c.IsPlayer) world.Post("It's locked.");
                     }
                     break;
+                case ToggleDoorsOrder or ToggleDoorLocksOrder:
+                    DoorInputs(world, command);
+                    break;
             }
         }
     }
 
     public void SlowWorld(World world)
     {
+        Doors(world);
         Rounds(world);
         var table = world.Characters;
         var next = table.Next;

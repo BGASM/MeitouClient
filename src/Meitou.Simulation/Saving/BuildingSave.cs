@@ -147,7 +147,7 @@ public static class BuildingSave
         }
         var townHands = WriteTowns(game, world, playerFactionId, seed);
         if (reg.Count == 0) return townHands;
-        foreach (var site in reg.All) WriteSite(game, site, playerFactionId, seed, townHands.GetValueOrDefault(site.Town, Hand.Null));
+        foreach (var site in reg.All) WriteSite(game, site, playerFactionId, seed, townHands.GetValueOrDefault(site.Town, Hand.Null), world.Fixtures);
 
         // Parents last: they may be sites written above.
         var states = HeldSave.BuildingStates(game);
@@ -170,7 +170,7 @@ public static class BuildingSave
         return townHands;
     }
 
-    static void WriteSite(SaveGame game, BuildSite site, string playerFactionId, ulong seed, Hand town)
+    static void WriteSite(SaveGame game, BuildSite site, string playerFactionId, ulong seed, Hand town, Locks.FixtureRegistry fixtures)
     {
         var coordinate = site.Zone;
         if (!game.Zones.TryGetValue(coordinate, out var zone)) game.Zones[coordinate] = zone = new SaveZone(coordinate, new SaveFile());
@@ -233,6 +233,8 @@ public static class BuildingSave
         state.Strings["owner faction ID"] = playerFactionId;
         state.Strings["residents template"] = "";
         state.Strings["name"] = site.Name;
+        // Its doors (a finished building has them registered): the same keys as a town building's (docs/game/locks.md "Save keys").
+        fixtures.WriteBuilding(site.Id, state);
     }
 
     /// <summary>

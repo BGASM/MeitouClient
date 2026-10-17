@@ -526,6 +526,14 @@ sealed partial class PlayerInterface
         verbs.Add(("Dismantle", () => Say(new DismantleOrder(selection, site.Id) { Tick = session.World.Tick })));
         if (!site.Complete && site.Progress <= 0 && site.Materials.All(m => m.Delivered <= 0))
             verbs.Add(("Cancel Construction", () => Say(new CancelSite(site.Id) { Tick = session.World.Tick })));
+        // A finished building's doors: the door panel's open/close and lock buttons, for all its doors at once (docs/simulation.md "Cages, beds and locks").
+        var doors = session.CurrentSnapshot.Doors.Where(d => d.Key.Building == site.Id).Select(d => d.Value).ToList();
+        if (site.Complete && doors.Count > 0)
+        {
+            bool open = doors.Any(d => d.Motion == Meitou.Simulation.Locks.DoorMotion.Open);
+            verbs.Add((open ? "Close Doors" : "Open Doors", () => Say(new Meitou.Simulation.Locks.ToggleDoorsOrder(site.Id) { Tick = session.World.Tick })));
+            verbs.Add((doors.All(d => d.WantsLock) ? "Unlock Doors" : "Lock Doors", () => Say(new Meitou.Simulation.Locks.ToggleDoorLocksOrder(site.Id) { Tick = session.World.Tick })));
+        }
         return verbs;
     }
 

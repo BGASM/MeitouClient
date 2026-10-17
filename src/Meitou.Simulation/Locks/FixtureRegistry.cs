@@ -86,18 +86,7 @@ public sealed class FixtureRegistry
         var record = db.Find(b.BuildingId);
         if (record is not null)
         {
-            var doorRefs = record.GetReferences("doors");
-            for (int i = 0; i < doorRefs.Count; i++)
-            {
-                var door = db.Find(doorRefs[i].TargetStringId);
-                string id = $"{b.InstanceId}#{i.ToString(CultureInfo.InvariantCulture)}";
-                list.Add(new Fixture
-                {
-                    Id = id, Building = b.InstanceId, Kind = FixtureKind.Door, RecordId = doorRefs[i].TargetStringId, Site = site, Owner = owner,
-                    Position = b.Position, Yaw = b.Yaw, DoorIndex = i, WantsLock = door?.GetBool("always locks") ?? false,
-                    Lock = new LockState { Level = RollLevel(world.Seed, id, faction, IntOf(door, "lock level bonus"), door: true), Hardness = FloatOf(record, "hardness") },
-                });
-            }
+            AddDoors(world, db, record, b.InstanceId, site, owner, faction, b.Position, b.Yaw, list);
             if (Lockable(db, record) is { } own) list.Add(Make(world, db, own, b.InstanceId, b.InstanceId, record, site, owner, faction, b.Position, b.Yaw));
         }
         foreach (var f in b.Fixtures)
@@ -120,6 +109,51 @@ public sealed class FixtureRegistry
         foreach (var f in list) { all.Add(f); byId[f.Id] = f; }
         if (Saved?.GetValueOrDefault(b.InstanceId) is { } state) Restore(state, b.InstanceId, list);
         SyncDoors(b.InstanceId);
+    }
+
+    /// <summary>One door fixture per entry of the building's <c>doors</c> list: the door's own <c>lock level bonus</c> and motion, the parent's <c>hardness</c>.</summary>
+    static void AddDoors(World world, GameDatabase db, GameRecord record, string instance, int site, int owner, FactionData? faction, Vector3 at, float yaw, List<Fixture> list)
+    {
+        var doorRefs = record.GetReferences("doors");
+        for (int i = 0; i < doorRefs.Count; i++)
+        {
+            var door = db.Find(doorRefs[i].TargetStringId);
+            string id = $"{instance}#{i.ToString(CultureInfo.InvariantCulture)}";
+            list.Add(new Fixture
+            {
+                Id = id, Building = instance, Kind = FixtureKind.Door, RecordId = doorRefs[i].TargetStringId, Site = site, Owner = owner,
+                Position = at, Yaw = yaw, DoorIndex = i, WantsLock = door?.GetBool("always locks") ?? false, HostRecordId = record.StringId,
+                Leaf = door is null ? new DoorLeaf(0, 30, 1, 0) : DoorLeaf.Of(door),
+                Lock = new LockState { Level = RollLevel(world.Seed, id, faction, IntOf(door, "lock level bonus"), door: true), Hardness = FloatOf(record, "hardness") },
+            });
+        }
+    }
+
+    /// <summary>
+    /// Registers the doors of a finished building of the player (<see cref="Construction.BuildSite"/>; engine: when it is complete, the lock rolled from its owner's faction) and takes
+    /// their state from a loaded save. A building registered already is left as it is.
+    /// </summary>
+    public void RegisterPlayerBuilding(World world, PopulationData data, Construction.BuildSite site)
+    {
+        if (byBuilding.ContainsKey(site.Id) || data.Db.Find(site.Record) is not { } record || record.GetReferences("doors").Count == 0) return;
+        var faction = site.Owner >= 0 && site.Owner < data.Factions.Count ? data.Factions[site.Owner] : null;
+        var list = new List<Fixture>();
+        AddDoors(world, data.Db, record, site.Id, -1, site.Owner, faction, site.Position, TownBuildings.YawOf(site.Rotation), list);
+        byBuilding[site.Id] = list;
+        buildings.Add(site.Id);
+        foreach (var f in list) { all.Add(f); byId[f.Id] = f; }
+        if (Saved?.GetValueOrDefault(site.Id) is { } state) Restore(state, site.Id, list);
+        SyncDoors(site.Id);
+    }
+
+    /// <summary>Forgets a building's fixtures (a player building dismantled); its doors are opened in the navmesh.</summary>
+    public void Unregister(string buildingInstance)
+    {
+        if (!byBuilding.Remove(buildingInstance, out var list)) return;
+        buildings.Remove(buildingInstance);
+        foreach (var f in list) { all.Remove(f); byId.Remove(f.Id); }
+        initialApplied.Remove(buildingInstance);
+        doors?.SetDoorsBlocked(buildingInstance, false);
     }
 
     FixtureKind? Lockable(GameDatabase db, GameRecord record)
@@ -198,6 +232,61 @@ public sealed class FixtureRegistry
         Touch(fixture);
     }
 
+    /// <summary>
+    /// Starts opening a closed door (the original's <c>FUN_140297040</c>, <b>Verified</b>: only from state 0; it tests no lock, its callers do). False when it was not closed.
+    /// </summary>
+    public static bool OpenDoor(Fixture door)
+    {
+        if (door.Kind != FixtureKind.Door || door.Motion != DoorMotion.Closed) return false;
+        door.Motion = DoorMotion.Opening;
+        return true;
+    }
+
+    /// <summary>Starts closing an open door (<c>FUN_140298c50</c>, <b>Verified</b>: only from state 1). False when it was not open.</summary>
+    public static bool CloseDoor(Fixture door)
+    {
+        if (door.Kind != FixtureKind.Door || door.Motion != DoorMotion.Open) return false;
+        door.Motion = DoorMotion.Closing;
+        return true;
+    }
+
+    /// <summary>
+    /// Moves every opening or closing door on by <c>door move speed</c> x <paramref name="dt"/> (the door's update, <c>FUN_140299030</c>, <b>Verified</b>): an opening one is open at 1, a
+    /// closing one closed below 0, and then locked when it <c>wants lock</c> (<c>FUN_1402969f0</c>).
+    /// </summary>
+    public void StepDoors(float dt)
+    {
+        foreach (var f in all)
+        {
+            if (f.Kind != FixtureKind.Door) continue;
+            if (f.Motion == DoorMotion.Opening)
+            {
+                f.OpenAmount += dt * f.Leaf.Speed;
+                if (f.OpenAmount >= 1) { f.OpenAmount = 1; f.Motion = DoorMotion.Open; }
+            }
+            else if (f.Motion == DoorMotion.Closing)
+            {
+                f.OpenAmount -= dt * f.Leaf.Speed;
+                if (f.OpenAmount >= 0) continue;
+                f.OpenAmount = 0;
+                f.Motion = DoorMotion.Closed;
+                if (f.WantsLock && f.Lock is { } l) { l.Locked = true; Touch(f); }
+            }
+        }
+    }
+
+    /// <summary>The world position of a door's leaf (closed), asked of the door gate once; null without a gate or when it does not know the door.</summary>
+    public Vector3? DoorCentre(Fixture door)
+    {
+        if (door.Kind != FixtureKind.Door) return null;
+        if (door.CentreAsked) return door.Centre;
+        if (doors is null) return null;
+        door.CentreAsked = true;
+        if (doors.DoorCentre(door.HostRecordId, door.DoorIndex) is { } local)
+            door.Centre = door.Position + Vector3.Transform(local, Quaternion.CreateFromAxisAngle(Vector3.UnitY, door.Yaw));
+        return door.Centre;
+    }
+
     /// <summary>Tells navigation after a door's lock changed (a pick, a break, an unlock).</summary>
     public void Touch(Fixture fixture)
     {
@@ -265,7 +354,7 @@ public sealed class FixtureRegistry
         {
             if (d.Kind != FixtureKind.Door || d.Lock is not { } l) continue;
             any = true;
-            if (locked) { d.Motion = DoorMotion.Closed; d.OpenAmount = 0; }
+            if (locked && d.Motion is DoorMotion.Open or DoorMotion.Opening) d.Motion = DoorMotion.Closing;   // the leaf slides shut; the lock holds at once
             l.Locked = locked;
             l.PickTime = 0;
             l.NextRoll = LockState.FirstRoll;
@@ -579,6 +668,30 @@ public sealed class FixtureRegistry
             }
         }
         return true;
+    }
+
+    IReadOnlyDictionary<(string Building, int Door), DoorView> publishedDoors = new Dictionary<(string Building, int Door), DoorView>();
+    ulong publishedDoorsKey;
+
+    /// <summary>The doors of the player's buildings and every other door that is not plainly closed and unlocked (open, moving, locked or set to lock), for the snapshot; a new dictionary only when one of them changed.</summary>
+    internal IReadOnlyDictionary<(string Building, int Door), DoorView> PublishedDoors()
+    {
+        ulong key = 0x446F6F72;
+        for (int i = 0; i < all.Count; i++)
+        {
+            var f = all[i];
+            if (f.Kind != FixtureKind.Door || !Shown(f)) continue;
+            key = Rng.Mix(key ^ (ulong)i) ^ BitConverter.SingleToUInt32Bits(f.OpenAmount) ^ ((ulong)f.Motion << 32) ^ (f.Lock is { EffectivelyLocked: true } ? 1UL << 40 : 0) ^ (f.WantsLock ? 1UL << 41 : 0);
+        }
+        if (key == publishedDoorsKey) return publishedDoors;
+        var doorViews = new Dictionary<(string Building, int Door), DoorView>();
+        foreach (var f in all)
+            if (f.Kind == FixtureKind.Door && Shown(f))
+                doorViews[(f.Building, f.DoorIndex)] = new DoorView(f.OpenAmount, f.Motion, f.Lock is { EffectivelyLocked: true }, f.WantsLock);
+        publishedDoorsKey = key;
+        return publishedDoors = doorViews;
+
+        static bool Shown(Fixture f) => f.Site < 0 || f.OpenAmount > 0 || f.Motion != DoorMotion.Closed || f.WantsLock || f.Lock is { EffectivelyLocked: true };
     }
 
     /// <summary>The registered buildings, in registration order.</summary>

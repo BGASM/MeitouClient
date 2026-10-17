@@ -26,6 +26,9 @@ public sealed class NavmeshWalkability : IWalkability
     /// <summary>The doors' run-time state; shared with every query made through this object.</summary>
     public NavDoors Doors { get; } = new();
 
+    /// <summary>Where the buildings' doors are (<see cref="NavDoorGeometry"/>); null until a <see cref="NavSystem"/> gives it the data.</summary>
+    public NavDoorGeometry? DoorGeometry { get; internal set; }
+
     public NavWorld World => world;
 
     /// <summary>Replaces the loaded meshes; only <see cref="NavMeshService"/> calls it, under its publish lock.</summary>

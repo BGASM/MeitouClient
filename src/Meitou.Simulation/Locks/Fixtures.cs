@@ -1,4 +1,5 @@
 using System.Numerics;
+using Meitou.Data.World;
 
 namespace Meitou.Simulation.Locks;
 
@@ -18,7 +19,7 @@ public enum FixtureKind : byte
     Bed,
 }
 
-/// <summary>The door's motion state as saved in <c>state&lt;i&gt;</c> (docs/game/locks.md "Doors"; not the DoorState enum): 0 closed, 1 open, 2 opening (engine reading), 3 closing.</summary>
+/// <summary>The door's motion state as saved in <c>state&lt;i&gt;</c> (docs/game/locks.md "Doors"; not the DoorState enum): 0 closed, 1 open, 2 opening, 3 closing.</summary>
 public enum DoorMotion : byte { Closed = 0, Open = 1, Opening = 2, Closing = 3 }
 
 /// <summary>
@@ -79,6 +80,12 @@ public sealed class Fixture
     public bool DoorBroken { get; set; }
     public int GateCode { get; set; } = -1;
     public bool WantsLock { get; set; }
+    /// <summary>Doors: how the leaf moves (its record's <c>door move speed</c> etc.), and the parent BUILDING record (the door's position is looked up by it and <see cref="DoorIndex"/>).</summary>
+    public DoorLeaf Leaf { get; init; }
+    public string HostRecordId { get; init; } = "";
+    /// <summary>Doors: the leaf's centre in the world, once the door gate has told it (<see cref="FixtureRegistry.DoorCentre"/>); derived from the data, not hashed or saved.</summary>
+    internal Vector3? Centre { get; set; }
+    internal bool CentreAsked { get; set; }
 
     /// <summary>Cages: the functionality's <c>restrains movement</c> (pole, peeler). Cages and beds: <c>use range</c>, and who is in it.</summary>
     public bool Restrains { get; init; }
@@ -97,6 +104,9 @@ public sealed class Fixture
     }
 }
 
+/// <summary>A door as the snapshot shows it (<see cref="WorldSnapshot.Doors"/>): its open amount 0..1, motion, whether it is effectively locked and whether it wants to lock.</summary>
+public readonly record struct DoorView(float Open, DoorMotion Motion, bool Locked, bool WantsLock);
+
 /// <summary>Where the simulation tells navigation that a building's doors are shut for paths (the game host forwards it to the navmesh's door table). Serial phases only.</summary>
 public interface IDoorGate
 {
@@ -104,4 +114,9 @@ public interface IDoorGate
     void SetDoorsBlocked(string buildingInstance, bool blocked);
     /// <summary>Opens every door again (the world was replaced).</summary>
     void ResetDoors();
+    /// <summary>
+    /// The centre of door <paramref name="doorIndex"/> of a BUILDING record in the building's frame (scaled, not rotated or moved; from the door's collision, as the navmesh
+    /// paints it); null when not known. Pure data: the same answer every time.
+    /// </summary>
+    Vector3? DoorCentre(string buildingRecordId, int doorIndex) => null;
 }

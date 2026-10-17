@@ -33,6 +33,8 @@ public sealed record InventoryItemView(int Index, string Record, string Name, st
 {
     /// <summary>The item's material record (<c>material sid</c>; "" none), which picks its icon.</summary>
     public string Material { get; init; } = "";
+    /// <summary>How full the item is (0 to 1, <see cref="Items.ItemInstance.ChargeFraction"/>); null: no charge bar.</summary>
+    public float? Charge { get; init; }
 }
 public sealed record InventoryView(int Width, int Height, int BagWidth, int BagHeight, IReadOnlyList<InventoryItemView> Items)
 {
@@ -148,6 +150,10 @@ public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> C
     public long BuildingsRevision { get; init; }
     /// <summary>BUILDING ids the player's research has unlocked (the build menu's list).</summary>
     public IReadOnlySet<string> UnlockedBuildings { get; init; } = EmptySet;
+    /// <summary>The doors of the player's buildings and the others that are open, moving, locked or set to lock, by (building instance, index in its <c>doors</c> list); any other door is closed and unlocked (docs/simulation.md "Cages, beds and locks").</summary>
+    public IReadOnlyDictionary<(string Building, int Door), Locks.DoorView> Doors { get; init; } = NoDoors;
+
+    static readonly IReadOnlyDictionary<(string Building, int Door), Locks.DoorView> NoDoors = new Dictionary<(string Building, int Door), Locks.DoorView>();
 
     static readonly IReadOnlySet<string> EmptySet = new HashSet<string>(StringComparer.Ordinal);
 }

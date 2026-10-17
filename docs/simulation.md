@@ -392,6 +392,15 @@ unload, hashed only once non-empty. Facts: [locks](game/locks.md), [economy 11.5
 - **Doors**: `AiSystem` applies the template's `initial door state` when it assigns a home (first squad, not to restored
   doors). `IDoorGate` (the game's `NavAdapter` -> `NavDoors`, reset on `ReplaceWorld`) closes a building for every path while
   all its doors are effectively locked and none broken (engine: one nav door state per building; closed-unlocked doors stay passable).
+  Motion (`LockSystem.Doors.cs`, serial `SlowWorld`): `StepDoors` moves opening/closing leaves by `door move speed` per second and
+  locks a closed one that `wants lock`; locking a home's doors closes them (animated, the lock holds at once). Engine stand-in for
+  Task_OpenDoor: every 3 ticks a walker within 40 of a closed door whose next two path legs pass within 10 of the leaf's centre
+  (`IDoorGate.DoorCentre`, from the door collision via `NavDoorGeometry`; headless: none, so no walk-through opening) opens it, or
+  stops at an effectively locked one ("It's locked." for the player). Nothing closes a door by itself, as in the original.
+  The player's finished buildings register their doors (`RegisterPlayerBuilding`, site -1, unregistered when no longer finished;
+  keys written by `BuildingSave`); the site menu has Open/Close Doors (`ToggleDoorsOrder`) and Lock/Unlock Doors
+  (`ToggleDoorLocksOrder`), the door panel's buttons for all doors at once. `WorldSnapshot.Doors` publishes the player's doors and
+  every door that is not closed and unlocked; the object renderer slides door parts by `DoorLeaf.LocalOffset` ([render-objects](render-objects.md)).
 - **Cages/beds**: `FindCage` (original weights; engine: skips a cage the carrier can't reach, `Reachable`: its building
   shut by another faction's doors, or a walk of that faction there failed in the last 24 game hours, `MarkUnreachable`;
   no path query runs in a tick), `Imprison` (state 2, `CharacterTable.Place` at the item's origin, cage
@@ -404,7 +413,7 @@ unload, hashed only once non-empty. Facts: [locks](game/locks.md), [economy 11.5
   (`World.GameHours`) + `SentenceLength`; served when start + length <= now; no bounty with the cage owner: none (served).
 - **Lockpicking** (`Lockpicking`, serial; the player's order is in [Arrest and jail](#arrest-and-jail)): `Step` per task update (pending crime,
   timer on the lock, seeded roll by the lock's roll counter, XP), `Allowed` (min chance; engine: conscious, an arm, not
-  carried, not on a pole), `Break` (strength > 3 x hardness). Not built: shackles (item locks), cutting, door motion.
+  carried, not on a pole), `Break` (strength > 3 x hardness). Not built: shackles (item locks), cutting, bashing doors.
 
 ## Arrest and jail
 
@@ -742,7 +751,7 @@ order. Renderer state lives in Rendering; snapshots are the simulation-to-host b
 
 Original-game unknowns are maintained in each linked subsystem reference; do not infer parity from our determinism tests.
 
-**Engine gaps:** remaining AI is listed in [AI](#ai); persistent town/world state, production, outposts, full UI fidelity, dynamic doors and physics remain incomplete (walls: see [Buildings](#buildings)). Save and combat limitations are listed in their subsystem sections.
+**Engine gaps:** remaining AI is listed in [AI](#ai); persistent town/world state, production, outposts, full UI fidelity, door AI tasks (closing, bashing) and physics remain incomplete (walls: see [Buildings](#buildings)). Save and combat limitations are listed in their subsystem sections.
 
 **Behaviour and hash constraints.**
 - No end-of-tick hook: the combat system swaps its arrays at the end of its `SlowWorld`, so the result depends on the system order
