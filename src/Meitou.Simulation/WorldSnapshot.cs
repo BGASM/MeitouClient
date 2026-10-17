@@ -139,8 +139,6 @@ public readonly record struct SkillSummary(float Attack, float Defence, float Do
 /// </summary>
 public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> Characters)
 {
-    public static readonly WorldSnapshot Empty = new(-1, []);
-
     /// <summary>Crossbow bolts in flight and stuck in the ground (the renderer may draw them; empty when there are none).</summary>
     public IReadOnlyList<ProjectileSnapshot> Projectiles { get; init; } = [];
     /// <summary>The open trade (null: none).</summary>
@@ -167,6 +165,9 @@ public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> C
     static readonly IReadOnlyDictionary<(string Building, int Door), Locks.DoorView> NoDoors = new Dictionary<(string Building, int Door), Locks.DoorView>();
 
     static readonly IReadOnlySet<string> EmptySet = new HashSet<string>(StringComparer.Ordinal);
+
+    // After the statics above: static initializers run in textual order, and the property defaults read them.
+    public static readonly WorldSnapshot Empty = new(-1, []);
 }
 
 /// <summary>
