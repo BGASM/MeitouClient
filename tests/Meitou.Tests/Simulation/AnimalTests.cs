@@ -100,6 +100,10 @@ public class AnimalTests(ITestOutputHelper output)
         // A predator of a faction hostile to the player's, 150 units off and facing it.
         var dog = population.SpawnSandbox(world, Bonedog, new Vector2(5150, 5000), player: false, yaw: -MathF.PI / 2);
         var table = world.Characters;
+        // A middling brawler, so both sides land blows: with its data stats the dog knocks it out before its first hit, from MA ~35 its hits cancel every bite.
+        var stats = table.Cold(me.Slot)!.Stats!;
+        stats[StatsEnumerated.MartialArts] = 20;
+        stats[StatsEnumerated.Toughness] = 50;
         int mine = table.Cold(me.Slot)!.Faction, theirs = table.Cold(dog.Slot)!.Faction;
         Assert.True(AggroSystem.IsEnemy(data.Relations, theirs, mine));
         world.RunTicks(60);

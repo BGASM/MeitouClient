@@ -90,7 +90,4 @@ source identity, header metadata, and named-slot validation. `UiStateTests` cove
 editing, map zoom/pan and runtime visibility overrides; `MyGuiColourTests` covers
 skin state text colours and dark parchment list text.
 
-The targeted UI/catalog/inventory tests pass. The installed save-schema suite
-also exposes an existing `SaveWriteTests.New_records_have_the_key_sets_of_the_real_ones`
-failure for a `PLATOON` `campaign` key in a sampled original save. The UI work
-does not change `SaveBuilder` or that schema assertion; the failure is not suppressed.
+The targeted UI/catalog/inventory tests pass.

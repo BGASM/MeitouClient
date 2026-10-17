@@ -1,8 +1,7 @@
 # Save games
 
 A save is a folder of FCS containers plus portrait PNG, not one blob. **Verified:** sample `wade`
-(70 files, Kenshi1.0.68) and three later base-game saves round-trip through FcsReader/Writer;
-`SaveReadTests.Every_file_of_a_save_reads_and_writes_back_to_the_same_bytes` checks bytes.
+(70 files, Kenshi1.0.68) and three later base-game saves round-trip through FcsReader/Writer; (checked when written; the real-save tests were removed).
 Early-sample absence does not establish absence in later/modded saves. Sources: SaveManager,
 SaveFileSystem, GameDataContainer and named binary functions in the evidence/table references.
 
