@@ -124,7 +124,8 @@ sealed partial class PlayerInterface
         foreach (string name in new[] { "ShortcutMapButton", "ShortcutTechButton", "ShortcutSquadButton" }) b.Actions[name] = "faithful:" + name;
         b.Actions["OrdersMedicButton"] = "meitou:medic";
         b.Actions["OrdersRescueButton"] = "meitou:rescue";
-        BindOrders(b, lead);
+        var own = Selected().FirstOrDefault() ?? lead;   // the orders, jobs and squad tab stay the player's while another faction's character is inspected
+        BindOrders(b, own);
         foreach (string name in new[] { "LoadingPanel", "TownPanel", "TooltipPanel", "MessagePanel", "BiomeTextPanel" }) b.Hidden.Add(name);
         // The viewed floor (the exe's "Floor {1,num}", docs/game/ui-screens.md section 4; docs/formats/zones.md "Interior view"); the arrows step it as PageUp / PageDown do.
         b.Text["FloorText"] = $"Floor {Floor?.Get() ?? 0}";
@@ -144,10 +145,10 @@ sealed partial class PlayerInterface
         b.Actions["ExtendedStatsButton"] = "meitou:extendedstats";
         if (session.Simulation.Speed != 0) b.Hidden.Add("PausedPanel");
         BindMedicalBars(b, lead);
-        BindJobs(b, lead);
+        BindJobs(b, own);
         // The squad bar has one tab per squad of the player's; Meitou has one squad, so the first page shows, captioned with its name.
         foreach (var widget in faithfulHud.Find("SquadPanel")?.Children.Where(w => w.Type == "TabItem").Skip(1) ?? []) b.HiddenWidgets.Add(widget);
-        b.Text["SquadPanel@tab0"] = SquadTabCaption(lead);
+        b.Text["SquadPanel@tab0"] = SquadTabCaption(own);
         if (lead is null) { b.Hidden.Add("MedicalPanel"); b.Hidden.Add("InformationPanel"); }
         // Buttons without a backend are disabled, except those the original never greys out (the build and floor buttons look live there in the open).
         foreach (var w in faithfulHud.Widgets.Where(w => w.Type == "Button" && !b.Actions.ContainsKey(w.Name) && w.Name is not ("BuildButton" or "FloorArrowUp" or "FloorArrowDown"))) b.Disabled.Add(w.Name);

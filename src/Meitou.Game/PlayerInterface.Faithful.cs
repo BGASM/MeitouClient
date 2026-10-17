@@ -253,7 +253,7 @@ sealed partial class PlayerInterface
     /// <summary>Takes a job (the jobs list's row id) off the lead whose list shows it.</summary>
     void RemoveJob(string job)
     {
-        if (Lead() is not { IsPlayer: true } lead) return;
+        if ((Selected().FirstOrDefault() ?? Lead()) is not { IsPlayer: true } lead) return;
         if (job == "medic") Say(new Meitou.Simulation.FirstAid.MedicJobCommand([lead.Id], false) { Tick = session.World.Tick });
         else if (job == "rescue") Say(new Meitou.Simulation.Carrying.RescueJobCommand([lead.Id], false) { Tick = session.World.Tick });
     }
