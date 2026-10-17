@@ -375,6 +375,6 @@ lists, 58's field; the speech timer's unit.
 
 ## Meitou design
 
-As built: [simulation](../simulation.md#dialogue). Still planned: ambient conversations and speech bubbles (events other than 1, the AI
+As built: [simulation](../simulation.md#dialogue). Still planned: ambient conversations and speech bubbles (events other than 1 and campaign announcements, which go to the message log; the AI
 tasks 102/159/161), crowd triggers, recruiting, AI contracts and `change AI`, items given, the arrest and slavery effects, and
 moving the surgeon verb, Pay bail and `ArrestSystem`'s fine/arrest stand-ins onto dialogue.

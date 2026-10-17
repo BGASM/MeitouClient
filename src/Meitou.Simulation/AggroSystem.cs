@@ -207,6 +207,8 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         public ulong Seed, Key, Tick;
         /// <summary>The looker's AI stance (<see cref="Ai.AiStance.Aggressive"/> for a character the AI does not run) and, for the territorial one, its home.</summary>
         public Ai.AiStance Stance;
+        /// <summary>A campaign squad's assault targets (<see cref="Squad.War"/>; none for others).</summary>
+        public WarTargets War;
         public Vector2 Home;
         public float HomeR2;
         public int Best;
@@ -234,7 +236,8 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
             if (task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat || task == (byte)CharacterTask.Rest && !AiSleeper(table.Cold(i))) continue;
             if (table.Cold(i) is not { IsPlayer: false, InCombat: false, Fleeing: false, IsImprisoned: false, Fighter.CanAttack: true, Medical.Incapacitated: false, Carrying.IsNone: true } cold || !Relations.Contains(cold.Faction)) continue;
             var stance = cold.Ai?.Stance ?? Ai.AiStance.Aggressive;
-            if (stance == Ai.AiStance.Passive || !hasEnemy[cold.Faction] && stance != Ai.AiStance.AggressiveNeutrals) continue;
+            var war = cold.SquadId >= 0 && world.Squads.Find(cold.SquadId) is { War.IsSet: true } assaulting ? assaulting.War : WarTargets.None;
+            if (stance == Ai.AiStance.Passive || !hasEnemy[cold.Faction] && stance != Ai.AiStance.AggressiveNeutrals && !war.IsSet) continue;
             float range = RangeOf(cold, Settings.SightRange);
             if (!(range > 0)) continue;
             var scan = new Scan
@@ -242,7 +245,7 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
                 Table = table, Relations = Relations, Self = i, Faction = cold.Faction,
                 Eye = prev[i].Position, Yaw = prev[i].Yaw, Range = range, Best = -1, BestD2 = float.MaxValue,
                 Seed = world.Seed, Key = Rng.Key(new CharacterId(i, prev[i].Generation)), Tick = (ulong)world.Tick,
-                Stance = stance,
+                Stance = stance, War = war,
                 Home = cold.Ai?.Squad.HomeCentre ?? default, HomeR2 = cold.Ai is { } mind ? mind.Squad.HomeRadius * mind.Squad.HomeRadius : 0,
                 Spots = slots[i].Spots, Sightings = sightings ??= [], Effects = effects,
             };
@@ -309,7 +312,7 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         if (s.Table.Cold(slot) is not { Medical.Incapacitated: false } c) return;
         // Wanted characters are the arrest system's (Crime.ArrestSystem): the police spot, fine or arrest them there.
         bool enemy = s.Stance != Ai.AiStance.Passive
-            && (IsEnemy(s.Relations, s.Faction, c.Faction) || s.Stance == Ai.AiStance.AggressiveNeutrals && IsNeutral(s.Relations, s.Faction, c.Faction));
+            && (IsEnemy(s.Relations, s.Faction, c.Faction) || s.Stance == Ai.AiStance.AggressiveNeutrals && IsNeutral(s.Relations, s.Faction, c.Faction) || WarEnemy(s.War, s.Faction, c.Faction, other.Position));
         if (!enemy) return;
         // The AI's stances (docs/simulation.md "AI", Combat goals): the defensive one joins fights only, the territorial one keeps to its home.
         if (s.Stance == Ai.AiStance.Defensive && !c.InCombat) return;
@@ -353,6 +356,10 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
 
     /// <summary>A character the AI put to bed or sat down (<see cref="Ai.AiBehaviour.Sleep"/>, <see cref="Ai.AiBehaviour.Sit"/>): unlike one resting by order, it can be roused into a fight.</summary>
     static bool AiSleeper(CharacterCold? cold) => cold?.Ai is { Behaviour: Ai.AiBehaviour.Sleep or Ai.AiBehaviour.Sit };
+
+    /// <summary>A campaign assault's extra enemy (<see cref="WarTargets"/>): of the target faction, or with <c>Everyone</c> anyone not of its own faction in the target town.</summary>
+    static bool WarEnemy(WarTargets war, int mine, int theirs, Vector3 at) =>
+        war.IsSet && theirs != mine && (theirs == war.Faction || war.Everyone && Vector2.DistanceSquared(new Vector2(at.X, at.Z), war.Centre) <= war.Radius * war.Radius);
 
     public static bool IsEnemy(FactionRelations relations, int mine, int theirs) =>
         relations.Contains(theirs) && relations.IsHostile(mine, theirs) && !relations.Coexists(mine, theirs) && !relations.Coexists(theirs, mine);

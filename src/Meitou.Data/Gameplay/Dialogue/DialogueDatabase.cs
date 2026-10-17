@@ -12,7 +12,7 @@ public enum Talker
 /// <summary>The <c>EventTriggerEnum</c> numbers the engine fires (docs/game/dialogue.md "Enums").</summary>
 public static class DialogueEvents
 {
-    public const int PlayerTalkToMe = 1;
+    public const int PlayerTalkToMe = 1, Announcement = 2;
     /// <summary>The highest event number (EV_MAX is 75).</summary>
     public const int Max = 75;
 }
@@ -99,7 +99,7 @@ public sealed class DialogueNode
 public static class DialogueActions
 {
     public const int None = 0, Trade = 1, AffectRelations = 4, AttackChaseForever = 6, TakeMoney = 8, GiveMoney = 9, CharacterEditor = 11,
-        AssignBounty = 32, LockThisDialog = 36, ClearBounty = 49, AttackStayNearHome = 55, AttackIfNoCoexist = 57;
+        BubbleWait = 12, AssignBounty = 32, LockThisDialog = 36, AssaultPhase = 37, RetreatPhase = 38, ClearBounty = 49, AttackStayNearHome = 55, AttackIfNoCoexist = 57;
 }
 
 /// <summary>The <c>DialogConditionEnum</c> numbers with special handling at load (docs/game/dialogue.md "Line check").</summary>

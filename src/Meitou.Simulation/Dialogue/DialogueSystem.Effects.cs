@@ -77,6 +77,9 @@ public sealed partial class DialogueSystem
                 case DialogueActions.LockThisDialog when mc is not null && c.Root is { } current:
                     Lock(mc, current.StringId, true);
                     break;
+                case DialogueActions.AssaultPhase or DialogueActions.RetreatPhase:
+                    population?.SetCampaignPhase(world, me, effect.Action == DialogueActions.AssaultPhase);
+                    break;
                 case 3 or 18:
                     world.Post("(Recruiting through dialogue is not in Meitou yet.)");
                     break;

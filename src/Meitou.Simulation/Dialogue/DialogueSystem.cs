@@ -125,6 +125,7 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
 
     public void SlowWorld(World world)
     {
+        if (bubbles.Count > 0) StepBubbles(world);
         if (!talker.IsNone && open is null)
         {
             var table = world.Characters;
@@ -147,7 +148,8 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
         var table = world.Characters;
         if (!table.TryResolveNext(order.Talker, out int p) || table.Cold(p) is not { IsPlayer: true } || !table.TryResolveNext(order.Target, out int n) || table.Cold(n) is not { IsPlayer: false } nc) return;
         if (!Awake(table, n)) return;
-        if (data.Relations.IsHostile(nc.Faction, world.Player.Faction))
+        // A campaign member with a pending interrupt (its negotiation) talks even when its faction is hostile (docs/game/factions-squads-towns.md "Campaigns", announcement).
+        if (data.Relations.IsHostile(nc.Faction, world.Player.Faction) && !interrupts.ContainsKey(order.Target))
         {
             world.Defer(new Combat.AttackOrder([order.Talker], order.Target) { Tick = world.Tick + 1 });
             return;
@@ -212,7 +214,8 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
         return dialogue.SetFor(cold.RecordId, squad?.TemplateId, squad is not null && squad.Leader == world.Characters.IdOf(slot), cold.IsPlayer, animal, playerFaction);
     }
 
-    public bool CanTalk(World world, int slot) => world.Characters.Cold(slot) is { IsPlayer: false } && SetOf(world, slot).For(DialogueEvents.PlayerTalkToMe).Count > 0;
+    public bool CanTalk(World world, int slot) => world.Characters.Cold(slot) is { IsPlayer: false }
+        && (interrupts.ContainsKey(world.Characters.IdOf(slot)) || SetOf(world, slot).For(DialogueEvents.PlayerTalkToMe).Count > 0);
 
     static bool IsNpcSide(Talker t) => t is Talker.Me or Talker.Interjector1 or Talker.Interjector2 or Talker.Interjector3 or Talker.WholeSquad;
 
@@ -313,7 +316,7 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
 
     public void Hash(ref StateHasher hasher)
     {
-        if (lastUse.Count == 0 && permanent.Count == 0 && counters.Count == 0 && met.Count == 0 && interrupts.Count == 0 && open is null && talker.IsNone) return;
+        if (lastUse.Count == 0 && permanent.Count == 0 && counters.Count == 0 && met.Count == 0 && interrupts.Count == 0 && bubbles.Count == 0 && open is null && talker.IsNone) return;
         hasher.Add(0x44696167);
         hasher.Add(rolls);
         foreach (var (line, hours) in lastUse) { hasher.Add(Rng.StableHash(line)); hasher.Add(hours); }
@@ -321,6 +324,7 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
         foreach (var ((who, ev), (count, last)) in counters) { hasher.Add(who); hasher.Add(ev); hasher.Add(count); hasher.Add(last); }
         foreach (var ((squad, whom), hours) in met) { hasher.Add(squad); hasher.Add(whom); hasher.Add(hours); }
         foreach (var (who, line) in interrupts) { hasher.Add(who); hasher.Add(Rng.StableHash(line)); }
+        foreach (var b in bubbles) { hasher.Add(b.C.Npc); hasher.Add(Rng.StableHash(b.Line.StringId)); hasher.Add(b.DueTick); }
         hasher.Add(talker);
         hasher.Add(target);
         if (open is { } c)

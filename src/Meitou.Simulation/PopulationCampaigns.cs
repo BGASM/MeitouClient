@@ -50,6 +50,10 @@ public sealed class CampaignInstance
     public bool FoughtPlayer { get; set; }
     /// <summary>The leader's recorded trail, oldest first (the original's <c>GatherAndMove</c>): its followers' places. Not saved: laid again after a load.</summary>
     public List<Vector2> Trail { get; } = [];
+    /// <summary>Its leader said the <c>dialog announcement</c> (the character, and the game hour; -1: not yet) and has reached the target. Not saved.</summary>
+    public CharacterId Announcer { get; set; } = CharacterId.None;
+    public double AnnouncedAt { get; set; } = -1;
+    public double ArrivedAt { get; set; } = -1;
 }
 
 /// <summary>A queued campaign (<c>req*</c> of the save): due at a game hour against a target.</summary>
@@ -519,6 +523,7 @@ public sealed partial class PopulationSystem : IStateHashed
     {
         p.Campaign = null;
         p.CampaignGoal = null;
+        if (world.Squads.Find(p.SquadId) is { } assaulting) assaulting.War = WarTargets.None;
         p.Target = p.Origin;
         p.GoingHome = true;
         p.WaitLeft = 0;
@@ -552,6 +557,22 @@ public sealed partial class PopulationSystem : IStateHashed
         ulong roll = Rng.Hash(world.Seed, (ulong)to.Faction << 32 | (uint)to.Queued++, RngPurpose.Campaign, Rng.StableHash(c.Id) ^ SeedSalts.CampaignDelay);
         to.Requests.Add(new CampaignRequest { CampaignId = c.Id, Enemy = enemy, Due = now + minHours + Rng.Float(roll) * Math.Max(0, maxHours - minHours), Target = target, Home = home });
         to.Know(c.Id);
+        return true;
+    }
+
+    /// <summary>
+    /// Dialogue's DA 37 ASSAULT_PHASE / DA 38 RETREAT_PHASE (<c>FUN_140680560</c>, <b>Verified</b>): the campaign the speaker's squad marches in goes to phase 1 (2 when it has no
+    /// <c>pt2</c> leader package) or 2, its phase clock restarting. DA 39 (phase 3, which no phase handles; the data never uses it) is not built. Returns whether a campaign changed.
+    /// </summary>
+    public bool SetCampaignPhase(World world, CharacterId speaker, bool assault)
+    {
+        if (!world.Characters.TryResolveNext(speaker, out int s) || world.Characters.Cold(s) is not { SquadId: >= 0 } sc) return false;
+        if (world.Platoons.All.FirstOrDefault(p => p.SquadId == sc.SquadId && p.State == PlatoonState.Loaded && p.Campaign is not null)?.Campaign is not { Phase: not 2 } inst
+            || CampaignOf(inst.CampaignId) is not { } c) return false;
+        int phase = assault && c.HasPt2 ? 1 : 2;
+        if (inst.Phase == phase) return false;
+        inst.Phase = phase;
+        inst.PhaseStart = world.GameHours;
         return true;
     }
 
@@ -679,7 +700,15 @@ public sealed partial class PopulationSystem : IStateHashed
         {
             case 0:
                 if (Vector2.Distance(leader.Position, CentreOf(world, inst.Target)) > 0.8f * RadiusOf(inst.Target)) return false;
-                world.Post($"{c.DisplayName} has arrived at {NameOf(world, inst.Target)}");
+                if (inst.ArrivedAt < 0)
+                {
+                    world.Post($"{c.DisplayName} has arrived at {NameOf(world, inst.Target)}");
+                    inst.ArrivedAt = now;
+                }
+                // With an announcement, a loaded leader waits for it, then while its negotiation is pending (engine choice for the Unknown event-2 state: up to
+                // AnnouncementPatience hours from arriving); off screen nobody can hear it, so it goes on.
+                if (c.DialogAnnouncement is not null && leader.State == PlatoonState.Loaded && Announcer is not null && now - inst.ArrivedAt < AnnouncementPatience
+                    && (inst.AnnouncedAt < 0 || PendingTalk?.Invoke(inst.Announcer) == true)) return false;
                 inst.Phase = c.HasPt2 ? 1 : 2;
                 inst.PhaseStart = now;
                 return false;
@@ -872,6 +901,41 @@ public sealed partial class PopulationSystem : IStateHashed
             }
     }
 
+    /// <summary>
+    /// Whom a loaded campaign platoon fights besides its faction's enemies (docs/game/factions-squads-towns.md "Campaigns", enemies): in phase 1, everyone in the target town when
+    /// its <c>pt2</c> package is a Package_WarAssault (signal 20 or 32), else the target faction when the campaign is hostile; nobody in the other phases.
+    /// </summary>
+    WarTargets AssaultTargets(World world, CampaignInstance inst, bool leads)
+    {
+        if (inst.Phase != 1 || CampaignOf(inst.CampaignId) is not { } c) return WarTargets.None;
+        if (c.PackageOf(1, leads) is { } id && data.Ai.Package(id) is { Signal: 20 or 32 })
+            return new WarTargets(-1, true, CentreOf(world, inst.Target), RadiusOf(inst.Target));
+        return c.IsHostile && inst.Enemy >= 0 ? new WarTargets(inst.Enemy, false, default, 0) : WarTargets.None;
+    }
+
+    /// <summary>The dialogue's announcement and pending-talk queries (<see cref="Dialogue.DialogueSystem.Announce"/>, <see cref="Dialogue.DialogueSystem.HasInterrupt"/>), set by the host; null: none.</summary>
+    public Func<World, CharacterId, string, bool>? Announcer { get; set; }
+    public Func<CharacterId, bool>? PendingTalk { get; set; }
+
+    /// <summary>Game hours an arrived campaign waits for its announcement and negotiation before it goes on (engine choice).</summary>
+    public const double AnnouncementPatience = 1;
+    /// <summary>The announcement needs the leader within this of the camera and a target-faction member within this of the leader (<b>Verified</b>, task 129).</summary>
+    const float AnnounceRange = 2500;
+
+    /// <summary>A loaded leader in phase 0 says its campaign's <c>dialog announcement</c> once, with the camera and a target-faction member within 2500 of it.</summary>
+    void TryAnnounce(World world, CampaignInstance inst, CharacterId leader, Vector3 at)
+    {
+        if (inst.Phase != 0 || inst.AnnouncedAt >= 0 || Announcer is null || inst.Enemy < 0 || CampaignOf(inst.CampaignId)?.DialogAnnouncement is not { } announcement) return;
+        if (focus is not { } camera || Vector2.DistanceSquared(new Vector2(at.X, at.Z), new Vector2(camera.X, camera.Z)) > AnnounceRange * AnnounceRange) return;
+        var table = world.Characters;
+        bool heard = false;
+        for (int i = 0; i < table.Previous.Length && !heard; i++)
+            heard = table.Previous[i].Alive && table.Cold(i) is { } c && c.Faction == inst.Enemy && Vector3.DistanceSquared(table.Previous[i].Position, at) <= AnnounceRange * AnnounceRange;
+        if (!heard || !Announcer(world, leader, announcement)) return;
+        inst.Announcer = leader;
+        inst.AnnouncedAt = world.GameHours;
+    }
+
     /// <summary>The trail's step and its first slot count (<b>Verified</b>, <c>FUN_1409d6070</c>).</summary>
     const float TrailStep = 150;
     const int TrailSlots = 5;
@@ -934,7 +998,9 @@ public sealed partial class PopulationSystem : IStateHashed
     void StepCampaignLoaded(World world, Platoon p, Squad squad, float dt)
     {
         var table = world.Characters;
+        squad.War = AssaultTargets(world, p.Campaign!, p.Campaign!.Leader == p.Id);
         if (p.CampaignGoal is not { } goal || !table.TryResolveNext(squad.Leader, out int slot)) return;
+        if (p.Campaign!.Leader == p.Id) TryAnnounce(world, p.Campaign, squad.Leader, table.Next[slot].Position);
         if (table.Next[slot].Task == (byte)CharacterTask.Attack) return;
         bool leads = p.Campaign!.Leader == p.Id;
         float arrive = leads ? settings.RoamArrivalRadius : CampaignFollowDistance;
@@ -1011,6 +1077,9 @@ public sealed partial class PopulationSystem : IStateHashed
                 h.Add(a.Leader);
                 h.Add(a.Men);
                 h.Add(a.Lost);
+                h.Add(a.Announcer);
+                h.Add(a.AnnouncedAt);
+                h.Add(a.ArrivedAt);
                 h.Add(a.Trail.Count);
                 foreach (var t in a.Trail) h.Add(t);
                 h.Add(a.Platoons.Count);

@@ -206,6 +206,16 @@ the player has one; requests (victory/loss chains, ally help) can follow.
   as it was) while every intact platoon is within 6000, else it waits within 8294.4 of the target or walks. They fight through the normal aggro;
   arrival, timers and the 20 % rule run. **Observed** (headless, Dust Bandits, 4 squads of 49 at `raidSizeMult` 4, camera on the leader): the
   followers keep 190, 380 and 470 behind a walking leader (the rule's 187, 375, 562).
+- **Assault**: in phase 1 a loaded campaign squad also fights (`Squad.War`, read by the aggro) everyone not of its faction in the target town when its
+  `pt2` package is a Package_WarAssault (20, 32), else the target faction when the campaign is hostile. Looting, kidnapping and the cannibals'
+  carrier rule (nothing carries yet) are not built.
+- **Announcement**: a loaded leader in phase 0 says `dialog announcement` once (camera and a target-faction member within 2500): its lines go
+  to the message log 2 + 0.12 × length seconds apart, or DA 12's wait (speech bubbles are not built), and their `interrupt` makes the next talk
+  with it the negotiation, also when its faction is hostile. After arriving it waits for the announcement and then while the negotiation is
+  pending, at most 1 game hour (engine choice for the Unknown event-2 state); off screen it goes on. Dialogue DA 37 sets phase 1 (2 without a
+  pt2 leader package), DA 38 phase 2; DA 39 (phase 3, unhandled in the original, unused in the data) is not built. **Observed** (headless, real
+  data): Dust Bandits "Invasion with demands" shout their four lines 20 s apart; talking to the boss opens the negotiation; paying takes 2000
+  and sends them back (phase 2), refusing starts the assault (phase 1, the squad's targets set), stabbing him sends them back.
 - **World states** (`WorldStates`, `PopulationSystem.States`): WORLD_EVENT_STATEs answered live by the original's rule
   ([world states](game/factions-squads-towns.md#relations-and-world-states)) from the unique table and the relations; the squad factory,
   wild sites, towns and campaigns all ask it. A population given its own `IWorldStates` (the pinned tests) uses that instead.
@@ -633,7 +643,7 @@ modal, which pauses the game; `DialogueChoice` and `EndConversation` apply betwe
 to the next tick. A hostile target is attacked instead.
 
 - **Effects built**: locks, interrupts, `change relations`, trade, relations, the three attacks, take and give money, the surgeon's editor
-  (paid by the line, `EditCharacter.Paid`), assign and clear bounty, lock this dialogue, `trigger campaign` (`PopulationSystem.TriggerFromDialogue`: the rules in
+  (paid by the line, `EditCharacter.Paid`), assign and clear bounty, lock this dialogue, DA 37 / 38 (a campaign's phase), `trigger campaign` (`PopulationSystem.TriggerFromDialogue`: the rules in
   [campaigns](game/factions-squads-towns.md#campaigns); `world state` conditions read the live states). Recruiting posts that it is not built; the rest is
   listed in [dialogue](game/dialogue.md#meitou-design).
 - **Conditions**: most DCs are computed; those needing state Meitou lacks (squad memory flags beyond "met", building locks, slavery, walls,
