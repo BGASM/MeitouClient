@@ -189,14 +189,15 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         long loadId = state.LoadId;
         ulong seed = world.Seed;
         var walk = world.Walkability;
+        var saved = SavedSquadsOf(world, site.Index);
         if (work is null)
         {
-            Spawn(world, BuildTown(site, loadId, seed, walk));
+            Spawn(world, BuildTown(site, loadId, seed, walk, saved));
             state.Status = SiteStatus.Loaded;
         }
         else
         {
-            work.Add(() => built.Enqueue(BuildTown(site, loadId, seed, walk)));
+            work.Add(() => built.Enqueue(BuildTown(site, loadId, seed, walk, saved)));
         }
     }
 
@@ -213,6 +214,22 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         state.Status = SiteStatus.Unloaded;
         state.UnloadAtTick = -1;
         state.LoadId++;   // a build still in flight is dropped when it arrives
+    }
+
+    /// <summary>
+    /// The town's own squads a loaded save already holds (pinned saved platoons of the site, whether made now or not), by template: the town makes that many fewer of
+    /// each resident and bar squad entry (docs/simulation.md "Saves"). Null when there are none.
+    /// </summary>
+    static Dictionary<string, int>? SavedSquadsOf(World world, int site)
+    {
+        Dictionary<string, int>? have = null;
+        foreach (var p in world.Platoons.All)
+            if (p.Pinned && p.Origin == site)
+            {
+                have ??= new Dictionary<string, int>(StringComparer.Ordinal);
+                have[p.TemplateId] = have.GetValueOrDefault(p.TemplateId) + 1;
+            }
+        return have;
     }
 
 

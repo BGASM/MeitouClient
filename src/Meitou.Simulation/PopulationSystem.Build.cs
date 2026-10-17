@@ -27,7 +27,7 @@ public sealed partial class PopulationSystem
     internal sealed record BuiltSquad(SquadPlan Plan, Vector2 Position, int Faction, List<BuiltMember> Members);
     sealed record BuiltTown(int Site, long LoadId, List<BuiltSquad> Squads);
 
-    BuiltTown BuildTown(TownSite site, long loadId, ulong seed, IWalkability walk)
+    BuiltTown BuildTown(TownSite site, long loadId, ulong seed, IWalkability walk, Dictionary<string, int>? saved = null)
     {
         var town = site.Town;
         int factionIndex = town.Faction is { } fid ? data.FactionIndex(fid) : -1;
@@ -40,6 +40,7 @@ public sealed partial class PopulationSystem
             var template = SquadTemplate.From(record);
             for (int k = 0; k < entries[e].V0; k++)
             {
+                if (TakeSaved(saved, entries[e].Id)) continue;   // the save holds this squad of the town
                 ulong key = Rng.Mix((ulong)site.Index << 40 ^ (ulong)e << 20 ^ (uint)k);
                 if (BuildOne(template, factionIndex, faction, key, seed, Place(site, seed, key, walk)) is { } one) squads.Add(one);
             }
@@ -52,6 +53,7 @@ public sealed partial class PopulationSystem
             var template = SquadTemplate.From(record);
             for (int k = 0; k < bars[e].V0; k++)
             {
+                if (TakeSaved(saved, bars[e].Id)) continue;
                 ulong key = Rng.Mix(SeedSalts.BarSquad ^ (ulong)site.Index << 40 ^ (ulong)e << 20 ^ (uint)k);
                 int chance = bars[e].V1 <= 0 ? 100 : bars[e].V1;
                 if (Rng.Float(Rng.Hash(seed, key, RngPurpose.Spawn, SeedSalts.BarChance)) * 100 >= chance) continue;
@@ -59,6 +61,14 @@ public sealed partial class PopulationSystem
             }
         }
         return new BuiltTown(site.Index, loadId, squads);
+    }
+
+    /// <summary>Takes one squad of <paramref name="template"/> off the saved count (true: there was one, the slot is the save's).</summary>
+    static bool TakeSaved(Dictionary<string, int>? saved, string template)
+    {
+        if (saved is null || !saved.TryGetValue(template, out int n) || n <= 0) return false;
+        saved[template] = n - 1;
+        return true;
     }
 
     /// <summary>The bar squad entries of a town (6.4, Observed): its own <c>bar squads</c>, plus the faction's default list for towns of type Town. v0 = 0 entries are dropped.</summary>

@@ -44,6 +44,7 @@ sealed partial class GameHost
             DuelFrame(false);   // the duel's laps run on in a long still too
             if (g.TitlePreview) titleBattle?.Advance(session.Ticks.TickSeconds);
         }
+        PrintSavedLog();
         SandboxFollowCamera();
         ApplyCamera(session.Camera.Current);
         if (g.TitlePreview) ApplyTitleCamera();

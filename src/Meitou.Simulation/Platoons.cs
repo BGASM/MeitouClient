@@ -50,6 +50,10 @@ public sealed class Platoon
     public Ai.PlatoonJob Job { get; set; }
     /// <summary>A short-range patrol's next point (null: none; it goes to <see cref="Target"/> instead).</summary>
     public Vector2? Point { get; set; }
+    /// <summary>The save's platoon this stand-in is (null: one the population made): its characters are made from the save, not from <see cref="Key"/>.</summary>
+    public Saving.SavedPlatoon? Saved { get; init; }
+    /// <summary>A saved platoon of its town's own (residents, bar squads, slaves): it never travels, its squad is run by the AI like the town's, and it is not in the roaming pool.</summary>
+    public bool Pinned => Saved?.Pinned == true;
 }
 
 /// <summary>The roaming squads of a world, by id. Ids are never reused. Part of the state hash.</summary>
@@ -91,6 +95,12 @@ public sealed class PlatoonRegistry
                 h.Add((int)p.Job);
                 h.Add(p.Point.HasValue);
                 h.Add(p.Point ?? default);
+            }
+            if (p.Saved is { } saved)
+            {
+                // Only for a save's platoons, so worlds without them hash as before.
+                h.Add(saved.Pinned);
+                h.Add(saved.Touched);
             }
         }
     }

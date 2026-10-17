@@ -213,7 +213,7 @@ public class QuickSaveTests
                 var cb = b.Characters.Cold(squadB.Members[i].Slot)!;
                 Assert.Equal(ca.Name, cb.Name);
                 Assert.NotNull(ca.Appearance);
-                Assert.Equal(ca.Appearance!.Loadout!.Seed, save.Platoons.Single().Characters[i].Handle.S);   // the look's seed is the saved handle serial
+                Assert.Equal(ca.Appearance!.Loadout!.Seed, save.Platoons.Single(p => p.FactionId == save.PlayerFaction!.Id).Characters[i].Handle.S);   // the look's seed is the saved handle serial
                 Assert.NotNull(cb.Appearance);
                 // The same look: the roll's seed, hence the same body, head, hair and clothes; and so the same inventory.
                 Assert.Equal(ca.Appearance!.Loadout!.Seed, cb.Appearance!.Loadout!.Seed);

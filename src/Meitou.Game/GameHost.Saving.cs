@@ -62,6 +62,7 @@ sealed partial class GameHost
     void HandleSaves()
     {
         while (saveNotices.TryDequeue(out var notice)) player.Notice(notice.Text, notice.Error);
+        PrintSavedLog();
         if (quickSaveRequested) { quickSaveRequested = false; QuickSaveNow(); }
         if (quickLoadRequested) { quickLoadRequested = false; BeginQuickLoad(); }
         if (saveRequestedFolder is { } to) { saveRequestedFolder = null; QuickSaveNow(to); }
@@ -123,6 +124,13 @@ sealed partial class GameHost
                 saveNotices.Enqueue(($"Save failed: {e.Message}", true));
             }
         });
+    }
+
+    /// <summary>The save's NPC platoons made since the last call (one line each), to the log.</summary>
+    void PrintSavedLog()
+    {
+        if (session.World.Saved is { } saved)
+            foreach (var line in saved.TakeLog()) Console.WriteLine($"saved     {line}");
     }
 
     /// <summary>
@@ -219,7 +227,7 @@ sealed partial class GameHost
             session.Camera.Place(new Vector2(at.X, at.Z), view.Yaw, view.Pitch, view.Distance);
             navmesh = NavmeshAround(at);
         }
-        summary = $"{readingFolder}: {loaded.PlayerPlatoons.Sum(p => p.Squad.Members.Count)} player character(s), {loaded.RoamingPlatoons.Count} roaming platoon(s), {loaded.TownBoundPlatoons} town platoon(s) left to the towns, day {loaded.Clock.Day} {loaded.Clock.Hour:00}:{loaded.Clock.Minute:00}, made in {watch.ElapsedMilliseconds} ms";
+        summary = $"{readingFolder}: {loaded.PlayerPlatoons.Sum(p => p.Squad.Members.Count)} player character(s), {loaded.RoamingPlatoons.Count} roaming platoon(s) and {loaded.TownBoundPlatoons} town platoon(s) kept as saved, day {loaded.Clock.Day} {loaded.Clock.Hour:00}:{loaded.Clock.Minute:00}, made in {watch.ElapsedMilliseconds} ms";
         return navmesh;
     }
 

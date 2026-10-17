@@ -235,7 +235,7 @@ public sealed partial class ArrestSystem(CrimeSystem crimes, GameConstants const
     public bool InOwnTown(World world, int guard)
     {
         var table = world.Characters;
-        if (table.Cold(guard) is not { SquadId: >= 0 } c || world.Squads.Find(c.SquadId) is not { Town: >= 0, PlatoonId: < 0 } squad) return false;
+        if (table.Cold(guard) is not { SquadId: >= 0 } c || world.Squads.Find(c.SquadId) is not { TownOwn: true } squad) return false;
         var p = table.Next[guard].Position;
         float r = squad.HomeRadius * Settings.TownSlack;
         return Vector2.DistanceSquared(new Vector2(p.X, p.Z), squad.HomeCentre) <= r * r;

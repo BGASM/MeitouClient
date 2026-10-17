@@ -29,8 +29,9 @@ public sealed class SaveCaptureOptions
 /// <summary>
 /// Turns a <see cref="World"/> into a <see cref="SaveGame"/> (docs/simulation.md "Saves"). With the <see cref="LoadedSave"/> the world was loaded from, the save it came
 /// from is copied and the parts the world models are written over it: clock, money, the factions' relations and prosperity, the player's platoons and their characters (position,
-/// facing, stats, medical state, new recruits, removals), the selection and the roaming platoons' positions; everything else is carried through unchanged. Without one a new save
-/// is made from the game data: all factions with their relations, the player's platoons, a default state per placed town, and empty weather, research and decals.
+/// facing, stats, medical state, new recruits, removals), the selection, the save's NPC platoons (stand-in positions; the characters of those that were in the world) and the
+/// population's own town and roaming squads in the world as new platoons; everything else is carried through unchanged. Without one a new save
+/// is made from the game data: all factions with their relations, the player's platoons and the population's squads, a default state per placed town, and empty weather, research and decals.
 /// </summary>
 public static class SaveCapture
 {
@@ -76,9 +77,13 @@ public static class SaveCapture
         WriteLocks(world, buildings);
         ResearchSave.Write(game.Research, world.Research);
         if (data.PlayerFaction >= 0) BuildingSave.Write(game, world, data.Factions[data.PlayerFaction].Id, options.Seed);
-        var written = WritePlayerSquads(builder, world, data, loaded, options, clock, buildings);
+        var races = new Dictionary<string, RaceData?>(StringComparer.Ordinal);
+        var written = WritePlayerSquads(builder, world, data, loaded, options, clock, buildings, races);
         WriteSelection(game, world, written);
+        // The NPC platoons: the save's as they are now, and the population's own squads in the world as new platoons (docs/simulation.md "Saves").
         if (loaded is not null) WriteRoaming(game, world, loaded);
+        WriteSavedNpcs(builder, world, data, options, clock, buildings, races);
+        WriteFreshNpcs(builder, world, data, options, clock, buildings, races);
 
         game.UpdateDerived();
         return game;
@@ -171,12 +176,11 @@ public static class SaveCapture
     // ------------------------------------------------------------------ the player's platoons
 
     static Dictionary<CharacterId, SaveCharacter> WritePlayerSquads(SaveBuilder builder, World world, PopulationData data, LoadedSave? loaded, SaveCaptureOptions options, SaveClock clock,
-        IReadOnlyDictionary<string, FcsRecord> buildings)
+        IReadOnlyDictionary<string, FcsRecord> buildings, Dictionary<string, RaceData?> races)
     {
         var game = builder.Game;
         var table = world.Characters;
         var written = new Dictionary<CharacterId, SaveCharacter>();
-        var races = new Dictionary<string, RaceData?>(StringComparer.Ordinal);
         string playerFactionId = data.PlayerFaction >= 0 ? data.Factions[data.PlayerFaction].Id : "204-gamedata.base";
         string playerFactionName = data.PlayerFaction >= 0 ? data.Factions[data.PlayerFaction].Name : "Nameless";
         var playerState = game.Factions.FirstOrDefault(f => f.Id == playerFactionId);
@@ -188,6 +192,7 @@ public static class SaveCapture
 
         foreach (var squad in world.Squads.All)
         {
+            if (squad.PlatoonId >= 0) continue;   // a roaming or saved NPC platoon's squad (WriteSavedNpcs, WriteFreshNpcs)
             // A member of a loaded platoon is written whoever owns it (a prisoner or slave kept in the squad is not the player's but is in the file); only the
             // resident squads the population system made, which have no link, are left out by the player test.
             var alive = squad.Members.Where(m => table.IsAlive(m) && (table.Cold(m.Slot)!.IsPlayer || table.Cold(m.Slot)!.Save is not null)).ToList();
@@ -198,13 +203,8 @@ public static class SaveCapture
             var platoon = name is null ? null : game.Platoons.FirstOrDefault(p => p.Name == name);
             if (platoon is null)
             {
-                int n = playerState?.PlatoonCounter ?? 0;
-                string fresh;
-                while (game.Platoons.Any(p => p.Name == (fresh = $"{playerFactionName}_{n}"))) n++;
-                fresh = $"{playerFactionName}_{n}";
-                if (playerState is not null) playerState.PlatoonCounter = n + 1;
                 var at = table.Previous[alive[0].Slot].Position;
-                platoon = builder.AddPlatoon(fresh, playerFactionName, playerFactionId, squad.TemplateId, at);
+                platoon = builder.AddPlatoon(FreshName(game, playerState, playerFactionName), playerFactionName, playerFactionId, squad.TemplateId, at);
             }
             else
             {
@@ -215,59 +215,18 @@ public static class SaveCapture
             {
                 members++;
                 var cold = table.Cold(id.Slot)!;
-                ref readonly var hot = ref table.Previous[id.Slot];
                 SaveCharacter? sc = null;
                 if (cold.Save is { } link && link.PlatoonName == platoon.Name)
                 {
                     sc = platoon.Characters.FirstOrDefault(c => c.Handle.I == link.Slot);
                     seen.Add((link.PlatoonName, link.Slot));
                 }
-                bool isNew = sc is null;
-                sc ??= builder.AddCharacter(platoon, cold.RecordId, cold.Name, playerFactionId, hot.Position, SaveRotation.OfYaw(hot.Yaw),
-                    isLeader: squad.Leader == id, squadMemberType: cold.Role);
-                // The handle's own serial is "random" in the original, and the loader rolls a character's look from it: a character with a rolled look gets the look's seed
-                // as its serial, so loading a save without its items (one written before inventories were) rolls the same face, hair and clothes again.
-                if (isNew && cold.Appearance?.Loadout is { } loadout) sc.Handle = sc.Handle with { S = loadout.Seed };
-
-                // Where and which way.
-                sc.Position = hot.Position;
-                var link2 = cold.Save;
-                sc.Rotation = link2 is not null && MathF.Abs(SaveRotation.Difference(hot.Yaw, link2.Yaw)) < 1e-4f ? link2.Rotation : SaveRotation.OfYaw(hot.Yaw);
-                if (sc.GameState is { } g)
-                {
-                    g.Strings["name"] = cold.Name;
-                    g.Bools["is leader"] = squad.Leader == id;
-                    BountySave.Write(g, cold.Bounties, data.Relations, clock, world.Tick, world.TickSeconds);
-                    CrimeSave.Write(g, cold);
-                    Orders.Write(g, cold);
-                    HeldSave.Write(g, cold, cold.Save, world.Fixtures, buildings);
-                }
-
-                // Body: stats and medical state, from the host, else the loaded ones, else (for a new character) defaults.
-                var (stats, medical) = options.Bodies?.Invoke(id) ?? (null, null);
-                stats ??= cold.Stats ?? link2?.Stats;
-                medical ??= cold.Medical ?? link2?.Medical;
-                if (stats is null && isNew) stats = new CharacterStats();
-                if (stats is not null && sc.Stats is { } sr)
-                {
-                    stats.WriteSave(sr.Floats);
-                    SaveBuilder.FillLegacyStats(sr);
-                }
-                if (medical is null && isNew && RaceOf(cold.RecordId, data.Db, races) is { } race)
-                    medical = MedicalState.Create(race, stats?.Strength ?? 50);
-                if (medical is not null && sc.Medical is { } mr)
-                    medical.WriteSave(mr.Floats, mr.Bools, mr.Strings);
-                if (isNew) WriteAppearance(sc, cold, data.Db, races);
-                // What it carries and wears, as it is now; items read from a save keep their records' other keys.
-                if (cold.Inventory is { } inventory) builder.SetInventory(platoon, sc, SavedKit.FromInventory(inventory));
-                written[id] = sc;
+                written[id] = WriteCharacter(builder, world, data, options, clock, buildings, races, platoon, sc, id, playerFactionId, squad.Leader == id, orders: true);
             }
             // The platoon's `imprisoned` (meaning Observed): set while a member is in a cage, cleared when the save had it and none is.
             bool caged = alive.Any(m => table.Cold(m.Slot)!.IsImprisoned);
             if (caged || platoon.Record.Bools.ContainsKey("imprisoned")) platoon.Record.Bools["imprisoned"] = caged;
-            platoon.CharCount = platoon.Characters.Count;
-            if (platoon.Collection is { } c) c.Ints["char count"] = platoon.Characters.Count;
-            platoon.Record.Ints["char count"] = platoon.Characters.Count;
+            SetCharCount(platoon);
         }
 
         // Characters of a loaded platoon that the world had and now has no more (killed, left the squad): gone from the file.
@@ -282,6 +241,170 @@ public static class SaveCapture
         game.Camera.Squads = squads;
         game.Camera.Members = members;
         return written;
+    }
+
+    /// <summary>The next free <c>&lt;faction name&gt;_&lt;n&gt;</c> platoon name of a faction, counting its platoon counter on.</summary>
+    static string FreshName(SaveGame game, SaveFaction? faction, string factionName)
+    {
+        int n = faction?.PlatoonCounter ?? 0;
+        while (game.Platoons.Any(p => p.Name == $"{factionName}_{n}")) n++;
+        if (faction is not null) faction.PlatoonCounter = n + 1;
+        return $"{factionName}_{n}";
+    }
+
+    static void SetCharCount(SavePlatoon platoon)
+    {
+        platoon.CharCount = platoon.Characters.Count;
+        if (platoon.Collection is { } c) c.Ints["char count"] = platoon.Characters.Count;
+        platoon.Record.Ints["char count"] = platoon.Characters.Count;
+    }
+
+    /// <summary>
+    /// One character as it is in the world into its platoon file: its records (<paramref name="sc"/>), or new ones when null. Place and facing, name, leader flag,
+    /// bounties, crime marks, the player's orders (<paramref name="orders"/>, the player's squads), bed or cage; stats and medical state (from the host, else the
+    /// loaded ones, else defaults for a new one); a new one's look; what it carries.
+    /// </summary>
+    static SaveCharacter WriteCharacter(SaveBuilder builder, World world, PopulationData data, SaveCaptureOptions options, SaveClock clock, IReadOnlyDictionary<string, FcsRecord> buildings,
+        Dictionary<string, RaceData?> races, SavePlatoon platoon, SaveCharacter? sc, CharacterId id, string ownerFactionId, bool isLeader, bool orders)
+    {
+        var table = world.Characters;
+        var cold = table.Cold(id.Slot)!;
+        ref readonly var hot = ref table.Previous[id.Slot];
+        bool isNew = sc is null;
+        sc ??= builder.AddCharacter(platoon, cold.RecordId, cold.Name, ownerFactionId, hot.Position, SaveRotation.OfYaw(hot.Yaw), isLeader: isLeader, squadMemberType: cold.Role);
+        // The handle's own serial is "random" in the original, and the loader rolls a character's look from it: a character with a rolled look gets the look's seed
+        // as its serial, so loading a save without its items (one written before inventories were) rolls the same face, hair and clothes again.
+        if (isNew && cold.Appearance?.Loadout is { } loadout) sc.Handle = sc.Handle with { S = loadout.Seed };
+
+        // Where and which way.
+        sc.Position = hot.Position;
+        var link = cold.Save;
+        sc.Rotation = link is not null && MathF.Abs(SaveRotation.Difference(hot.Yaw, link.Yaw)) < 1e-4f ? link.Rotation : SaveRotation.OfYaw(hot.Yaw);
+        if (sc.GameState is { } g)
+        {
+            g.Strings["name"] = cold.Name;
+            g.Bools["is leader"] = isLeader;
+            BountySave.Write(g, cold.Bounties, data.Relations, clock, world.Tick, world.TickSeconds);
+            CrimeSave.Write(g, cold);
+            if (orders) Orders.Write(g, cold);
+            HeldSave.Write(g, cold, link, world.Fixtures, buildings);
+        }
+
+        // Body: stats and medical state, from the host, else the loaded ones, else (for a new character) defaults.
+        var (stats, medical) = options.Bodies?.Invoke(id) ?? (null, null);
+        stats ??= cold.Stats ?? link?.Stats;
+        medical ??= cold.Medical ?? link?.Medical;
+        WriteBody(sc, cold.RecordId, stats, medical, isNew, data, races);
+        if (isNew) WriteAppearance(sc, cold, data.Db, races);
+        // What it carries and wears, as it is now; items read from a save keep their records' other keys.
+        if (cold.Inventory is { } inventory) builder.SetInventory(platoon, sc, SavedKit.FromInventory(inventory));
+        return sc;
+    }
+
+    static void WriteBody(SaveCharacter sc, string recordId, CharacterStats? stats, MedicalState? medical, bool isNew, PopulationData data, Dictionary<string, RaceData?> races)
+    {
+        if (stats is null && isNew) stats = new CharacterStats();
+        if (stats is not null && sc.Stats is { } sr)
+        {
+            stats.WriteSave(sr.Floats);
+            SaveBuilder.FillLegacyStats(sr);
+        }
+        if (medical is null && isNew && RaceOf(recordId, data.Db, races) is { } race)
+            medical = MedicalState.Create(race, stats?.Strength ?? 50);
+        if (medical is not null && sc.Medical is { } mr)
+            medical.WriteSave(mr.Floats, mr.Bools, mr.Strings);
+    }
+
+    // ------------------------------------------------------------------ NPC platoons
+
+    /// <summary>
+    /// The save's NPC platoons (docs/simulation.md "Saves"): a stand-in that travelled gets its position and package; one whose characters were in the world gets
+    /// them as they are (in the world now) or were (when it left): place, facing, body, kit, bounties; a character whose body is gone leaves the file.
+    /// </summary>
+    static void WriteSavedNpcs(SaveBuilder builder, World world, PopulationData data, SaveCaptureOptions options, SaveClock clock, IReadOnlyDictionary<string, FcsRecord> buildings,
+        Dictionary<string, RaceData?> races)
+    {
+        if (world.Saved is not { } saved) return;
+        var game = builder.Game;
+        var table = world.Characters;
+        var byName = new Dictionary<string, SavePlatoon>(StringComparer.Ordinal);
+        foreach (var x in game.Platoons) byName.TryAdd(x.Name, x);
+        foreach (var sp in saved.Platoons)
+        {
+            if (!byName.TryGetValue(sp.Name, out var platoon)) continue;
+            if (!sp.Touched) continue;   // a stand-in that travelled is written by WriteRoaming
+            var p = sp.PlatoonId >= 0 ? world.Platoons.Find(sp.PlatoonId) : null;
+            var squad = p is { State: PlatoonState.Loaded } ? world.Squads.Find(p.SquadId) : null;
+            if (squad is not null && table.TryResolveNext(squad.Leader, out int leaderSlot)) platoon.Position = table.Previous[leaderSlot].Position;
+            if (p is not null) platoon.Money = (int)Math.Clamp(squad?.Money ?? p.Money, int.MinValue, int.MaxValue);
+            foreach (var m in sp.Members)
+            {
+                var sc = platoon.Characters.FirstOrDefault(c => c.Handle.I == m.Slot);
+                if (sc is null) continue;
+                if (m.Gone)
+                {
+                    builder.RemoveCharacter(platoon, sc);
+                    continue;
+                }
+                if (!m.Live.IsNone && table.IsAlive(m.Live))
+                    WriteCharacter(builder, world, data, options, clock, buildings, races, platoon, sc, m.Live, sc.OwnerFactionId, squad?.Leader == m.Live, orders: false);
+                else if (m.Position is { } at)
+                {
+                    // As it was when its platoon left the world.
+                    sc.Position = at;
+                    if (MathF.Abs(SaveRotation.Difference(m.Yaw, SaveRotation.YawOf(sc.Rotation))) >= 1e-4f) sc.Rotation = SaveRotation.OfYaw(m.Yaw);
+                    WriteBody(sc, sc.RecordId, m.Stats, m.Medical, false, data, races);
+                    if (sc.GameState is { } g) BountySave.Write(g, m.Bounties, data.Relations, clock, world.Tick, world.TickSeconds);
+                    if (m.Inventory is { } inventory) builder.SetInventory(platoon, sc, SavedKit.FromInventory(inventory));
+                }
+            }
+            SetCharCount(platoon);
+        }
+    }
+
+    /// <summary>
+    /// The NPC squads the population made (a town's residents and bar squads, and roaming squads while they are in the world) as new platoons, so a save keeps them
+    /// where they are: a new PLATOON with its <c>basetown</c>, <c>is resident</c> for a town's residents and the AI package running; its characters as new ones
+    /// (look, kit, body). Wild squads and roaming stand-ins (no characters) are not written: the population makes them again.
+    /// </summary>
+    static void WriteFreshNpcs(SaveBuilder builder, World world, PopulationData data, SaveCaptureOptions options, SaveClock clock, IReadOnlyDictionary<string, FcsRecord> buildings,
+        Dictionary<string, RaceData?> races)
+    {
+        var game = builder.Game;
+        var table = world.Characters;
+        var factions = new Dictionary<string, SaveFaction>(StringComparer.Ordinal);
+        foreach (var f in game.Factions) factions.TryAdd(f.Id, f);
+        foreach (var squad in world.Squads.All)
+        {
+            if (squad.Town < 0 || squad.Town >= data.Sites.Count || squad.Faction < 0 || squad.Faction >= data.Factions.Count || squad.Faction == data.PlayerFaction) continue;
+            Platoon? roamer = null;
+            if (squad.PlatoonId >= 0)
+            {
+                roamer = world.Platoons.Find(squad.PlatoonId);
+                if (roamer is null || roamer.Saved is not null) continue;   // a save's platoon (WriteSavedNpcs)
+            }
+            var alive = squad.Members.Where(m => table.IsAlive(m) && table.Cold(m.Slot) is { IsPlayer: false, DiedTick: < 0, Save: null }).ToList();
+            if (alive.Count == 0) continue;
+            var faction = data.Factions[squad.Faction];
+            factions.TryGetValue(faction.Id, out var state);
+            var site = data.Sites[squad.Town];
+            var leader = alive.Contains(squad.Leader) ? squad.Leader : alive[0];
+            var platoon = builder.AddPlatoon(FreshName(game, state, faction.Name), faction.Name, faction.Id, squad.TemplateId, table.Previous[leader.Slot].Position,
+                (int)Math.Clamp(squad.Money, int.MinValue, int.MaxValue));
+            var record = platoon.Record;
+            record.Strings["basetown"] = site.Town.Id;
+            int siteFaction = data.SiteFactions.Count > squad.Town ? data.SiteFactions[squad.Town] : -1;
+            record.Bools["is resident"] = roamer is null
+                && PopulationSystem.ResidentEntries(site.Town, siteFaction >= 0 ? data.Factions[siteFaction] : null).Any(e => e.Id == squad.TemplateId);
+            if ((roamer?.Package ?? squad.Ai?.Current?.Id) is { } package) record.Strings["currentPackage"] = package;
+            foreach (var id in alive)
+            {
+                int f = table.Cold(id.Slot)!.Faction;
+                string owner = f >= 0 && f < data.Factions.Count ? data.Factions[f].Id : faction.Id;
+                WriteCharacter(builder, world, data, options, clock, buildings, races, platoon, null, id, owner, id == leader, orders: false);
+            }
+            SetCharCount(platoon);
+        }
     }
 
     /// <summary>The registered buildings' locks and doors, and the homes a lock-up round locked, into their zones' existing state records (a building the save has no record of, or a new save without zones, is left out).</summary>

@@ -124,7 +124,7 @@ public class JailSaveTests
             first.Write(folder);
             var save = SaveGame.Load(folder);
             // The save holds them (a world without the state, below, holds none).
-            var states = save.Platoons.Single().Characters.Select(c => c.GameState!).ToList();
+            var states = save.Platoons.Single(p => p.FactionId == save.PlayerFaction!.Id).Characters.Select(c => c.GameState!).ToList();
             Assert.Equal(2, states[0].Ints[HeldSave.MeitouState]);
             Assert.Equal("house/0", states[0].Strings[HeldSave.MeitouWhat]);
             Assert.True(states[1].Bools[CrimeSave.EscapedKey]);
@@ -155,7 +155,7 @@ public class JailSaveTests
 
             // Captured again from the loaded world: the same keys, character by character and for the house.
             var second = SaveCapture.Capture(b.World, data, loaded.Clock, loaded, Options);
-            var again = second.Platoons.Single().Characters.Select(c => c.GameState!).ToList();
+            var again = second.Platoons.Single(p => p.FactionId == second.PlayerFaction!.Id).Characters.Select(c => c.GameState!).ToList();
             for (int k = 0; k < 2; k++)
                 Assert.Equal(Keys(states[k]).Where(e => e.Key.StartsWith("meitou ") || e.Key is "sentence" or "psts" or "bountyfac0" or "amount0"),
                     Keys(again[k]).Where(e => e.Key.StartsWith("meitou ") || e.Key is "sentence" or "psts" or "bountyfac0" or "amount0"));
@@ -169,8 +169,9 @@ public class JailSaveTests
         plain.World.Fixtures.RegisterSite(plain.World, data, 0);
         plain.World.RunTicks(2);
         var empty = Capture(plain.World, data);
-        Assert.Equal(squadP.Members.Count, empty.Platoons.Single().Characters.Count);
-        foreach (var c in empty.Platoons.Single().Characters)
+        var plainPlatoon = empty.Platoons.Single(p => p.FactionId == empty.PlayerFaction!.Id);   // the town's own squads are written too
+        Assert.Equal(squadP.Members.Count, plainPlatoon.Characters.Count);
+        foreach (var c in plainPlatoon.Characters)
             Assert.DoesNotContain(Keys(c.GameState!), e => CharacterKeys.Contains(e.Key));
         var plainHouse = HeldSave.BuildingStates(empty)["house"];
         Assert.False(plainHouse.Bools["locked0"]);

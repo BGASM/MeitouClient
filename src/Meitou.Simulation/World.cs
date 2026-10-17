@@ -109,6 +109,8 @@ public sealed partial class World : IDisposable
     public SquadRegistry Squads { get; } = new();
     /// <summary>Roaming squads that persist across the loading of zones (<see cref="PopulationSystem"/>).</summary>
     public PlatoonRegistry Platoons { get; } = new();
+    /// <summary>The NPC platoons of the save this world was loaded from, made when their zones load (null: a world that started new). Not hashed: the platoons carry what matters.</summary>
+    public Saving.SavedPopulation? Saved { get; set; }
     /// <summary>The player: faction, money, selection.</summary>
     public PlayerState Player { get; } = new();
     /// <summary>Doors, lockable containers, cages and beds of the registered towns, with their occupants (docs/simulation.md "Cages, beds and locks").</summary>

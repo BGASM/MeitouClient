@@ -399,8 +399,8 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
         };
     }
 
-    /// <summary>The AI runs a squad that is not the player's, not a roaming platoon's active half, and whose template lists AI packages.</summary>
-    bool Runs(World world, Squad squad) => squad.PlatoonId < 0 && !IsPlayers(world, squad) && TemplateOf(squad.TemplateId).Packages.Count > 0;
+    /// <summary>The AI runs a squad that is not the player's, not a roaming platoon's active half (a town's own saved squad, pinned, is run like the town's), and whose template lists AI packages.</summary>
+    bool Runs(World world, Squad squad) => (squad.PlatoonId < 0 || squad.Pinned) && !IsPlayers(world, squad) && TemplateOf(squad.TemplateId).Packages.Count > 0;
 
     bool IsPlayers(World world, Squad squad)
     {

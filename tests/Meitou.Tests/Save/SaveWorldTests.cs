@@ -119,7 +119,7 @@ public class SaveWorldTests
 
     // ------------------------------------------------------------------ the user's saves
 
-    /// <summary>A save of the original loaded on the install's own load order: each character in its saved look carrying its saved items; the towns' own platoons left to the population.</summary>
+    /// <summary>A save of the original loaded on the install's own load order: each character in its saved look carrying its saved items; the towns' own platoons kept town-bound, not roaming.</summary>
     [Theory, Trait("Category", "Slow")]
     [MemberData(nameof(SaveSamples.Names), MemberType = typeof(SaveSamples))]
     public void A_real_save_loads_its_characters_kit_and_look_and_leaves_the_towns_to_the_population(string folder)

@@ -507,7 +507,7 @@ handles and original saved/derived/regenerated state.
 F5/F9 and named save menus share mapping. Restore clock, player money/faction, relation/prosperity,
 player squads, character transforms/names/roles, stats/medical parts, appearance, inventories,
 bounties, bed/cage state and sentence, and registered buildings' locks and doors (into existing zone records only; a
-new save has none, [save.md](formats/save.md#locks-cages-and-sentences)) and selection; the host restores and writes every region's season, weather, strength and wind ([BIOMES](formats/save.md#biomes-type-28-quicksave-weather-per-region)). Town/roaming populations regenerate. Orders/paths, animation,
+new save has none, [save.md](formats/save.md#locks-cages-and-sentences)) and selection; the host restores and writes every region's season, weather, strength and wind ([BIOMES](formats/save.md#biomes-type-28-quicksave-weather-per-region)). NPC platoons whose `basetown` is a placed town load as their saved characters at their saved positions: town-bound ones (not travellers) are pinned to the town (no trips, AI-run, homed at the site) and the town's population counts them per template, so no duplicates spawn; travellers become roaming stand-ins made from the saved characters on activation. A platoon that unloads keeps its members' state. Meitou saves write them back and the population's own squads as new platoons ([save.md](formats/save.md#npc-platoons-meitou-mapping)). Wild and nest platoons stay in the file but are not restored. Orders/paths, animation,
 combat engagement, wound-list/pain, base-game building state, ground items, camera/speed are not
 fully restored. Loaded hashes need not match captured hashes: compare carried fields and agreement
 between repeated loads. QuickSaveTests checks carried fields and repeatable loading.
@@ -518,7 +518,7 @@ lock-up round locked (without the flag a loaded night's locks would never be und
 town NPC the population makes again with a new id, so a saved link would dangle): arrests (a downed target lies where it fell, is spotted again once awake, the saved markers make
 that quick), cagings (the carry link is not saved: order Put in Cage again), hunts and their rest timers, release, lock-up and warden rounds (the 30-tick sweep finds
 them again), the unreachable-cage memo (relearned by a failed walk), lock picking (an order), pending crimes
-(seconds long, victim id unsaveable). Spawn bounties are not saved: they are rolled when the population makes an NPC, never for a loaded character, and NPC populations regenerate.
+(seconds long, victim id unsaveable). Spawn bounties are not saved: they are rolled when the population makes an NPC, never for a loaded character.
 
 ## Sandbox
 

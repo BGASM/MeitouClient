@@ -64,9 +64,9 @@ public sealed class LoadedSave
     public HashSet<(string Platoon, int Slot)> SpawnedSlots { get; } = [];
     /// <summary>The relation table of the data right after loading (faction by faction, row by row): a value that still equals it was not changed in play, and the save keeps its own.</summary>
     public float[] RelationBaseline { get; set; } = [];
-    /// <summary>The roaming platoons made from the save's NPC platoons: the world's platoon id to the save's platoon name.</summary>
+    /// <summary>The travelling stand-ins made from the save's NPC platoons: the world's platoon id to the save's platoon name.</summary>
     public Dictionary<int, string> RoamingPlatoons { get; } = [];
-    /// <summary>NPC platoons of a placed town left in the save only because they stay in their town (residents, bar squads, slaves): the population makes the town's own again.</summary>
+    /// <summary>NPC platoons that stay in their placed town (residents, bar squads, slaves): pinned stand-ins, made when the town loads, and that many fewer of the town's own.</summary>
     public int TownBoundPlatoons { get; set; }
     /// <summary>The CAMERA <c>mods</c> entries the running load order lacks (the save was made with mods this game does not load).</summary>
     public List<string> MissingMods { get; } = [];

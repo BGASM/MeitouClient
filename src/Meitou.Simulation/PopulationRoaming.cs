@@ -26,7 +26,7 @@ public sealed partial class PopulationSystem
     readonly List<Platoon> platoonBuffer = [];   // StepRoaming's copy of the registry (a step may remove a platoon)
     readonly List<Vector2> playerPositions = [];
 
-    sealed record BuiltRoamer(int Platoon, BuiltSquad? Squad);
+    sealed record BuiltRoamer(int Platoon, BuiltSquad? Squad, List<(Saving.SavedMember Member, Saving.SavedParts Parts)>? Saved = null);
 
     static bool IsSettlement(TownType t) => t is TownType.Town or TownType.Village or TownType.Outpost or TownType.Military;
 
@@ -58,6 +58,7 @@ public sealed partial class PopulationSystem
     /// <summary>The unloaded half: moves a stand-in for the squad towards its target, with no physics (the original's <c>UnloadedPlatoon</c>).</summary>
     void StandIn(World world, Platoon p, float dt)
     {
+        if (p.Pinned) return;   // a town's own saved squad stays where it was
         if (p.WaitLeft > 0)
         {
             p.WaitLeft -= dt;
@@ -158,7 +159,12 @@ public sealed partial class PopulationSystem
         var squad = world.Squads.Find(p.SquadId);
         if (squad is null || squad.Members.Count == 0 || squad.Leader.IsNone)
         {
-            // Wiped out (or removed): the pool is free to make another.
+            // Wiped out (or removed): the pool is free to make another (a saved platoon's characters are marked, for the next save).
+            if (p.Saved is { } gone)
+            {
+                Saving.SavedCharacters.Store(world, gone, p.Position);
+                gone.PlatoonId = -1;
+            }
             if (squad is not null) world.Squads.Remove(squad.Id);
             world.Platoons.Remove(p.Id);
             return;
@@ -171,6 +177,7 @@ public sealed partial class PopulationSystem
         else if (p.UnloadAtTick < 0) p.UnloadAtTick = world.Tick + (long)Math.Ceiling(settings.RoamUnloadGraceSeconds / world.TickSeconds);
         else if (world.Tick >= p.UnloadAtTick)
         {
+            if (p.Saved is { } saved) Saving.SavedCharacters.Store(world, saved, p.Position);
             p.Money = squad.Money;
             foreach (var m in squad.Members) table.Remove(m);
             world.Squads.Remove(squad.Id);
@@ -179,6 +186,7 @@ public sealed partial class PopulationSystem
             p.UnloadAtTick = -1;
             return;
         }
+        if (p.Pinned) return;   // a town's own: its AI runs it, it has no trips
         // A leader in a fight is left to it: an order now would replace the fight's task (the trip goes on when it is over).
         if (table.Next[squad.Leader.Slot].Task == (byte)CharacterTask.Attack) return;
 
@@ -243,6 +251,13 @@ public sealed partial class PopulationSystem
         ulong seed = world.Seed;
         var position = p.Position;
         int id = p.Id;
+        // A save's platoon: its saved characters (their records read on the build thread, like a new squad's looks).
+        if (p.Saved is { } saved && world.Saved is { } context)
+        {
+            if (work is null) FinishRoamer(world, new BuiltRoamer(id, null, Saving.SavedCharacters.Prepare(saved, data, context.Appearances, context)));
+            else work.Add(() => builtRoamers.Enqueue(new BuiltRoamer(id, null, Saving.SavedCharacters.Prepare(saved, data, context.Appearances, context))));
+            return;
+        }
         if (work is null) FinishRoamer(world, new BuiltRoamer(id, BuildRoamer(p.TemplateId, p.Faction, p.Key, seed, position)));
         else
         {
@@ -273,9 +288,19 @@ public sealed partial class PopulationSystem
     {
         var p = world.Platoons.Find(b.Platoon);
         if (p is null || p.State != PlatoonState.Activating) return;
-        if (b.Squad is null) { world.Platoons.Remove(p.Id); return; }   // nobody to spawn: the pool is free to make another
         var site = data.Sites[p.Origin];
-        var squad = SpawnSquad(world, b.Squad, site, site.Town.SizeRadius * site.Town.TownRadiusMult, platoonId: p.Id);
+        float radius = site.Town.SizeRadius * site.Town.TownRadiusMult;
+        Squad? squad;
+        if (b.Saved is { } members && p.Saved is { } saved)
+            squad = Saving.SavedCharacters.Spawn(world, p, saved, members, data, assembly, new Vector2(site.Position.X, site.Position.Z), Math.Max(radius * 0.8f, 40));
+        else squad = b.Squad is null ? null : SpawnSquad(world, b.Squad, site, radius, platoonId: p.Id);
+        if (squad is null)
+        {
+            // Nobody to spawn: the pool is free to make another (a saved platoon whose members are all dead stays in the save as it is).
+            if (p.Saved is { } empty) empty.PlatoonId = -1;
+            world.Platoons.Remove(p.Id);
+            return;
+        }
         squad.Money = p.Money;
         p.State = PlatoonState.Loaded;
         p.SquadId = squad.Id;
@@ -297,7 +322,7 @@ public sealed partial class PopulationSystem
             if (factionIndex < 0) continue;
             int cap = (int)MathF.Floor(settings.RoamingShare * data.Factions[factionIndex].RoamingPopulation * settings.PopulationMultiplier);
             int members = 0;
-            foreach (var p in world.Platoons.All) if (p.Origin == site.Index) members += p.Size;
+            foreach (var p in world.Platoons.All) if (p.Origin == site.Index && !p.Pinned) members += p.Size;   // a town's own saved squads are not its roaming ones
             if (members >= cap) continue;
 
             var weights = new List<(RecordLink Entry, float Weight)>();
@@ -306,7 +331,7 @@ public sealed partial class PopulationSystem
             {
                 if (entry.V0 <= 0 || !SquadFactory.IsTemplate(data.Db.Find(entry.Id))) continue;
                 int existing = 0;
-                foreach (var p in world.Platoons.All) if (p.Origin == site.Index && p.TemplateId == entry.Id) existing++;
+                foreach (var p in world.Platoons.All) if (p.Origin == site.Index && !p.Pinned && p.TemplateId == entry.Id) existing++;
                 float w = MathF.Max(0, entry.V0 - existing);
                 if (w <= 0) continue;
                 weights.Add((entry, w));

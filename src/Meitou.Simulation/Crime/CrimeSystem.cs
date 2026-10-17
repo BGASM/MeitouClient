@@ -54,7 +54,7 @@ public sealed class CrimeSystem(FactionRelations relations, CrimeSettings? setti
     {
         if (c.IsPlayer || Factions.Bandit(c.Faction)) return false;
         if (c.NpcClass == FundamentalType.LawEnforcement) return true;
-        return c.NpcClass == FundamentalType.Military && c.SquadId >= 0 && world.Squads.Find(c.SquadId) is { Town: >= 0, PlatoonId: < 0 } squad && squad.Faction == c.Faction;
+        return c.NpcClass == FundamentalType.Military && c.SquadId >= 0 && world.Squads.Find(c.SquadId) is { TownOwn: true } squad && squad.Faction == c.Faction;
     }
 
     /// <summary>A faction regards another as friendly: the same, or allied (relation 50 or more), as the carry system reads the game's "regards as friendly".</summary>

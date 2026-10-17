@@ -26,6 +26,10 @@ public sealed class Squad
     public float HomeRadius { get; set; }
     /// <summary>The roaming platoon this loaded squad is the active half of (-1: a resident or other squad).</summary>
     public int PlatoonId { get; init; } = -1;
+    /// <summary>The active half of a pinned saved platoon (<see cref="Platoon.Pinned"/>): a town's own squad from a save, treated as the town's squads are (AI, guards).</summary>
+    public bool Pinned { get; init; }
+    /// <summary>One of its town's own squads: the town made it, or a save holds it as the town's.</summary>
+    public bool TownOwn => Town >= 0 && (PlatoonId < 0 || Pinned);
     public List<CharacterId> Members { get; } = [];
     /// <summary>The member the others follow (the role-2 leader, else the first member); <see cref="CharacterId.None"/> when none is alive.</summary>
     public CharacterId Leader { get; set; } = CharacterId.None;

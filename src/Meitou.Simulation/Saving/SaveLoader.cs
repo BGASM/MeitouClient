@@ -16,8 +16,8 @@ public sealed class SaveLoadOptions
     public bool ApplyRelations { get; init; } = true;
 
     /// <summary>
-    /// Make the save's other platoons (not the player's) roaming <see cref="Platoon"/> stand-ins in <see cref="World.Platoons"/>, at their saved positions, when they belong to a placed
-    /// town. Their characters are not made: the population system makes the members again from the template when a zone near them is active.
+    /// Make the save's other platoons (not the player's) <see cref="Platoon"/> stand-ins in <see cref="World.Platoons"/>, at their saved positions, when they belong to a placed
+    /// town: the population makes their saved characters when a zone near them is active (<see cref="SavedPlatoon"/>; town-bound ones are pinned to their town).
     /// </summary>
     public bool NpcPlatoons { get; init; } = true;
 
@@ -27,8 +27,8 @@ public sealed class SaveLoadOptions
 
 /// <summary>
 /// Loads a <see cref="SaveGame"/> into a <see cref="World"/> (docs/simulation.md "Saves"): the clock, the factions' state and relations, the player's money and
-/// platoons with their characters (positions, stats, medical state), the camera's selection, and the other platoons as roaming stand-ins. Everything else a save
-/// holds (towns, war state, weather, research, zone buildings, items, appearance sliders) stays in <see cref="LoadedSave.Source"/> for <see cref="SaveCapture"/> to carry on.
+/// platoons with their characters (positions, stats, medical state), the camera's selection, and the other platoons as stand-ins that make their saved characters when their zone loads. Everything else a save
+/// holds (towns, war state, weather (the host restores it), research, zone buildings, items, appearance sliders) stays in <see cref="LoadedSave.Source"/> for <see cref="SaveCapture"/> to carry on.
 /// Call it on a world that has not run a tick yet and holds no characters.
 /// </summary>
 public static class SaveLoader
@@ -73,13 +73,19 @@ public static class SaveLoader
         var parts = new Dictionary<string, BodyPartTemplate?>(StringComparer.Ordinal);
         var bySource = new Dictionary<SaveCharacter, CharacterId>();
         var assembly = new CharacterAssembly(data);
+        // The NPC platoons are made when their zones load; what that needs stays with the world (docs/simulation.md "Saves").
+        var context = new SavedPopulation
+        {
+            Handles = handles, InstanceOf = instanceOf, Appearances = options.Appearances, Clock = loaded.Clock, PlayerFaction = playerIndex,
+        };
+        world.Saved = context;
         foreach (var platoon in save.Platoons)
         {
             bool mine = playerFaction is not null && platoon.FactionId == playerFaction.Id;
             if (mine && platoon.IsLoaded)
-                LoadPlayerPlatoon(world, platoon, data, options, loaded, playerIndex, races, parts, bySource, assembly, handles, instanceOf);
+                LoadPlayerPlatoon(world, platoon, data, options, loaded, playerIndex, races, parts, bySource, assembly, context);
             else if (!mine && options.NpcPlatoons)
-                LoadRoamingPlatoon(world, platoon, data, loaded);
+                LoadNpcPlatoon(world, platoon, data, loaded, context);
         }
         if (loaded.PlayerPlatoons.Count > 0) world.Player.Squad = loaded.PlayerPlatoons[0].Squad.Id;
 
@@ -141,7 +147,7 @@ public static class SaveLoader
 
     static void LoadPlayerPlatoon(World world, SavePlatoon platoon, PopulationData data, SaveLoadOptions options, LoadedSave loaded,
         int playerIndex, Dictionary<string, RaceData?> races, Dictionary<string, BodyPartTemplate?> parts, Dictionary<SaveCharacter, CharacterId> bySource, CharacterAssembly assembly,
-        SaveHandles handles, IReadOnlyDictionary<Meitou.Data.Fcs.FcsRecord, string> instanceOf)
+        SavedPopulation context)
     {
         var squad = new Squad
         {
@@ -153,89 +159,20 @@ public static class SaveLoader
             HomeCentre = new Vector2(platoon.Position.X, platoon.Position.Z),
             HomeRadius = 100,
         };
-        var table = world.Characters;
         foreach (var sc in platoon.Characters)
         {
-            var record = data.Db.Find(sc.RecordId);
-            if (record is null)
-            {
-                loaded.Notes.Add($"{platoon.Name}: character {sc.Name} is made from {sc.RecordId}, which the game data does not have; left out.");
-                continue;
-            }
-            RaceData? race = RaceOf(sc, record, data.Db, races);
-            CharacterStats? stats = sc.Stats is null ? null : CharacterStats.ReadSave(sc.Stats.Floats);
-            MedicalState? medical = null;
-            if (race is not null && sc.Medical is not null)
-                medical = MedicalState.ReadSave(race, sc.Medical.Floats, sc.Medical.Bools, sc.Medical.Strings, id => PartOf(id, data.Db, parts));
-            if (medical is { Dead: true })
+            if (SavedCharacters.Read(sc, platoon.Name, data, options.Appearances, races, parts, loaded.Notes.Add) is not { } p) continue;
+            if (p.Medical is { Dead: true })
             {
                 loaded.Notes.Add($"{platoon.Name}: {sc.Name} is dead in the save; not made, and kept as it is when saving.");
                 continue;
             }
-
-            float yaw = SaveRotation.YawOf(sc.Rotation);
-            float athletics = stats?.Athletics ?? 20;
-            float speed = race is null ? 45 : medical is not null && stats is not null ? Speed.Run(race, stats, medical, 1) : Speed.RunUnhurt(race, athletics);
-            var hot = new CharacterHot
-            {
-                Position = sc.Position,
-                Yaw = yaw,
-                Health = 100,
-                Task = (byte)CharacterTask.Idle,
-                Mode = SpeedMode.Free,
-                MaxSpeed = speed,
-                WalkSpeed = race?.WalkSpeed ?? 15,
-            };
-            string ownerId = sc.OwnerFactionId;
-            int faction = ownerId.Length > 0 && data.FactionIndex(ownerId) is var fi and >= 0 ? fi : playerIndex;
-            var handle = sc.Handle;
-            // The kit: a character whose INVENTORY_STATE holds items gets them, and its look is its saved appearance wearing them. One with none (a Meitou save from before
-            // inventories were written) keeps the old rule: the look rolled from the handle's serial and the inventory a new character of the look would have.
-            var savedItems = sc.Inventory is { } invState && platoon.File is { } platoonFile ? SaveInventory.Read(platoonFile, invState) : [];
-            CharacterAppearance? look = null;
-            if (savedItems.Count > 0 && options.Appearances is { } source && SavedKit.LoadoutOf(sc.Appearance, savedItems, data.Db, handle.S & 0x7FFFFFFF) is { } kit)
-                look = source.Create(sc.RecordId, kit);
-            look ??= options.Appearances?.Create(sc.RecordId, ownerId.Length > 0 ? ownerId : null, handle.S & 0x7FFFFFFF);
-            var cold = new CharacterCold
-            {
-                Name = sc.Name.Length > 0 ? sc.Name : record.Name,
-                Faction = faction,
-                Appearance = look,
-                RecordId = sc.RecordId,
-                SquadId = squad.Id,
-                Role = sc.SquadMemberType,
-                IsPlayer = faction == playerIndex,
-                Orders = faction == playerIndex ? Orders.PlayerDefaults : CharacterOrders.None,
-                FootprintRadius = race?.PathfindFootprintRadius ?? 0,
-                Save = new SavedCharacterLink
-                {
-                    Source = sc,
-                    PlatoonName = platoon.Name,
-                    Slot = handle.I,
-                    Rotation = sc.Rotation,
-                    Yaw = yaw,
-                    Stats = stats,
-                    Medical = medical,
-                },
-            };
-            // Bounties: the ledger keys of the character's state record (docs/simulation.md "Crimes and bounties").
-            cold.Bounties = BountySave.Read(sc.GameState, data.Relations, loaded.Clock, world.Tick, world.TickSeconds);
-            CrimeSave.Read(sc.GameState, cold);
-            if (cold.IsPlayer && sc.GameState is { } orders) Orders.Read(orders, cold);
-            // In a bed or a cage, and the sentence (docs/simulation.md "Cages, beds and locks"); the fixture binds when its town registers.
-            HeldSave.Read(sc.GameState, cold, handles, instanceOf);
-            cold.Save.InSomething = cold.InSomething;
-            cold.Save.InWhat = cold.InWhat;
-            // The body: the saved stats and medical state go to the body systems, the rest of the assembly (inventory, fighter) is made as for a new character.
-            if (race is not null && stats is not null && medical is not null)
-                assembly.AttachSaved(cold, race, stats, medical, record, savedItems.Count > 0 ? SavedKit.ToInventory(savedItems, data.Items, loaded.Notes) : null);
-            else if (race is not null)
-                loaded.Notes.Add($"{platoon.Name}: {cold.Name} has no stats or medical state that could be read; it has no body in the world.");
-            var id = table.Spawn(hot, cold, world.Tick);
+            var id = SavedCharacters.Make(world, p, platoon.Name, squad, playerIndex, playerIndex, true, sc.Position, SaveRotation.YawOf(sc.Rotation), CharacterTask.Idle, SpeedMode.Free,
+                data, assembly, context, null, loaded.Notes);
             squad.Members.Add(id);
             bySource[sc] = id;
             loaded.Characters.Add(id);
-            loaded.SpawnedSlots.Add((platoon.Name, handle.I));
+            loaded.SpawnedSlots.Add((platoon.Name, sc.Handle.I));
             if (sc.IsLeader && squad.Leader.IsNone) squad.Leader = id;
         }
         if (squad.Leader.IsNone && squad.Members.Count > 0) squad.Leader = squad.Members[0];
@@ -243,7 +180,11 @@ public static class SaveLoader
         loaded.PlayerPlatoons.Add(new LoadedPlatoon(platoon, squad));
     }
 
-    static void LoadRoamingPlatoon(World world, SavePlatoon platoon, PopulationData data, LoadedSave loaded)
+    /// <summary>
+    /// An NPC platoon of a placed town: a <see cref="Platoon"/> stand-in at its saved place carrying its saved characters (<see cref="SavedPlatoon"/>), made when a zone
+    /// near it is active. Town-bound platoons (<see cref="Travels"/> false) are pinned to their town and count against its residents and bar squads; the others travel.
+    /// </summary>
+    static void LoadNpcPlatoon(World world, SavePlatoon platoon, PopulationData data, LoadedSave loaded, SavedPopulation context)
     {
         string baseTown = platoon.Record.Strings.GetValueOrDefault("basetown", "");
         int origin = -1;
@@ -258,28 +199,43 @@ public static class SaveLoader
         string? saved = platoon.Record.Strings.TryGetValue("currentPackage", out var current) && current.Length > 0 ? current : null;   // a string: the AI_PACKAGE id (docs/formats/save.md)
         var (package, job) = data.Db.Find(platoon.SquadTemplate) is { } templateRecord && SquadFactory.IsTemplate(templateRecord)
             ? Ai.PlatoonJobs.For(data.Ai, Meitou.Data.Gameplay.SquadTemplate.From(templateRecord), saved) : (null, Ai.PlatoonJob.None);
-        // Town-bound platoons are the town's own: its residents, bar squads, slaves and farm animals, which the population makes again when the town loads.
-        // A stand-in for them as well would double the town, so they stay in the save only (docs/simulation.md "Saves").
+        // Town-bound platoons are the town's own: its residents, bar squads, slaves and farm animals. They stay home, and the town makes that many fewer of its own.
         int siteFaction = data.SiteFactions.Count > origin ? data.SiteFactions[origin] : -1;
-        if (!Travels(platoon, job, data.Sites[origin].Town, siteFaction >= 0 ? data.Factions[siteFaction] : null))
+        bool travels = Travels(platoon, job, data.Sites[origin].Town, siteFaction >= 0 ? data.Factions[siteFaction] : null);
+        int faction = data.FactionIndex(platoon.FactionId);
+        // A platoon without characters (no file, or none in it) has nothing to make: a town's stays in the save as it is, a travelling one is a stand-in whose members the
+        // template makes, as for the population's own.
+        bool hasCharacters = platoon.IsLoaded && platoon.Characters.Count > 0;
+        if (!hasCharacters && !travels) return;
+        SavedPlatoon? sp = null;
+        if (hasCharacters)
         {
-            loaded.TownBoundPlatoons++;
-            return;
+            sp = new SavedPlatoon { Source = platoon, Pinned = !travels, Anchor = new Vector2(platoon.Position.X, platoon.Position.Z) };
+            foreach (var sc in platoon.Characters) sp.Members.Add(new SavedMember { Source = sc });
         }
         var p = new Platoon
         {
             Id = world.Platoons.NextId(),
             Origin = origin,
             TemplateId = platoon.SquadTemplate,
-            Faction = data.FactionIndex(platoon.FactionId),
+            Faction = faction >= 0 ? faction : siteFaction,
             Key = Rng.Mix(Rng.StableHash(platoon.Name)),
             Size = Math.Max(platoon.CharCount, platoon.Characters.Count),
             Position = new Vector2(platoon.Position.X, platoon.Position.Z),
+            Money = platoon.Money,
             State = PlatoonState.Unloaded,
             Package = package?.Id, Job = job,
+            Saved = sp,
         };
         world.Platoons.Add(p);
-        loaded.RoamingPlatoons[p.Id] = platoon.Name;
+        if (sp is not null)
+        {
+            sp.PlatoonId = p.Id;
+            context.Platoons.Add(sp);
+            context.ByName[sp.Name] = sp;
+        }
+        if (travels) loaded.RoamingPlatoons[p.Id] = platoon.Name;
+        else loaded.TownBoundPlatoons++;
     }
 
     /// <summary>
@@ -296,18 +252,4 @@ public static class SaveLoader
         return job is Ai.PlatoonJob.PatrolShortRange or Ai.PlatoonJob.TravelTarget or Ai.PlatoonJob.TravelTargetFast;
     }
 
-    static RaceData? RaceOf(SaveCharacter sc, GameRecord record, GameDatabase db, Dictionary<string, RaceData?> cache)
-    {
-        string? id = sc.Appearance is { } a && a.References.TryGetValue("race", out var list) && list.Count > 0 ? list[0].TargetStringId : null;
-        id ??= CharacterAssembly.RaceId(record);
-        return id is null ? null : CharacterAssembly.RaceDataOf(db, id, cache);
-    }
-
-    static BodyPartTemplate? PartOf(string id, GameDatabase db, Dictionary<string, BodyPartTemplate?> cache)
-    {
-        if (cache.TryGetValue(id, out var part)) return part;
-        part = db.Find(id) is { } rec ? BodyPartTemplate.From(rec) : null;
-        cache[id] = part;
-        return part;
-    }
 }
