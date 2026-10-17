@@ -316,7 +316,7 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
         var kinds = Shapes(r.Definition);
         // A whole body that starts in the ground (a foot on a slope: the animated pose is not clipped to the terrain) is lifted out of it as one, as the game snaps a new
         // ragdoll up to the terrain: the ground is a one-sided mesh, and a body that starts behind it has nothing to land on.
-        float lift = (mask & RagdollPart.Whole) != 0 && !had.Contains(true) ? OutOfGround(animated, dynamic) : 0;
+        float lift = (mask & RagdollPart.Whole) != 0 && !had.Contains(true) ? OutOfGround(environment, animated, dynamic) : 0;
         r.Tag = nextTag++;
         r.Bodies = new BodyHandle?[bodies.Length];
         r.Dynamic = dynamic;
@@ -342,7 +342,7 @@ public sealed class RagdollSystem : ITickSystem, IStateHashed, IRagdollState, IR
     }
 
     /// <summary>How far a new whole-body ragdoll must go up to have no body centre under the terrain (the lowest ends 0.25 above it); 0 when none is under it, or when it is more than <see cref="MaxLift"/> (a floor sunk into a hill, not a foot in a slope).</summary>
-    float OutOfGround(RigidTransform[] animated, bool[] dynamic)
+    internal static float OutOfGround(IRagdollEnvironment? environment, RigidTransform[] animated, bool[] dynamic)
     {
         if (environment is not { } env) return 0;
         float lift = 0;

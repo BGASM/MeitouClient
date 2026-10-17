@@ -192,7 +192,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     /// Whether a fighter is still closing in on its target: on a path to it (the pursuit system asks for one only while the target is out of reach) and more than
     /// <see cref="CombatTuning.StanceRange"/> away. It keeps the plain walk and run clips until it is near (engine choice, docs/game/combat.md "Combat stance").
     /// </summary>
-    bool Approaching(CharacterTable table, int slot, CharacterCold cold)
+    internal bool Approaching(CharacterTable table, int slot, CharacterCold cold)
     {
         if (!cold.InCombat || combat is null) return false;
         var next = table.Next;
