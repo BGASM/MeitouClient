@@ -359,6 +359,14 @@ or population); a failed start retries each run, up to 100 times; a gone target 
   assault, slave raid, loot food; speed mode 2, the base's 4), 32 Package_WarAssault_Cannibal; retreat packages use 1, 5 or 0 with
   `clears existing jobs`. Goals (**Observed**, data): pt1 leader 215 TRAVEL_TO_TARGET_PACKAGE, 143, 129 MAKE_ANNOUNCEMENT_FAST; pt1
   others 215, 15; pt2 16 (attack enemies), 15, 216, 270, 276 or 131; cannibal 216, 254, 270.
+  - Kidnapping (**Verified**, data query of the install's AI_PACKAGE records for task enum 254 "Find and kidnap (with cages) urgent"; 132 and 246 are in no
+    base package): the leader goal list of `Cannibal Raid Retreat` (the `retreat AI leader` of "BASE Basic Invasion", "slave raider silent", its
+    "non slave trade" copy and "BASE- standard cannibal raid"), `Cannibal raid assault town` (the pt2 leader of the cannibal raid), `Cannibals at home`, the squad
+    goals of `Cannibal patrol map (short range)` and `Assault and kidnap` (a DIALOGUE_LINE's `delivery AI package`). So raiders (bandit invasions, slave
+    raiders, cannibals) kidnap when their leader retreats from a raid, cannibals also on patrol and at home. The task (254, final state 153 got a
+    victim, then 154 put the carried one in a cage) needs a free squad member to lift a downed one and a cage of its faction;
+    what makes a target eligible is **Unknown** (the "innocent victim" flag of the status object, [carry-loot](carry-loot.md#unknowns)). Meitou builds none of it:
+    loaded campaign squads run no AI goals, nothing but guards and rescuers carries, and there is no prisoner state beyond jail ([arrest](../simulation.md#arrest-and-jail)).
   - Enemies: the base package, in a hostile campaign's phase 1, tags each seen target-faction character with squad memory 4 (TEMP_ENEMY,
     as DA 21); WarAssault tags every seen character except those of another town, with an engine flag (slot 0x248), or of factions with
     +0x1d0 or +0x34 == 8 set (meanings **Unknown**).
