@@ -43,7 +43,7 @@ public sealed partial class DialogueSystem
             case 18:
             {
                 var whom = subjectId == me ? other : subjectId;
-                return Num2(mc.SquadId >= 0 && met.TryGetValue((mc.SquadId, whom), out double at) ? world.GameHours - at : 0);
+                return Num2(mc.SquadId >= 0 && met.TryGetValue((mc.SquadId, whom), out double at) ? world.GameHours - at : world.GameHours);
             }
             case 17: return Bool(mc.SquadId >= 0 && world.Squads.Find(mc.SquadId)?.HomeBuilding is { } home && Position(world, subjectId) is { } inside && InBuilding(home, inside));
             case 19: return Bool(s.SquadId < 0 || world.Squads.Find(s.SquadId)?.Leader == subjectId);

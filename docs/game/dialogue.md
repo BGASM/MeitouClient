@@ -268,7 +268,7 @@ nearby player character (and stores it as the target). `B` = value > 0.
 | 14 IS_IMPRISONED | S is caged | Bool |
 | 16 TARGET_IN_TALKING_RANGE | same area as Me and within 260 | Bool |
 | 17 IN_MY_BUILDING | S is inside Me's building | Bool |
-| 18 TARGET_LAST_SEEN_X_HOURS_AGO | Me's squad memory of S, hours | Num2 |
+| 18 TARGET_LAST_SEEN_X_HOURS_AGO | Me's squad memory of S, hours; never seen: the hours since the game began (engine reading, **Observed** only that most event 3 and 67 lines need it large) | Num2 |
 | 19 IS_LEADER | S leads its squad | Bool |
 | 20 MET_TARGET_BEFORE | Me's squad remembers S | Bool |
 | 21 / 22 WEAKER / STRONGER_THAN_ME | a strength rating ×1.5 apart (rating **Unknown**) | Bool |
