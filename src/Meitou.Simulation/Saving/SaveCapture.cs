@@ -353,6 +353,12 @@ public static partial class SaveCapture
         foreach (var sp in saved.Platoons)
         {
             if (!byName.TryGetValue(sp.Name, out var platoon)) continue;
+            // Despawned off screen (the Faithful switch, or wiped out in an off-screen fight): the original deletes such a platoon's record.
+            if (sp.Despawned)
+            {
+                builder.RemovePlatoon(platoon);
+                continue;
+            }
             if (!sp.Touched) continue;   // a stand-in that travelled is written by WriteRoaming
             var p = sp.PlatoonId >= 0 ? world.Platoons.Find(sp.PlatoonId) : null;
             var squad = p is { State: PlatoonState.Loaded } ? world.Squads.Find(p.SquadId) : null;
@@ -449,12 +455,12 @@ public static partial class SaveCapture
             var members = alive.Select(id => (table.Cold(id.Slot)!, table.Previous[id.Slot].Position, table.Previous[id.Slot].Yaw, id, id == leader)).ToList();
             Write(squad.Town, squad.Faction, squad.TemplateId, squad.Money, roamer is { Pinned: false }, squad.HomeBuilding, roamer?.Package ?? squad.Ai?.Current?.Id, members);
         }
-        // A town's squads stored since their town unloaded.
+        // Squads stored since they left the world: a town's since its town unloaded, a roaming one (Meitou) since it first left.
         foreach (var p in world.Platoons.All)
         {
             if (p is not { State: PlatoonState.Unloaded, Stored: { Members.Count: > 0 } stored } || !Writable(p.Origin, p.Faction)) continue;
             var members = stored.Members.Select(m => (m.Cold, m.Position, m.Yaw, CharacterId.None, m.Leader)).ToList();
-            Write(p.Origin, p.Faction, p.TemplateId, p.Money, false, stored.HomeBuilding, stored.Package, members);
+            Write(p.Origin, p.Faction, p.TemplateId, p.Money, !stored.Pinned, stored.HomeBuilding, p.Package ?? stored.Package, members);
         }
     }
 

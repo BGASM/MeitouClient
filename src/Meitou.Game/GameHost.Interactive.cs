@@ -98,6 +98,11 @@ sealed partial class GameHost
                 UpscalerStatus = () => gpu.Post?.ActiveUpscaler ?? "Off",
                 AttackSlotsChanged = slots => { foreach (var combat in session.World.Systems.OfType<Meitou.Simulation.Combat.CombatSystem>()) combat.AttackSlots = slots; },
                 LateDefencesChanged = on => { foreach (var combat in session.World.Systems.OfType<Meitou.Simulation.Combat.CombatSystem>()) combat.LateDefences = on; },
+                OffscreenChanged = () =>
+                {
+                    foreach (var population in session.World.Systems.OfType<Meitou.Simulation.PopulationSystem>())
+                        (population.KeepRoamers, population.OffscreenFights, population.OffscreenHealing) = (config.KeepRoamers, config.OffscreenFights, config.OffscreenHealing);
+                },
             };
         if (panel is not null)
             foreach (var slider in panel.Sliders)

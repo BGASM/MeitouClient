@@ -51,6 +51,10 @@ public sealed class SavedPlatoon
     public List<SavedMember> Members { get; } = [];
     /// <summary>The platoon position the members' stored positions belong to: a stand-in that travelled since takes them along.</summary>
     public Vector2 Anchor { get; set; }
+    /// <summary>The tick its characters last left the world (-1: never in it).</summary>
+    public long StoredTick { get; set; } = -1;
+    /// <summary>Despawned off screen, as the original does with a platoon it does not keep (the Faithful <see cref="PopulationSystem.KeepRoamers"/>): a save leaves it out.</summary>
+    public bool Despawned { get; set; }
     /// <summary>Its characters were in the world at least once: a capture writes them.</summary>
     public bool Touched { get; set; }
     /// <summary>A wild platoon (docs/formats/save.md "Wild and nest platoons"): a nest's (<see cref="Nest"/> set) or a homeless one (a sector's); null for a town's.</summary>
@@ -359,5 +363,6 @@ internal static class SavedCharacters
             m.Live = CharacterId.None;
         }
         sp.Anchor = anchor;
+        sp.StoredTick = world.Tick;
     }
 }

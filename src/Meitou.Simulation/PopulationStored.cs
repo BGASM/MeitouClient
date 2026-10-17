@@ -33,6 +33,8 @@ public sealed partial class PopulationSystem
             }
             table.Remove(id);
         }
+        stored.Anchor = at;
+        stored.StoredTick = world.Tick;
         return at;
     }
 
@@ -73,7 +75,7 @@ public sealed partial class PopulationSystem
 
     /// <summary>
     /// The stored characters into the world as the squad of <paramref name="p"/> (serial phase), each where it stood, the leader wandering round the town and the rest
-    /// following it; the stored list is emptied (the characters are the world's again). Null when no one is left.
+    /// following it (a roaming one waits for its orders), moved along with a stand-in that travelled; the stored list is emptied (the characters are the world's again). Null when no one is left.
     /// </summary>
     Squad? SpawnStored(World world, Platoon p, StoredSquad stored)
     {
@@ -89,25 +91,36 @@ public sealed partial class PopulationSystem
             Faction = p.Faction,
             Town = p.Origin,
             PlatoonId = p.Id,
-            Pinned = true,
+            Pinned = stored.Pinned,
             Position = new Vector3(p.Position.X, world.Walkability.GroundHeight(p.Position.X, p.Position.Y), p.Position.Y),
             HomeCentre = new Vector2(site.Position.X, site.Position.Z),
             HomeRadius = Math.Max(radius * 0.8f, 40),
             HomeBuilding = stored.HomeBuilding,
             Shop = stored.Shop,
         };
+        // A stand-in that travelled since takes its members along, each on walkable ground (else at the stand-in).
+        var walk = world.Walkability;
+        var delta = p.Position - stored.Anchor;
+        bool moved = delta.LengthSquared() > 1;
         bool hasLeader = stored.Members.Any(m => m.Leader);
         foreach (var m in stored.Members)
         {
             var cold = m.Cold;
             bool leads = m.Leader || !hasLeader && squad.Members.Count == 0;
             cold.SquadId = squad.Id;
+            var at = m.Position;
+            if (moved)
+            {
+                float x = at.X + delta.X, z = at.Z + delta.Y;
+                if (!walk.IsWalkable(x, z)) (x, z) = (p.Position.X, p.Position.Y);
+                at = new Vector3(x, walk.GroundHeight(x, z), z);
+            }
             var hot = new CharacterHot
             {
-                Position = m.Position,
+                Position = at,
                 Yaw = m.Yaw,
                 Health = 100,
-                Task = (byte)(leads ? CharacterTask.Wander : CharacterTask.Follow),
+                Task = (byte)(leads ? (stored.Pinned ? CharacterTask.Wander : CharacterTask.Idle) : CharacterTask.Follow),
                 Mode = SpeedMode.Walk,
                 MaxSpeed = cold.Race is { } race && cold.Stats is { } stats && cold.Medical is { } medical ? Speed.Run(race, stats, medical, 1) : CharacterAssembly.StandInMaxSpeed,
                 WalkSpeed = cold.Race?.WalkSpeed ?? 15,

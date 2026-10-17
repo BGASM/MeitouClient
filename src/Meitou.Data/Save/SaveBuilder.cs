@@ -308,6 +308,13 @@ public sealed class SaveBuilder
         return c;
     }
 
+    /// <summary>Removes a platoon: its PLATOON record and its file (the original deletes the record of a platoon it destroys, docs/game/factions-squads-towns.md "Persistent platoons").</summary>
+    public void RemovePlatoon(SavePlatoon platoon)
+    {
+        Game.Quick.Records.Remove(platoon.Record);
+        Game.Platoons.Remove(platoon);
+    }
+
     /// <summary>
     /// Removes a character from its platoon: its instance, the six state records and everything its inventory holds (items and the inventories of containers
     /// inside it). The other characters keep their slots.

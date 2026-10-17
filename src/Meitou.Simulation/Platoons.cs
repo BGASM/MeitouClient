@@ -52,25 +52,35 @@ public sealed class Platoon
     public Vector2? Point { get; set; }
     /// <summary>The save's platoon this stand-in is (null: one the population made): its characters are made from the save, not from <see cref="Key"/>.</summary>
     public Saving.SavedPlatoon? Saved { get; init; }
-    /// <summary>A town's squad the population made, kept as its characters since its town unloaded (null: none): made of them again, never rolled anew.</summary>
-    public StoredSquad? Stored { get; init; }
+    /// <summary>
+    /// A squad the population made, kept as its characters while it is not in the world (null: none): a town's squad since its town unloaded, or (the Meitou
+    /// <see cref="PopulationSystem.KeepRoamers"/> switch) a roaming one since it first left. Made of them again, never rolled anew.
+    /// </summary>
+    public StoredSquad? Stored { get; set; }
     /// <summary>A platoon of its town's own (residents, bar squads, slaves; saved or stored): it never travels, its squad is run by the AI like the town's, and it is not in the roaming pool.</summary>
-    public bool Pinned => Saved?.Pinned == true || Stored is not null;
+    public bool Pinned => Saved?.Pinned == true || Stored?.Pinned == true;
     /// <summary>A save's wild platoon (a nest's or a homeless one, <see cref="Origin"/> -1): it never travels and counts against its wild site, not a town's pool.</summary>
     public bool Wild => Saved?.Wild is not null;
+    /// <summary>Game seconds it has been a stand-in with no reason to be kept (the Faithful <see cref="PopulationSystem.KeepRoamers"/>: the original's orphan timer).</summary>
+    public float OrphanSeconds { get; set; }
 }
 
 /// <summary>
-/// A town's squad the population made, kept while it is not in the world (docs/simulation.md "Population"): each member's own <see cref="CharacterCold"/> (name, look, body,
-/// kit, bounties) with where it stood, and the squad's home, shop and AI package. Its platoon is made of them again; a save writes them as the town's platoon.
+/// A squad the population made, kept while it is not in the world (docs/simulation.md "Population"): each member's own <see cref="CharacterCold"/> (name, look, body,
+/// kit, bounties) with where it stood, and the squad's home, shop and AI package. Its platoon is made of them again; a save writes them as the platoon.
 /// </summary>
 public sealed class StoredSquad
 {
     public required string Name { get; init; }
+    /// <summary>A town's own squad (else a roaming one, which travels).</summary>
+    public bool Pinned { get; init; } = true;
     public Meitou.Data.World.TownBuilding? HomeBuilding { get; init; }
     public Trading.Shop? Shop { get; set; }
     /// <summary>The AI package it ran (saved as <c>currentPackage</c>; null: none).</summary>
     public string? Package { get; set; }
+    /// <summary>The platoon position the members' places belong to (a stand-in that travelled since takes them along), and the tick they were stored at.</summary>
+    public Vector2 Anchor { get; set; }
+    public long StoredTick { get; set; }
     /// <summary>The characters while the platoon is not in the world (empty while it is).</summary>
     public List<StoredMember> Members { get; } = [];
 }
@@ -123,7 +133,10 @@ public sealed class PlatoonRegistry
                 // Only for stored squads, so worlds without them hash as before.
                 h.Add(stored.Members.Count);
                 foreach (var m in stored.Members) h.Add(m.Position);
+                h.Add(stored.Anchor);
+                h.Add(stored.Pinned);
             }
+            if (p.OrphanSeconds > 0) h.Add(p.OrphanSeconds);   // only while counting, so worlds without it hash as before
             if (p.Saved is { } saved)
             {
                 // Only for a save's platoons, so worlds without them hash as before.

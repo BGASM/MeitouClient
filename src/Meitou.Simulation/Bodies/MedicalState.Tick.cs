@@ -206,6 +206,40 @@ public sealed partial class MedicalState
         }
     }
 
+    /// <summary>
+    /// Catches up <paramref name="hours"/> game hours spent off screen in one step (Meitou; the original changes nothing off screen, docs/simulation.md "Off-screen tier"): the
+    /// squad is taken to have tended itself, so every wound is treated, clotted and healing at the part's heal rate; stun is gone, blood recovers at the resting rate and a
+    /// character whose vital parts and blood allow it wakes. Hunger, degeneration and death are not stepped. A dead character is left as it is.
+    /// </summary>
+    public void Recover(float hours, in MedicalContext ctx)
+    {
+        if (Dead || hours <= 0) return;
+        var c = ctx.Constants;
+        foreach (var p in Parts)
+        {
+            float m = MathF.Max(p.MaxHp, 0.01f);
+            p.Bandage = MathF.Max(p.Bandage, MathF.Max(m - p.Flesh, 0));
+            float rate = ctx.Race.HealRate * ctx.HealMult * (p.Limb == LimbState.Stump && !p.IsRobotic(ctx.Race) ? 2 : 1);
+            float heal = MathF.Min(p.Bandage, hours * 0.05f * c.HealRateMult * m / 100 * rate);
+            p.Bandage -= heal;
+            p.Flesh = MathF.Min(p.Flesh + heal, m);
+            Healed += heal;
+            p.Stun = 0;
+            p.Rig = 0;
+            p.HitMult = 1;
+        }
+        wounds.Clear();
+        Bleeding = 0;
+        Blood = MathF.Min(Capacity(ctx), Blood + c.BloodRecoveryRate * hours * ctx.Race.HealRate * c.RestingHealRateMult);
+        if (Blood > 25) BloodKo = false;
+        if (Unconscious && VitalPartsUp() && !BloodKo)
+        {
+            Unconscious = false;
+            KoTimer = 0;
+            starvationKo = false;
+        }
+    }
+
     void TickBlood(float dt, in MedicalContext ctx)
     {
         var c = ctx.Constants;

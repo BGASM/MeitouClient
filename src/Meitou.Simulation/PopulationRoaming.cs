@@ -55,6 +55,13 @@ public sealed partial class PopulationSystem
             switch (p.State)
             {
                 case PlatoonState.Unloaded:
+                    // Faithful: a stand-in with no reason to be kept is despawned after 60 s out of range (the original's orphan timer).
+                    if (!KeepRoamers && !p.Pinned && !Wanted(p))
+                    {
+                        p.OrphanSeconds += dt;
+                        if (p.OrphanSeconds > OrphanLimitSeconds) { Despawn(world, p); break; }
+                    }
+                    else p.OrphanSeconds = 0;
                     StandIn(world, p, dt);
                     if (p.State == PlatoonState.Unloaded && Wanted(p) && Ready(p)) Activate(world, p);
                     break;
@@ -63,7 +70,33 @@ public sealed partial class PopulationSystem
                     break;
             }
         }
-        if (world.Tick % settings.RoamCheckTicks == 0) FillPools(world);
+        if (world.Tick % settings.RoamCheckTicks == 0)
+        {
+            FillPools(world);
+            if (OffscreenFights) Fights(world);
+        }
+    }
+
+    /// <summary>The original's orphan timer: a platoon it does not keep is activated, and so despawned, after this many seconds unloaded.</summary>
+    const float OrphanLimitSeconds = 60;
+
+    /// <summary>
+    /// Takes a platoon out of the world for good (serial phase), as the original does with one it does not keep: its characters (if made) and its stand-in; a save's platoon
+    /// is marked so a save leaves it out.
+    /// </summary>
+    void Despawn(World world, Platoon p)
+    {
+        if (world.Squads.Find(p.SquadId) is { } squad)
+        {
+            foreach (var m in squad.Members) world.Characters.Remove(m);
+            world.Squads.Remove(squad.Id);
+        }
+        if (p.Saved is { } saved)
+        {
+            saved.Despawned = true;
+            saved.PlatoonId = -1;
+        }
+        world.Platoons.Remove(p.Id);
     }
 
     /// <summary>The unloaded half: moves a stand-in for the squad towards its target, with no physics (the original's <c>UnloadedPlatoon</c>).</summary>
@@ -189,8 +222,16 @@ public sealed partial class PopulationSystem
         else if (p.UnloadAtTick < 0) p.UnloadAtTick = world.Tick + (long)Math.Ceiling((p.Pinned ? settings.UnloadGraceSeconds : settings.RoamUnloadGraceSeconds) / world.TickSeconds);
         else if (world.Tick >= p.UnloadAtTick)
         {
+            // Faithful: a platoon the original does not keep (not a town's own) is despawned as it leaves.
+            if (!KeepRoamers && !p.Pinned)
+            {
+                Despawn(world, p);
+                return;
+            }
             if (p.Saved is { } saved) Saving.SavedCharacters.Store(world, saved, p.Position);
             p.Money = squad.Money;
+            // Meitou: a roaming squad the population made keeps its characters from now on.
+            if (p.Stored is null && p.Saved is null && !p.Pinned) p.Stored = new StoredSquad { Name = squad.Name, Pinned = false };
             if (p.Stored is { } stored)
             {
                 stored.Shop = squad.Shop;
@@ -269,7 +310,8 @@ public sealed partial class PopulationSystem
         ulong seed = world.Seed;
         var position = p.Position;
         int id = p.Id;
-        // A stored town squad: its own characters, at once (nothing to build).
+        if (OffscreenHealing) Recover(world, p);
+        // A stored squad: its own characters, at once (nothing to build).
         if (p.Stored is not null)
         {
             FinishRoamer(world, new BuiltRoamer(id, null));

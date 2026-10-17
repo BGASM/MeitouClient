@@ -191,6 +191,14 @@ public sealed class PopulationSettings
     public float StandInFarSpeed { get; init; } = 90;
     public float StandInFarDistance { get; init; } = 25000;
 
+    // ---- the off-screen tier's Faithful / Meitou switches (docs/simulation.md "Off-screen tier"; the live values are the population system's) ----
+    /// <summary>Meitou: a roaming squad keeps its characters off screen. Faithful: it is despawned on leaving, and a stand-in after 60 s, as the original.</summary>
+    public bool KeepRoamers { get; init; } = true;
+    /// <summary>Meitou: hostile stand-ins that meet fight it out by strength. Faithful: nothing happens off screen.</summary>
+    public bool OffscreenFights { get; init; } = true;
+    /// <summary>Meitou: a squad coming back catches up its healing for the time away. Faithful: it comes back as it left.</summary>
+    public bool OffscreenHealing { get; init; } = true;
+
     // ---- the wild: homeless squads and nests (6.2, 6.3) ----
     /// <summary>The new game's <i>Number of nests multiplier</i> (slider 0.5 to 4; its default is <b>Unknown</b>, 1 here).</summary>
     public float NestsMultiplier { get; init; } = 1;

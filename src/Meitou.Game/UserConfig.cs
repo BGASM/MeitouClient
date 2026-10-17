@@ -35,6 +35,11 @@ sealed class UserConfig
     public const int FaithfulAttackSlots = 1, MeitouAttackSlots = 3;
     /// <summary>A late but successfully rolled dodge or block still counts (Advanced settings; Faithful off, Meitou on): a balance change for fights against several enemies.</summary>
     public bool LateDefences { get; set; } = true;
+    /// <summary>The off-screen switches (Advanced settings; Faithful off, Meitou on; docs/simulation.md "Off-screen tier"): roaming squads keep their characters off screen,
+    /// hostile squads that meet off screen fight it out, a squad coming back has healed for the time away.</summary>
+    public bool KeepRoamers { get; set; } = true;
+    public bool OffscreenFights { get; set; } = true;
+    public bool OffscreenHealing { get; set; } = true;
     /// <summary>The Windows cursor instead of the game's drawn pointer (the original's <c>hardware_mouse</c>, default off; Interface settings).</summary>
     public bool HardwareMouse { get; set; }
     /// <summary>Outline and tint the character under the cursor (Advanced settings; Meitou only, the game has none).</summary>

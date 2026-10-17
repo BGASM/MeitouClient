@@ -56,11 +56,19 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         states = new SiteState[data.Sites.Count];
         for (int i = 0; i < states.Length; i++) states[i] = new SiteState();
         centres = [.. data.Sites.Select(s => s.Zone)];
+        KeepRoamers = this.settings.KeepRoamers;
+        OffscreenFights = this.settings.OffscreenFights;
+        OffscreenHealing = this.settings.OffscreenHealing;
         if (!this.settings.Background) return;
         work = [];
         worker = new Thread(() => { foreach (var job in work.GetConsumingEnumerable()) job(); }) { IsBackground = true, Name = "Meitou.Sim population" };
         worker.Start();
     }
+
+    /// <summary>The off-screen switches (<see cref="PopulationSettings.KeepRoamers"/> and the next two), changed live by the host.</summary>
+    public bool KeepRoamers { get; set; }
+    public bool OffscreenFights { get; set; }
+    public bool OffscreenHealing { get; set; }
 
     public PopulationData Data => data;
     public PopulationSettings Settings => settings;
