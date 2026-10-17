@@ -396,6 +396,7 @@ public sealed partial class LockSystem : IStateHashed
                 r.Time += dt;
                 if (r.Time < LockWorkSeconds) return true;
                 Apply(world, r, f, wc);
+                world.EmitSound(r.Kind is RoundKind.LockDoors or RoundKind.LockCages ? SoundKind.Locked : SoundKind.Unlocked, w, n.Position);
                 if (++r.Index >= r.Targets.Length) return End(world, r, fallback: false, done: true);
                 var nextTarget = world.Fixtures.Find(r.Targets[r.Index]);
                 if (nextTarget is null) return End(world, r, fallback: false, done: true);

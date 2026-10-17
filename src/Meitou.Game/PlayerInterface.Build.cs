@@ -334,7 +334,7 @@ sealed partial class PlayerInterface
     {
         if (!buildMode) return false;
         if (WallClick()) return true;
-        if (ghost is { Failure: not PlacementFailure.None } failed) Notice(PlacementCheck.Message(failed.Failure), error: true);
+        if (ghost is { Failure: not PlacementFailure.None } failed) { Sound("Building_Cant_Build_There"); Notice(PlacementCheck.Message(failed.Failure), error: true); }
         else QueueGhost();
         return true;
     }
@@ -345,18 +345,20 @@ sealed partial class PlayerInterface
         if (WallClick()) return;
         if (ghost is not { Failure: PlacementFailure.None } g) return;
         buildQueue.Add(new QueuedGhost(g.Building, g.Position, g.Rotation, 0, g.Hull));
+        Sound("Building_Place", "Building_Place", "Outdoors");   // Indoors for a ghost with a parent building: Unknown here, see docs/audio.md "Interface"
         ghostLift = 0;
     }
 
     void BuildUndo()
     {
         if (WallCancel()) return;
-        if (buildQueue.Count > 0) buildQueue.RemoveAt(buildQueue.Count - 1);
+        if (buildQueue.Count > 0) { Sound("Building_Undo"); buildQueue.RemoveAt(buildQueue.Count - 1); }
     }
 
     void BuildConfirm()
     {
         if (buildQueue.Count == 0) return;
+        Sound("Building_Confirm");
         Say(new PlaceBuildings([.. buildQueue.Select(q => new PlannedBuilding(q.Building.Id, q.Position, q.Rotation, q.Floor, null))]) { Tick = session.World.Tick });
         buildQueue.Clear();
     }

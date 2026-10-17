@@ -264,6 +264,7 @@ static partial class WorldApp
         SettingsPanel? panel = null;
         FrameProfiler? profiler = null;
         PassMeter? meter = null;
+        Meitou.Audio.AudioSystem? audio = null;
         bool statsVisible = false, fpsVisible = false;
         string fpsText = "";
         double fpsWindowMs = 0;
@@ -285,6 +286,12 @@ static partial class WorldApp
                 () => o.TimeSpeed, v => o.TimeSpeed = v, () => BorderlessFullScreen.IsOn(window), _ => BorderlessFullScreen.Toggle(window));
             profiler = new FrameProfiler(display.Context, () => display.Context.GpuFrameMs);
             meter = PassMeter.TryCreate(display);   // MEITOU_PASS_STATS=1: the frame cost breakdown, printed when the window closes
+            if (!o.NoAudio)
+            {
+                audio = Meitou.Audio.AudioSystem.TryCreate(install, Meitou.Audio.AudioSystem.AmbientVolumeSetting(install), out var audioError);
+                if (audio is not null) audio.Player.Gain = MathF.Pow(10, o.AudioGainDb / 20);
+                Console.WriteLine(audio is not null ? $"audio     {audio.DeviceName}, ambience and music from the Wwise banks{(o.AudioGainDb != 0 ? $", gain {o.AudioGainDb:+0.#;-0.#} dB" : "")} (--no-audio turns it off)" : $"audio     off: {audioError}");
+            }
             var input = window.CreateInput();
             keyboard = input.Keyboards.FirstOrDefault();
             foreach (var kb in input.Keyboards) kb.KeyDown += (_, key, _) => OnKey(key);
@@ -452,6 +459,7 @@ static partial class WorldApp
                 if (gpu.Post is { } hazy && (hazy.HeatHazeAmount > 0 || gpu.HeatHazeTarget > 0))
                     stats.Add($"heat haze   {hazy.HeatHazeAmount:0.00} (target {gpu.HeatHazeTarget:0.00}, weather {WorldStats.WeatherName(gpu)})" + (hazy.HeatHazeRuns ? "" : hazy.HasHeatHaze ? ", off" : ", no textures"));
                 WorldStats.AddWeather(stats, gpu);
+                if (audio is not null) stats.Add($"audio       {audio.StatsLine()}");
                 stats.Add($"camera      {t.X:0}, {t.Y:0}, {t.Z:0}, zone {WorldLayout.ZoneOf(t.X, t.Z)}");
                 stats.Add($"terrain     {gpu.Terrain.DrawnChunks} chunks, {gpu.Terrain.DrawnTriangles / 1000}k tris" + (gpu.Streamer is { Pending: > 0 } st ? $", loading {st.Pending}" : ""));
                 if (gpu.Objects is { } ob && render.Objects)
@@ -519,6 +527,7 @@ static partial class WorldApp
             string? takeFile = cinema.TakeFrame();
             if (gpu.Weather is { } clockWeather) clockWeather.Day = day;   // game speed 1, never paused: the viewer's time is the day and the hour set here
             Draw(gpu, scene, camera, render, size.X, size.Y, hour, (float)animSeconds / 600f, o.FogDistance);
+            if (audio is not null) UpdateAudio(audio, gpu, scene, camera, hour, frameDt);
             cpuMs += frameWatch.Elapsed.TotalMilliseconds;
             if (timing)
             {
@@ -590,7 +599,7 @@ static partial class WorldApp
                 Console.WriteLine($"saved {Path.GetFullPath(file)}");
             }
         };
-        window.Closing += () => { SpikeLog.PrintSummary(); if (meter is not null) { meter.Report(Console.Out); meter.Dispose(); } profiler?.Dispose(); overlay?.Dispose(); gpu?.Dispose(); };
+        window.Closing += () => { audio?.Dispose(); SpikeLog.PrintSummary(); if (meter is not null) { meter.Report(Console.Out); meter.Dispose(); } profiler?.Dispose(); overlay?.Dispose(); gpu?.Dispose(); };
         window.Run();
         return 0;
     }

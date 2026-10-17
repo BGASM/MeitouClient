@@ -76,7 +76,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
     public int Run()
     {
         try { return o.Screenshot is not null ? Screenshot() : Interactive(); }
-        finally { DisposeTitleScene(); session?.Dispose(); nav?.Dispose(); ragdollGeometry?.Dispose(); ownedScene?.Dispose(); }
+        finally { DisposeAudio(); DisposeTitleScene(); session?.Dispose(); nav?.Dispose(); ragdollGeometry?.Dispose(); ownedScene?.Dispose(); }
     }
 
     void Boot(VulkanDisplay display, bool interactive)

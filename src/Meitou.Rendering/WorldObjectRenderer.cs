@@ -661,6 +661,22 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// The indoor volume of a loaded building straight above or below the ground point (<paramref name="x"/>, <paramref name="z"/>), whatever the height: what a ray
+    /// cast down from far above hits (the game's interior ambience test, docs/audio.md "Interiors"). The highest one when several overlap; null when none.
+    /// </summary>
+    public InteriorVolume? InteriorUnder(float x, float z)
+    {
+        InteriorVolume? best = null;
+        foreach (var zone in streamer.AllZones)
+        {
+            if (zone.Interiors.Count == 0 || ObjectStreamer.ZoneDistance(zone.X0, zone.Z0, new Vector3(x, 0, z)) > 200) continue;
+            foreach (var v in zone.Interiors)
+                if ((best is null || v.YMax > best.YMax) && v.ContainsGround(x, z)) best = v;
+        }
+        return best;
+    }
+
     /// <summary>The loaded mask of a building or one of its layout objects (building id / item id).</summary>
     internal InteriorVolume? InteriorFor(string placementId)
     {

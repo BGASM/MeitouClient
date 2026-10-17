@@ -118,6 +118,10 @@ i.e. everything).
 
 ### Audio
 
+Floats 0..1, missing → 0.5, applied when the options close (FUN_1403e7290). Each becomes a Wwise game parameter × 100 (`User_Volume_Music`,
+`User_Volume_Ambient_SFX`, `Footstep_Volume`, `User_Volume_SFX`, `User_Volume_UI`, `User_Volume_VO`; also at start, FUN_140259620), turned
+into bus gains ([audio.md](../audio.md#volumes)). Meitou applies them at once from the Audio page of its settings menu, kept in `meitou.user.json` (first run: this file); the viewer reads `settings.cfg` once.
+
 | Key | Options label |
 | --- | --- |
 | `Music volume` | Music volume |

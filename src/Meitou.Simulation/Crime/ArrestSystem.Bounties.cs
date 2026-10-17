@@ -181,6 +181,7 @@ public sealed partial class ArrestSystem
         world.Player.Money += amount;
         entry.Claimed = true;
         world.Post($"Received c.{amount} reward.");
+        world.EmitSound(SoundKind.BountyPaid, carrier, table.Next[carrier].Position);
         Note(world, ArrestEventKind.Claimed, table.IdOf(carrier), captive, owner, amount);
         return amount;
     }

@@ -29,6 +29,7 @@ sealed partial class PlayerInterface
         var item = grid.Items.FirstOrDefault(i => i.Index == int.Parse(index, CultureInfo.InvariantCulture));
         if (item is null || !InventoryCommands.IsMovableSection(item.Section)) return false;
         inventoryDrag = (lead.Id, item, Grab());
+        Sound("Item_Lift", item: item.Record);
         return true;
     }
 

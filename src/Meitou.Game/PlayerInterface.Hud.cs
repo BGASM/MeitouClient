@@ -87,7 +87,7 @@ sealed partial class PlayerInterface
     /// <summary>The HUD, the selection rings and the drag box, over the finished picture.</summary>
     public void Draw(DebugOverlay o, int width, int height)
     {
-
+        PollUiSounds();
         Width = width;
         Height = height;
         var white = DebugOverlay.TextColour;

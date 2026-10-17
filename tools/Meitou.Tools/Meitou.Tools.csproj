@@ -9,6 +9,7 @@
     <ProjectReference Include="..\..\src\Meitou.Core\Meitou.Core.csproj" />
     <ProjectReference Include="..\..\src\Meitou.Data\Meitou.Data.csproj" />
     <ProjectReference Include="..\..\src\Meitou.Navigation\Meitou.Navigation.csproj" />
+    <ProjectReference Include="..\..\src\Meitou.Audio\Meitou.Audio.csproj" />
   </ItemGroup>
 
 </Project>

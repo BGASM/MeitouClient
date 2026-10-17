@@ -22,6 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Meitou.Audio\Meitou.Audio.csproj" />
     <ProjectReference Include="..\Meitou.Core\Meitou.Core.csproj" />
     <ProjectReference Include="..\Meitou.Data\Meitou.Data.csproj" />
     <ProjectReference Include="../Meitou.Ui/Meitou.Ui.csproj" />

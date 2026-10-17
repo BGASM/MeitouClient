@@ -447,6 +447,7 @@ public sealed partial class CombatSystem : IProjectileSource
             Passed = -1,
             Mesh = x.Data.LiveAmmoMesh,
         });
+        Sound(world, SoundKind.Shot, a, -1, prev[a].Position);
     }
 
     // ------------------------------------------------------------------ schedule: the flight
@@ -547,6 +548,7 @@ public sealed partial class CombatSystem : IProjectileSource
                         p.Position = at;
                         p.Stuck = true;
                         projectiles[k] = p;
+                        Sound(world, SoundKind.BoltStuck, -1, p.Shooter, at);
                         stuck++;
                     }
                     break;
@@ -619,6 +621,7 @@ public sealed partial class CombatSystem : IProjectileSource
         var cover = new BoltCover(world.Seed, Rng.Key(table.IdOf(v)), p.Id);
         var (part, damage, absorbed) = HitResolver.LandDetailed(dc.Medical, ctx, packet, armour, cover, toughness, false, true, combat, events);
         FloatHit(world, v, dc, p.ShooterIsPlayer, part, damage, absorbed);
+        Sound(world, SoundKind.BoltHit, v, p.Shooter, prev[v].Position, armoured: absorbed.Cut + absorbed.Blunt + absorbed.Pierce > 0, robot: false);
 
         D.Taken++;
         D.HitTick = now;
@@ -642,6 +645,7 @@ public sealed partial class CombatSystem : IProjectileSource
             D.AttackTech = -1;
             D.NextBlow = 0;
             D.ReactTech = -1;
+            Sound(world, SoundKind.Down, v, p.Shooter, prev[v].Position, fatal: death);
         }
         // Only a heavy bolt staggers (engine choice: the original's reaction to a bolt was not traced).
         else if (damage.Cut + damage.Blunt + damage.Pierce + damage.ExtraStun > DamageFormulas.StumbleThreshold(toughness, combat))

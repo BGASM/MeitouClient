@@ -41,7 +41,11 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
 
     // ---- commands ----
 
-    void Say(SimCommand command) => session.World.Commands.Enqueue(command);
+    void Say(SimCommand command)
+    {
+        SoundForCommand(command);
+        session.World.Commands.Enqueue(command);
+    }
 
     public void Select(IReadOnlyList<CharacterId> ids, bool additive) =>
         Say(new SelectCommand(ids, additive) { Tick = session.World.Tick });

@@ -84,7 +84,7 @@ holding files to matching base resource group, default General. Skip `leveldata`
 | 256 `.raw`, 1 `fullmap.tif` | [Terrain](terrain.md); legacy257² uint16/4097² world; current16385², height=raw*9800/65535 |
 | 3 `.dat` | [Features](zones.md), [fogfeatures](fogfeatures.md), [blendinfo](terrain.md) |
 | 1158 `.xml` (1125 collisions), 862 `.bin` | [Collision](collision.md), [MyGUI](mygui.md) |
-| 53 `.layout`, 93 `.pu`, 24 `.bnk` | [MyGUI](mygui.md), [particles](particle-universe.md); Wwise banks unknown |
+| 53 `.layout`, 93 `.pu`, 24 `.bnk` | [MyGUI](mygui.md), [particles](particle-universe.md), [Wwise banks](wwise-bnk.md) (**Verified** v112 hierarchy; Vorbis decoded) |
 | ~200 `.phs`/`.bod2`/`.body`/`.PxProj` | [PHS](phs.md), [bodies](../characters.md); `.PxProj` are Max projects, not loaded |
 
 ## World data (Observed, folder names only)

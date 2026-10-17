@@ -14,6 +14,34 @@ namespace Meitou.Data.World;
 /// <param name="Footprint">Convex polygon of the hull in world X/Z, counter-clockwise.</param>
 public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, float YMin, float YMax)
 {
+    /// <summary>The building's <c>interior ambience</c> (enum <c>InteriorSound</c>: 0 None, 1 Metal, 2 Stone, 3 Wicker, 4 Wood).</summary>
+    public int Ambience { get; init; }
+
+    /// <summary>The building's <c>interior integrity</c> (0..100): the <c>Building_Integrity</c> game parameter while inside.</summary>
+    public float Integrity { get; init; } = 100;
+
+    /// <summary>The building's <c>cavernous</c> flag: <c>Enter_Building_Big</c> (the big reverb) instead of <c>Enter_Building</c>.</summary>
+    public bool Cavernous { get; init; }
+
+    /// <summary>
+    /// Whether the volume is straight below or above the ground point (<paramref name="x"/>, <paramref name="z"/>): its footprint contains it, whatever the height.
+    /// What a ray cast down from far above hits (the game's building test for the interior ambience).
+    /// </summary>
+    public bool ContainsGround(float x, float z)
+    {
+        if (Footprint.Length < 3) return false;
+        var q = new Vector2(x, z);
+        for (int i = 0; i < Footprint.Length; i++)
+        {
+            var a = Footprint[i];
+            var e = Footprint[(i + 1) % Footprint.Length] - a;
+            float len = e.Length();
+            if (len < 1e-4f) continue;
+            if ((e.X * (q.Y - a.Y) - e.Y * (q.X - a.X)) / len < 0) return false;
+        }
+        return true;
+    }
+
     /// <summary>Whether <paramref name="p"/> is inside the footprint and height range, both widened by <paramref name="margin"/>.</summary>
     public bool Contains(Vector3 p, float margin = 0)
     {
@@ -67,6 +95,9 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
         if (hull.Length < 3) return null;
         return new InteriorVolume(placementId, hull, yMin, yMax)
         {
+            Ambience = building.GetInt("interior ambience"),
+            Integrity = building.GetFloat("interior integrity", 100),
+            Cavernous = building.GetBool("cavernous"),
             floors = new Lazy<FloorSurfaces>(() => FloorSurfaces.For(db, building, placementId, position, rotation, node, collision)),
         };
     }

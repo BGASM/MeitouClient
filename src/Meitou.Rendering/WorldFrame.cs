@@ -108,6 +108,9 @@ sealed class WorldOptions
     public bool AutoWeather => Weather is null || Weather.Equals("auto", StringComparison.OrdinalIgnoreCase);
     /// <summary>The weather particle effects (docs/formats/particle-universe.md): <c>--no-particles</c> turns the pass off, <c>--particle-prewarm</c> is the seconds simulated before the first picture (null: each system's longest particle life).</summary>
     public bool NoParticles;
+    /// <summary><c>--no-audio</c>: no sound (docs/audio.md); <c>--audio-gain &lt;dB&gt;</c> raises or lowers the whole mix (0 = the game's levels).</summary>
+    public bool NoAudio;
+    public float AudioGainDb;
     public float? ParticlePrewarm;
     /// <summary><c>--particle-density x</c>: the Tab panel's "Particle density x" at start (0.1 to 1).</summary>
     public float ParticleDensity = 1;
@@ -211,7 +214,8 @@ sealed class WorldOptions
           --weather <name|auto>    auto (default): the weather scheduler (regions, seasons, wind) at the camera, from --day and --time; a WEATHER record's name forces that one (sky colour, fog, clouds, wind, heat haze, particles; "Default" is clear)
           --day <n>                the game day the weather schedule starts at (default 0)
           --clouds <0..1>          cloud density c (test override)
-          --no-particles           no weather particles   --particle-prewarm <s> seconds simulated before the first picture (default: the longest particle life; 0 starts empty)   --particle-density <x> the effects' emission rate x (0.1-1, the Tab slider)   --anisotropy <n> the most anisotropic filtering any texture gets (1-16, the Tab slider; 16 default)
+          --no-audio               no sound (the biome ambience and weather beds from the game's Wwise banks)   --audio-gain <dB> raise or lower the whole mix (0 = the game's levels)
+          --no-particles           no weather particles  --particle-prewarm <s> seconds simulated before the first picture (default: the longest particle life; 0 starts empty)   --particle-density <x> the effects' emission rate x (0.1-1, the Tab slider)   --anisotropy <n> the most anisotropic filtering any texture gets (1-16, the Tab slider; 16 default)
           --low-end                potato-PC settings: short draw distances, no shadows, reflections, AO or anti-aliasing, 0.83 render scale, sparse grass and particles (options after it override)
           --no-vsync               start with vsync off (uncapped; Tab slider)
           --grass-density <x>      grass blades x this (0.1-2, default 1; Tab slider)
@@ -331,6 +335,8 @@ sealed class WorldOptions
                 case "--weather": o.Weather = Next(); break;
                 case "--day": o.Day = int.Parse(Next(), CultureInfo.InvariantCulture); break;
                 case "--no-particles": o.NoParticles = true; break;
+                case "--no-audio": o.NoAudio = true; break;
+                case "--audio-gain": o.AudioGainDb = F(); break;
                 case "--particle-prewarm": o.ParticlePrewarm = Math.Max(F(), 0); break;
                 case "--particle-density": o.ParticleDensity = Math.Clamp(F(), 0.1f, 1); break;
                 case "--anisotropy": o.Anisotropy = (int)F(); break;

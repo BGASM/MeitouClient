@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 using Meitou.Content;
@@ -30,6 +30,7 @@ sealed partial class GameHost
         VulkanDisplay.RayTracing = o.WantsRayTracing;
         // The world's files are read on a worker from here on: while the window and the device are made, then behind the loading screen.
         var sceneRead = LoadScene is { } readScene ? Task.Run(readScene) : null;
+        BeginAudio();
         using var display = new VulkanDisplay(WindowOptions.Default with
         {
             Size = new Vector2D<int>(o.Width, o.Height),
@@ -62,6 +63,7 @@ sealed partial class GameHost
                 scene = ownedScene = loaded;
             }
             Boot(display, interactive: true);
+            AttachAudio();
             BeginWarm();
         }
         catch (LoadingCancelledException)
@@ -99,6 +101,7 @@ sealed partial class GameHost
                 AttackSlotsChanged = slots => { foreach (var combat in session.World.Systems.OfType<Meitou.Simulation.Combat.CombatSystem>()) combat.AttackSlots = slots; },
                 LateDefencesChanged = on => { foreach (var combat in session.World.Systems.OfType<Meitou.Simulation.Combat.CombatSystem>()) combat.LateDefences = on; },
                 DoorsCloseChanged = on => { foreach (var locks in session.World.Systems.OfType<Meitou.Simulation.Locks.LockSystem>()) locks.DoorsCloseBehind = on; },
+                AudioChanged = AudioSettingsChanged,
                 OffscreenChanged = () =>
                 {
                     foreach (var population in session.World.Systems.OfType<Meitou.Simulation.PopulationSystem>())
@@ -362,6 +365,7 @@ sealed partial class GameHost
             if (!cinemaHolds) EditorCamera();
             OpenPendingEditor();
             if (!cinemaHolds) ApplyTitleCamera();
+            UpdateAudio(dt);
             if (TitleVisible && !warming) titleBattle?.Advance(frameDt);
             if (skyArrival is not null)
             {
@@ -472,6 +476,9 @@ sealed partial class GameHost
                 stats.Add($"simulation  {ticks / statsTimer:0} ticks/s, {session.CurrentSnapshot.Characters.Count} characters, dropped {session.Simulation.DroppedTicks} ticks in all");
                 WorldStats.Add(stats, display.Context, gpu, render, camera.Eye);
                 stats.Add($"ui          {(interfaceHidden ? 0 : player.OpaqueUiCoverage):P0} of the screen under opaque controls");
+                if (audio is not null) stats.Add($"audio       {audio.StatsLine()}");
+                if (audio is not null) stats.Add($"world audio {WorldAudioStats()}");
+                if (audio is not null) stats.Add($"char audio  {CharacterAudioStats()}, {UiAudioStats()}");
                 statsTimer = gpuSum = 0;
                 statsFrames = gpuSamples = 0;
             }
@@ -491,6 +498,9 @@ sealed partial class GameHost
             }
             totalFrames++;
             if (g.QuitAfter is { } quitAfter && now >= quitAfter) { Console.WriteLine($"profile   {session.CurrentSnapshot.Characters.Count} characters in the snapshot, {session.CurrentSnapshot.Characters.Count(c => c.Appearance is not null)} drawable; per frame: simulation advance {advanceTotal / Math.Max(totalFrames, 1):0.000} ms ({session.Simulation.TotalTicks} ticks, {advanceTotal / Math.Max(session.Simulation.TotalTicks, 1):0.000} ms per tick), host draw-list fill {fillTotal / Math.Max(fillCalls, 1):0.000} ms, world draw cpu {drawTotal / Math.Max(totalFrames, 1):0.00} ms, {(gpu.Characters is { } chars ? chars.Statistics() : "no characters")}");
+                if (audio is not null) Console.WriteLine($"audio     {audio.StatsLine()}");
+                if (audio is not null) Console.WriteLine($"audio     world: {WorldAudioStats()}");
+                if (audio is not null) Console.WriteLine($"audio     characters: {CharacterAudioStats()}, {UiAudioStats()}");
                 if (menuFrames > 0) Console.WriteLine($"menu      {menuFrames} visible frames in {menuFrameSeconds:0.0} s: {menuFrames / menuFrameSeconds:0} fps, {menuSlowFrames} frames over 100 ms, longest {menuLongestFrame * 1000:0.0} ms");
                 Console.WriteLine($"smoke     {totalFrames} frames in {now:0.0} s: {totalFrames / now:0} fps on average, {session.Ticks.TotalTicks} control ticks, {session.Simulation.TotalTicks} simulation ticks, game time {session.Clock.TimeText}"); quit = true; }
             if (!display.VSync && fpsLimit > 0) Limit(frame, now, 1.0 / fpsLimit);

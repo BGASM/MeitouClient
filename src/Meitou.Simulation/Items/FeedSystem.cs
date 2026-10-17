@@ -47,6 +47,7 @@ public sealed class FeedSystem(ItemFactory items, FeedSettings? settings = null)
             }
             if (food is null || owner is null) continue;
             med.Feed(food.Nutrition);
+            world.EmitSound(SoundKind.Eat, i, state[i].Position);
             owner.RemoveOne(food);
         }
     }

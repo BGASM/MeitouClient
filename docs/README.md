@@ -30,6 +30,7 @@ diaries, asset dumps or decompiled output. Current choices: [DECISIONS](../DECIS
 - [render-water](render-water.md)
 - [renderer-native](renderer-native.md)
 - [simulation](simulation.md)
+- [audio](audio.md): what the game sends to Wwise, Meitou's player, ambience rules
 - [viewer](viewer.md)
 
 ## Format research
@@ -60,6 +61,7 @@ diaries, asset dumps or decompiled output. Current choices: [DECISIONS](../DECIS
 - [sky](formats/sky.md)
 - [terrain](formats/terrain.md)
 - [weather](formats/weather.md)
+- [wwise-bnk](formats/wwise-bnk.md): sound banks, HIRC v112, Wwise Vorbis to Ogg
 - [zones](formats/zones.md)
 
 ## Gameplay research

@@ -231,6 +231,7 @@ sealed partial class PlayerInterface
 
     void ExecuteUiAction(string action, string argument)
     {
+        SoundForAction(action, argument);
         if (action.StartsWith("speed:", StringComparison.Ordinal)) PressButton(int.Parse(action[6..], CultureInfo.InvariantCulture));
         else if (action is "inventory" or "stats")
         {

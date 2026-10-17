@@ -143,6 +143,42 @@ sealed class WorldObjects : IDisposable
 
     IEnumerable<BuildingPlacement> RuntimeIn(ZoneCoordinate zone) => runtimeByZone.TryGetValue(zone, out var list) ? list : [];
 
+    /// <summary>
+    /// The sound emitters of the level's buildings (docs/audio.md "Point emitters"): those whose record has <c>sounds</c>, that are not destroyed and whose state does not say
+    /// <c>is complete</c> is false (a state without the key counts as complete), and those of the furniture in the state's interior and exterior layouts (ovens, stoves).
+    /// Positioned as <see cref="Lay"/> places the building and its layout objects. Safe from a worker thread.
+    /// </summary>
+    public List<PlacedEmitter> Emitters()
+    {
+        var result = new List<PlacedEmitter>();
+        using var map = TerrainHeightmap.Open(Install);
+        foreach (var b in Levels.Buildings())
+        {
+            if (b.Position == Vector3.Zero || Database.Find(b.BuildingId) is not { } record) continue;
+            var state = b.StateId is not null && Levels.Zones.TryGetValue(b.Zone, out var zoneDb) ? zoneDb.Find(b.StateId) : null;
+            if (state is not null && state.GetBool("destroyed")) continue;
+            bool incomplete = state is not null && state.Bools.TryGetValue("is complete", out bool complete) && !complete;
+            bool sounds = !incomplete && record.GetReferences("sounds").Count > 0;
+            var layouts = new List<GameRecord>(2);
+            foreach (bool exterior in (ReadOnlySpan<bool>)[true, false])
+                if (state?.GetString(exterior ? "exterior layout name" : "interior layout name") is { Length: > 0 } layoutName && Layouts.Find(record, layoutName, exterior) is { } layout)
+                    layouts.Add(layout);
+            if (!sounds && layouts.Count == 0) continue;
+            float y = b.WorldY ?? map.HeightAt(b.Position.X, b.Position.Z) + b.Position.Y;
+            var position = new Vector3(b.Position.X, y, b.Position.Z);
+            string key = $"{b.Zone.X}.{b.Zone.Y}:{b.InstanceId}";
+            if (sounds && BuildingEmitters.For(Database, record, key, position, b.Rotation) is { } emitter) result.Add(emitter);
+            foreach (var layout in layouts)
+                foreach (var item in Layouts.Items(layout))
+                {
+                    if (item.Building.GetReferences("sounds").Count == 0) continue;
+                    var (at, rotation) = BuildingLayouts.Place(position, b.Rotation, item);
+                    if (BuildingEmitters.For(Database, item.Building, $"{key}/{item.InstanceId}", at, rotation) is { } furniture) result.Add(furniture);
+                }
+        }
+        return result;
+    }
+
     /// <summary>Lays out one zone's buildings and map features as the game builds them (docs/formats/zones.md).</summary>
     public ZoneObjects BuildZone(ZoneCoordinate zone)
     {
