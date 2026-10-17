@@ -125,6 +125,9 @@ public sealed class PopulationData
     Meitou.Data.Characters.SurgeonDialogues? surgeons;
     /// <summary>The plastic surgeons' editor lines and costs (<see cref="Meitou.Data.Characters.SurgeonDialogues"/>).</summary>
     public Meitou.Data.Characters.SurgeonDialogues Surgeons => LazyInitializer.EnsureInitialized(ref surgeons, () => new Meitou.Data.Characters.SurgeonDialogues(Db));
+    Meitou.Data.Gameplay.Dialogue.DialogueDatabase? dialogue;
+    /// <summary>The dialogue trees, packages and word swaps (docs/game/dialogue.md).</summary>
+    public Meitou.Data.Gameplay.Dialogue.DialogueDatabase Dialogue => LazyInitializer.EnsureInitialized(ref dialogue, () => new Meitou.Data.Gameplay.Dialogue.DialogueDatabase(Db));
 
     /// <param name="buildings">The towns' buildings by placement id (<see cref="TownBuildings.Build"/>), for the AI's homes; null: none.</param>
     public static PopulationData Create(GameDatabase db, IEnumerable<TownPlacement> placements, IAppearanceSource? appearances = null, BodyOptions? bodyOptions = null, BiomeMap? biomes = null,

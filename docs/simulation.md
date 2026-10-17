@@ -58,7 +58,7 @@ factories/database/relations and lazy body/combat/item assembly. Research owns o
 
 `StandardSystems.Build` is the single wiring authority. Ordered systems:
 Population, Player, AI, Pursuit, Movement, FirstAid, Body, Carry, Construction, Combat, Animation, Ragdoll
-(only with `StandardSystemOptions.Ragdolls`), Feed, Retaliation, Aggro, Flee, Crime, Arrest, Locks, Trade (Arrest and
+(only with `StandardSystemOptions.Ragdolls`), Feed, Retaliation, Aggro, Flee, Crime, Arrest, Locks, Trade, Dialogue (Arrest and
 Locks come with the Crime part). Tests selecting subsets retain this relative order.
 Population spawns before later SlowWorld work; player selection precedes movement orders;
 AI writes tasks before movement; pursuit schedules paths before movement answers them.
@@ -587,6 +587,25 @@ ghost, commands), `Building/PlacementCheck.cs`, `Building/BuildMenu.cs` (categor
 quality, culture, market, forbidden/stolen factors follow [economy.md](game/economy.md).
 A squad shop holds one 20 x 20 stock grid (the `Shopkeepers Backpack` size); `ArrangeStock` arranges it. Shop state is hashed; open UI trade is not world state. Building shops/production/research remain
 incomplete. Transfers and money changes must succeed together.
+
+## Dialogue
+
+`DialogueSystem` (game facts: [dialogue](game/dialogue.md)). The context menu's Talk (for an NPC with event-1 dialogue) sends `TalkOrder`: the
+talker walks up (60 units, engine choice; 60 s to arrive), the NPC is held, then event 1 fires and the NPC's dialogue set (record, squad
+template, leader role; `DialogueDatabase`) is chosen from by score, line checks and a seeded pick. The NPC line is said (text, tokens and
+word swaps, effects at once); passing replies become choices, an NPC-side child a single `[...]`. The host opens `Kenshi_ConversationPanel`
+modal, which pauses the game; `DialogueChoice` and `EndConversation` apply between ticks at speed 0; effects that order fights are deferred
+to the next tick. A hostile target is attacked instead.
+
+- **Effects built**: locks, interrupts, `change relations`, trade, relations, the three attacks, take and give money, the surgeon's editor
+  (paid by the line, `EditCharacter.Paid`), assign and clear bounty, lock this dialogue. Recruiting posts that it is not built; the rest is
+  listed in [dialogue](game/dialogue.md#meitou-design).
+- **Conditions**: most DCs are computed; those needing state Meitou lacks (squad memory flags beyond "met", building locks, slavery, walls,
+  missions, the personality functions, tech level, ranks) compute "no". `met` and "last seen" come from finished conversations (per squad). IN_MY_BUILDING uses the squad's home building and the lock rounds' extent.
+- **Personality**: the save's `personality` when above 0, else an engine roll from the record's PERSONALITY tags (`Personality`).
+- **Engine choices**: a childless NPC line shows `[Leave]`; a reply leading to another reply offers it alone; number keys pick choices.
+- **State**: last use per line, permanent chance rolls, event counters, met memory, interrupts and the open conversation are hashed, not
+  saved (as the original). Locks are on `CharacterCold.DialogueLocks`, hashed while set, saved as `lok*` (`DialogueSave`).
 
 ## AI
 

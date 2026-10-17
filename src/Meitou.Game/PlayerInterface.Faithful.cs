@@ -42,6 +42,7 @@ sealed partial class PlayerInterface
         }
         if (key == Meitou.Engine.Input.Key.Tab && faithfulScreens.FocusNext(shift)) return true;
         if (key == Meitou.Engine.Input.Key.Enter && faithfulScreens.Submit()) return true;
+        if (DialogueKey(key)) return true;
         if (faithfulScreens.HasModal) return true;
         if (ReservedKeys.Contains(key)) return false;
         if (key is Meitou.Engine.Input.Key.I or Meitou.Engine.Input.Key.C) { ExecuteUiAction(key == Meitou.Engine.Input.Key.I ? "inventory" : "stats", ""); return true; }
@@ -76,6 +77,7 @@ sealed partial class PlayerInterface
         else if (e.Screen == "stats" && e.Action == "select") selectedStat = e.Text;
         else if (e.Screen == "stats" && e.Action.StartsWith("stat:", StringComparison.Ordinal)) selectedStat = e.Action[5..];
         else if (e.Screen == "build") BuildAction(e);
+        else if (e.Screen == "dialogue") DialogueAction(e);
         else if (e.Screen == "overview") MapAction(e.Widget);
         else if (e.Screen == "trader" && e.Widget == "ArrangeButton") Say(new Meitou.Simulation.Trading.ArrangeStock { Tick = session.World.Tick });
         else if (e.Screen is "inventory" or "bag")
@@ -94,6 +96,7 @@ sealed partial class PlayerInterface
         if (BindFrontend(id, b)) return b;
         if (id == "editor") { BindEditor(b); return b; }
         else if (id == "trader") BindTraderScreen(b);
+        else if (id == "dialogue") BindDialogueScreen(b);
         else if (id == "build") BindBuildScreen(b);
         else if (id is "inventory" or "stats" or "bag" or "limbs")
         {
@@ -168,6 +171,7 @@ sealed partial class PlayerInterface
         if (id == "stats") { AddStatsContent(controls); return; }
         if (id == "editor") { AddEditorContent(controls); return; }
         if (id == "build") { AddBuildContent(controls); return; }
+        if (id == "dialogue") { AddDialogueChoices(controls); return; }
         AddMapContent(id, controls);
         if (id == "trader") { ArrangeTraderWindow(controls); AddTraderContent(controls); return; }
         if (id is not ("inventory" or "bag" or "limbs") || Selected().FirstOrDefault() is not { ItemGrid: { } grid } lead) return;

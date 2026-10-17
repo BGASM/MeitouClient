@@ -75,6 +75,7 @@ public sealed partial class World : IDisposable
     IAnimationSource? animations;
     IProjectileSource? projectiles;
     Trading.ITradeSource? trades;
+    Dialogue.IDialogueSource? dialogues;
     Ragdolls.IRagdollSource? ragdolls;
 
     public World(WorldSettings settings, IWalkability walkability, IEnumerable<ITickSystem>? systems = null, CharacterTable? characters = null)
@@ -89,6 +90,7 @@ public sealed partial class World : IDisposable
         animations = this.systems.OfType<IAnimationSource>().FirstOrDefault();
         projectiles = this.systems.OfType<IProjectileSource>().FirstOrDefault();
         trades = this.systems.OfType<Trading.ITradeSource>().FirstOrDefault();
+        dialogues = this.systems.OfType<Dialogue.IDialogueSource>().FirstOrDefault();
         ragdolls = this.systems.OfType<Ragdolls.IRagdollSource>().FirstOrDefault();
         Characters = characters ?? new CharacterTable();
         Grid = new SpatialGrid(settings.GridCellSize);
@@ -163,8 +165,12 @@ public sealed partial class World : IDisposable
         animations ??= system as IAnimationSource;
         projectiles ??= system as IProjectileSource;
         trades ??= system as Trading.ITradeSource;
+        dialogues ??= system as Dialogue.IDialogueSource;
         ragdolls ??= system as Ragdolls.IRagdollSource;
     }
+
+    /// <summary>Whether the character answers the player's Talk (the dialogue system finds event-1 dialogue for it); the host asks between ticks.</summary>
+    public bool CanTalk(CharacterId id) => dialogues is not null && Characters.Phase == TablePhase.Outside && Characters.TryResolveNext(id, out int slot) && dialogues.CanTalk(this, slot);
 
     /// <summary>Runs one simulation tick.</summary>
     public void RunTick()

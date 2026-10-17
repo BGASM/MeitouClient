@@ -16,6 +16,8 @@ public sealed record EditCharacter(CharacterId Character, FcsRecord Appearance, 
 {
     /// <summary>The plastic surgeon doing the work (surgery only).</summary>
     public CharacterId Surgeon { get; init; } = CharacterId.None;
+    /// <summary>The surgery was paid already (a surgeon's dialogue line takes the money, DA_TAKE_MONEY, before it opens the editor).</summary>
+    public bool Paid { get; init; }
 }
 
 /// <summary>Ends the new game's character creation: the start's characters cannot be remade any more.</summary>
@@ -64,7 +66,8 @@ public static class CharacterEditing
                 world.Post("The surgeon is not here any more.");
                 return;
             }
-            if (SurgeryCost(world, data.Surgeons, edit.Surgeon, table.Cold(surgeon)!) is not { } cost) { world.Post("That is not a surgeon."); return; }
+            int? known = edit.Paid ? 0 : SurgeryCost(world, data.Surgeons, edit.Surgeon, table.Cold(surgeon)!);
+            if (known is not { } cost) { world.Post("That is not a surgeon."); return; }
             // The dialogue's gate is DC_PLAYERMONEY > cost (strict), then DA_TAKE_MONEY takes it.
             if (cost > 0 && world.Player.Money <= cost) { world.Post($"Surgery costs c.{cost}: not enough money."); return; }
             bool female = edit.Appearance.Bools.TryGetValue("sex female", out var f) && f;

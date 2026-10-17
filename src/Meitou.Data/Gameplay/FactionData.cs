@@ -203,6 +203,24 @@ public sealed class FactionRelations
         return (before, after);
     }
 
+    /// <summary>
+    /// Adds <paramref name="delta"/> to <paramref name="a"/>'s relation towards <paramref name="b"/>, clamped to [-100, 100] (dialogue's <c>change relations</c> and DA_AFFECT_RELATIONS,
+    /// docs/game/dialogue.md "Effects"); a change asked of the player's row goes to the other side's table, as in <see cref="Event"/>. Returns the value before and after.
+    /// </summary>
+    public (float Before, float After) Add(int a, int b, float delta)
+    {
+        if (a == PlayerFaction && a >= 0) (a, b) = (b, a);
+        float before = Get(a, b);
+        if (a == b || !Contains(a) || !Contains(b)) return (before, before);
+        float after = Math.Clamp(before + delta, -100, 100);
+        if (after != before)
+        {
+            relation[a * Count + b] = after;
+            Changes++;
+        }
+        return (before, after);
+    }
+
     /// <summary>Sets the relation of faction <paramref name="a"/> towards <paramref name="b"/> (a loaded save does this; trust and the other state live outside this table).</summary>
     public void Set(int a, int b, float value) => relation[a * Count + b] = value;
 

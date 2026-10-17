@@ -34,8 +34,10 @@ public enum StandardParts
     Ai = 32768,
     /// <summary>Player construction (<see cref="Meitou.Simulation.Construction.ConstructionSystem"/>): placing sites, building and dismantling them, the auto-job.</summary>
     Construction = 65536,
+    /// <summary>Talking to NPCs: the Talk order and the conversation (<see cref="Meitou.Simulation.Dialogue.DialogueSystem"/>).</summary>
+    Dialogue = 131072,
     /// <summary>What the game runs.</summary>
-    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee | Carry | Crime | Trade | Ai | Construction,
+    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee | Carry | Crime | Trade | Ai | Construction | Dialogue,
 }
 
 /// <summary>What <see cref="StandardSystems.Build"/> builds and with which settings; the defaults are the game's.</summary>
@@ -57,6 +59,7 @@ public sealed class StandardSystemOptions
     /// <summary>Null: the animation system's default; the game passes the CONSTANTS value.</summary>
     public float? AnimationBlendRate { get; init; }
     public FeedSettings? Feed { get; init; }
+    public Meitou.Simulation.Dialogue.DialogueSettings? Dialogue { get; init; }
     public Meitou.Simulation.FirstAid.FirstAidSettings? FirstAid { get; init; }
     public AggroSettings? Aggro { get; init; }
     public Meitou.Simulation.Carrying.CarrySettings? Carry { get; init; }
@@ -88,6 +91,7 @@ public sealed class StandardSystemSet
     public Meitou.Simulation.Ai.AiSystem? Ai { get; init; }
     public Meitou.Simulation.Construction.ConstructionSystem? Construction { get; init; }
     public Meitou.Simulation.Ragdolls.RagdollSystem? Ragdolls { get; init; }
+    public Meitou.Simulation.Dialogue.DialogueSystem? Dialogue { get; init; }
 }
 
 /// <summary>
@@ -192,6 +196,8 @@ public static class StandardSystems
             systems.Add(trade = new Meitou.Simulation.Trading.TradeSystem(data, o.Trade));
             trade.Crimes = crime;
         }
-        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime, Arrest = arrest, Locks = locks, Trade = trade, Ai = ai, Construction = construction, Ragdolls = ragdolls };
+        Meitou.Simulation.Dialogue.DialogueSystem? talk = null;
+        if (Has(StandardParts.Dialogue)) systems.Add(talk = new Meitou.Simulation.Dialogue.DialogueSystem(data, o.Dialogue));
+        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime, Arrest = arrest, Locks = locks, Trade = trade, Ai = ai, Construction = construction, Ragdolls = ragdolls, Dialogue = talk };
     }
 }

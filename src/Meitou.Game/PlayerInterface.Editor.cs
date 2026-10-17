@@ -17,8 +17,10 @@ namespace Meitou.Game;
 /// </summary>
 sealed partial class PlayerInterface
 {
-    sealed class EditorSession(EditKind kind, IReadOnlyList<CharacterId> characters, CharacterId surgeon)
+    sealed class EditorSession(EditKind kind, IReadOnlyList<CharacterId> characters, CharacterId surgeon, bool paid = false)
     {
+        /// <summary>A surgeon's dialogue took the money already (<see cref="EditCharacter.Paid"/>).</summary>
+        public bool Paid { get; } = paid;
         public EditKind Kind { get; } = kind;
         public IReadOnlyList<CharacterId> Characters { get; } = characters;
         public CharacterId Surgeon { get; } = surgeon;
@@ -50,12 +52,12 @@ sealed partial class PlayerInterface
     /// Opens the editor for <paramref name="characters"/> (the start's squad at creation; one character at a surgeon). Characters without a person's look (animals) are
     /// left out; nothing opens when none is left.
     /// </summary>
-    public bool OpenEditor(EditKind kind, IReadOnlyList<CharacterId> characters, CharacterId surgeon = default)
+    public bool OpenEditor(EditKind kind, IReadOnlyList<CharacterId> characters, CharacterId surgeon = default, bool paid = false)
     {
         if (EditorData is null) return false;
         var people = characters.Where(id => session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is { Appearance: { Animal: null } look } && RecordOf(look) is not null).ToList();
         if (people.Count == 0) return false;
-        editor = new EditorSession(kind, people, surgeon);
+        editor = new EditorSession(kind, people, surgeon, paid);
         previews.Clear();
         faithfulScreens.Open("editor");
         ShowEditorCharacter();
@@ -207,7 +209,7 @@ sealed partial class PlayerInterface
         long tick = session.World.Tick;
         foreach (var (id, draft) in s.Drafts)
             if (s.Kind == EditKind.Surgery || draft.Version > 0 || draft.Name != s.StartNames[id])
-                Say(new EditCharacter(id, CharacterDraft.Copy(draft.Record), draft.Name, s.Kind) { Tick = tick, Surgeon = s.Surgeon });
+                Say(new EditCharacter(id, CharacterDraft.Copy(draft.Record), draft.Name, s.Kind) { Tick = tick, Surgeon = s.Surgeon, Paid = s.Paid });
         if (s.Kind == EditKind.Creation) Say(new FinishCreation { Tick = tick });
         CloseEditor();
     }

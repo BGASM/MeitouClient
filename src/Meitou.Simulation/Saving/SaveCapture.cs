@@ -320,6 +320,7 @@ public static partial class SaveCapture
             g.Bools["is leader"] = isLeader;
             BountySave.Write(g, cold.Bounties, data.Relations, clock, world.Tick, world.TickSeconds);
             CrimeSave.Write(g, cold);
+            DialogueSave.Write(g, cold);
             if (orders) Orders.Write(g, cold);
             HeldSave.Write(g, cold, link, world.Fixtures, buildings);
         }

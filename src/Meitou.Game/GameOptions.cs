@@ -38,7 +38,7 @@ sealed class GameOptions
           --vsync / --no-vsync       vsync (default off)
           --seed <n>                 the world seed (default 0)
           --ui <faithful|meitou>      UI mode, independent of graphics; also available in Tab settings (default faithful)
-          --ui-showcase              with --screenshot: capture HUD, inventory, stats, map, menus and a trade with the nearest trader in either UI mode
+          --ui-showcase              with --screenshot: capture HUD, inventory, stats, map, menus, a trade with the nearest trader and a conversation in either UI mode
           --title-preview            with --screenshot: capture the staged Meitou title scene
           --no-population            no town residents or movement (an empty world)
           --new-game [start]         a new game as the NEW_GAME_STARTOFF start (default Wanderer): the player squad at its town, camera on it

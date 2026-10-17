@@ -3,7 +3,7 @@
 How the original picks, says and acts on dialogue. Sources: the FCS editor's enums (decompile, outside the repo), the install's
 `fcs.def` / `fcs_enums.def` / `data/gui/layout`, the kenshi_x64.exe decompile (functions cited), and a probe over the merged base
 load order (`gamedata.base`, `Newwworld.mod`, `Dialogue.mod`, `rebirth.mod`; 2026-10-17). Claims are **Observed** (decompile reading)
-unless marked. Engine design: [Meitou design](#meitou-design).
+unless marked. Engine: [Meitou design](#meitou-design).
 
 ## Data
 
@@ -375,22 +375,6 @@ lists, 58's field; the speech timer's unit.
 
 ## Meitou design
 
-**Proposed, not built.** Dialogue is world state in `Meitou.Simulation` (a `DialogueSystem`), read by the host through snapshots.
-
-- **Data**: `Meitou.Data` builds the trees once (shared nodes, score, condition/effect lists, word swaps, package sets per event) over
-  `GameRecord`, like the other typed views.
-- **State** (hashed): per character the lock map (saved as `lok*`), permanent-chance rolls and per-event counters (not saved, as the
-  original); per line the last-use time (global, not saved); conversations in progress (speaker, target, current line, interjectors,
-  timers). Rolls use `Rng.Hash` with a new dialogue salt.
-- **Player conversation**: a Talk order walks the selected character to the NPC (task 12 style) and fires event 1; the open
-  conversation (NPC line, choices, money) is in the snapshot. The window pauses like the original, so a choice joins the commands that
-  apply between ticks at speed 0 ([simulation](../simulation.md#time-model), like the open shop's): it says the next line and runs the
-  instant effects (money, relations, locks, recruit, trade, editor) at once; effects that hand out AI tasks (attack, go home, follow,
-  run away) are queued and start on the first tick after the window closes.
-- **Prerequisite**: DC 26 (the most used condition) needs a personality index per character, which Meitou does not roll yet (CHARACTER
-  `personality` → PERSONALITY `tags always*` / `common*` / `rare*` / `never*`, 233 references; the roll is **Unknown**). DC 23 needs the
-  squad memory flags (`CharacterPerceptionTags_LongTerm`).
-- **Ambient**: events fired by systems (perception, first aid, getting up, AI tasks 102/159/161) go through one `Fire(owner, target,
-  event)` entry point, run serially; the host draws bubbles from the snapshot.
-- **Effects** map onto existing orders and systems (trade, attack, money, relations, bounties, arrest, editor, AI contract, recruit).
-  The surgeon verb, Pay bail, and `ArrestSystem`'s fine/arrest stand-ins move onto dialogue once their effects run through it.
+As built: [simulation](../simulation.md#dialogue). Still planned: ambient conversations and speech bubbles (events other than 1, the AI
+tasks 102/159/161), crowd triggers, recruiting, AI contracts and `change AI`, campaigns, items given, the arrest and slavery effects, and
+moving the surgeon verb, Pay bail and `ArrestSystem`'s fine/arrest stand-ins onto dialogue.

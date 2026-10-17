@@ -132,6 +132,10 @@ public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> C
     public IReadOnlyList<ProjectileSnapshot> Projectiles { get; init; } = [];
     /// <summary>The open trade (null: none).</summary>
     public Trading.TradeView? Trade { get; init; }
+    /// <summary>The open player conversation (null: none).</summary>
+    public Dialogue.ConversationView? Conversation { get; init; }
+    /// <summary>The last thing a conversation asked the host to do (the host acts on each <see cref="Dialogue.DialogueRequest.Id"/> once).</summary>
+    public Dialogue.DialogueRequest? DialogueRequest { get; init; }
     /// <summary>What the player knows of each placed town (<see cref="PlayerState.Towns"/>).</summary>
     public IReadOnlyList<TownKnowledge> Towns { get; init; } = [];
     /// <summary>The camps and nests the player knows (<see cref="PlayerState.Camps"/>).</summary>

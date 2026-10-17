@@ -160,6 +160,13 @@ public sealed class CharacterCold
     /// <summary>Held still by an interaction (a trader in an open trade, <see cref="Trading.TradeSystem"/>): the AI leaves it alone. Serial phases only.</summary>
     public bool Engaged { get; set; }
     /// <summary>
+    /// The personality tag dialogue tests (DC_PERSONALITY_TAG, docs/game/dialogue.md "Line check"): the save's <c>personality</c> when it has one, else rolled from the record on first use
+    /// (<see cref="Dialogue.Personality"/>); 0 not yet known. Follows from the seed, the id and the record, so not hashed.
+    /// </summary>
+    public int Personality { get; set; }
+    /// <summary>The dialogues this character has locked or unlocked (DIALOGUE string id → locked; saved as <c>lok*</c>); null: none changed. <see cref="Dialogue.DialogueSystem"/>; hashed only while set.</summary>
+    public SortedDictionary<string, bool>? DialogueLocks { get; set; }
+    /// <summary>
     /// The original's <c>Character+0x2f8</c> (save key <c>in something</c>): in a bed or imprisoned in a cage or restraint, with <see cref="InWhat"/> the
     /// <see cref="Locks.Fixture.Id"/> it is in (null: not known, e.g. a loaded prisoner whose cage the world has not mapped). Set by <see cref="Locks.FixtureRegistry"/>, serial phases only.
     /// </summary>
@@ -396,6 +403,11 @@ public sealed class CharacterTable
             // The AI's decision and the trade hold add to the hash only while set, so worlds without AI packages hash as before.
             if (k.Ai is { } mind) { hasher.Add(0x41694D64); mind.Hash(ref hasher); }
             if (k.Engaged) hasher.Add(0x456E6761);
+            if (k.DialogueLocks is { Count: > 0 } locks)
+            {
+                hasher.Add(0x4C6F6B73);
+                foreach (var (dialogue, locked) in locks) { hasher.Add(Rng.StableHash(dialogue)); hasher.Add(locked); }
+            }
             // Beds, cages and sentences add to the hash only while set, so worlds without them hash as before.
             if (k.InSomething != Locks.HeldState.None) { hasher.Add(0x496E536D); hasher.Add((int)k.InSomething); hasher.Add(k.InWhat is { } w ? Rng.StableHash(w) : 0UL); }
             if (k.SentenceLength > 0) { hasher.Add(k.SentenceStart); hasher.Add(k.SentenceLength); }

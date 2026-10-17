@@ -7,7 +7,7 @@ public sealed partial class World
     {
         if (Characters.Phase != TablePhase.Outside) throw new InvalidOperationException("interface commands require a tick boundary");
         var due = Commands.TakeDue(Tick, c => c is SelectCommand or InspectCommand or Items.MoveInventoryItem or Items.ArrangeInventory
-            or Trading.BuyItem or Trading.SellItem or Trading.CloseTrade
+            or Trading.BuyItem or Trading.SellItem or Trading.CloseTrade or Dialogue.DialogueChoice or Dialogue.EndConversation
             or Construction.PlaceBuildings or Construction.CancelSite or Construction.PauseSite or Editing.EditCharacter or Editing.FinishCreation);
         if (due.Count == 0) return;
         Characters.BeginTick();
@@ -15,7 +15,7 @@ public sealed partial class World
         try
         {
             foreach (var system in systems)
-                if (system is PlayerSystem or Trading.TradeSystem or Construction.ConstructionSystem) system.Inputs(this, due);
+                if (system is PlayerSystem or Trading.TradeSystem or Construction.ConstructionSystem or Dialogue.DialogueSystem) system.Inputs(this, due);
         }
         finally
         {
@@ -23,6 +23,7 @@ public sealed partial class World
             Characters.EndTick();
         }
         foreach (var trade in systems.OfType<Trading.TradeSystem>()) trade.RefreshView(this);
+        foreach (var talk in systems.OfType<Dialogue.DialogueSystem>()) talk.RefreshView(this);
         if (Settings.PublishSnapshots)
         {
             var previous = PreviousSnapshot;

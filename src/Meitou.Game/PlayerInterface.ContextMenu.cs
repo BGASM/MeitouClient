@@ -9,7 +9,7 @@ namespace Meitou.Game;
 /// The context menu (the original's ContextMenuGUI, <c>Kenshi_ContextMenu</c>; docs/game/ui-input.md section 7): holding the command (right) button on a character for
 /// <see cref="ContextHoldSeconds"/> opens a menu of the orders the selection can give it, titled with its name; a quicker click gives the default order at once, as before.
 /// A left click on a verb gives it; any other click, or Esc, closes the menu. The verbs are the original's names for the orders Meitou has (attack, trade, first aid, pick up,
-/// put down, loot); the rest of its verb list (talk, follow, bodyguard...) waits for those systems.
+/// put down, loot); Talk opens a conversation (<see cref="Meitou.Simulation.Dialogue.DialogueSystem"/>); the rest of its verb list (follow, bodyguard...) waits for those systems.
 /// </summary>
 sealed partial class PlayerInterface
 {
@@ -39,6 +39,7 @@ sealed partial class PlayerInterface
             verbs.Add(($"Pay bail (c.{bail.ToString("N0", CultureInfo.InvariantCulture)})", () => Say(new Meitou.Simulation.Crime.PayBailOrder(id) { Tick = session.World.Tick })));
         if (!down && !target.IsPlayer)
         {
+            if (session.World.CanTalk(id)) verbs.Add(("Talk", () => Say(new Meitou.Simulation.Dialogue.TalkOrder(selection[0], id) { Tick = session.World.Tick })));
             if (target.IsTrader) verbs.Add(("Trade", () => Say(new Meitou.Simulation.Trading.OpenTrade(selection[0], id) { Tick = session.World.Tick })));
             // Meitou's stand-in for a plastic surgeon's dialogue line (DA_CHARACTER_EDITOR, docs/characters.md "Plastic surgeons"): the editor on the first selected character.
             if (target.SurgeryCost is { } cost) verbs.Add((cost > 0 ? $"Plastic Surgery (c.{cost.ToString("N0", CultureInfo.InvariantCulture)})" : "Plastic Surgery", () => AskSurgery(selection[0], target, cost)));
