@@ -12,7 +12,7 @@ public sealed partial class PopulationSystem
         Inputs(world, []);
         RefreshZones(world);
         foreach (var platoon in world.Platoons.All)
-            if (platoon.State == PlatoonState.Unloaded && active.Contains(WorldLayout.ZoneOf(platoon.Position.X, platoon.Position.Y)))
+            if (platoon.State == PlatoonState.Unloaded && Wanted(platoon))
                 Activate(world, platoon);
 
         foreach (var site in data.Sites)
@@ -21,6 +21,6 @@ public sealed partial class PopulationSystem
             if (wildByZone.TryGetValue(zone, out var sites))
                 foreach (int site in sites)
                     if (wildStates[site].Status != SiteStatus.Loaded) return false;
-        return !world.Platoons.All.Any(p => p.State == PlatoonState.Activating && active.Contains(WorldLayout.ZoneOf(p.Position.X, p.Position.Y)));
+        return !world.Platoons.All.Any(p => p.State == PlatoonState.Activating && Wanted(p));
     }
 }

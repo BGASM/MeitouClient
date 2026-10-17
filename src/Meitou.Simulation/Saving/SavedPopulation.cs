@@ -225,18 +225,26 @@ internal static class SavedCharacters
 
     /// <summary>
     /// The building of <paramref name="site"/> a saved platoon lives in: its <c>homebuilding</c> handle resolved to the zone's building state (<c>&lt;instance&gt;-S23</c>),
-    /// matched by zone and instance id (docs/formats/save.md "NPC platoons"). Null when the platoon names none or it is not one of the town's buildings.
+    /// matched by zone and instance id, or (a zone the save has no file of) to the building whose level-data state has that handle (docs/formats/save.md "NPC platoons").
+    /// Null when the platoon names none or it is not one of the town's buildings.
     /// </summary>
     public static Meitou.Data.World.TownBuilding? SavedHome(World world, SavedPlatoon sp, TownSite site)
     {
         if (world.Saved is not { } context || site.Buildings.Count == 0) return null;
         var h = Hand.Read(sp.Source.Record, "homebuilding");
-        if (h.IsNull || context.Handles.Building(h) is not { } state || !state.StringId.EndsWith("-S23", StringComparison.Ordinal)) return null;
-        string instance = state.StringId[..^4];
+        if (h.IsNull || h.Type != (int)FcsRecordType.BUILDING) return null;
         int c = h.C - 1;
         var zone = new Meitou.Data.World.ZoneCoordinate(c % Meitou.Data.World.WorldLayout.ZoneCount, c / Meitou.Data.World.WorldLayout.ZoneCount);
+        if (context.Handles.Building(h) is { } state)
+        {
+            if (!state.StringId.EndsWith("-S23", StringComparison.Ordinal)) return null;
+            string instance = state.StringId[..^4];
+            foreach (var b in site.Buildings)
+                if (b.Zone == zone && b.InstanceId == instance) return b;
+            return null;
+        }
         foreach (var b in site.Buildings)
-            if (b.Zone == zone && b.InstanceId == instance) return b;
+            if (b.Zone == zone && b.HandleSlot == h.I && b.HandleSerial == h.S) return b;
         return null;
     }
 

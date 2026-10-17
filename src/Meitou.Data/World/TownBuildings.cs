@@ -54,6 +54,12 @@ public sealed record TownBuilding(string InstanceId, string BuildingId, string N
     /// <summary>The names of the interior and exterior layouts its record can take (its own and those of <c>shares interiors with</c>), case ignored.</summary>
     public IReadOnlySet<string> InteriorLayouts { get; init; } = EmptyNames;
     public IReadOnlySet<string> ExteriorLayouts { get; init; } = EmptyNames;
+    /// <summary>
+    /// The slot (<c>I</c>) and serial (<c>S</c>) of the <c>handle</c> its level-data state carries (-1 / 0 when it has none). A save writes a base building's state with this
+    /// same handle (docs/formats/save.md "Object handles"), so a platoon can name a building whose zone was never saved.
+    /// </summary>
+    public int HandleSlot { get; init; } = -1;
+    public int HandleSerial { get; init; }
 
     static readonly IReadOnlySet<string> EmptyNames = new HashSet<string>();
 }
@@ -136,6 +142,8 @@ public static class TownBuildings
                 InteriorLayout = state?.GetString("interior layout name") ?? "",
                 InteriorLayouts = LayoutNames(layouts, record, exterior: false, names),
                 ExteriorLayouts = LayoutNames(layouts, record, exterior: true, names),
+                HandleSlot = state is not null && state.Ints.ContainsKey("handleI") && state.GetInt("handleTYPE") == (int)FcsRecordType.BUILDING ? state.GetInt("handleI") : -1,
+                HandleSerial = state?.GetInt("handleS") ?? 0,
             });
             fixtures = null;
         }

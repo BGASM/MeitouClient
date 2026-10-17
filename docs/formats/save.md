@@ -120,6 +120,12 @@ A queued request (kind at +0xA0 of the request object) is run on the next frame;
 | `I` | slot index of the object in its container | **Verified** within a zone: building `handleI` unique per file (0 duplicates in 1496) and always in that zone's slot list. Platoon members count 1, 2, 3... (**Verified**: the `I` values of the characters of each of the 56 files are exactly 1..n); the platoon's own handle has `I = 0`, `S = 0` (**Verified**, 56 of 56) |
 | `S` | the object's random **serial** | **Observed** (`FUN_1400d1c20`, catalogued earlier as `Handle_NewRandomSerial`): set at allocation to `int(rand01 * 4e9)`, hence the negative values seen; used to detect a stale handle |
 
+**Base buildings keep the level data's handle.** **Verified** (census of saves 2, wade, 1): every saved base-building state whose level-data
+GAMESTATE_BUILDING (the zone files of `leveldata`) has a `handle` carries exactly that handle (3345, 2994 and 178 of as many; the rest of the saved
+states are generated interiors and buildings without a level state), and every platoon `homebuilding` names one of them (339, 313, 20 and save 3's 22
+of as many equal the level handle). So a building of a zone the save never wrote is named by its level state's handle. A handle allocated in play is
+not predictable (**Verified** by code: `I` from a rotating free-slot cursor `FUN_1400cd210`, `S` from `rand()` before the zone's `srand`).
+
 ### CAMERA (type 56, id 1051): the world record
 
 | Fields | Meaning |
@@ -193,18 +199,26 @@ one changed in the character editor (its keys replaced by the edited copy's, so 
 ### NPC platoons (Meitou mapping)
 
 Every saved NPC platoon with a `basetown` naming a placed town is restored (a characterless town-bound one is skipped); town-bound ones (template does not travel) are pinned to their town and replace
-that many of its resident squads of the same template; a town holding any rolls no bar squads. Wild and nest platoons: [below](#wild-and-nest-platoons-meitou-mapping). On save, a restored platoon is rewritten
+that many of its resident squads of the same template; a town holding any rolls no bar squads; it is made with its town (when the town's zone is active, as the
+town's fresh squads are). On save, a restored platoon is rewritten
 only once loaded (its characters from the world), otherwise only its position/package; a squad the population made is written as a new PLATOON with the
-`SaveBuilder` key set plus `basetown` (town id), `is resident` (false for a travelling template) and `currentPackage`. **Observed** (headless load of saves 1, 2,
+`SaveBuilder` key set plus `basetown` (town id), `hometown` (the town state's `hand`), `homebuilding` (below), `is resident`, `sqt`, `map area sid` / `map area name`
+(the BIOME_GROUP of its cell) and `currentPackage`. **Observed** (headless load of saves 1, 2,
 wade): NPCs within 5 units of their saved positions (save 2: 4 of 107 differ in Y only, flat test ground); a Meitou save → load restores them
 exactly with no fresh squads for save 2 and a new game. A pinned platoon is homed in the building its `homebuilding` handle names (state `<id>-S23`
-of zone C-1, X = c % 64, Y = c / 64; ids repeat across zones); that building is taken out of the town's free homes. **Unknown:** how the original reuses the saved package.
+of zone C-1, X = c % 64, Y = c / 64; ids repeat across zones; a zone without a file: the building whose level state has that handle); that building is taken
+out of the town's free homes. **Unknown:** how the original reuses the saved package.
 
 PLATOON keys (**Verified**):
 - `sqt` is the town pool the platoon counts against (platoon +0xa8; by code: written by `FUN_140372ef0`, read by `FUN_1407ed0f0`, setter `FUN_1409c44b0` makes 0 into 1
   and 3+ into 2, default 2): 1 residents (and bar squads), 2 roaming; every wild platoon of the samples has 2 (nests have only pool 2).
+- `is resident` is set exactly on the platoons with a `homebuilding` (census of saves 1, 2, 3, wade: 0 exceptions); Meitou writes both for a squad with a home.
 - `hometown` (handle) puts the platoon into that town's or nest's pool at load (`FUN_1407ec8d0`; the platoon's faction and player status must match the town's);
   the pool counts living characters, `char count` while the platoon is not active (`FUN_1408f6a40`). `basetown` is only kept as a TOWN record pointer.
+- `homebuilding` (handle) is bound through the game's per-frame system-message queue (`FUN_1407b65b0`): only if the building resolves that frame, else the message is
+  dropped (**Unknown** whether something rebinds it later). Meitou writes the state's handle when the save's zone file holds the building, else its level-data handle
+  ([handles](#object-handles-and-slot-lists)); no zone file is written for it, since a zone file marks the zone visited and stops its town generation (`FUN_1409ffad0`;
+  a bool `imported` in `0-buildinglist` forces it back on).
 
 ### Wild and nest platoons (Meitou mapping)
 

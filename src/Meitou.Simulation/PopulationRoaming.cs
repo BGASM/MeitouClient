@@ -32,6 +32,10 @@ public sealed partial class PopulationSystem
 
     Vector2 SiteCentre(int site) => new(data.Sites[site].Position.X, data.Sites[site].Position.Z);
 
+    /// <summary>Whether a platoon should have its characters: a zone near it is active, or (a town's own saved squad) its town's zone is, as the town's fresh squads are made with the town.</summary>
+    bool Wanted(Platoon p) =>
+        active.Contains(WorldLayout.ZoneOf(p.Position.X, p.Position.Y)) || p.Pinned && p.Origin >= 0 && active.Contains(data.Sites[p.Origin].Zone);
+
     // ---- the look at the roaming squads, in the slow phase ----
 
     void StepRoaming(World world)
@@ -45,7 +49,7 @@ public sealed partial class PopulationSystem
             {
                 case PlatoonState.Unloaded:
                     StandIn(world, p, dt);
-                    if (p.State == PlatoonState.Unloaded && active.Contains(WorldLayout.ZoneOf(p.Position.X, p.Position.Y))) Activate(world, p);
+                    if (p.State == PlatoonState.Unloaded && Wanted(p)) Activate(world, p);
                     break;
                 case PlatoonState.Loaded:
                     StepLoaded(world, p, dt);
@@ -173,7 +177,7 @@ public sealed partial class PopulationSystem
         p.Position = new Vector2(lead.X, lead.Z);
 
         // Away from every active zone for long enough: only the stand-in goes on.
-        if (active.Contains(WorldLayout.ZoneOf(p.Position.X, p.Position.Y))) p.UnloadAtTick = -1;
+        if (Wanted(p)) p.UnloadAtTick = -1;
         else if (p.UnloadAtTick < 0) p.UnloadAtTick = world.Tick + (long)Math.Ceiling(settings.RoamUnloadGraceSeconds / world.TickSeconds);
         else if (world.Tick >= p.UnloadAtTick)
         {

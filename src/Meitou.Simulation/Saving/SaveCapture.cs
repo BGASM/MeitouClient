@@ -376,6 +376,9 @@ public static partial class SaveCapture
         var table = world.Characters;
         var factions = new Dictionary<string, SaveFaction>(StringComparer.Ordinal);
         foreach (var f in game.Factions) factions.TryAdd(f.Id, f);
+        var townHands = new Dictionary<string, Hand>(StringComparer.Ordinal);
+        foreach (var t in game.Towns)
+            if (t.Instance.Length > 0 && !t.Handle.IsNull) townHands.TryAdd(t.Instance, t.Handle);
         foreach (var squad in world.Squads.All)
         {
             if (squad.Town < 0 || squad.Town >= data.Sites.Count || squad.Faction < 0 || squad.Faction >= data.Factions.Count || squad.Faction == data.PlayerFaction) continue;
@@ -396,9 +399,16 @@ public static partial class SaveCapture
             var record = platoon.Record;
             record.Strings["basetown"] = site.Town.Id;
             int siteFaction = data.SiteFactions.Count > squad.Town ? data.SiteFactions[squad.Town] : -1;
-            record.Bools["is resident"] = roamer is null
-                && PopulationSystem.ResidentEntries(site.Town, siteFaction >= 0 ? data.Factions[siteFaction] : null).Any(e => e.Id == squad.TemplateId);
+            // `sqt` is the town pool it counts against: 1 residents (and bar squads), 2 roaming (docs/formats/save.md "NPC platoons").
+            record.Ints["sqt"] = roamer is null ? 1 : 2;
+            // A squad with a home is a resident (every platoon of the samples with a `homebuilding` has `is resident`, and only those): a default resident too.
+            record.Bools["is resident"] = roamer is null && (squad.HomeBuilding is not null
+                || PopulationSystem.ResidentEntries(site.Town, siteFaction >= 0 ? data.Factions[siteFaction] : null).Any(e => e.Id == squad.TemplateId));
             if ((roamer?.Package ?? squad.Ai?.Current?.Id) is { } package) record.Strings["currentPackage"] = package;
+            // Its town and home building by handle, as the original names them (docs/formats/save.md "NPC platoons").
+            if (townHands.TryGetValue(site.InstanceId, out var townHand)) townHand.Write(record, "hometown");
+            if (squad.HomeBuilding is { } home && HomeHandle(game, home) is { } homeHand) homeHand.Write(record, "homebuilding");
+            WriteMapArea(record, data, table.Previous[leader.Slot].Position);
             foreach (var id in alive)
             {
                 int f = table.Cold(id.Slot)!.Faction;
@@ -408,6 +418,24 @@ public static partial class SaveCapture
             SetCharCount(platoon);
         }
     }
+
+    /// <summary>
+    /// The handle a platoon's <c>homebuilding</c> names a town building by: its state's <c>handle</c> when the save's zone file holds the building, else the handle of its
+    /// level-data state, which the original gives the building when it loads a zone that has no saved state of it (docs/formats/save.md "Object handles"). Null when it has neither.
+    /// </summary>
+    static Hand? HomeHandle(SaveGame game, TownBuilding b)
+    {
+        if (game.Zones.TryGetValue(b.Zone, out var zone) && zone.BuildingList is { } list)
+        {
+            var entry = list.Instances.FirstOrDefault(i => i.Id == b.InstanceId);
+            if (entry is { States.Count: > 0 } && zone.File.Records.FirstOrDefault(r => r.StringId == entry.States[0]) is { } state && Hand.Read(state, "handle") is { IsNull: false } saved)
+                return saved;
+        }
+        return b.HandleSlot >= 0 ? new Hand((int)FcsRecordType.BUILDING, SaveZone.ContainerIdOf(b.Zone), ZoneContainerSerial, b.HandleSlot, b.HandleSerial) : null;
+    }
+
+    /// <summary>The <c>CS</c> of every zone container (docs/formats/save.md "Object handles").</summary>
+    const int ZoneContainerSerial = 11111;
 
     /// <summary>The registered buildings' locks and doors, and the homes a lock-up round locked, into their zones' existing state records (a building the save has no record of, or a new save without zones, is left out).</summary>
     static void WriteLocks(World world, IReadOnlyDictionary<string, FcsRecord> buildings)
