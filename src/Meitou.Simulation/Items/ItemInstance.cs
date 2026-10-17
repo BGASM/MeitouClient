@@ -64,6 +64,9 @@ public sealed class ItemInstance
     /// <summary>The weight this item and what is in it add to the load.</summary>
     public float Weight => UnitWeight * Quantity + (Contents?.ContentWeight() ?? 0) * ContentsFactor;
 
+    /// <summary>How full a single food item or charged tool (medkit, splint kit, robot repair) is, 0 to 1, for the inventory's charge bar; null for items without one (stacks, gear, ammunition).</summary>
+    public float? ChargeFraction => MaxCharges > 0 && Quantity == 1 && (IsFood || ItemFunction != 0) ? Math.Clamp(Charges / MaxCharges, 0f, 1f) : null;
+
     /// <summary>The hunger levels eating the item gives: <see cref="Charges"/> / 100.</summary>
     public float Nutrition => IsFood ? Charges / 100f : 0;
 }

@@ -245,7 +245,8 @@ decompile unless marked; Meitou's adapter is `PlayerInterface.Map.cs`.
 - **Observed** in the vanilla screenshot supplied on 2026-10-15 (Wolf, Thieves Backpack, Armour King): the character title is the character's name; the bag title is its item name;
   the shop title is the trader's name. The character pockets contain 8 columns by 10 rows of square cells. The bag is left of the character, stock right of it, with an independent
   vertical scrollbar. Equipment icons occupy their cell footprints; empty clothing slots are red, other empty cells pale. Stack counts are plain numbers in the lower-right corner;
-  stock prices are not printed over every icon. The bag has a 10-by-14 grid with a fitted frame and an ARRANGE footer without the generic layout's editor capacity/type fields.
+  stock prices are not printed over every icon. Meitou additionally draws a thin charge bar down the left edge of a single food item or charged tool (item function
+  other than 0: medkit, splint kit, robot repair), green when full to red when spent (`ItemInstance.ChargeFraction`); whether the original shows one is **Unknown**. The bag has a 10-by-14 grid with a fitted frame and an ARRANGE footer without the generic layout's editor capacity/type fields.
   The character parchment has separate label/value rows: Total Weight, a burden description, Disguise, Slave of, Looks like slave. **Unknown**: exact runtime sizing/rounding,
   burden description thresholds, and race/mod overrides of the pocket dimensions. Meitou uses 8 by 10 for new pockets and retains taller loaded inventories when saved items require it.
 - **Trader window** (code `PlayerInterface.Trade.cs`):
