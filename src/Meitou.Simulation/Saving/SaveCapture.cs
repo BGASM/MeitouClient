@@ -70,6 +70,7 @@ public static partial class SaveCapture
         camera.Version = SaveGame.GameVersion;
         camera.SetMods(options.DataFiles);
         if (data.PlayerFaction >= 0) camera.PlayerFactionName = data.Factions[data.PlayerFaction].Name;
+        camera.Record.Strings[SaveLoader.SeedKey] = world.Seed.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         UpdateFactions(game, data, loaded);
         WriteTownKnowledge(builder, data, world.Player);
@@ -84,7 +85,7 @@ public static partial class SaveCapture
         if (loaded is not null) WriteRoaming(game, world, loaded);
         WriteSavedNpcs(builder, world, data, options, clock, buildings, races);
         WriteFreshNpcs(builder, world, data, options, clock, buildings, races);
-        // The wild: every nest in the town list the original's way, and the wild squads in the world as new platoons of their nest or sector.
+        // The wild: the nests made so far in the town list the original's way, and the wild squads in the world as new platoons of their nest or sector.
         if (world.Systems.OfType<PopulationSystem>().FirstOrDefault() is { } population)
         {
             var nests = WriteNests(builder, world, data, population, options.Seed);

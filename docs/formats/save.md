@@ -142,6 +142,7 @@ not predictable (**Verified** by code: `I` from a rotating free-slot cursor `FUN
 | `usedUniques<k>` (CHARACTER ids), `num usedUniques`, `usedUniques<k>handle*`, `usedUniquesState<k>`, `usedUniquesPlayer<k>` | unique (story) characters already spawned; **Verified** the 3 ids resolve to CHARACTER records |
 | bools `bl ditch eject ep feed heal help rescue share shootfirst sit sleep stay`, floats `bs cod gdm ht nnm ps rs`, `formation` | squad behaviour toggles and short-key game toggles (`FUN_1403eb710`, `FUN_1403ee910`): **Observed**; meaning of the short keys **Unknown** |
 | reference list `zones` | one entry per zone **that has a file**, written in grid order (X outer, Y inner; `FUN_140375360` loops 64 x 64): target = the list index in **hexadecimal** ("0".."9", "a", "b", "c" for 13 entries), values `(x, y, 1)` = (zone X, zone Y, has-file flag). **Verified**: the 13 entries equal the 13 files of `zone/` (probe), and the key spelling is seen in the sample |
+| `meitou seed` (string) | Meitou-only: the world seed in decimal, written on every Meitou save and restored before the world's first tick on load (so the nests it did not write roll again where they were, [Nests](#nests-town-list)); a save without it keeps the launch seed. The original's keys are read by name, so it is ignored (as the other Meitou-only keys) |
 | reference list `mods` | one entry per loaded data file, target = the file's name without extension for the `.mod` files (`Newwworld`, `Dialogue`, `rebirth`) and `base` for `gamedata.base`, values `(-1, 0, 0)`; **Verified** (probe, `GameDatabase.Files`) that the four entries are in the load order of the base game (`gamedata.base`, `Newwworld.mod`, `Dialogue.mod`, `rebirth.mod`). **Unknown** whether `loadGame` compares it with the current mod list (no such string seen) |
 
 ### BIOMES (type 28, `quick.save`): weather per region
@@ -243,9 +244,14 @@ TOWN has `type` 0 becomes a nest at the entry's position; its handle is the `han
 `Nest state <TOWN name> <k>` (`k` a rising number with gaps, origin **Unknown**), keys `hand` (type 85, a town container `C`), `started`, `explored`,
 `recently discovered`, `discovered`, `ded`, `is nest` true, `faction`, `artifacts count`, floats `popd2` (= the TOWN's `nest resident population` in every sample) and
 `pop2` (≤ it), `popd`, `pop`, `tod` (0); some have `zzX0` / `zzY0`. The states sit before the list. A save holds only the nests made so far (save 1: 13; the original
-adds them as areas tick). Meitou takes a save's nests first and rolls the rest of each group's count; a Meitou save writes every nest of its layout this way
-(new ones with `popd2` = `pop2` = `nest resident population`, `started` once loaded, the player's knowledge as `discovered` / `explored`), so a base save gains its
-unrolled nests on the first Meitou save, and loading a Meitou save rolls none. Older Meitou saves' `meitou-nest:` camp states are still read.
+adds them as areas tick). Meitou takes a save's nests first and rolls the rest of each group's count from the world seed (CAMERA `meitou seed`, restored on load).
+A Meitou save likewise holds only the nests made so far: the save's own plus the rolled ones that have loaded (a squad made, or a saved one at it), at the spot they
+loaded at, with `popd2` = `pop2` = `nest resident population`, `started` true and the player's knowledge as `discovered` / `explored`. On load the roll runs in its
+fixed order and leaves out each roll whose spot (or marker) a saved nest holds, without counting it against the group's count, so whichever subset was saved the
+unwritten nests come out at their old places and no nest is rolled twice (the saved one takes over that roll's key for its squads); a rolled nest's place uses a
+random stream apart from its TOWN pick. **Observed** (headless, base saves 1, 2, wade and a new game, the player sent to 3-4 nests): saved nests = base (13, 150,
+150, 0) + the started ones (3, 3, 4, 4); reloaded with another launch seed, all 325 nests (TOWN and position) and every nest squad's nest equal those before.
+A rolled nest that loads but makes no squad is not written (rolled again). Older Meitou saves' `meitou-nest:` camp states are still read.
 
 ### Locks, cages and sentences
 

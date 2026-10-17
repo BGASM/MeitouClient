@@ -11,9 +11,10 @@ public enum WildKind : byte { Sector, Nest }
 /// <summary>
 /// A place in the wild that gets squads while its zone is active: an area sector (one zone cell and its BIOME_GROUP) or a nest of a biome group.
 /// <see cref="Spots"/> are the seeded candidate centres of a nest (the first walkable one is used when it loads); a sector has none. <see cref="SaveInstance"/> is the
-/// town-list entry of a nest that came from a save (its one spot is the saved position).
+/// town-list entry of a nest that came from a save (its one spot is the saved position). <see cref="Key"/> keys a nest's squads: its layout roll's, or for a saved nest no roll
+/// gives, its entry's (so a nest makes the same squads whatever its index).
 /// </summary>
-public sealed record WildSite(int Index, WildKind Kind, ZoneCoordinate Zone, int Group, TownData? Nest, int Faction, IReadOnlyList<Vector2> Spots, string? SaveInstance = null);
+public sealed record WildSite(int Index, WildKind Kind, ZoneCoordinate Zone, int Group, TownData? Nest, int Faction, IReadOnlyList<Vector2> Spots, string? SaveInstance = null, ulong Key = 0);
 
 /// <summary>
 /// The wild population (docs/game/factions-squads-towns.md 6.2, 6.3): homeless squads of the area sectors and the animals (and camps) of the nests. Runs
@@ -35,7 +36,8 @@ public sealed record WildSite(int Index, WildKind Kind, ZoneCoordinate Zone, int
 /// size passes the free capacity is skipped), the squads wandering round the nest. Squads are not replaced while the nest is loaded (the respawn delay is
 /// <b>Unknown</b>); a reload fills it again.</item>
 /// <item><b>Saves</b> (docs/formats/save.md "Nests", "Wild and nest platoons"): a loaded save's nests are the layout's first (at their saved places), the
-/// seeded roll only tops each group up to its count. The save's wild platoons stay as themselves: a nest's counts its members against the nest's pool, a
+/// seeded roll (with the seed the save restores) only tops each group up to its count, leaving out the rolls whose nests the save holds, so a Meitou save
+/// (which writes only the nests that have loaded) loads with its other nests where they were. The save's wild platoons stay as themselves: a nest's counts its members against the nest's pool, a
 /// homeless one counts as one of its sector's squads (the sector its position is in), so a site makes only the rest.</item>
 /// <item><b>Loading</b> follows the towns: the same zone gate, the same unload grace; the squads are built on the population thread and taken in at a
 /// tick boundary; on unload they are removed. Every roll is keyed by the world seed and the sector's zone or the nest's index and the squad's number, never
@@ -179,11 +181,14 @@ public sealed partial class PopulationSystem
             if (!savedOf.TryGetValue(g, out var list)) savedOf[g] = list = [];
             list.Add(n);
         }
+        var savedSite = new Dictionary<Saving.SavedNest, int>(ReferenceEqualityComparer.Instance);
         void AddSaved(Saving.SavedNest n, int g)
         {
+            savedSite[n] = sites.Count;
             var town = TownData.From(data.Db.Find(n.TownId)!);
             int faction = town.Faction is { } f ? data.FactionIndex(f) : -1;
-            sites.Add(new WildSite(sites.Count, WildKind.Nest, WorldLayout.ZoneOf(n.Position.X, n.Position.Z), g, town, faction, [new Vector2(n.Position.X, n.Position.Z)], n.Instance));
+            sites.Add(new WildSite(sites.Count, WildKind.Nest, WorldLayout.ZoneOf(n.Position.X, n.Position.Z), g, town, faction, [new Vector2(n.Position.X, n.Position.Z)], n.Instance,
+                Rng.Mix(SeedSalts.NestLayout ^ Rng.StableHash(n.Instance))));
         }
         for (int g = 0; g < groups.Count; g++)
         {
@@ -200,40 +205,47 @@ public sealed partial class PopulationSystem
                     && WeatherAreas.CellOf(s.Position.X, s.Position.Z) is var (cx, cz) && biomes.GroupOf(cx, cz) == g)];
                 count = Math.Min(count, markers.Count);
             }
-            // The roll runs as for a world without a save, and leaves out a nest the save already has (one of its spots, or its marker, is where a saved nest
-            // stands: a Meitou save writes every nest at its first walkable spot), until the group has its count; so loading a save made by this layout rolls nothing new.
+            // The roll runs in a fixed order as for a world without a save and leaves out each roll whose nest the save holds (a saved nest stands at one of its spots,
+            // or its marker: a Meitou save writes a rolled nest at the spot it loaded at), until the group has its count. A save holds only the nests made so far
+            // (docs/formats/save.md "Nests"), so whichever of them it holds, the others come out as before: a left-out roll takes no room, a held one is never rolled
+            // twice, and the saved nest takes over that roll's key.
             int room = count - mine.Count;
             for (int i = 0; i < count && room > 0; i++)
             {
                 ulong key = Rng.Mix(groupKey ^ (ulong)i << 16);
-                ulong counter = 0;
-                ulong Next() => Rng.Hash(seed, key, RngPurpose.Spawn, counter++);
-                if (SquadFactory.WeightedPick(group.Nests, Gated, Next) is not { } townId || data.Db.Find(townId) is not { } record) continue;
-                var town = TownData.From(record);
+                ulong pick = 0, place = SeedSalts.NestPlace;
+                ulong Pick() => Rng.Hash(seed, key, RngPurpose.Spawn, pick++);
+                ulong Place() => Rng.Hash(seed, key, RngPurpose.Spawn, place++);
                 var spots = new List<Vector2>();
                 if (markers is not null)
                 {
                     // A seeded draw without repeats: marker i of a shuffled order.
-                    int m = i + Rng.Int(Next(), markers.Count - i);
+                    int m = i + Rng.Int(Place(), markers.Count - i);
                     (markers[i], markers[m]) = (markers[m], markers[i]);
                     spots.Add(new Vector2(markers[i].Position.X, markers[i].Position.Z));
                 }
                 else
                 {
-                    var (cx, cz) = cellsOf[g][Rng.Int(Next(), cellsOf[g].Count)];
+                    var (cx, cz) = cellsOf[g][Rng.Int(Place(), cellsOf[g].Count)];
                     var (minX, minZ, maxX, maxZ) = WeatherAreas.CellRect(cx, cz);
                     for (int t = 0; t < 16 && spots.Count < 8; t++)
                     {
-                        var p = new Vector2(minX + Rng.Float(Next()) * (maxX - minX), minZ + Rng.Float(Next()) * (maxZ - minZ));
+                        var p = new Vector2(minX + Rng.Float(Place()) * (maxX - minX), minZ + Rng.Float(Place()) * (maxZ - minZ));
                         if (!NearTown(data, p, 2)) spots.Add(p);
                     }
                     if (spots.Count == 0) continue;
                 }
                 float near = markers is not null ? 100 : 1;
-                if (mine.Any(n => spots.Any(s => Vector2.DistanceSquared(s, new Vector2(n.Position.X, n.Position.Z)) < near * near))) continue;
+                if (mine.FirstOrDefault(n => spots.Any(s => Vector2.DistanceSquared(s, new Vector2(n.Position.X, n.Position.Z)) < near * near)) is { } held)
+                {
+                    if (savedSite.Remove(held, out int at)) sites[at] = sites[at] with { Key = key };
+                    continue;
+                }
+                if (SquadFactory.WeightedPick(group.Nests, Gated, Pick) is not { } townId || data.Db.Find(townId) is not { } record) continue;
+                var town = TownData.From(record);
                 var zone = WorldLayout.ZoneOf(spots[0].X, spots[0].Y);
                 int faction = town.Faction is { } f ? data.FactionIndex(f) : -1;
-                sites.Add(new WildSite(sites.Count, WildKind.Nest, zone, g, town, faction, spots));
+                sites.Add(new WildSite(sites.Count, WildKind.Nest, zone, g, town, faction, spots, Key: key));
                 room--;
             }
         }
@@ -485,7 +497,7 @@ public sealed partial class PopulationSystem
             for (int i = 0; i < entries.Count; i++)
                 weights[i] = templates[i] is { } t && SquadFactory.ExpectedSize(t, settings.SquadSizeMultiplier) <= cap - members
                     ? MathF.Max(0, entries[i].V0 - counts[i]) : 0;
-            ulong key = Rng.Mix(SeedSalts.NestSquad ^ (ulong)site.Index << 32 ^ (uint)s);
+            ulong key = Rng.Mix(Rng.Mix(SeedSalts.NestSquad ^ site.Key) ^ (uint)s);
             int e = Pick(weights, Rng.Hash(seed, key, RngPurpose.Spawn, SeedSalts.NestPick));
             if (e < 0) break;
             counts[e]++;

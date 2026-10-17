@@ -28,6 +28,8 @@ internal static class SeedSalts
     public const ulong HomelessPick = 6;
     /// <summary>Counter of the roll that picks the template of a nest's squad.</summary>
     public const ulong NestPick = 7;
+    /// <summary>Counter base of a rolled nest's place (marker or cell and spots), apart from its TOWN pick so a changed world-state gate never moves it.</summary>
+    public const ulong NestPlace = 1UL << 20;
     /// <summary>Counter base of the placement tries of a wild squad (the try is added).</summary>
     public const ulong WildPlace = 2000;
 

@@ -13,8 +13,8 @@ public static partial class SaveCapture
     const string TownStateSuffix = "-S5e";   // the hex of GAMESTATE_TOWN (94)
 
     /// <summary>
-    /// Every nest of the wild layout in <c>quick.save</c>'s town list, the original's way (docs/formats/save.md "Nests"): a nest the save already holds keeps its entry and
-    /// state, and gets the player's knowledge of it; a rolled one gets an entry <c>&lt;n&gt;-quick.save-INGAME</c> (target the TOWN record, its position, a zero
+    /// The nests made so far in <c>quick.save</c>'s town list, the original's way (docs/formats/save.md "Nests"): a nest the save already holds keeps its entry and
+    /// state, and gets the player's knowledge of it; a rolled one that has loaded (a rolled one that has not is left out: the layout rolls it again) gets an entry <c>&lt;n&gt;-quick.save-INGAME</c> (target the TOWN record, its position, a zero
     /// quaternion) and a GAMESTATE_TOWN <c>&lt;entry&gt;-S5e</c> named <c>Nest state &lt;name&gt; &lt;k&gt;</c> with a type-85 <c>hand</c> and the key set of the samples. The
     /// population remembers each one, so the next save reuses it. Returns each nest site's handle (what its platoons' <c>hometown</c> names).
     /// </summary>
@@ -48,8 +48,11 @@ public static partial class SaveCapture
         foreach (var site in sites)
         {
             if (site.Kind != WildKind.Nest || site.Nest is not { } nest) continue;
+            // Only the nests made so far, as the original holds: the save's and the ones that have loaded. The others roll again at the same places when the save loads.
+            bool held = population.NestSaveId(site.Index, out var id);
+            if (!held && population.WildCentreOf(site.Index) is null) continue;
             FcsRecord? state = null;
-            if (population.NestSaveId(site.Index, out var id) && entries.TryGetValue(id.Instance, out var entry) && entry.States.Count > 0)
+            if (held && entries.TryGetValue(id.Instance, out var entry) && entry.States.Count > 0)
                 state = byId.GetValueOrDefault(entry.States[0]);
             if (state is null)
             {

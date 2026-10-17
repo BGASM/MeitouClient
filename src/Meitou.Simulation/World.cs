@@ -97,8 +97,15 @@ public sealed partial class World : IDisposable
         for (int i = 0; i < buffers.Length; i++) buffers[i] = new EffectBuffer();
     }
 
-    public WorldSettings Settings { get; }
+    public WorldSettings Settings { get; private set; }
     public ulong Seed => Settings.Seed;
+
+    /// <summary>A loaded save's world seed (docs/formats/save.md CAMERA <c>meitou seed</c>), so its seeded layout rolls as before the save; only before the first tick.</summary>
+    internal void RestoreSeed(ulong seed)
+    {
+        if (Tick != 0) throw new InvalidOperationException("The seed is restored before the world's first tick.");
+        Settings = Settings with { Seed = seed };
+    }
     public IWalkability Walkability { get; }
     public CharacterTable Characters { get; }
     /// <summary>The neighbour grid of the last tick's positions (valid from the Schedule step of a tick on).</summary>

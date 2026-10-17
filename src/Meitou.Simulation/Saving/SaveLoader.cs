@@ -33,6 +33,9 @@ public sealed class SaveLoadOptions
 /// </summary>
 public static class SaveLoader
 {
+    /// <summary>Meitou-only CAMERA string: the world seed in decimal (docs/formats/save.md "CAMERA"). The original ignores it.</summary>
+    public const string SeedKey = "meitou seed";
+
     public static LoadedSave Load(World world, SaveGame save, PopulationData data, SaveLoadOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(world);
@@ -40,6 +43,8 @@ public static class SaveLoader
         ArgumentNullException.ThrowIfNull(data);
         options ??= new SaveLoadOptions();
         if (world.Tick != 0 || world.Characters.Count != 0) throw new InvalidOperationException("A save is loaded into a world that has not started and has no characters.");
+        // The seed a Meitou save was made with (its seeded layout: the nests it did not write roll again where they were); a base save keeps the world's.
+        if (save.Camera.Record.Strings.GetValueOrDefault(SeedKey) is { } seedText && ulong.TryParse(seedText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out ulong seed)) world.RestoreSeed(seed);
 
         var camera = save.Camera;
         var loaded = new LoadedSave { Source = save, Clock = new SaveClock(camera.Day, camera.Hour, camera.Minute) };
