@@ -1,4 +1,6 @@
-# MeitouClient
+<p align="center">
+  <img src="assets/branding/header.png" alt="MeitouClient" width="100%">
+</p>
 
 [![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/martinvlcek)
 
@@ -7,6 +9,7 @@ mods and saves unchanged. **No game assets are shipped; an installed legal copy 
 Early playable slice: streamed Vulkan world, characters/animation, movement/combat/body state,
 NPC population/partial AI, inventory/trade, saves and native UI. Remaining work:
 [ROADMAP.md](ROADMAP.md). Architecture/research: [docs index](docs/README.md).
+Website: [meitou.martinvlcek.sk](https://meitou.martinvlcek.sk/).
 
 ## Download and requirements
 
