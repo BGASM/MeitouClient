@@ -112,7 +112,7 @@ public sealed partial class PopulationSystem
             if (moved)
             {
                 float x = at.X + delta.X, z = at.Z + delta.Y;
-                if (!walk.IsWalkable(x, z)) (x, z) = (p.Position.X, p.Position.Y);
+                if (!walk.IsWalkable(x, z)) (x, z) = WalkableSpots.Nearest(walk, new Vector2(x, z), out var near, 32) ? (near.X, near.Y) : (p.Position.X, p.Position.Y);
                 at = new Vector3(x, walk.GroundHeight(x, z), z);
             }
             var hot = new CharacterHot

@@ -109,14 +109,27 @@ Three Faithful/Meitou switches (`PopulationSettings`, live on `PopulationSystem`
   wounds treated and closed, flesh healing at the part rate, stun gone, blood back at the resting rate, a KO ended if vital parts allow; no
   hunger, degeneration or death. Faithful: it comes back as it left.
 
-The rest of the tier, proposed (awaiting review):
+Implemented (`PopulationRoaming.cs`):
 
-- **Who**: town squads (stored), roaming squads (above), campaign squads. Wild and nest squads are dropped, as in the original.
-- **Clock**: each unloaded, non-pinned platoon steps at every population look with its own elapsed game time. The step is a pure function of the
-  platoon (position, job, wait, keyed random), run as a parallel pass on the worker pool over a snapshot of the registry; activations and other
-  structural changes are applied after it in the serial phase, in platoon id order. Pinned platoons do no work (GOHOME at home).
-- **Jobs**: the original's per `unloaded func` and speeds (25, 55, 60, 90 beyond 25000, capped at 70), straight lines; roads (the level data's
-  ROAD records, the faction's `road preference`) in a later step. Meitou keeps its short-range patrol moving (the original's stands still).
+- **Step**: at every population look (15 ticks), every unloaded platoon that is not a town's own steps by the look's game time in a parallel pass
+  (`World.ParallelFor`, 64 stand-ins a job): the Faithful orphan timer and its travel. A step changes only its own platoon, so the result does not
+  depend on the order (the roaming hashes agree at 1, 4 and 16 threads). Despawns, activations, loaded squads, pools and fights follow serially in
+  id order. Town squads do no off-screen work (the original's GOHOME at home).
+- **Speeds**: per job as the original (GOHOME 55, TRAVEL_TARGET 25, TRAVEL_TARGET_FAST 60 or 90 beyond 25000), the engine's travel stand-in (job
+  NONE) 25 or 90, all capped at the original mover's 70 (`StandInSpeedCap`); straight lines. A short-range patrol keeps walking at 25 (the
+  original's stands still). Destinations are still the engine's (towns, patrol points near home); roads (the level data's ROAD records, the
+  faction's `road preference`) are not used yet.
+- **Hand-off**: a stand-in that travelled comes back on the nearest walkable point (`WalkableSpots.Nearest`: rings of 4 to 128 units, eight
+  directions each); its kept characters keep their offsets round it, each moved to a walkable point within 32 if needed, else onto it. A town's
+  own or wild platoon, or one that did not move, keeps its characters' exact places.
+- **Cost** (**Observed**, headless, save 2 with 2000 extra travelling stand-ins, warm): the step 0.08-0.1 ms per look at 1 or 8 threads (too little
+  work for the threads to pay), pools and fights 0.23-0.26 ms per look (fights run every 4th look), about 0.03 ms a tick in all; save 2 alone
+  0.08-0.1 ms per look. Not measured in the viewer's bench harness, which does not run the population.
+
+Proposed (awaiting review):
+
+- **Who**: campaign squads join the town and roaming squads. Wild and nest squads are dropped, as in the original.
+- **Jobs**: the original's destinations (the blackboard's target, GOHOME's home within 2000) and roads.
 - **Budgets**: towns' `pop`/`popd` (residents) and `pop2`/`popd2` (roaming) grow 0.21818 per game hour for every town, loaded or not, read from
   and written to the town states; a roaming squad is made only within `floor(pop2) − living`; a loaded town marks squads that lost ≥ 60 % for a
   fresh make; a town made once makes no residents again (this replaces "a town with no squads left is made afresh"). Nests start at 0.7 ×
@@ -124,13 +137,8 @@ The rest of the tier, proposed (awaiting review):
   (`tod` saved).
 - **Campaigns** (raids, wars): the war manager on its 6-hour roll, squads made at the source town, the phases and outcomes, WAR_SAVESTATE read
   and written exactly. Designed in detail after a survey of FACTION_CAMPAIGN data and the victory/defeat effects.
-- **Hand-off**: a platoon activates when wanted and its zones pass the navmesh gate; members keep their offsets round the moved anchor, each put
-  on the nearest walkable point (else the anchor). Leaving keeps the Meitou graces (towns 60 s, roaming 10 s; the original's 4 s would churn).
-  Stored state survives both ways and saves (one writer for stored and in-world squads).
-- **Cost**: target well under 0.1 ms a frame with 1000 platoons (save 2 holds 510). Measured with the bench harness (`--view hub`) before and
-  after, plus the simulation's per-system time; no new `--ab` switch without OK.
-- **Waves**: (1) the parallel step, original jobs and speeds, hand-off snapping, bench; (2) budgets, regeneration,
-  nests (`RoamingShare` gives way to the pools: a town's roaming pool starts at the faction's `roaming population`, 0.7 is the nests' rule); (3) campaigns. Tests to propose then: the growth formula pin, one real-data round trip of travelled stored squads.
+- **Waves**: (2) budgets, regeneration, nests (`RoamingShare` gives way to the pools: a town's roaming pool starts at the faction's
+  `roaming population`, 0.7 is the nests' rule); (3) campaigns. Tests to propose then: the growth formula pin.
 
 ## Player
 

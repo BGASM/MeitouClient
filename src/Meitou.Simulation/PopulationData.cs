@@ -186,7 +186,7 @@ public sealed class PopulationSettings
     /// <summary>Seconds a roaming squad stays at a town it reached (engine choice).</summary>
     public float RoamWaitMin { get; init; } = 30;
     public float RoamWaitMax { get; init; } = 120;
-    /// <summary>Stand-in speeds of an unloaded squad in units per second: 25, or 90 when the way exceeds 25000 (game-loop.md; units not verified).</summary>
+    /// <summary>Stand-in speeds of the engine's travel stand-in (job NONE) in units per second: 25, or 90 when the way exceeds 25000 (the original's TRAVEL_TARGET_FAST numbers), capped at <see cref="PopulationSystem.StandInSpeedCap"/>.</summary>
     public float StandInSpeed { get; init; } = 25;
     public float StandInFarSpeed { get; init; } = 90;
     public float StandInFarDistance { get; init; } = 25000;

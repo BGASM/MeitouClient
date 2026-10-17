@@ -16,8 +16,8 @@ namespace Meitou.Simulation;
 /// <item><b>Travel</b> (engine choice on the Observed destination chooser <c>FUN_14092c5e0</c>: the nearest 4 towns by distance, hostile ones skipped, one at
 /// random): out to a town, a wait, then home to the origin, a wait, then out again. Settlements only (outposts, towns, villages, military).</item>
 /// <item><b>Active and unloaded halves</b> (game-loop.md): a <see cref="Platoon"/> whose position is in an active zone has its characters; one that is not for
-/// <see cref="PopulationSettings.RoamUnloadGraceSeconds"/> loses them and goes on as a stand-in at 25 units per second (90 beyond 25000, the original's
-/// numbers; units not verified); it gets its characters back, made again from its key, when a zone near it is active.</item>
+/// <see cref="PopulationSettings.RoamUnloadGraceSeconds"/> loses them and goes on as a stand-in at its job's speed (<see cref="StandInSpeed"/>), stepped in parallel; it
+/// gets its characters back (kept, or made again from its key) on walkable ground when a zone near it is active.</item>
 /// </list>
 /// </summary>
 public sealed partial class PopulationSystem
@@ -50,19 +50,25 @@ public sealed partial class PopulationSystem
         float dt = settings.CheckEveryTicks * world.TickSeconds;
         platoonBuffer.Clear();
         platoonBuffer.AddRange(world.Platoons.All);
+        // The off-screen step (docs/simulation.md "Off-screen tier"): every travelling stand-in moves on, in parallel; each changes only its own platoon and reads
+        // nothing another one changes, so the result does not depend on the order. What changes the registry or the world follows, serially, in id order.
+        movers.Clear();
+        foreach (var p in platoonBuffer)
+            if (p.State == PlatoonState.Unloaded && !p.Pinned) movers.Add(p);
+        world.ParallelFor((movers.Count + MoversPerJob - 1) / MoversPerJob, job =>
+        {
+            for (int i = job * MoversPerJob, end = Math.Min(movers.Count, i + MoversPerJob); i < end; i++) StepOffscreen(world, movers[i], dt);
+        });
         foreach (var p in platoonBuffer)
         {
             switch (p.State)
             {
                 case PlatoonState.Unloaded:
-                    // Faithful: a stand-in with no reason to be kept is despawned after 60 s out of range (the original's orphan timer).
-                    if (!KeepRoamers && !p.Pinned && !Wanted(p))
+                    if (p.OrphanSeconds > OrphanLimitSeconds)
                     {
-                        p.OrphanSeconds += dt;
-                        if (p.OrphanSeconds > OrphanLimitSeconds) { Despawn(world, p); break; }
+                        Despawn(world, p);
+                        break;
                     }
-                    else p.OrphanSeconds = 0;
-                    StandIn(world, p, dt);
                     if (p.State == PlatoonState.Unloaded && Wanted(p) && Ready(p)) Activate(world, p);
                     break;
                 case PlatoonState.Loaded:
@@ -79,6 +85,21 @@ public sealed partial class PopulationSystem
 
     /// <summary>The original's orphan timer: a platoon it does not keep is activated, and so despawned, after this many seconds unloaded.</summary>
     const float OrphanLimitSeconds = 60;
+
+    readonly List<Platoon> movers = [];
+    /// <summary>Stand-ins one worker job steps (engine choice: a job costs more than a few stand-ins).</summary>
+    const int MoversPerJob = 64;
+
+    /// <summary>
+    /// One stand-in's off-screen step (any thread): the Faithful orphan timer (a stand-in out of range counts up; despawned in the serial pass past the limit), then its
+    /// travel (<see cref="StandIn"/>).
+    /// </summary>
+    void StepOffscreen(World world, Platoon p, float dt)
+    {
+        if (!KeepRoamers && !Wanted(p)) p.OrphanSeconds += dt;
+        else p.OrphanSeconds = 0;
+        if (p.OrphanSeconds <= OrphanLimitSeconds) StandIn(world, p, dt);
+    }
 
     /// <summary>
     /// Takes a platoon out of the world for good (serial phase), as the original does with one it does not keep: its characters (if made) and its stand-in; a save's platoon
@@ -121,9 +142,31 @@ public sealed partial class PopulationSystem
             Arrive(world, p);
             return;
         }
-        float speed = d > settings.StandInFarDistance ? settings.StandInFarSpeed : settings.StandInSpeed;
+        float speed = StandInSpeed(p, d);
         p.Position += to / d * MathF.Min(speed * dt, d);
     }
+
+    /// <summary>
+    /// A stand-in's speed in units per second, <paramref name="d"/> from its goal: the original's per job (docs/game/factions-squads-towns.md "Off-screen world": GOHOME 55,
+    /// TRAVEL_TARGET 25, TRAVEL_TARGET_FAST 60 or 90 beyond 25000), else the engine's travel stand-in (25, 90 far; a short-range patrol keeps walking at 25, where the
+    /// original's stands still), all capped at the original mover's 70.
+    /// </summary>
+    float StandInSpeed(Platoon p, float d)
+    {
+        bool far = d > settings.StandInFarDistance;
+        float speed = p.Job switch
+        {
+            Ai.PlatoonJob.GoHome => 55,
+            Ai.PlatoonJob.TravelTarget => 25,
+            Ai.PlatoonJob.TravelTargetFast => far ? 90 : 60,
+            Ai.PlatoonJob.PatrolShortRange => settings.StandInSpeed,
+            _ => far ? settings.StandInFarSpeed : settings.StandInSpeed,
+        };
+        return MathF.Min(speed, StandInSpeedCap);
+    }
+
+    /// <summary>The original unloaded mover's top speed (its constructor's 70; no other writer found, Observed).</summary>
+    public const float StandInSpeedCap = 70;
 
     void Arrive(World world, Platoon p)
     {
@@ -307,6 +350,10 @@ public sealed partial class PopulationSystem
     void Activate(World world, Platoon p)
     {
         p.State = PlatoonState.Activating;
+        // A stand-in that travelled comes back on walkable ground (it went in straight lines, over water and through buildings); one that did not keeps its characters' places.
+        var anchor = p.Stored?.Anchor ?? p.Saved?.Anchor;
+        bool travelled = anchor is not { } a || Vector2.DistanceSquared(a, p.Position) > 1;
+        if (travelled && !p.Pinned && !p.Wild && WalkableSpots.Nearest(world.Walkability, p.Position, out var spot)) p.Position = spot;
         ulong seed = world.Seed;
         var position = p.Position;
         int id = p.Id;

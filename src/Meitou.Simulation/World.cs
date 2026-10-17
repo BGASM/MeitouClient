@@ -134,6 +134,12 @@ public sealed partial class World : IDisposable
     public IReadOnlyList<ITickSystem> Systems => systems;
     /// <summary>The number of ticks run; during a tick, the number of the tick being run.</summary>
     public long Tick { get; private set; }
+
+    /// <summary>
+    /// Runs <paramref name="body"/> for 0..<paramref name="count"/>-1 on the worker pool and waits, in a serial phase (a slow-world pass over independent items: each call may
+    /// change only its own item). The result must not depend on the order the items run in.
+    /// </summary>
+    internal void ParallelFor(int count, Action<int> body) => pool.ForEach(count, body);
     /// <summary>Game seconds per game hour (docs/game/game-loop.md "The clock", Verified; the engine's <c>GameClock</c> has the same).</summary>
     public const double SecondsPerGameHour = 1200.0 / 11;
     /// <summary>
