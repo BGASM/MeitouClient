@@ -162,6 +162,49 @@ no path re-running the initial resident placement was found (**Unknown** whether
   not relaid to the template's layout); on a tie a building already laid out as the template wants wins; bar squads
   stand in the town's bars; a loaded town keeps its saved squads, homes and bar squads and rolls no new bar squads.
 
+### Off-screen world
+
+**Verified** by code (kenshi-named dump) unless marked. Who is kept off screen: [persistent platoons](#1-object-model).
+
+- **No world pass**: work is spread over round robins. Each faction steps one platoon of its list per frame (`FUN_1406b9970`, unloaded
+  ones only); one faction per frame runs its war manager (`FUN_1406b97c0` → `FUN_1409cb310`); one town and one nest per frame get growth /
+  spawn / wipe (`TownList::vfunc_4`); the area tick every 2 s (new nests, homeless squads), sector housekeeping every 10 s. Each unloaded
+  step measures its own elapsed game time, and growth and campaign timers read the game clock, so no rate depends on these periods.
+- **Unloaded step** (`UnloadedPlatoon::vfunc_2`, `0x1407ee790`): activation test, the 60 s orphan timer, then (not the player's, not
+  imprisoned, not at a loading zone's edge) the job: a campaign's if the war manager holds the platoon, else the package's `unloaded func`
+  ([ai.md](ai.md)); job 0 becomes 2 for a non-persistent platoon and 4 (GOHOME) for a persistent one. No character data is read or changed:
+  no healing, needs or fights (**Observed**).
+  - GOHOME: to the home only once within 2000, else to the object of a platoon handle (+0xb8, meaning **Unknown**) at 55.
+  - TRAVEL_TARGET / _FAST: to the blackboard's mission target; speed by campaign class 0/1/2 = 25/55/90, else FAST 60 (90 beyond 25000),
+    TRAVEL_TARGET 25. The mover caps speed at 70 (**Observed**: no other writer of the cap).
+  - PATROL_SHORTRANGE: picks a point in a neighbouring 4608 sector of the same biome group (sometimes a town, `patrol approaches towns`)
+    but sets no speed, so it does not move (**Observed**). PATROL_TOWN, PATROL_LONGRANGE: no branch, no movement.
+  - Movement is a straight line; a destination over 10000 away takes the road network when the faction's `road preference` > 0 and the
+    road (weighted by `1 - preference`, clamped 0.2..0.9) beats the straight line (`0x14065f940`). No navmesh.
+- **Meetings**: nothing looks at other platoons; there is no off-screen combat. Off-screen outcomes are campaign phases and despawning.
+- **Pool growth** (`FUN_1408f4c20`): each pool's current max (`pop`) grows `+0.21818` per game hour (5.24 a day) up to its desired max
+  (`popd`), for every town whether loaded or not; roaming grows only once residents are within 1 of full. Towns never spawn squads over
+  time by themselves (only nests call the pool spawner). Once per town load (`0x14092a020`) a squad that lost ≥ 60 % of its spawn size, if
+  the budget allows, is marked to be made afresh from its template on its next activation.
+- **Despawn cost**: a non-persistent squad that leaves while not intact is taken out of its pool, lowering `pop` by its living members.
+- **Town wipe** (**Observed**, `TownPopulationManager::vfunc_4`): roaming `pop` ≤ 3, ≤ 25 roaming living and no intact resident platoon
+  sets `ded`.
+- **Nests** (`NestPopulationManager::vfunc_4`): pool 2 starts at 0.7 × `nest resident population` and grows as above. While the nest's
+  zone is loaded it spawns one squad per tick (weight `max(0, v0 − existing) × faction wealth`, size within the free budget) unless a
+  player-faction unit is within 1250. With no candidate and no intact squad the nest is `ded` ("wiped out", game hour stored as `tod`,
+  **Observed**) and never spawns again. New nests come only from the area tick, up to `num nests` per biome group; whether a dead nest
+  frees its count is **Unknown**.
+- **Traders**: restocked only while active, when the clock passes the platoon's `inventory refresh time`; an unloaded one catches up at
+  its first active tick.
+- **Prisoners** (**Observed**): frozen with their platoon; sentences are absolute timestamps and release is a loaded AI task.
+- **Campaigns** (raids, wars; `FactionWarMgr`): every 6 game hours a faction with none running rolls each FACTION_CAMPAIGN with
+  `territorial triggers`: chance = `chance per day` × 0.25 × range falloff (shape **Unknown**; 0 beyond `range far` × 10) ×
+  `raidFrequencyMult`, gated by target population, tech level, `repeat limit` and world states; one is drawn by chance. Its squads are made
+  fresh (not persistent, kept while the campaign lives) within 700 of the source town and travel at `travel speed unloaded`. Phases: travel
+  (arrived within 0.8-0.9 town radius or 400), at target (victory 0.2 h after no player character is present in the first 4 h; defeat
+  when under 20 % of its platoons are intact), ended (removed 3 h later). It all runs with everything unloaded (**Observed**: an empty
+  outpost falls without a fight). Effects of victory/defeat and `raidSizeMult` are **Unknown**. Saved in WAR_SAVESTATE.
+
 ### 9. Settings and constants that matter
 
 | Name | Value | Effect |

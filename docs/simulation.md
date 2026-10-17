@@ -89,6 +89,39 @@ simulation thread; publish results at boundaries.
 platoons and drains completed builds during loading. It publishes matching snapshots without advancing
 ticks, game hours, AI, movement or roaming timers; readiness includes navmesh-gated sites.
 
+### Off-screen tier (proposed design, awaiting review)
+
+The original's rules: [off-screen world](game/factions-squads-towns.md#off-screen-world). It keeps only persistent platoons (residents) and
+campaign squads off screen, moves them in straight lines (roads for long trips), never fights or heals there, and drives the rest by clock-based
+budgets. The tier follows it, with Meitou choices marked.
+
+- **Who**: town squads (stored, done), roaming squads, campaign squads. *Meitou choice (needs OK)*: roaming squads keep their characters as a
+  `StoredSquad` when they unload (the original despawns them and the pools refill), so the world they travel stays the same people; written as
+  `sqt` 2, `persistent` false. Wild and nest squads are dropped, as in the original.
+- **Clock**: each unloaded, non-pinned platoon steps at every population look with its own elapsed game time. The step is a pure function of the
+  platoon (position, job, wait, keyed random), run as a parallel pass on the worker pool over a snapshot of the registry; activations and other
+  structural changes are applied after it in the serial phase, in platoon id order. Pinned platoons do no work (GOHOME at home).
+- **Jobs**: the original's per `unloaded func` and speeds (25, 55, 60, 90 beyond 25000, capped at 70), straight lines; roads (the level data's
+  ROAD records, the faction's `road preference`) in a later step. Meitou keeps its short-range patrol moving (the original's stands still).
+- **Meetings**: none, as the original. *Optional (needs OK)*: hostile stand-ins within a radius settle by a strength formula (living members ×
+  mean combat stats), losers' members marked dead in their stored state.
+- **Healing**: none off screen, as the original. *Optional (needs OK)*: on activation the stored medical state catches up the elapsed hours at
+  the resting heal rate in one step.
+- **Budgets**: towns' `pop`/`popd` (residents) and `pop2`/`popd2` (roaming) grow 0.21818 per game hour for every town, loaded or not, read from
+  and written to the town states; a roaming squad is made only within `floor(pop2) − living`; a loaded town marks squads that lost ≥ 60 % for a
+  fresh make; a town made once makes no residents again (this replaces "a town with no squads left is made afresh"). Nests start at 0.7 ×
+  `nest resident population`, spawn one squad per look while loaded and no player unit is within 1250, and are `ded` for good once wiped
+  (`tod` saved).
+- **Campaigns** (raids, wars): the war manager on its 6-hour roll, squads made at the source town, the phases and outcomes, WAR_SAVESTATE read
+  and written exactly. Designed in detail after a survey of FACTION_CAMPAIGN data and the victory/defeat effects.
+- **Hand-off**: a platoon activates when wanted and its zones pass the navmesh gate; members keep their offsets round the moved anchor, each put
+  on the nearest walkable point (else the anchor). Leaving keeps the Meitou graces (towns 60 s, roaming 10 s; the original's 4 s would churn).
+  Stored state survives both ways and saves (one writer for stored and in-world squads).
+- **Cost**: target well under 0.1 ms a frame with 1000 platoons (save 2 holds 510). Measured with the bench harness (`--view hub`) before and
+  after, plus the simulation's per-system time; no new `--ab` switch without OK.
+- **Waves**: (1) the parallel step, original jobs and speeds, stored roaming squads, hand-off snapping, bench; (2) budgets, regeneration,
+  nests; (3) campaigns. Tests to propose then: the growth formula pin, one real-data round trip of travelled stored squads.
+
 ## Player
 
 `PlayerSystem` / Orders: selection, stop, move/queued move, attack, treat/rest/medic, carry/rescue,

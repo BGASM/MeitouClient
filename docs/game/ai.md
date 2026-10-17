@@ -52,7 +52,7 @@ routing use [perception](perception.md), [population](factions-squads-towns.md),
 | `taskType` | 289 names | `fcs_enums.def`; see [ai-tasks.md](ai-tasks.md) |
 | `TaskTargetType` | SPECIFIC, SELF, LEADER, SQUAD_MISSION, HOME_GATE | `fcs_enums.def` |
 | `TaskEndEvent` | NOTHING, REMOVE_MINE_ONLY, REMOVE_WHOLE_SQUADS | `fcs_enums.def` |
-| `UnloadedPlatoonJob` | NONE 0, PATROL_TOWN 1, PATROL_SHORTRANGE 2, PATROL_LONGRANGE 3, GOHOME 4, TRAVEL_TARGET 5, TRAVEL_TARGET_FAST 6 | The FCS editor's enum (not in `fcs_enums.def`). The numbering of 2, 4, 5 and 6 agrees with the unloaded update's behaviour per value (see below); 1 and 3 have no branch there (**Observed**) |
+| `UnloadedPlatoonJob` | NONE 0, PATROL_TOWN 1, PATROL_SHORTRANGE 2, PATROL_LONGRANGE 3, GOHOME 4, TRAVEL_TARGET 5, TRAVEL_TARGET_FAST 6 | The FCS editor's enum (not in `fcs_enums.def`). The numbering of 2, 4, 5 and 6 agrees with the unloaded update's behaviour per value; 1 and 3 have no branch there (**Verified** by code, [off-screen world](factions-squads-towns.md#off-screen-world)) |
 | `BlackboardSignalFunctions` | see the table below | **Verified**: the FCS editor's enum (not in `fcs_enums.def`) and the RTTI package classes built by the factory agree value by value |
 | `EventTriggerEnum` | 0 EV_NONE, 1 PLAYER_TALK_TO_ME, 3 I_SEE_NEUTRAL_SQUAD, 13 UNLOCK_MY_CAGE_OR_SHACKLES, 15 I_DEFEATED_SQUAD, 30 CONTRACT_JOB_ENDED, 44 BOUNTY_SPOTTED, 45 ESCAPED_PRISONER_SPOTTED, 46 PRISONER_FREE_TO_GO, 51 BOUGHT_ME_FROM_SLAVERY, ... | The editor exe's numbering is authoritative. `fcs_enums.def` lists the names in a different order (it starts with EV_PLAYER_TALK_TO_ME, no EV_NONE). Cross-check: the dialogue `dialogs` val0 histogram (event 3 x294, event 1 x220, 13 x147, 15 x87) and the binary firing 30 on contract end (`FUN_14026a110`) and 13/44/45/46/51 at the prison sites of [economy 11.5-11.8](economy.md#115-bail-and-sentence). Whether the two lists differ only in order is **Unknown** |
 | `DialogActionEnum` (DA_*), `DialogConditionEnum` (DC_*), `DialogRepetitionEnum`, `CharacterTypeEnum`, `TalkerEnum`, `PersonalityTags` | Names and numbers. `DialogActionEnum` has unprefixed entries 41-48 (`CHOOSE_SLAVES_SELLING` .. `CHOOSE_ANIMALS_BUYING`, 43 `CHOOSE_PRISONER_BAIL`), so 49 is `DA_CLEAR_BOUNTY`; arrest-related: 6 ATTACK_CHASE_FOREVER, 8 TAKE_MONEY, 10 PAY_BOUNTY, 29 ARREST_TARGET, 30 ARREST_TARGETS_CARRIED_PERSON, 32 ASSIGN_BOUNTY (matched to the action switch `FUN_140680560`, **Observed**). DC compare-by: 0 `==`, 1 `<`, 2 `>` | From the FCS exe decompile (`probes\characters-fcs-decomp`), enum names and values only |
@@ -105,8 +105,8 @@ vtable is the RTTI class named here; the editor's enum names are matched to the 
 - The extra x1.25 under an owner-object condition in scoring; the rule that drops a candidate whose B list holds with no effect.
 - What the extra Tasker list at +0x70 of `OrdersReceiver` holds, and the "AI flag +0xbc" gating urgent jobs.
 - Why `clears existing jobs` has no string reference in the exe (editor-only field, or read some other way).
-- What the mode-0 test `FUN_1407ec570` and the finished-after-60-s rule mean for unloaded squads; PATROL_TOWN / PATROL_LONGRANGE
-  (1 and 3) have no branch in the unloaded update.
+- Which AI packages use which `unloaded func` value (not surveyed in the data). The unloaded update itself, the keep test `FUN_1407ec570`
+  and the 60 s orphan timer are in [off-screen world](factions-squads-towns.md#off-screen-world).
 - The meaning of `squad mem type` value 3, and Blackboard role list 3. Tiers 0 (JUST_ACTION) and 4 (OBEDIENCE) are never scored by the
   chooser: the normal passes sync role lists with the mask `1 << tier` for tiers 3, 2, 1, and the slave special case in `FUN_14050e5b0`
   syncs role list 4 with mask 0xe (tiers 1..3); what tier 0 and 4 are for is **Unknown**.
