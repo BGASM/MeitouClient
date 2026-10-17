@@ -30,6 +30,8 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
     readonly PopulationSettings settings;
     readonly CharacterAssembly assembly;
     readonly SiteState[] states;
+    // The zones the towns are centred in (a town is made when its zone is active).
+    readonly HashSet<ZoneCoordinate> centres;
     readonly ConcurrentQueue<BuiltTown> built = new();
     readonly BlockingCollection<Action>? work;
     readonly Thread? worker;
@@ -53,6 +55,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         assembly = new CharacterAssembly(data);
         states = new SiteState[data.Sites.Count];
         for (int i = 0; i < states.Length; i++) states[i] = new SiteState();
+        centres = [.. data.Sites.Select(s => s.Zone)];
         if (!this.settings.Background) return;
         work = [];
         worker = new Thread(() => { foreach (var job in work.GetConsumingEnumerable()) job(); }) { IsBackground = true, Name = "Meitou.Sim population" };
@@ -241,8 +244,10 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         float radius = site.Town.SizeRadius * site.Town.TownRadiusMult;
         // The town's doors, cages, containers and beds, once (they stay registered when the town unloads).
         world.Fixtures.RegisterSite(world, data, town.Site);
-        // A town made counts as visited in every zone of its buildings (engine choice: its residents and its buildings' locks are saved whole, docs/formats/save.md "Zone files").
-        foreach (var b in site.Buildings) world.VisitedZones.Add(b.Zone);
+        // A town made counts as visited in every zone of its buildings (engine choice: its residents and its buildings' locks are saved whole, docs/formats/save.md "Zone files"),
+        // but for the centre zone of another town: a file there would tell the original that town was made, with no residents saved for it.
+        foreach (var b in site.Buildings)
+            if (b.Zone == site.Zone || !centres.Contains(b.Zone)) world.VisitedZones.Add(b.Zone);
         foreach (var built in town.Squads)
         {
             var squad = SpawnSquad(world, built, site, radius);
