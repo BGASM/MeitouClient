@@ -45,7 +45,7 @@ public sealed class CommandQueue
     }
 
     /// <summary>Removes and returns the commands whose tick is at or before <paramref name="tick"/>, oldest tick first, then queue order.</summary>
-    public IReadOnlyList<SimCommand> TakeDue(long tick)
+    public IReadOnlyList<SimCommand> TakeDue(long tick, Func<SimCommand, bool>? include = null)
     {
         List<(SimCommand Command, long Sequence)>? due = null;
         lock (gate)
@@ -55,7 +55,7 @@ public sealed class CommandQueue
             for (int k = 0; k < pending.Count; k++)
             {
                 var p = pending[k];
-                if (p.Command.Tick <= tick) (due ??= []).Add(p);
+                if (p.Command.Tick <= tick && (include is null || include(p.Command))) (due ??= []).Add(p);
                 else pending[kept++] = p;
             }
             if (due is null) return [];
@@ -74,8 +74,14 @@ public sealed class CommandQueue
 /// </summary>
 public sealed record FocusCommand(Vector3 Position) : SimCommand;
 
-/// <summary>Selects characters (the player's own only; others are ignored). Not additive replaces the selection; additive (shift) adds to it.</summary>
+/// <summary>Selects the player's own characters. No valid targets retains the selection; otherwise non-additive replaces it and additive (shift) adds to it.</summary>
 public sealed record SelectCommand(IReadOnlyList<CharacterId> Characters, bool Additive = false) : SimCommand;
+
+/// <summary>Clears order selection and shows another faction's character in the HUD panels. <see cref="CharacterId.None"/> clears inspection only.</summary>
+public sealed record InspectCommand(CharacterId Target) : SimCommand;
+
+/// <summary>The map was closed: towns lose their recently-discovered mark (<see cref="TownKnowledge.Recent"/>).</summary>
+public sealed record SeenDiscoveriesCommand : SimCommand;
 
 /// <summary>Stop: the characters (the selection when the list is empty) drop their orders and stand.</summary>
 public sealed record StopCommand(IReadOnlyList<CharacterId> Characters) : SimCommand;

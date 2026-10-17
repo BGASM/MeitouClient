@@ -32,6 +32,10 @@ public sealed class ZoneNavMesh
     public string[]? DoorIds { get; internal set; }
     /// <summary>Per polygon: the index into <see cref="DoorIds"/> for door polygons, −1 otherwise; null when there are no doors.</summary>
     public int[]? DoorOf { get; internal set; }
+    /// <summary>The walkable collision triangles the polygons stand for, for exact heights (<see cref="NavSurfaces"/>); null when none were kept.</summary>
+    public NavSurfaces? Surfaces { get; internal set; }
+    /// <summary>The zone's heightmap samples (exact terrain heights; the simulation's own grid is exact only near where the game started). Read when the zone loads, not cached.</summary>
+    public Meitou.Data.World.HeightWindow? Terrain { get; internal set; }
 
     public int PolygonCount => Polygons.Length;
 
@@ -109,7 +113,7 @@ public sealed class ZoneNavMesh
         return new ZoneNavMesh
         {
             ZoneX = ZoneX, ZoneZ = ZoneZ, Vertices = [.. vertices], Polygons = polygons, Neighbours = neighbours, Areas = areas, Links = links,
-            Kept = Enumerable.Repeat(true, count).ToArray(), BoundsMin = BoundsMin, BoundsMax = BoundsMax, DoorIds = DoorIds, DoorOf = doorOf,
+            Kept = Enumerable.Repeat(true, count).ToArray(), BoundsMin = BoundsMin, BoundsMax = BoundsMax, DoorIds = DoorIds, DoorOf = doorOf, Surfaces = Surfaces, Terrain = Terrain,
         };
     }
 
@@ -190,6 +194,14 @@ public sealed class ZoneNavMesh
                 any = true;
             }
         return any;
+    }
+
+    /// <summary>Appends the heights at (x, z) of every kept polygon containing the point (stacked floors give several).</summary>
+    public void HeightsAt(float x, float z, List<float> heights)
+    {
+        if (!TryCell(x, z, out var ix, out var cell)) return;
+        foreach (int p in cell)
+            if (Covers(ix, p, x, z)) heights.Add(HeightAt(p, x, z));
     }
 
     bool TryCell(float x, float z, out PointIndex ix, out int[] cell)

@@ -1,0 +1,233 @@
+/* Meitou UI for the web: the kit in docs/meitou-ui (tokens.json, reference/bundle.css) without the game's
+   textures, which may not be distributed. Plates, paper and button plates are drawn from the tokens alone. */
+
+:root {
+  --vignette: #080605;
+  --plate: #1c1714;
+  --plate-tint: rgba(14, 11, 9, 0.86);
+  --plate-rim: rgba(175, 166, 139, 0.12);
+  --metal-edge: #1a1514;
+  --paper: #7a6d61;
+  --paper-light: #d9ceb8;
+  --paper-edge: rgba(20, 8, 6, 0.9);
+  --paper-wear: rgba(60, 35, 20, 0.35);
+  --main: #afa68b;
+  --secondary: #140806;
+  --title: #492620;
+  --bad-bright: #bf4834;
+  --good: #a8b774;
+  --greyed: #444444;
+  --greyed-bright: #777777;
+  --brass: #816635;
+  --brass-light: #c4a062;
+  --grade-4: #fceb0d;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 24px;
+  --radius-bar: 3px;
+  --radius-portrait: 4px;
+  --radius-btn: 7px;
+  --radius-card: 10px;
+  --plate-drop: 0 6px 14px rgba(0, 0, 0, 0.55);
+  --paper-border: inset 0 0 0 2px rgba(20, 8, 6, 0.9), inset 0 0 0 3px rgba(20, 8, 6, 0.25), inset 0 0 10px rgba(60, 35, 20, 0.35);
+  --plate-border: inset 0 0 0 1px rgba(175, 166, 139, 0.12);
+  --font-exo: "Exo 2", "Segoe UI", Tahoma, sans-serif;
+  --font-mono: ui-monospace, Consolas, monospace;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { background: var(--vignette); }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--vignette);
+  color: var(--main);
+  font: 400 16px/21px var(--font-exo);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--paper-light); text-decoration-color: var(--brass); text-underline-offset: 3px; }
+a:hover { color: var(--brass-light); }
+code { font: 500 14px/20px var(--font-mono); }
+
+/* Focus: brass ring, offset from the plate. */
+a:focus-visible, .mt-btn:focus-visible, .mt-tab:focus-visible {
+  outline: 2px solid var(--brass-light);
+  outline-offset: 2px;
+}
+
+/* ---------- Scene: the page ground ---------- */
+
+.mt-scene {
+  position: relative;
+  min-height: 100vh;
+  background: var(--vignette);
+}
+
+/* ---------- Surfaces ---------- */
+
+/* Plate: the dark rust surface. A faint grain stands in for the texture. */
+.mt-plate {
+  border-radius: var(--radius-card);
+  background:
+    linear-gradient(var(--plate-tint), var(--plate-tint)),
+    radial-gradient(ellipse at 30% 0%, #5a3a26, transparent 70%),
+    var(--plate);
+  box-shadow: var(--plate-border), var(--plate-drop);
+  color: var(--main);
+  padding: var(--space-5) var(--space-6);
+}
+.mt-plate h2, .mt-card h2 { margin: 0 0 var(--space-4); font: 600 24px/30px var(--font-exo); }
+.mt-plate h3, .mt-card h3 { margin: 0 0 var(--space-2); font: 600 20px/26px var(--font-exo); }
+.mt-plate p { margin: 0 0 var(--space-5); }
+.mt-plate p:last-child { margin-bottom: 0; }
+.mt-plate hr { margin: var(--space-5) calc(-1 * var(--space-6)); border: 0; border-top: 1px solid var(--plate-rim); }
+
+/* Paper card: worn paper with its edge drawn inside. */
+.mt-card {
+  border-radius: var(--radius-card);
+  padding: var(--space-5) var(--space-6);
+  background:
+    radial-gradient(ellipse at 20% 15%, rgba(217, 206, 184, .22), transparent 60%),
+    radial-gradient(ellipse at 85% 90%, rgba(60, 35, 20, .28), transparent 55%),
+    var(--paper);
+  box-shadow: var(--paper-border), var(--plate-drop);
+  color: var(--secondary);
+}
+.mt-card a { color: var(--title); text-decoration-color: var(--title); }
+
+/* ---------- Buttons ---------- */
+
+/* Plate button: the charcoal button plate at 70% brightness; brighter, pressed look on hover. */
+.mt-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-5);
+  min-height: 38px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--radius-btn);
+  background: none;
+  color: var(--main);
+  font: 600 14px/18px var(--font-exo);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color .16s ease;
+}
+.mt-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(#4a4440, #2e2926 55%, #241f1c);
+  box-shadow: inset 0 0 0 1px var(--metal-edge), inset 0 1px 0 rgba(217, 206, 184, .14), 0 1px 2px rgba(0, 0, 0, .5);
+  filter: brightness(.7);
+  transition: filter .16s ease;
+}
+.mt-btn > * { position: relative; }
+.mt-btn:hover, .mt-btn[aria-current="page"] { color: var(--paper-light); }
+.mt-btn:hover::before, .mt-btn[aria-current="page"]::before, .mt-btn:active::before {
+  background: linear-gradient(#241f1c, #2e2926 45%, #3a3430);
+  box-shadow: inset 0 0 0 1px var(--metal-edge), inset 0 2px 3px rgba(0, 0, 0, .45);
+  filter: brightness(.85);
+}
+.mt-btn.is-block { display: flex; width: 100%; justify-content: flex-start; }
+
+/* Primary: a small paper card. One per screen. */
+.mt-btn-primary {
+  min-height: 48px;
+  padding: 0 var(--space-7);
+  color: var(--secondary);
+  font-size: 22px;
+  line-height: 24px;
+  letter-spacing: .08em;
+  background: var(--paper);
+  box-shadow: var(--paper-border), var(--plate-drop);
+  transition: filter .16s ease;
+}
+.mt-btn-primary::before { content: none; }
+.mt-btn-primary:hover { color: var(--secondary); filter: brightness(1.1); }
+.mt-btn-primary:active { transform: translateY(1px); }
+
+/* Key badge */
+.mt-key {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: var(--radius-portrait);
+  background: rgba(20, 8, 6, .6);
+  color: var(--paper-light);
+  font: 600 10px/15px var(--font-exo);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+/* ---------- Tabs: a dark track, the selected tab is a lit plate ---------- */
+
+.mt-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: 3px;
+  border-radius: calc(var(--radius-btn) + 3px);
+  background: rgba(8, 6, 5, .55);
+  box-shadow: var(--plate-border);
+}
+.mt-tab {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 var(--space-6);
+  border-radius: var(--radius-btn);
+  color: var(--greyed-bright);
+  font: 600 14px/18px var(--font-exo);
+  letter-spacing: .06em;
+  text-decoration: none;
+}
+.mt-tab:hover { color: var(--main); }
+.mt-tab[aria-current="page"] {
+  color: var(--paper-light);
+  background: linear-gradient(#241f1c, #3a3430);
+  box-shadow: inset 0 0 0 1px var(--metal-edge), inset 0 -2px 0 var(--brass);
+}
+
+/* ---------- Rows and lists on a plate ---------- */
+
+.mt-rows { display: grid; margin: 0; }
+.mt-rows > div { display: flex; justify-content: space-between; gap: var(--space-5); padding: var(--space-3) 0; border-top: 1px solid var(--plate-rim); font: 600 14px/18px var(--font-exo); }
+.mt-rows > div:first-child { border-top: 0; }
+.mt-rows dt { color: var(--main); }
+.mt-rows dd { margin: 0; color: var(--paper-light); text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  .mt-rows > div { flex-direction: column; gap: 0; }
+  .mt-rows dd { text-align: left; }
+}
+
+.mt-list { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-3); }
+.mt-list li { position: relative; padding-left: 18px; }
+.mt-list li::before { content: ""; position: absolute; left: 2px; top: 8px; width: 6px; height: 6px; border-radius: 1px; background: var(--brass); }
+
+.mt-code {
+  margin: 0;
+  padding: var(--space-5) var(--space-6);
+  overflow-x: auto;
+  border-radius: var(--radius-btn);
+  background: rgba(8, 6, 5, .7);
+  box-shadow: inset 0 0 0 1px var(--plate-rim);
+  color: var(--paper-light);
+  font: 500 13px/20px var(--font-mono);
+}
+
+.mt-caption { font: 400 12px/15px var(--font-exo); opacity: .75; }
+.mt-good { color: var(--good); }
+.mt-bad { color: var(--bad-bright); }

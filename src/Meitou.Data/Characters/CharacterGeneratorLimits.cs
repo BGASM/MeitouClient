@@ -42,7 +42,8 @@ public sealed class AppearanceLimits
     /// Reads the config of one gender, the way <c>AppearanceManager::loadEditorXMLData</c> does (docs/characters.md,
     /// "Random appearance"): a <c>Config</c> without <c>gender</c> counts as male; <c>mid</c> defaults to the middle of
     /// the range, else is clamped into it; the random variation is the range × <c>random_variation</c>% or, without
-    /// one, × <paramref name="defaultDeviation"/> (CONSTANTS <c>appearance random deviation percentage</c>).
+    /// one, × <paramref name="defaultDeviation"/> (runtime CONSTANTS <c>appearance random deviation percentage</c>,
+    /// after its ×0.5 conversion).
     /// Returns null if the file has no config for that gender.
     /// </summary>
     public static AppearanceLimits? Read(string path, bool female, float defaultDeviation)

@@ -82,8 +82,6 @@ public sealed unsafe class ShaderProgram : IDisposable
         VertexReflection = vertexCode is null ? null : compiled?.Vertex ?? SpirvReflection.Parse(vertexCode);
         FragmentReflection = fragmentCode is null ? null : compiled?.Fragment ?? SpirvReflection.Parse(fragmentCode);
         ComputeReflection = computeCode is null ? null : SpirvReflection.Parse(computeCode);
-        // A stable identity for logs: the hash of the code handed to the driver.
-        CodeHash = DrawLog.ProgramHash(vertexCode ?? computeCode ?? [], fragmentCode ?? []);
     }
 
     public string Name { get; }
@@ -106,7 +104,6 @@ public sealed unsafe class ShaderProgram : IDisposable
     public bool PushDescriptors { get; }
     public uint PushConstantBytes { get; }
     public ShaderStageFlags PushConstantStages { get; }
-    public ulong CodeHash { get; }
 
     /// <summary>The GLSL of the fragment stage as compiled, kept for the native model only (the bench's instrumented variant is made from it).</summary>
     public string? FragmentSource { get; internal set; }

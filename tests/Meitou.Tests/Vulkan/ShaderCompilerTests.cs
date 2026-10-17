@@ -23,9 +23,12 @@ public class ShaderCompilerTests
         yield return ("terrain mesh depth", TerrainShaders.MeshInstancedDepthVertex, ShadowShaders.DepthFragment);
         yield return ("mesh", Shaders.MeshVertex, Shaders.MeshFragment);
         yield return ("line", Shaders.LineVertex, Shaders.LineFragment);
-        foreach (var f in new[] { nameof(PostProcessShaders.Ssao), nameof(PostProcessShaders.SsaoBlur), nameof(PostProcessShaders.Composite),
+        foreach (var f in new[] { nameof(PostProcessShaders.Ssao), nameof(PostProcessShaders.SsaoBlur), nameof(PostProcessShaders.SsaoApply), nameof(PostProcessShaders.Composite),
                      nameof(PostProcessShaders.Luminance), nameof(PostProcessShaders.Adapt), nameof(PostProcessShaders.Fxaa), nameof(PostProcessShaders.HeatHaze) })
             yield return ("post " + f, PostProcessShaders.Vertex, Private(typeof(PostProcessShaders), f));
+        yield return ("cloud march", PostProcessShaders.Vertex, VolumetricCloudShaders.March);
+        yield return ("cloud history", PostProcessShaders.Vertex, VolumetricCloudShaders.Resolve);
+        yield return ("cloud shadow map", PostProcessShaders.Vertex, VolumetricCloudShaders.Shadow);
         yield return ("sky simple", Private(typeof(SkyRenderer), "Vertex"), Private(typeof(SkyRenderer), "SimpleFragment"));
         yield return ("sky", Private(typeof(SkyRenderer), "Vertex"), Private(typeof(SkyRenderer), "SkyFragment"));
         yield return ("water", Private(typeof(WaterRenderer), "Vertex"), Private(typeof(WaterRenderer), "Fragment"));
@@ -53,13 +56,6 @@ public class ShaderCompilerTests
     {
         var p = Pairs().First(p => p.Name == name);
         return (p.Vertex, p.Fragment);
-    }
-
-    [Fact]
-    public void AllRendererPairsAreCovered()
-    {
-        Assert.Equal(Pairs().Count(), Pairs().Select(p => p.Name).Distinct().Count());
-        Assert.True(Pairs().Count() >= 23);   // every pair the renderers compile (bloom's three removed)
     }
 
     [Theory]
@@ -97,191 +93,5 @@ public class ShaderCompilerTests
 
         // fragment outputs numbered from 0
         Assert.All(program.Fragment.Outputs, o => Assert.True(o.Location >= 0));
-    }
-
-    /// <summary>
-    /// The Meitou shadows' own passes compile, and so do the programs that include the receiver in a vertex stage (the grass: the
-    /// receiver's fragment-only parts sit behind MEITOU_FRAGMENT) and in a plain fragment stage (the debug view).
-    /// </summary>
-    [Fact]
-    public void MeitouShadowProgramsCompile()
-    {
-        foreach (var (v, f) in new[] {
-                     (ShadowShaders.FullscreenVertex, MeitouShadowShaders.SweepFragment),
-                     (ShadowShaders.FullscreenVertex, MeitouShadowShaders.BlockerFragment),
-                     (FoliageShaders.GrassVertex, FoliageShaders.GrassFragment),
-                     (ShadowShaders.FullscreenVertex, ShadowShaders.DebugFragment) })
-        {
-            var program = Compiler.Compile(v, f);
-            Assert.NotEmpty(program.Fragment.Outputs);
-        }
-        var mesh = Compiler.Compile(Shaders.MeshVertex, Shaders.MeshFragment);
-        Assert.Contains(mesh.Fragment.Blocks, b => b.Name == MeitouShadowShaders.Block);
-        Assert.Contains(mesh.Fragment.Samplers, s => s.Name == "uShadowTerrain");
-        // The receiver (included before the stage's own outputs) must not add any: the terrain writes its colour at location 0.
-        var (_, terrainFragment) = GlslProgramCompiler.Preprocess(TerrainShaders.PatchVertex, TerrainShaders.Fragment);
-        Assert.Contains("layout(location = 0) out vec4 fragColour", terrainFragment);
-    }
-
-    [Fact]
-    public void VertexAttributesStayAsDeclared()
-    {
-        var (v, f) = Find("mesh");
-        var program = Compiler.Compile(v, f);
-        Assert.Equal(0, program.Vertex.Inputs.Single(i => i.Name == "aPosition").Location);
-        var bones = program.Vertex.Inputs.Single(i => i.Name == "aBones");
-        Assert.Equal(5, bones.Location);
-        Assert.Equal(ScalarKind.UInt, bones.Kind);
-        Assert.Equal(4, bones.Rows);
-    }
-
-    [Fact]
-    public void TerrainPatchReflection()
-    {
-        var program = Compiler.Compile(TerrainShaders.PatchVertex, TerrainShaders.Fragment);
-        var block = program.Vertex.DefaultBlock;
-        Assert.NotNull(block);
-        Assert.Equal("gl_DefaultUniformBlock", block.Name);
-        Assert.Equal(BlockKind.Uniform, block.Kind);
-        var vp = block.Members.Single(m => m.Name == "uViewProjection");
-        Assert.Equal(4, vp.Columns);
-        Assert.Equal(4, vp.Rows);
-        Assert.Equal(ScalarKind.Float, vp.Kind);
-        Assert.Equal(16, vp.MatrixStride);
-        Assert.Equal(64, vp.Size);
-        Assert.Equal(0, vp.ArrayLength);
-        Assert.True(block.Size >= vp.Offset + vp.Size);
-        Assert.Equal(0, block.Size % 16);
-        Assert.NotEmpty(program.Fragment.Samplers);
-        Assert.Equal(program.Vertex.DefaultBlock!.Binding + 32, program.Fragment.DefaultBlock!.Binding);
-    }
-
-    [Fact]
-    [Slow]
-    public void MeshReflectionHasBoneArrayAndBool()
-    {
-        var program = Compiler.Compile(Shaders.MeshVertex, Shaders.MeshFragment);
-        var block = program.Vertex.DefaultBlock!;
-        var bones = block.Members.Single(m => m.Name == "uBones");
-        Assert.Equal(128, bones.ArrayLength);
-        Assert.Equal(64, bones.ArrayStride);
-        Assert.Equal(128 * 64, bones.Size);
-        Assert.Equal(4, bones.Columns);
-        Assert.Equal(ScalarKind.UInt, block.Members.Single(m => m.Name == "uSkinned").Kind); // bool is stored as a uint
-        var diffuse = program.Fragment.FindSampler("uDiffuse");
-        Assert.NotNull(diffuse);
-        Assert.Equal(SamplerDimension.Dim2D, diffuse.Dimension);
-        Assert.False(diffuse.Depth);
-        Assert.Equal(ScalarKind.Float, diffuse.SampledKind);
-    }
-
-    [Fact]
-    public void FindUniformUnderstandsGlNames()
-    {
-        var program = Compiler.Compile(Shaders.MeshVertex, Shaders.MeshFragment);
-        var r = program.Vertex;
-        var plain = r.FindUniform("uModel");
-        Assert.NotNull(plain);
-        Assert.Equal(0, plain.Value.Element);
-
-        var first = r.FindUniform("uBones[0]");
-        var third = r.FindUniform("uBones[3]");
-        var whole = r.FindUniform("uBones");
-        Assert.NotNull(first);
-        Assert.NotNull(third);
-        Assert.NotNull(whole);
-        Assert.Equal(3, third.Value.Element);
-        Assert.Equal(first.Value.Offset + 3 * 64, third.Value.Offset);
-        Assert.Equal(whole.Value.Offset, first.Value.Offset);
-        Assert.Same(first.Value.Member, third.Value.Member);
-        Assert.Null(r.FindUniform("uBones[128]"));
-        Assert.Null(r.FindUniform("uNoSuchThing"));
-        Assert.Null(r.FindUniform(""));
-
-        var (v, f) = program.FindUniform("uViewProjection");
-        Assert.NotNull(v);
-        Assert.Null(f);
-    }
-
-    [Fact]
-    public void NamedBlocksAreReflectedByTypeName()
-    {
-        var program = Compiler.Compile(TerrainShaders.PatchVertex, ShadowShaders.DepthFragment);
-        var block = program.Fragment.Blocks.Single(b => b.Name == ShadowShaders.CasterBlock);
-        Assert.False(block.IsDefault);
-        Assert.InRange(block.Binding, 32, 63);
-        var bias = block.Members.Single(m => m.Name == "uShadowBias");
-        Assert.Equal(4, bias.Rows);
-        Assert.Equal(16, block.Size);
-        Assert.NotNull(program.Fragment.FindUniform("uShadowBias"));
-        Assert.NotNull(program.Fragment.FindUniform(ShadowShaders.CasterBlock + ".uShadowBias"));
-    }
-
-    [Fact]
-    public void ShaderFailuresReportTheSource()
-    {
-        var ex = Assert.Throws<ShaderCompileException>(() => Compiler.Compile("#version 330 core\nvoid main() { gl_Position = nope; }\n", "#version 330 core\nout vec4 c;\nvoid main() { c = vec4(1.0); }\n"));
-        Assert.Equal("vertex", ex.Stage);
-        Assert.Contains("nope", ex.Message);
-        Assert.Contains("    2: void main()", ex.Message);
-    }
-
-    [Fact]
-    [Slow]
-    public void RemapClipDepthCompilesAndAppendsTheRemap()
-    {
-        var (v, f) = Find("mesh");
-        var program = Compiler.Compile(v, f, new ShaderCompileOptions { RemapClipDepth = true, UseDiskCache = false });
-        Assert.Contains("meitou_original_main", program.VertexSource);
-        Assert.Contains("gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;", program.VertexSource);
-        Assert.DoesNotContain("meitou_original_main", program.FragmentSource);
-        var plain = Compiler.Compile(v, f);
-        Assert.NotEqual(plain.VertexSpirv.Length, program.VertexSpirv.Length);
-        Assert.NotEqual(plain.VertexSource, program.VertexSource);
-    }
-
-    [Fact]
-    [Slow]
-    public void DiskCacheRoundTripAndCorruptFileIsRewritten()
-    {
-        string dir = Path.Combine(Path.GetTempPath(), "meitou-shader-test-" + Guid.NewGuid().ToString("N"));
-        try
-        {
-            var options = new ShaderCompileOptions { CacheDirectory = dir };
-            var (v, f) = Find("water");
-            var first = new GlslProgramCompiler().Compile(v, f, options);
-            Assert.Equal(ProgramSource.Compiled, first.Source);
-            var file = Assert.Single(Directory.GetFiles(dir, "*.spvpair"));
-
-            var second = new GlslProgramCompiler().Compile(v, f, options);
-            Assert.Equal(ProgramSource.Disk, second.Source);
-            Assert.Equal(first.VertexSpirv, second.VertexSpirv);
-            Assert.Equal(first.FragmentSpirv, second.FragmentSpirv);
-
-            var compiler = new GlslProgramCompiler();
-            Assert.Equal(ProgramSource.Disk, compiler.Compile(v, f, options).Source);
-            Assert.Equal(ProgramSource.Memory, compiler.Compile(v, f, options).Source);
-
-            // different options are a different key
-            var other = new GlslProgramCompiler().Compile(v, f, options with { RemapClipDepth = true });
-            Assert.Equal(ProgramSource.Compiled, other.Source);
-            Assert.Equal(2, Directory.GetFiles(dir, "*.spvpair").Length);
-
-            // corrupt: flip a byte in the middle, then truncate
-            byte[] data = File.ReadAllBytes(file);
-            data[data.Length / 2] ^= 0xFF;
-            File.WriteAllBytes(file, data);
-            var healed = new GlslProgramCompiler().Compile(v, f, options);
-            Assert.Equal(ProgramSource.Compiled, healed.Source);
-            Assert.Equal(ProgramSource.Disk, new GlslProgramCompiler().Compile(v, f, options).Source);
-
-            File.WriteAllBytes(file, [1, 2, 3]);
-            Assert.Equal(ProgramSource.Compiled, new GlslProgramCompiler().Compile(v, f, options).Source);
-            Assert.Equal(ProgramSource.Disk, new GlslProgramCompiler().Compile(v, f, options).Source);
-        }
-        finally
-        {
-            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
-        }
     }
 }

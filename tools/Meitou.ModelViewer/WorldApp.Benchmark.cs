@@ -18,13 +18,6 @@ static partial class WorldApp
     {
         var context = display.Context;
         var centre = camera.Target;
-        // MEITOU_BENCH_SHADOW_RANGE=<u>: the shadow distance beyond --shadow-range's game limit (9000), as the Tab slider allows (VRAM measurements).
-        if (float.TryParse(Environment.GetEnvironmentVariable("MEITOU_BENCH_SHADOW_RANGE"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float shadowRange)
-            && gpu.Shadow is { } rangedShadow)
-        {
-            rangedShadow.Settings = rangedShadow.Settings with { Range = shadowRange };
-            Console.WriteLine($"shadows   range {shadowRange:0} (MEITOU_BENCH_SHADOW_RANGE)");
-        }
         var device = context.Device;
         ulong vramPeak = 0;
         float radius = Math.Max(o.FlyRadius, 1);
@@ -37,8 +30,6 @@ static partial class WorldApp
         var frameWatch = new Stopwatch();
         long gc2 = GC.CollectionCount(2), gcPrev = gc2, gc0 = GC.CollectionCount(0), gc1 = GC.CollectionCount(1), allocated = GC.GetTotalAllocatedBytes(), renderAllocated = GC.GetAllocatedBytesForCurrentThread();
         TimeSpan pause0 = GC.GetTotalPauseDuration(), pausePrev = pause0;
-        BackgroundWork.Measure = BackgroundWork.ReportJobs;
-        var allocLog = AllocationLog.Start();   // MEITOU_ALLOC_STATS=1: every collection and the allocation by thread and type
         var resident = new List<string>();
         // Pop-in: per frame, how near the nearest foliage zone without its whole layout (within the near reach) and without any layout (within
         // the far reach) are, and the nearest group in range whose mesh is not resident.
@@ -54,7 +45,7 @@ static partial class WorldApp
         var motion = CameraMotion.Fly(o, camera, gpu, FlyTurn, benchOrbit);
         var spikeProfiler = SpikeLog.Enabled ? new FrameProfiler(context, () => context.GpuFrameMs) : null;   // --log-spikes: the stage times the spike lines print
         // Draw counts over the flight (docs/render-distance-benchmark.md): the objects' totals per kind, the main view's grass blades, foliage
-        // instances and terrain triangles summed per frame, the foliage's indirect draws by view kind (MEITOU_FOLIAGE_TRIS=1).
+        // instances and terrain triangles summed per frame.
         var objectTotals0 = gpu.Objects is { } ot0 ? (long[,])ot0.Totals.Clone() : null;
         gpu.Foliage?.ResetDrawTally();
         double bladeSum = 0, foliageSum = 0, terrainTriSum = 0, preFrameSum = 0, gpuFrameSum = 0;
@@ -63,12 +54,16 @@ static partial class WorldApp
         for (int i = 1; i <= o.FlyBenchmark; i++)
         {
             motion.Step(i);
-            allocLog?.FrameStart();
             if (spikeProfiler is not null) { context.EnsureFrame(); spikeProfiler.BeginFrame(); } else StageClock.Start();
             frameWatch.Restart();
             // With weather particles the frame clock runs (1/60 s a frame, in the draw's time units of 600 s) so they simulate; without, it stays 0 as before.
             float clock = gpu.Particles is { Groups.Count: > 0 } ? (float)(i / 60.0 / 600) : 0;
-            { Draw(gpu, scene, camera, render, w, h, o.Hour, clock, o.FogDistance); EndFrame(context); }
+            // --time-speed: the hour runs on as in the viewer (game hours per real minute), at 1/60 s a frame.
+            float hour = o.TimeSpeed > 0 ? (o.Hour + o.TimeSpeed * i / 3600f) % 24 : o.Hour;
+            // The water's, the stars' and the heat haze's clock follows it too (the frame loop holds that clock still for pictures), so the
+            // ocean's FFT records every frame as it does in the viewer: the exit line's `water ocean: N passes` then counts the frames it ran.
+            if (o.TimeSpeed > 0) gpu.HeatHazeHours = hour;
+            { Draw(gpu, scene, camera, render, w, h, hour, clock, o.FogDistance); EndFrame(context); }
             double cpuMs = frameWatch.Elapsed.TotalMilliseconds;
             if (i % 500 == 0 || i <= 4) Console.WriteLine($"gpu       frame {i}: {context.Frame.Stats}");
             cpu.Add(cpuMs);
@@ -77,13 +72,6 @@ static partial class WorldApp
             if (i > 30) { preFrameSum += context.PreFrameGpuMs; gpuFrameSum += context.GpuFrameMs; gpuFrames++; }
             if (gpu.Foliage is { } fol) { gaps.Add((fol.NearestIncompleteZone, fol.NearestUnlaidZone, fol.NearestMissingMesh, fol.NearestMissingGrass)); impostorPop.Add(fol.ImpostorPopIn); }
             if (gpu.Objects is { } objs) { var (untextured, refining, held, coarse) = objs.TakePopStats(); objectPop.Add((untextured, refining, held, coarse, objs.MeshesAwaitingDetail)); }
-            if (o.Screenshot is not null && FlyShots.Contains(i) && gpu.Post is { Target: { } shotTarget } shotPost)
-            {
-                // MEITOU_FLY_SHOT=<frame>[,<frame>...]: the picture as drawn at that frame of the flight, nothing waited for (what a flying user sees).
-                string shot = Path.ChangeExtension(o.Screenshot, null) + $"-fly{i}.png";
-                FramebufferCapture.SavePng(shotPost.Gpu, shotTarget, shot, w, h);
-                Console.WriteLine($"fly shot  frame {i}: eye {camera.Eye.X:0}, {camera.Eye.Y:0}, {camera.Eye.Z:0}, {shot}");
-            }
             if (!pipelined) context.Finish();
             if (spikeProfiler is null) StageClock.Lap(11);
             spikeProfiler?.EndFrame();
@@ -116,8 +104,6 @@ static partial class WorldApp
         // times above are the render thread's wall time (including any wait for the jobs), so the two do not add up.
         Console.WriteLine($"jobs      record mode {Meitou.Rendering.Gpu.Recording.Mode} ({RenderJobs.Threads} threads); summed cpu mean ms: " +
             string.Join(", ", StageClock.Names.Select((n, k) => (n, k)).Where(x => jobSums[x.k] > 0).Select(x => $"{x.n} {jobSums[x.k] / o.FlyBenchmark:0.00}")));
-        if (BackgroundWork.ReportJobs) { BackgroundWork.Measure = false; BackgroundWork.Report(); }
-        if (allocLog is not null) { Thread.Sleep(500); allocLog.Print(); allocLog.Dispose(); }
         if (gpu.Particles is { } fx)
             Console.WriteLine($"particles per frame over the flight: simulation {fx.MeanMilliseconds.Simulation:0.00} ms (background threads), main thread waited {fx.MeanMilliseconds.Wait:0.00} ms; update {fx.MeanMainThreadMilliseconds.Update:0.00} ms, draw {fx.MeanMainThreadMilliseconds.Draw:0.00} ms (waiting included, of which filling instance buffers {fx.CollectMilliseconds:0.00} ms); {fx.ActiveUnits} units simulated, {fx.DrawnUnits} drawn");
         Console.WriteLine($"cpu only  p50 {C(0.5):0.0} ms, p95 {C(0.95):0.0} ms, p99 {C(0.99):0.0} ms, max {cpuSorted[^1]:0.0} ms (commands recorded, GPU not waited for)");
@@ -159,17 +145,12 @@ static partial class WorldApp
             Console.WriteLine($"counts    objects per frame: {Kind(0, "colour (slices + reflection)")}; {Kind(1, "shadow")}");
             Console.WriteLine($"sizes     objects: {ot.SizeSurvey()}");
         }
-        if (gpu.Foliage is { } tallied)
-        {
-            Console.WriteLine($"counts    foliage gpu draws per frame: {tallied.DrawTallyDescription}");
-            if (tallied.DrawTallyTop(12) is { Length: > 0 } top) Console.WriteLine($"top       colour {top}");
-        }
         if (meter is not null) ReportPasses(meter, display, gpu, scene, camera, render, o, w, h);
         if (o.Screenshot is not null)
         {
             // Back at the start: everything wanted there is loaded again (what was unloaded meanwhile comes back) before the picture.
             camera.Target = centre;
-            gpu.Streamer?.Settle(gpu.Anchor ?? camera.Eye);
+            gpu.Streamer?.Settle(camera.Eye);
             gpu.Objects?.Settle(camera.Eye);
             gpu.Foliage?.Settle(camera.Eye);
         }
@@ -184,7 +165,6 @@ static partial class WorldApp
     {
         meter.Report(Console.Out);
         meter.Dispose();
-        if (Environment.GetEnvironmentVariable("MEITOU_VK_MICRO") == "1") PassMeter.VkCallMicro(display.Context, Console.Out);
         WorldFrame.DetailedStats = true;
         { Draw(gpu, scene, camera, render, w, h, o.Hour, 0, o.FogDistance); EndFrame(display.Context); }
         display.Context.Finish();
@@ -198,9 +178,6 @@ static partial class WorldApp
 
     /// <summary><c>MEITOU_FLY_TURN=&lt;radians&gt;</c>: the fly benchmark turns the camera by that much each frame about its eye instead of flying (the occlusion cull's turn test).</summary>
     static readonly float FlyTurn = float.TryParse(Environment.GetEnvironmentVariable("MEITOU_FLY_TURN"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float turn) ? turn : 0;
-
-    /// <summary>MEITOU_FLY_SHOT: frames of the fly benchmark saved as pictures (with <c>--screenshot</c>, next to it).</summary>
-    static readonly HashSet<int> FlyShots = [.. (Environment.GetEnvironmentVariable("MEITOU_FLY_SHOT") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s => int.TryParse(s, out int f) ? f : -1)];
 
     /// <summary>One line on the GPU memory the streamed meshes and textures hold.</summary>
     static string Resident(Gpu gpu) =>

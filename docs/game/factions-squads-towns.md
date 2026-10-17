@@ -1,76 +1,142 @@
-# Factions, squads, towns and population spawning
+# Factions, squads and towns
 
-Sources:
+Original FACTION/Platoon/population/town research: binary functions, FCS and merged database/save
+checks. Tables/expressions retain fields and event values. Runtime: [simulation](../simulation.md);
+[AI](ai.md), [economy](economy.md), [save format](../formats/save.md).
 
-- **Binary**: `kenshi_x64.exe`, the Steam build (decompile dump, naming pass applied; addresses like `FUN_1406b2d20`
-  are functions of that dump, `Class::vfunc_n` are MSVC vtable slots from RTTI). Areas read: the
-  `FactionRelations` / `PlayerFactionRelations` / `Faction` classes (0x1406b2xxx - 0x1406bxxxx, 0x1407fe270), the
-  squad factory (`RootObjectFactory::createRandomSquad`, 0x140583a10, named in its own log strings), the area-sector
-  population code (0x1408f5xxx - 0x1408fexxx), the town and nest classes (0x140926xxx - 0x14093xxxx), world-state
-  evaluation (0x1409a7e00, 0x1409a9570, 0x1409a9a70), `BuildingItemGroup` (0x140549xxx, 0x1405534f0).
-- **Data**: `data/gamedata.base` plus the three core mods through `GameDatabase.Load(LoadOrder.FromInstall)` (probe
-  `<RE workspace outside the repo>/probes\factions`); field meanings from `fcs.def` (descriptions are the designers' text
-  and sometimes stale, see "Data corrections"); enum names and numbers from the editor's own enums (the decompiled
-  `forgotten construction set.exe`: `TownType`, `CharacterTypeEnum`, `SquadMemberType`, `DialogActionEnum`,
-  `BuildingDesignation`, `CrimeEnum`).
-- Counts below are for the **merged** base-game database (a record that a mod modifies counts once), so they are lower
-  than the per-file counts in [fcs-mod.md](../formats/fcs-mod.md#record-types).
+## Relations and world states
 
-Related: [zones.md](../formats/zones.md) (town placements, GAMESTATE_TOWN), [save.md](../formats/save.md) (the saved
-relation matrix, platoons, towns), [game-loop.md](game-loop.md#factions-and-squads) (how factions and platoons are
-stepped per frame), [characters.md](../characters.md#generating-a-character) (what happens to each character of a
-squad), [weather.md](../formats/weather.md) (BIOME_GROUP regions from `areasmap.tga`).
-The AI that runs squads and the `AI packages` they carry is in [ai.md](ai.md) and [ai-tasks.md](ai-tasks.md); walking, `squad formation` and the 4608-unit grid in [pathfinding.md](pathfinding.md);
-trade, shop stock, `trade culture` and bounties in [economy.md](economy.md); the RACE fields and body model of a spawned character in [character-stats.md](character-stats.md);
-the new-game start-offs in [ui-screens.md](ui-screens.md#3-main-menu-and-new-game-flow); building designations and production in [buildings-production.md](buildings-production.md).
+**Verified** initial A→B: explicit A.relations v0, otherwise min(A.default,B.default); self100.
+Hostile<=-30, ally>=50; directional flags/coexistence and event changes are distinct. Storage,
+trust/known/player-faction branches and dialogue/reaction events remain scoped Observed where
+not independently checked. Start-off relation overrides are not fully decoded.
 
-Labels: **Verified** = checked against game data or by two independent places in the binary (said how);
-**Observed** = one reading of one function (or a pattern in data); **Unknown**.
+WORLD_EVENT_STATE (`FUN_1409a7e00`, **Observed** by code): holds when every `NPC is` CHARACTER has unique state v0 (0 dead, 1 alive,
+2 imprisoned), no `NPC is NOT` one has its v0, each `player ally` FACTION is (v0 1) or is not (v0 0) the player's ally and each `player
+enemy` hostile to it. With `player involvement`, an `NPC is` other than alive or an `NPC is NOT` alive also needs the unique's player
+flag. A unique with no entry counts as alive, so a new game answers by the data alone; nothing is stored. A `world state` list entry
+(`FUN_1409a9a70`: spawn gates, weighted picks, campaigns) passes when the state's answer equals (v0 == 1); a missing record is skipped.
 
-## 1. Object model
+## Squad factory
+
+**Observed/Verified sentinel checks:** per entry count=v0 when v1=0 or100; otherwise inclusive
+v0..v1, reversed range givesv0. Apply size multiplier/truncation/min1 unless dont-multiply.
+Create leader role2, random choosefrom then squad role0/squad2 role1, animals/animals2, slaves
+role4 as recursive squads, prisoners into available home cages. First member can become leader.
+Offsets `(3*(i%8),3*floor(i/8)+(i%2))`, animals2 spacing5. Age=max(0,r*animal-age-random-0.1+v2/100).
+Unique members go through one gate: [unique characters](#unique-characters).
+
+Generic weighted refs: v0=0 means100; exclude nonpositive weights and false world states,
+first cumulative weight exceeding uniform roll wins; single candidate no roll. SpawnInfoList
+instead drops v0<=0 and budgets expected squad sizes using its separate sentinel/range rules.
+Do not reuse one zero-weight convention for both.
+
+## Unique characters
+
+**Data** (merged base files, throwaway survey): 155 of 639 CHARACTERs have `unique`; 13 of them have exactly one `unique replacement spawn`
+(no record has more, no non-unique has one). Uniques are named by SQUAD_TEMPLATE `leader` 99, `squad` 54, `choosefrom list` 51, `squad2` 1,
+FACTION_CAMPAIGN `special leader` 57, WORLD_EVENT_STATE `NPC is` 113 / `NPC is NOT` 60 and dialogue conditions; 34 by more than one template
+(Dust King leads 3; recruits sit in several towns' recruit lists); 9 by none. Templates with a unique leader are listed by TOWN `residents` (99)
+and `bar squads` (33). Two UNIQUE_SQUAD_TEMPLATEs exist (`General Epson Army`, `UNIQUE bandit test`), each in one FACTION's `special squads`.
+
+**State** (`UniqueNPCManager`: one global map CHARACTER record → entry, `FUN_140354560`; **Verified** by code, meanings of `state` from `fcs.def`
+`NPC is`; the 9 sample saves hold 302 entries, all state 1 / player false):
+
+| Field | Meaning |
+| --- | --- |
+| claimed | the CHARACTER record once a squad created it; null or no entry = free to create (`FUN_1405921b0`) |
+| handle | the live character, recorded when it gets its handle (`Character` slot 16, `FUN_140623920`) |
+| state | 1 alive (also for a new or absent entry), 0 dead, 2 imprisoned/captured |
+| player | the player was involved (killed, imprisoned, holds it) |
+
+**Transitions** (**Verified** by code unless marked):
+- Create (`FUN_1405836e0`, used by `FUN_140583a10` for `leader`, `choosefrom list`, `squad` and `squad2` alike): a claimed unique is replaced by
+  its first `unique replacement spawn` (created without the gate, recorded by slot 16 like any unique if it is one; all 13 targets are
+  non-unique except `Protector Of The Flame`, which names itself, so it can be duplicated), or by nobody; a free one is claimed (handle
+  reset) and created.
+  So a dead unique (claimed stays set) never comes back, a v0 > 1 entry yields one copy plus replacements, and a missing leader does not stop the
+  squad (the first member made leads). The platoon's +0xac is set when a unique member is made (use **Unknown**).
+- Death (`FUN_1407a6200`): state 0; player set (never cleared here) when the killer's faction is the player's. The dead unique's faction's
+  "prosperity" (`FactionUniqueSquadManager` +8) drops by 100, floor 0.
+- Imprisoned in a cage or restraint (`FUN_140330600`): state ≠ 0 → 2, player set when the cage's owner is the player's. `DA_ENSLAVE_TARGETS_CARRIED_PERSON` / `DA_ARREST_TARGETS_CARRIED_PERSON` (0x28 / 0x1e), which
+  take a carried unique off its carrier, do the same, player set when the carrier is the player's (`FUN_140680560`).
+- Periodic refresh (`FUN_1405cf470`, from the character's slot-80 update `FUN_1405d00b0`): state 1 and carried by a non-ally → 2 (player = carrier
+  is the player's); state 2, not carried, not imprisoned, and in the player's faction or allied with its squad's → 1, player cleared; state 0, in
+  the player's faction and not dead → 1 (**Observed**: the ally/town tests are summarised).
+- Unload of an active platoon (`FUN_1407ef4b0` → `FUN_1409a8120`), for each unique member in state 2 or away from its ownership town: dead, down,
+  carried by a non-friend or `+0x279 & 7` → state 0; free and well → entry erased (`FUN_1405067e0`, only if state ≠ 0 and the stored handle's container (C, CS) is
+  this platoon: a unique registered to another squad is not released) and the platoon re-creates its members from the template on activation (+0x118 = 1), which claims the unique again;
+  imprisoned away from friends → 2 (**Observed**; a 0.1 roll against the faction's town list in the free branch is **Unknown**).
+- An activating platoon in spawn mode 3 (home no longer valid) whose template leader is unique releases the template's unique
+  leader/squad/squad2 entries registered to it (`FUN_1404ffad0` → `FUN_1404ff760`) (**Observed**).
+- New game and every load (`FUN_1409a8970`): map cleared, then the unique leader/squad/squad2 of each SQUAD_TEMPLATE's first `prisoners`
+  template → state 2 unclaimed (base game: Cat of `Dust King Prisoner`, `Tengu's vault prisoners`, `agnu`). Import marks every imported unique
+  claimed (`FUN_140378a30`).
+
+**Queries**:
+- WORLD_EVENT_STATE (`FUN_1409a7e00`): `NPC is` needs state = v0, `NPC is NOT` state ≠ v0; with `player involvement` the player flag must
+  also be set (`NPC is` with v0 ≠ 1, `NPC is NOT` with v0 = 1) (**Verified** by code).
+- Campaign check (`FUN_1409c4ed0`): passes with no `special leader` or one in state 1 (a never-made one counts). Gathering (`FUN_1409c5040`),
+  leaders in list order, first usable wins: a registered handle → its platoon; else the SQUAD_TEMPLATEs naming it `leader` (more than one only
+  logs "ERROR: unique NPC with more than 1 squad referencing it", the first is used) are spawned if the unique is free. Lord Mirage (a
+  non-unique `special leader`) has no entry, so `UC town racists fort` (the template he leads) can be spawned for every campaign;
+  Yayoi has no template. `specific target NPC`s count when state ≠ 0 and the handle
+  has a non-zero position (`FUN_1409c5e80`, `FUN_1409a7d90`) (**Observed**).
+- Towns have no extra rule: a `residents`/`bar squads` template with a unique leader passes the create gate above, so while the unique is
+  claimed elsewhere or dead the squad comes with the replacement or without the leader (**Observed**).
+
+**Special squads** (FACTION `special squads` → UNIQUE_SQUAD_TEMPLATE, v0 = number to keep per `fcs.def`): `FUN_1402ddc90` makes per entry
+{template, v0, timer, live platoon handles}. The update `FUN_1402dd680` (each war-manager run, `FUN_1406b97c0`, with the faction's accumulated
+time) raises prosperity by 0.1·dt toward 1000 and counts timers down; when a timer is 0 and fewer than v0 live, it returns: **nothing spawns
+them** (**Verified**: by code, the only spawn-near-own-town helper `FUN_1402dda60` has no callers; 0 of 3,502 PLATOON records in 9 saves are
+`special`, every `sqtime` is 0). A `UniquePlatoon` (`FUN_14057c6f0`: UNIQUE_SQUAD_TEMPLATE, or a saved PLATOON with `special`) adds a
+mission ticker (every 10 s pick a `missions` DIPLOMATIC_ASSAULTS entry by its `conditions`: `FUN_1409a7930`; not decoded), saves
+`missionTimer` and `missionRepeatsCount` per mission (slot 23), and on destruction unless kept tells the manager, which drops its handle and
+sets the timer to 2618.18 × `replacement time` / 24 (`FUN_1402de9b0`; unit **Unknown**).
+
+## Population and contents
+
+Area-sector grid uses the4608-zone coordinate system with9-unit offset; biome populations,
+homeless/roaming pools, nests, town residents/bar/roam squads and campaigns have separate caps,
+spawn distances/timers/owner rules. Nest debris and regenerating squads are stateful. Towns
+resolve faction, homes/parts/material replacement, residents, interiors, contents and culture.
+World-state replacement towns and faction ownership affect both population and building data.
+
+**Sector and nest counts** (**Verified** by code): a platoon is filed in the area sector of its position (`FUN_1408f6c80`, from the platoon constructor and
+`Platoon::vfunc_28`): persistent platoons and nest squads into a set that is not counted, the rest into the counted set (+0x60, size +0x70), moved to a third set
+(+0x88, size +0x98) while imprisoned or dead but still loaded; a sector's load is +0x70 + 0.5 x +0x98 against its group's cap. A nest's or town's pool is the set
+of platoons whose `hometown` is it, by `sqt` (1 residents, 2 roaming), counted in living characters ([save keys](../formats/save.md#npc-platoons-meitou-mapping)).
+
+Loot/building inventories, artifacts, shop stock, prisoners/slaves and placed debris derive
+from different reference lists. Preserve slot/count/quality/owner fields and forbidden-item
+rules rather than treating every list as uniform random loot. Story NPCs: [unique characters](#unique-characters);
+campaigns: [campaigns](#campaigns).
+
+### 1. Object model
 
 | Game class (RTTI) | Role | Notes |
 | --- | --- | --- |
 | `Faction` | one per FACTION record (103 in the base game, the player's included); owns its record (+0x240), a `FactionRelations` (+0x78), the platoon lists, `FactionUniqueSquadManager` | `FUN_1407fe270` is the loader from the record (**Observed**). Player flag: the field at +0x250 is non-null only for the player's faction (**Observed**, also in [game-loop.md](game-loop.md)) |
 | `FactionRelations` / `PlayerFactionRelations` | the relation table of one faction towards all others | section 3 |
-| `Platoon` -> `ActivePlatoon` (characters exist) / `UnloadedPlatoon` (abstract) / `UniquePlatoon` | a squad | per-frame stepping is in [game-loop.md](game-loop.md#factions-and-squads); creation is section 5 |
+| `Platoon` -> `ActivePlatoon` (characters exist) / `UnloadedPlatoon` (abstract) / `UniquePlatoon` | a squad; `UniquePlatoon` only from an UNIQUE_SQUAD_TEMPLATE ([special squads](#unique-characters)) | per-frame stepping is in [game-loop.md](game-loop.md#update-threads-and-budget); creation is section 5 |
 | `TownBase` -> `Town`, `Nest` | a TOWN record placed in the world; nests are TOWN records of `type` 0 spawned by the game | section 7; `Town`/`Nest` share almost all virtuals, the nest overrides slot 103 (wiped out) |
 | `BasePopulationManager` -> `TownPopulationManager`, `NestPopulationManager` | per town: two pools (residents, roaming) with a population budget and a `SpawnInfoList` | section 6.4 |
 | `SpawnInfoList` | the weighted list of squad templates a pool or biome group may spawn | section 6.1 |
 | `AreaSector`, `AreaBiomeGroup` | one cell of a 64 x 64 grid of 4608-unit cells, and the BIOME_GROUP data it belongs to | section 6.2 |
 | `BuildingItemGroup` | an ITEM_PLACEMENT_GROUP placed in a building: one item slot with a respawn timer | section 9 |
-| `FactionWarMgr`, `CampaignData`/`CampaignInstance` | faction campaigns (FACTION_CAMPAIGN, DIPLOMATIC_ASSAULTS) | out of scope; only listed |
+| `FactionWarMgr`, `CampaignData` (always `StartInvasionData`) / `CampaignInstance` (always `GatherAndMove`) | faction campaigns (FACTION_CAMPAIGN) | [campaigns](#campaigns); DIPLOMATIC_ASSAULTS not decoded |
 
-## 2. FACTION record: what the exe reads
-
-103 FACTION records (`Nameless`, `204-gamedata.base`, is the player's; the other 102 are NPC factions).
-
-Fields **read by the exe** (field loader `FUN_1407fe270`, relation init `FUN_1406b3f80`/`FUN_1406b40d0`, others by
-the functions named): `default relation`, `relations`, `coexistence`, `trustworthy`, `allow slaves weapons`, `anti
-slavery`, `fundamental type`, `road preference`, `not real`, `offers bounties`, `run away ratio of squad size`, `run
-away ratio relative to enemy`, `races`, `trade culture`, `buildings replacements`, `max prosperity`,
-`special squads` (`FUN_1402ddc90`), `roaming population`, `residents`, `bar squads`, `default resident`, `squads`,
-`squad default`, `campaigns`, `biomes`, `no-go zones`, `heals strangers`, `squad formation`.
-
-Fields **never referenced**: `business relations`, `enemy classification`, `effect of anger`, `effect of happy`,
-`emotion fade rate`. **Observed**: none of these key strings exists in the exe's string table
-(`strings.tsv`), so no code looks them up; they are editor-only (the game's hostility threshold is hard-coded, section
-3.3). The base values (`enemy classification` -10 for 99 of 103 factions, `business relations` -5) therefore have no
-effect.
-
-Data summary (**Verified**, probe `schema FACTION`): `default relation` is non-zero for 21 factions (18 of them <= -30);
-`roaming population` is 50 for 96 of 103; `not real` is true
-for 30 (wildlife, ruins, slaves, "No Faction", ...); `fundamental type` (CharacterTypeEnum: 0 NONE, 1 LAW_ENFORCEMENT,
-2 MILITARY, 3 TRADER, 4 CIVILIAN, 5 DIPLOMAT, 6 SLAVE, 7 SLAVER, 8 BANDIT, 9 ADVENTURER) is 8 for 38, 4 for 25, 0 for 11,
-9 for 11, 2 for 8, 7 for 4, 1 for 2, 3 for 2, 6 for 2.
-
-## 3. Relations
+**Persistent platoons** (**Verified** by code): a zone's unload (`ZoneMapContent::deactivate`, `FUN_1409fe980`) touches no platoon; each platoon checks
+itself (`FUN_1404febd0`) and after 4 s outside every loaded zone (`FUN_1406bab60`, `FUN_1407ec570`) becomes an `UnloadedPlatoon` (`FUN_1407ef4b0`, its characters
+copied into an in-memory record container, no file written) when its `persistent` flag (+0x115) is set or it is in a live campaign, else it is destroyed
+(`FUN_1406ba9d0`). Town residents are made persistent (`FUN_14057f820`, with `sqt` 1); pool refills, homeless squads and `FUN_1409c4150` are not. A
+non-persistent unloaded platoon is activated after 60 s (`FUN_1407ee790`) and then destroyed, so it lasts about 64 s out of range. An unloaded platoon
+becomes active after 2 s inside a ready zone (`FUN_1407ebf30`), its characters rebuilt from the kept records; at game load each PLATOON is made active or
+unloaded by its zone (`FUN_1407f85f0`). `declareDead` (`FUN_140797090`) clears `persistent` (destroyed at its next unload, its PLATOON record deleted by
+`FUN_1407ec5e0`). No distance, age or emptiness rule removes a persistent platoon. A wiped-out town refills only through its pools, with non-persistent squads;
+no path re-running the initial resident placement was found (**Unknown** whether one exists).
 
 ### 3.1 Storage (**Observed**)
-
-Each faction has a `FactionRelations` object. It holds an unordered map from *other faction* to an entry, a default
-value, and the faction's own pointer. Entry layout (offsets from the entry as returned by `FactionRelations::vfunc_10`
-= `FUN_1406b4c60`):
 
 | Offset | Type | Meaning |
 | ---: | --- | --- |
@@ -80,32 +146,6 @@ value, and the faction's own pointer. Entry layout (offsets from the entry as re
 | +4 | float | **relation**, -100 .. +100 |
 | +8 | float | accumulated positive trust |
 | +0xc | float | accumulated negative trust |
-
-Table-level: float default relation (+0x60 of the table, a copy of the FACTION `default relation`), `trustworthy`
-(+0x14), global trust (+0x18; the save writes it as `global trust`). The saved matrix keeps `relation<k>`, `trust<k>`,
-`trustNeg<k>` per entry (save writer `FUN_1406b3300`, loader `FUN_1406b38d0`), which matches the three floats above (**Verified**: the
-key names written/read by those two functions are the same three, read from / stored to the offsets +4/+8/+0xc, and
-`FactionRelations::vfunc_6` (`FUN_1406b2560`) accumulates into +8 / +0xc by the sign of its argument).
-
-A missing entry is created on first access with relation = the table's default value (`vfunc_10`).
-The **player's faction has no table**: `PlayerFactionRelations::vfunc_10` (`FUN_1406b3240`) answers "player towards X" by
-asking X's table about the player, and "player towards player" is a static entry (flag 1, relation 100). This matches
-[save.md](../formats/save.md#factions-gamestate_faction-type-37-war_savestate-type-9-two-instance_collections)
-(the 103rd faction has no relation table, every other table has an entry about it).
-
-### 3.2 Initial values (**Verified**)
-
-For every pair A -> B: relation = the value of the entry in A's FACTION `relations` list (v0, an int; v1 and v2 unused,
-all 0 or 100 in data) if there is one, else `min(default relation of A, default relation of B)`; A -> A = 100.
-Two independent confirmations: [save.md](../formats/save.md) checked it against a saved world (checked against a saved world there), and the init function `FUN_1406b40d0` does exactly this (it copies B's default into A's entry, lowers it to A's
-default when that is smaller, then writes the explicit list values and the self entry 100 plus the allied flag).
-`FUN_1406b40d0` also sets the coexistence flag of each faction listed in `coexistence`.
-`NEW_GAME_STARTOFF.faction relations` can override relations at game start (new-game setup; **Unknown**; [ui-screens.md](ui-screens.md#3-main-menu-and-new-game-flow) counts the start-off records: 4 of the 13 carry a faction relations list).
-
-Base-game result (probe `rel`, **Verified** for the counts, which apply the rule above to the 102 NPC factions): of
-10,302 ordered NPC pairs, 3,356 start hostile (value <= -30), 62 start allied (>= 50; 56 strictly above 50), the rest
-neutral. 18 factions have `default relation` <= -30. Explicit lists hold 221 NPC -> NPC entries (224 non-self entries in all: the player faction's own list has 1 and 2 other entries target it; [save.md](../formats/save.md) counts 223 for the factions that have a table) with values in
-{-100, -50, 0, 15, 20, 50, 60, 70, 75, 100}. `coexistence` has 81 entries, 32 of them mutual.
 
 ### 3.3 Thresholds (**Verified**: -30 and 50 appear in the predicate functions, in the threshold-message function `FUN_1406b28f0` and in the declare-war gate `FUN_1406b3000`; re-read independently)
 
@@ -117,14 +157,7 @@ neutral. 18 factions have `default relation` <= -30. Explicit lists hold 221 NPC
 | coexists(A -> B) | B == A or coexistence flag | `FUN_1406b23c0` |
 | value as a fraction | relation x 0.01 (and its negative) | `FUN_1406b2460`, `FUN_1406b24c0` |
 
-The messages "{1} are now hostile towards you" / "no longer hostile" appear when the player's faction value crosses
--30, "{1} are now your allies" / "no longer your ally" when it crosses 50 (`FUN_1406b28f0`, called only when the other
-faction is the player's). Note the small asymmetry: the message fires for > 50, `ally()` accepts >= 50.
-
 ### 3.4 Changing relations (**Observed**; the event table cross-checked with the dialogue action numbers)
-
-All writers go through the table's virtual slots; the player's relation changes are applied to the *other* faction's
-table (about the player).
 
 | Slot | Function | Effect |
 | ---: | --- | --- |
@@ -135,14 +168,6 @@ table (about the player).
 | 7 | `FUN_1406b2f90` | end war: clear war flag; if relation <= -25 set it to -25 (just above hostile) |
 | 8 | `FUN_1406b3000` | declare war: only if relation >= -30 (not hostile yet): log "War breaks out between {1} and {2}" if the flag was clear, set the flag, set relation to -35 |
 | 9 | `FUN_1406b2530` | global trust += a (`DA_AFFECT_REPUTATION`) |
-
-Dialogue effects map straight onto the slots: `DA_AFFECT_RELATIONS` (4) -> slot 4, `DA_AFFECT_REPUTATION` (5) -> slot 9,
-`DA_DECLARE_WAR` (13) -> slot 8, `DA_END_WAR` (14) -> slot 7 (`FUN_140680560`, **Verified**: the action ids come from the
-editor's enum and the four slot calls in that function use exactly these ids). The UI text "Relations with {1} improved
-by {2}" / "decreased by {2}" is printed there too.
-
-Event kinds of slot 5 (`value += delta` only while `value > floor` for a negative delta, or `< ceiling` for a positive
-one, so a hit can overshoot the floor by up to |delta|; then clamp to [-100, 100]):
 
 | Kind | delta | floor | ceiling |
 | ---: | --- | ---: | ---: |
@@ -155,28 +180,7 @@ one, so a hit can overshoot the floor by up to |delta|; then clamp to [-100, 100
 | 12 | -10 x | -60 | 100 |
 | others | none | | |
 
-(dt = the scaled frame time, `DAT_142133794`.) Kind 8 is a continuous, time-scaled positive drift capped at +5 (what
-raises it is **Unknown**); kinds 3, 4, 5 and 12 line up with `CrimeEnum` STEALING, MURDER, ASSAULT and ESCAPE_PRISON but
-the call sites were not traced, so the mapping is **Unknown** (it is not certain that the kind is a crime id; [economy.md](economy.md#112-how-a-bounty-is-gained) lists the same numbers as crime codes: 3 Theft, 4 Murder, 5 Assault and 0xc Escaping Prison, with their bounty amounts). After
-every change, if the other faction is the player's, the threshold messages above are evaluated.
-
-World events such as a faction's `trustworthy` are not changed after load (**Observed**: only read).
-
-### 3.5 World states (WORLD_EVENT_STATE)
-
-152 records; conditions are lists of refs with a wanted value: `NPC is` (CHARACTER: 1 alive, 0 dead, 2 imprisoned),
-`NPC is NOT`, `player ally` (FACTION, 1/0), `player enemy`, `player involvement`, `town okay` (TOWN). A state is true
-when **all** its conditions hold (`FUN_1409a7e00`, **Observed**): `player ally` is compared with `ally(faction -> player)`
-and `player enemy` with `hostile(faction -> player)` (the section 3.3 predicates); the NPC conditions with the unique-NPC
-manager (`FUN_1409a9570` builds the per-state query object). `FUN_1409a9a70(record)` checks a record's `world state`
-list: every referenced state must equal its wanted value (1 = true, 0 = false). Used as an AND gate on SQUAD_TEMPLATE
-spawns, TOWN nests and TOWN override towns (sections 6, 7). Counts: 84 states use `NPC is`, 37 `NPC is NOT`, 20
-`player ally`, 8 `player enemy`; 121 SQUAD_TEMPLATEs carry `world state` refs.
-
-## 4. Squad templates
-
-SQUAD_TEMPLATE (959 merged records; UNIQUE_SQUAD_TEMPLATE has the same squad fields plus `missions`, `persistent`,
-`replacement time`).
+### 4. Squad templates
 
 | Field | Meaning in the exe |
 | --- | --- |
@@ -192,313 +196,216 @@ SQUAD_TEMPLATE (959 merged records; UNIQUE_SQUAD_TEMPLATE has the same squad fie
 | `dont multiply` | exempts the template from the *Squad size multiplier* setting |
 | `AI packages`, `blood smell mult`, `patrol approaches towns`, `force speed`, `personality`, `dialog *`, `nest`, ... | copied onto the platoon / its characters (`FUN_14057f4c0`, `read_AI_packages_n4`; the package system is in [ai.md](ai.md#other-records-that-touch-the-ai)) |
 | `building`, `building dislike`, `building designation`, `layout interior/exterior`, `public day/night`, `public beds`, `bed usage cost`, `sell home`, `building ruined`, `initial door state` | how the squad's home building is chosen and set up (resident squads) |
-| `vendors`, `is trader`, `vendor money`, `vendors fill total amount`, `vendors refresh time`, `buy mult`, `buys stolen`, `buys illegal`, `special items`, `special map items`, `*artifacts base value`, `regenerates` | shop and contents (section 8 for loot; the trading economy is in [economy.md](economy.md#9-shops-stock-money-and-restock)) |
+| `vendors`, `is trader`, `vendor money`, `vendors fill total amount`, `vendors refresh time`, `buy mult`, `buys stolen`, `buys illegal`, `special items`, `special map items`, `*artifacts base value`, `regenerates` | shop and contents (section 8 for loot; the trading economy is in [economy.md](economy.md#shops-and-transactions)) |
 
-Template stats (**Verified**, probe): 959 templates; `squad` has 853 refs , `squad2` 127, `animals` 169, `animals2` 23, `leader` 569 (24 with v1 = 100); `world state` 121. `building designation` is the editor's BuildingDesignation (0 NONE, 1 SHOP, 2
-BARRACKS, 3 BAR, 4 HOSPITAL, 5 ARMOURY, 6 TREASURE, 7 PRISON, 8 HQ, 9 RESIDENTIAL, 10 SLAVE_STORAGE, 11
-RESIDENTIAL_SMALL).
+### Town residents
 
-## 5. Creating a squad
+**Observed** (kenshi-named dump) unless marked; Meitou: `PopulationHomes.cs`.
 
-`RootObjectFactory::createRandomSquad` = `FUN_140583a10` builds the characters of a platoon from a template; the
-platoon object itself (faction, template, position, AI packages, designation, owner town) comes from `FUN_14057f4c0`
-(**Observed**; a wrapper that creates the `Platoon`, sets mode 2 for `roaming military`, copies the packages and the
-home building, and is called by the area spawner, the population spawner, the housemates code and `FUN_1409c4150`).
+- **Table** (`FUN_140935d10`, `FUN_140936e60`): the faction's `residents` then the town's; with `residents override` the
+  town's only. A template already listed is skipped (first wins). Per entry: v0 = count, v1 = priority (100 counts as 0,
+  outside 0..5 an error box). `default resident`: the town's, else (no override) the faction's. `bar squads`: the
+  faction's (TownType 2 only, no override) then the town's; with override the town's only.
+- **When**: at zone populate (`FUN_140a0e760`) per non-player town, the zone's buildings sorted by handle serial (random-looking).
+- **Candidates**: buildings of the town with an `interior` reference, not player-owned, holding no residents template
+  or the default one; walls (`links together`, a vfunc override) never, gates (`is wall gate`) only for entries naming
+  `building`s. Level data agrees: 1946 walls, none with a resident.
+- **Driver** (`FUN_1409370d0`): re-owns the buildings to the town's faction; priority 5 down to 0, each entry with count
+  left gets one building per pass, passes repeat while one placed and has more. An entry with no building left makes
+  no more squads (Stack: civilians v0 9, 2 made). Then every free building whose interiors take the default resident's
+  `layout interior` gets it (`FUN_14092e4b0`).
+- **Chooser** (`FUN_14092e870`): a template with `layout interior` needs a building offering it (own layouts or
+  `shares interiors with`; gates exempt); without one, an entry naming buildings takes only those. Weight 1, x 0.4 when
+  `layout exterior` is not offered, x 10 named in `building`, x 0.05 in `building dislike`; highest wins, first on a tie.
+- **Squads** (`FUN_14057f820`): `housemates` (v0, or Rand(v0, v1) when v1 > 0) first, then the squad. Platoon point: a
+  random free node of NodeType 0 (SHOPKEEPER), else 2 (GUARD_POST), else 1 (GENERAL), else the building. Characters
+  (`FUN_140583a10`): a GENERAL node, else SHOPKEEPER, at node + (0, 10, 0), else the platoon point. The squad's home is the building.
+- **Bar squads** (`FUN_1409fcd20`): n = v0 > 2 ? (int)(v1 x 0.005 x v0) : 0, then +1 per Rand(0, 100) <= v1, stopping
+  at the first failure, at most v0. Each at a random node of the town's node map (`FUN_14038b000`), else the town
+  position; no home. Which nodes that map holds is **Unknown** (Meitou: GENERAL nodes of its bars).
+- **New game vs level data**: level-data building states carry `residents template` / `squad template`; save 2 against
+  them has the same multiset per town but shuffled across buildings (223 same, 125 moved), so a new game rerolls homes
+  (**Observed**). Destroyed buildings stay candidates (the Hub's ruins house squatters).
+- **Meitou engine choices**: the level data's assignment is kept where it fits the rules (interiors are drawn from it,
+  not relaid to the template's layout); on a tie a building already laid out as the template wants wins; bar squads
+  stand in the town's bars; a loaded town keeps its saved squads, homes and bar squads and rolls no new bar squads.
 
-### 5.1 Counts and layout (**Observed**; two functions share the count rules, see the sentinel note)
+### Off-screen world
 
-For each member list entry (v0, v1), count n:
+**Verified** by code (kenshi-named dump) unless marked. Who is kept off screen: [persistent platoons](#1-object-model).
 
-- n = v0 when v1 = 0 **or** v1 = 100;
-- otherwise n = a uniform integer in [v0, v1] (`Rand_IntInRange` = `FUN_1409b3b40`: `v0 + floor(r x (v1 - v0 + 1))`, r in
-  [0, 1) from the C `rand()` / 32768, then clamped to [v0, v1]; with v1 < v0 the result is v0).
-  so a range with v1 < v0 always gives v0;
-- then n' = trunc(n x M), at least 1 when n > 0, where M = the `Squad size multiplier` setting (default 1) unless the
-  template has `dont multiply` (then M = 1).
+- **No world pass**: work is spread over round robins. Each faction steps one platoon of its list per frame (`FUN_1406b9970`, unloaded
+  ones only); one faction per frame runs its war manager (`FUN_1406b97c0` → `FUN_1409cb310`); one town and one nest per frame get growth /
+  spawn / wipe (`TownList::vfunc_4`); the area tick every 2 s (new nests, homeless squads), sector housekeeping every 10 s. Each unloaded
+  step measures its own elapsed game time, and growth and campaign timers read the game clock, so no rate depends on these periods.
+- **Unloaded step** (`UnloadedPlatoon::vfunc_2`, `0x1407ee790`): activation test, the 60 s orphan timer, then (not the player's, not
+  imprisoned, not at a loading zone's edge) the job: a campaign's if the war manager holds the platoon, else the package's `unloaded func`
+  ([ai.md](ai.md)); job 0 becomes 2 for a non-persistent platoon and 4 (GOHOME) for a persistent one. No character data is read or changed:
+  no healing, needs or fights (**Observed**).
+  - GOHOME: to the home only once within 2000, else to the object of a platoon handle (+0xb8, meaning **Unknown**) at 55.
+  - TRAVEL_TARGET / _FAST: to the blackboard's mission target; a campaign's `travel speed unloaded` WALK / JOG / RUN gives 25 / 55 / 90;
+    otherwise (GROUPED, NO_SPEED_CHANGE, no campaign) FAST 60 (90 beyond 25000), TRAVEL_TARGET 25. The mover caps speed at 70 (**Observed**: no other writer of the cap).
+  - PATROL_SHORTRANGE: picks a point in a neighbouring 4608 sector of the same biome group (sometimes a town, `patrol approaches towns`)
+    but sets no speed, so it does not move (**Observed**). PATROL_TOWN, PATROL_LONGRANGE: no branch, no movement.
+  - Movement is a straight line; a destination over 10000 away takes the road network when the faction's `road preference` > 0 and the
+    road (weighted by `1 - preference`, clamped 0.2..0.9) beats the straight line (`0x14065f940`). No navmesh.
+- **Meetings**: nothing looks at other platoons; there is no off-screen combat. Off-screen outcomes are campaign phases and despawning.
+- **Pool growth** (`FUN_1408f4c20`): each pool's current max (`pop`) grows `+0.21818` per game hour (5.24 a day) up to its desired max
+  (`popd`), for every town whether loaded or not; roaming grows only once residents are within 1 of full. Towns never spawn squads over
+  time by themselves (only nests call the pool spawner). Once per town load (`0x14092a020`) a squad that lost ≥ 60 % of its spawn size, if
+  the budget allows, is marked to be made afresh from its template on its next activation.
+- **Despawn cost**: a non-persistent squad that leaves while not intact is taken out of its pool, lowering `pop` by its living members.
+- **Town pools in saves** (**Observed**, saves 1, 2, wade): every town has `pop` = `popd`, `started` true when populated, `popd2` 0 (none of
+  304), while `read_roaming_population_n4` (`0x1408f98d0`) would set pool 2 to the faction's `roaming population` (no caller found:
+  **Unknown** when it runs). `pop` is near the living members of the town's resident platoons (`is resident`) of the town's own faction:
+  save 2 Squin 36 = 36, the Hub 12 vs 10, Stack 93 vs 95 (Squin without a Tech Hunters resident shop of 4).
+- **Town wipe** (**Observed**, `TownPopulationManager::vfunc_4`): roaming `pop` ≤ 3, ≤ 25 roaming living and no intact resident platoon
+  sets `ded`.
+- **Nests** (`NestPopulationManager::vfunc_4`): pool 2 starts at 0.7 × `nest resident population` and grows as above. While the nest's
+  zone is loaded it spawns one squad per tick (weight `max(0, v0 − existing) × faction wealth`, size within the free budget) unless a
+  player-faction unit is within 1250. With no candidate and no intact squad the nest is `ded` ("wiped out", game hour stored as `tod`,
+  **Observed**) and never spawns again. New nests come only from the area tick, up to `num nests` per biome group; whether a dead nest
+  frees its count is **Unknown**.
+- **Traders**: restocked only while active, when the clock passes the platoon's `inventory refresh time`; an unloaded one catches up at
+  its first active tick.
+- **Prisoners** (**Observed**): frozen with their platoon; sentences are absolute timestamps and release is a loaded AI task.
+- **Campaigns**: [below](#campaigns); they run whether loaded or not.
 
-100 is a sentinel ("not a range"), not a maximum: **Verified** by data (62 `squad` entries have v1 = 100 with v0 between
-0 and 20, none has v0 >= 100) and by the two functions that test `v1 != 0 and v1 != 100`: `FUN_140583a10` and the
-expected-size function `FUN_1408fe0f0` (section 6.1).
+### Campaigns
 
-Order of creation and roles (the role is the editor's `SquadMemberType`: 0 SQUAD_1, 1 SQUAD_2, 2 SQUAD_LEADER, 4
-SQUAD_SLAVE; stored per character, also the `squad mem type` of the platoon files in [save.md](../formats/save.md)):
+Raids, assaults, tax/tribute and trader visits, ally reinforcements: one `FactionWarMgr` per faction (Faction +0x88), stepped in the round
+robin above. **Verified** by code (kenshi-named dump; disassembly where noted) unless marked. Save layout: [WAR_SAVESTATE](../formats/save.md#war_savestate-type-9-faction-campaigns).
 
-1. the first `leader` character (role 2; position = the squad position, no offset);
-2. `num random chars` .. `num random chars max` characters from `choosefrom list` (count = min when min >= max, else a
-   uniform integer in [min, max]; each a weighted pick, weight v0, 0 = 100, skipping entries whose `world state` is false,
-   `FUN_14057fd40`); role 0, or 2 when no leader exists yet;
-3. `squad` entries, role 0;  4. `squad2` entries, role 1;
-5. `animals` (role 0, the first one becomes the leader when nothing is);  6. `animals2` (role 1);
-7. `slaves`: each listed template is created as a separate squad by a recursive call, its characters get role 4 and become
-   slaves owned by the squad; 8. `prisoners`: created the same way and put into cages found inside the home building
-   (`BuildingFinder_CagesWithinBuilding`); none if there are no cages.
+**Data** (**Verified**: merged base files, 179 FACTION_CAMPAIGN records). Content is aimed at the player: raids and assaults on player
+towns, hunts after story kills, visits, ally help; chains via victory/loss triggers. No NPC-town-against-NPC-town campaign exists.
+- Rolled ones: a FACTION's `campaigns` list (77 links, 24 factions; ref values ignored) with `territorial triggers` (60 of them).
+  `chance per day` 0.05-2 (mostly 0.1-0.5); `range near`/`range far` in tenths of a unit (e.g. 2500/9000; 50000/90000 = the whole map).
+- `key` = the editor's `WarCampaignEnum`: 0 ASSAULT_TOWN (159), 1 CONQUER_TOWN (none), 2 DEFEND_TOWN (13: "Ally ... (trigger)"),
+  3 TRADER_VISIT (7: merchant visits, crab champion).
+- `travel speed loaded/unloaded` = `MoveSpeed`: WALK 0, JOG 1, RUN 2, GROUPED 3, NO_SPEED_CHANGE 4 (data mostly 4/1).
+- `num forces` 2-80 (characters); `repeat limit` days (4 typical, 9999+ = once); `target population min` 0 (163) or 1-6.
+- `repetition limit` (33 records) belongs to dialogue and is unread here; `lock campaign` (one DIALOGUE_LINE) is unread by the exe
+  (**Observed**: no such string). `victory AI leader/others` (13) are unread: the loader builds only `pt1 AI`, `pt2 AI`, `retreat AI`.
+- `inherits from` (144 records, up to 2 parents; AI packages live on BASE parents): every ancestor is applied twice, by the loader
+  and again by the record reader (**Observed**). Appended lists (`squads to use`, `special leader`, victory/loss triggers) thus count an
+  ancestor's entries twice (double weight); AI packages and `trigger player ally` are inherited (the child wins where set); `world state`
+  merges by query. Own-record only: scalars and bools, ranges, chance, `key`, `num forces`, `faction override`, speeds, `dialog announcement`.
 
-Position of member number i (i counts every member so far, the leader is 0, slot 1 is the first follower): offset from
-the squad position of **(3 x (i mod 8), 3 x floor(i / 8) + (i mod 2))** in X/Z (animals2: spacing 5 instead of 3), i.e.
-rows of 8 characters 3 units apart with every odd one pushed 1 unit back.
+**Roll** (`FUN_1409cb310`): each run updates every active campaign, then the requests, then, when the clock passes `updatetime`, sets it
+to now + 6 h and, only if the faction has no active campaign and no pending request, rolls (**Verified** +6; gate **Observed**).
+- Each `territorial triggers` campaign of the list with a target gets chance c; it passes when c > uniform[0,1); one passer is drawn,
+  weighted by c (**Verified** by disassembly).
+- c (`CampaignData::vfunc_1`), 0 on any failure: player's living characters ≥ `target population min`; a TOWN target's level (+0x388,
+  **Unknown**) ≥ `target tech level >=`; now > last start + `repeat limit` × 24 h; world states and special leader (below); d = XZ
+  distance from the faction's nearest own town to the target: f = 1 when `range far` ≤ 0 or d ≤ near × 10, 0 beyond far × 10, else
+  linear from 1 to 0 between; f × `raidFrequencyMult` unless `ignores chance mults`; c = `chance per day` × 0.25 × f (**Verified**).
+- Target (`CampaignData::vfunc_0`): only towns of the player faction, those in the faction's `biomes` (BIOME_GROUP), else any player town;
+  dropped when TownBase slot 70 is false (terrain/navmesh tile flags, meaning **Unknown**), when Town +0x128 is set (**Unknown**) and the
+  campaign is not hostile, or in the faction's `no-go zones` unless `ignores nogo zones`. Sources: own towns except nests (and, for
+  factions with `fundamental type` 1 or `offers bounties`, villages, points of interest, prisons, slave camps); the first source in list
+  order with one of its 5 nearest candidates within `range far` is the home (**Observed**).
+- World states (`vfunc_2`): every `world state` query equals its val0, and no `special leader` or one with unique state 1 (**Observed**).
 
-Animal age (0 = baby, 1 = adult) = max(0, r x `animal age random` - 0.1 + v2 / 100), r uniform in [0, 1); v2 = 100 is an
-adult. Log message for a template reference that does not resolve: "Missing squad leader/squad/squad2/animals/animals2/
-slaves/prisoners data reference (Index: i) for squad '<name>'" (error level 4 for the first five).
+**Start** (`FUN_1409c9830`): home missing or disabled → the nearest own town to the target. Required men = int(`num forces` ×
+`raidSizeMult`) (**Verified** by disassembly). Gathering stops once men > required (each platoon adds its living members):
+1. the `special leader`'s platoon; if not spawned, the squad template naming it `leader`, spawned within 700 of the nearest own town;
+2. the faction's free, idle, intact homeless platoons (of a `squads to use` template when the list is set);
+3. for each of the 4 own towns nearest the target: such platoons homed there, then new squads drawn from `squads to use` by val0, within
+   700 of the town (at the leader once there is one), up to 100 per town; none when the list is empty.
 
-A story-unique `leader` (CHARACTER with `unique`) goes through the unique-replacement spawn (`FUN_1405836e0`, uses the
-`usedUniques` list that the save keeps): **Observed** from its name and callers, behaviour **Unknown**. The first call
-chain of a squad flags the platoon as unique-containing when such a character was created (`+0xac` = 1).
-
-Re-creation: a platoon with state 1 at +0x118 is flagged for regeneration; when the player cannot see it
-it is reset to state 0 and its content is rebuilt from the template (`FUN_1404ffad0`, **Observed**).
-The regeneration check itself is `BasePopulationManager::vfunc_5` = `FUN_14092a020`: for each squad of the pool whose
-alive count is below its size, if the missing number m satisfies m >= 0.6 x size and m <= (pool maximum - current
-population), the squad is flagged (state 1) and m is added to the running population; for the residents pool a flag at
-+0xd9 skips the 0.6 rule (**Observed**; `regenerates` in fcs.def).
-
-### 5.2 Procedural squads from a FACTION_TEMPLATE (**Observed**)
-
-`generation info` (a FACTION_TEMPLATE) lets the game build a SQUAD_TEMPLATE at runtime (`FUN_1402e3430`; only 4
-FACTION_TEMPLATE records exist, used by the BIOME_GROUP `faction gen` of new-game procedural factions): squad size is a
-uniform integer in [`squad size min`, `squad size max`], leader count in [`leader levels min`, `leader levels max`] with
-leader stats raised by a uniform value in [`leader increase min`, `leader increase max`] per tier, gear picked with
-`armour min/max/cap`, `weapon level`, `weapon models`, `clothing`, `races`, `combat stats min/max` (stronger when the
-squad is smaller when `strength/size balanced`). Only the skeleton is decoded here (the characters' gear rolls are in
-[characters.md](../characters.md)); how `faction gen` is consumed at game start is **Unknown**.
-
-## 6. Where squads come from
-
-### 6.1 SpawnInfoList and weighted picks
-
-`SpawnInfoList::vfunc_0` (`FUN_1408fe6b0`) turns a ref list (key + owner) into entries: for each ref with **v0 > 0**
-(entries with v0 = 0 are dropped here) an entry {faction, owner town, template, weight = v0, expected size}. The total
-weight is kept. Expected size (`FUN_1408fe0f0`) = 1 if the template has a leader, plus for each of `squad`, `squad2`,
-`animals`, `animals2` entries: v0 when v1 is 0 or 100 (**not** scaled by the multiplier), else the range case
-(v0 + v1) / 2 (integer), multiplied by the *Squad size multiplier* only when that is below 1, and then at least 1 (the
-entry is skipped when v0 and v1 are both <= 0); the result is what the pool budgets count (**Observed**,
-`FUN_1408fe0f0`; the multiplier and the minimum of 1 apply only to range entries).
-
-Generic weighted pick of a ref list (`Zones_CollectionRuleB` = `FUN_14057fd40`; `FUN_140580310` returns the record): for
-each entry the weight is the chosen value of the entry (v0 unless stated), **0 counts as 100**; entries whose target has
-`world state` refs that are not all true, or whose weight is not > 0, are skipped; the total is the sum; one roll in
-[0, total) picks the entry whose running sum first exceeds it (a single candidate is taken without a roll). Used for
-`choosefrom list`, BIOME_GROUP `nests`, FACTION/TOWN `residents`-style lists in the editor, and by the item groups.
-
-### 6.2 Area sectors: homeless / roaming squads and the biome population
-
-The world is a 64 x 64 grid of **area sectors**, one per 4608-unit zone cell (the game computes the cell as
-`trunc((coordinate + 147465) / 4608)`, clamped to 0..63; note 147465, not 147456, a 9-unit offset; first index X, second
-Z; one cell record is 0xb8 bytes). Each cell points to its `AreaBiomeGroup`, built from the BIOME_GROUP whose `index`
-colour matches the cell in `areasmap.tga` ([weather.md](../formats/weather.md)) by `Weather_AssignZonesToRegions` =
-`FUN_1408fd6e0`; cells without a group get the group `NONE` (`18003-gamedata.base`). The group reads (**Verified**:
-loader and users agree on the +0x88 slot, [game-loop.md](game-loop.md) names the same code): `num nests` (int),
-`nests at fixed markers only`, `homeless spawn amount` (float, stored at +0x88), `homeless spawns` (a `SpawnInfoList`,
-weight = v0; fcs.def says v1, the data and the code use v0), `nests` (a weighted list, weight v0).
-
-Settings (`settings.cfg`, settings loader; **Verified** by two places: the loader stores them at settings
-+0x48 / +0x4c and `npc range` at +0x38 = `DAT_1421334c8`, and the users read `DAT_1421334d8` / `DAT_1421334dc`):
-`Global population multiplier` P (default 1; options-slider range 0.5..4) and `Squad size multiplier` M (default 1; slider 0.5..3, **Observed** in the options-menu builder `FUN_1403f0260`); the loader stores P at +0x48 and M at +0x4c.
-
-**Tick** (`FUN_1408f9240`, per area "island", every **2 s of scaled time**, skipped while two UI-state checks hold (**Observed** that one is the loading window being visible, [game-loop.md](game-loop.md#zones)) and
-while paused): first the nest spawner (6.3). Then for the island:
-
-- current population C = sum over its sectors of (a + 0.5 b), where a and b are the two squad counters of the sector's
-  tracking object (+0x70, +0x98); sectors with a town nearby (or flagged) are clamped to [0, 2] each;
-- target T = P x sum of `homeless spawn amount` of the group of every **loaded** zone map of that island
-  (`FUN_1408f5ca0`);
-- if T <= C nothing happens; otherwise every eligible sector gets a weight
-  w = max(0, P x amount + 1 - (a + 0.5 b)), halved when a town is nearby, and (w + 1) x 2 when the sector is empty; a
-  sector is drawn by a weighted roll (retrying other sectors while its own target is already met) and
-  `FUN_1408f8060` tries to spawn one squad there (**Observed**; constants as read, the intent "fill emptier zones
-  first" is an inference).
-
-**Which template** (`FUN_1408f7e80`): each entry i of the group's `homeless spawns` (and, near a non-player town, of that
-town's roaming pool) gets weight
-`max(0, (v0_i - k x count_i) x 1) x factor(template)` where count_i = squads of that faction and template that exist now
-(for the town branch only those of that town), k = (sum of v0) / (sectors x P x amount) in the homeless branch (1 in the
-town pool branch), and factor = 1 (`FUN_1402dd530` returns constant 1.0). The entry's `world state` conditions must hold;
-in the town branch the entry's expected size must not exceed the pool's free capacity. One entry is then drawn by roll.
-In other words the v0 values are *target shares*: a template that is already over its share gets weight 0.
-
-**Placement** (`FUN_1408f50d0`, 4 rounds of up to 10 tries): a random point inside the sector rectangle; pushed out of
-the nearest town to at least 2 x its radius, and out of any other town of a different faction to at least 1 x its radius
-(direction away from the town centre); pushed out to at least **1382.4** units from the player's view position; must
-pass the walkability test (walkability helper); ground height from the terrain; rejected when a player-owned object is
-near (helper). The squad is created by `FUN_14057f4c0` with mode 99 and the town as owner; a spawn is also
-refused when the sector's nearest town belongs to the player's faction.
-
-### 6.3 Nests
-
-A nest is a TOWN record with `type` 0 (TownType 0 NEST); **Verified** against data: all 75 `nests` refs of the 36
-BIOME_GROUPs that have any target a TOWN of type 0 (23 distinct nests of the 40 type-0 records; the others are
-placed on the map or spawned by squad templates through `SQUAD_TEMPLATE.nest`, 47 templates).
-
-Nest spawner (`FUN_1408f7310`, run first in every area tick, **Observed**): for each biome group whose current nest
-count is below `num nests` x `DAT_142133588` (the new-game option *Number of nests multiplier*, slider 0.5 to 4: **Observed**, [character-stats.md](character-stats.md#new-game-advanced-options-that-change-these-mechanics) and [combat.md](combat.md#global-tuning-the-constants-record) bind this address to that slider), pick a nest TOWN from the group's
-`nests` list (weighted pick, weight v0, default 100, `world state` gate), pick a free position in the group's area
-(position helper; groups with `nests at fixed markers only` use the pre-placed `TOWN_NEST_MARKER` towns, TownType 8),
-create the `Nest` and stop; one nest per
-tick. The base data asks for 531 nests in total (sum of `num nests`).
-
-Nest population: `NestPopulationManager` (`FUN_14092e1d0`): the **roaming pool** gets the nest's `nest resident
-population` N (int) and a float cap of **0.7 x N**; the residents pool is 0. The nest
-draws its squads from the TOWN `roaming squads` list (entry = SQUAD_TEMPLATE, v0 = weight). `NestPopulationManager::vfunc_4` (`FUN_1408f9210`; a nest
-that is not wiped out) calls the population spawner `FUN_1408f8740` for pool 2: if the pool's current members (count
-via a helper) are below floor(0.7 N), it builds the weighted candidates (6.2's rule with k = 1), refuses to spawn
-if a player-faction object is within 1250 of the spawn point (the argument of a proximity helper, whether it is squared
-is **Unknown**) or the point is within sqrt(1250) = 35.4 units of the player view point, and otherwise creates one
-squad (mode 99, owner = the nest, pool type 2) and marks the manager started. When all squads are dead the nest
-manager reports it wiped out (`Nest::vfunc_103` = `FUN_14092f010`: message "{1} has been wiped out", stores the time
-for the respawn; the saved BIOMES record keeps `<k>_<id>_respawn` and `_count` per nest entry). The respawn delay
-itself was not decoded (**Unknown**).
-
-### 6.4 Town residents and roaming squads
-
-TOWN `residents` (SQUAD_TEMPLATE, v0 = number of squads, v1 = priority) and `residents override`: if the town has no
-residents, or `residents override` is false, the owning FACTION's `residents` list is the default (override true =
-the town's list replaces it, false = it adds to it). `FUN_140936e60` and `FUN_140935d10`
-build the town's resident table (**Observed**):
-
-- an entry = template, count v0, priority, set of preferred BUILDING records (`building`), set of disliked ones (`building
-  dislike`), and the template's `building designation` is registered for the town;
-- priority: v1 = 100 (the editor's default) counts as 0; otherwise v1 must be 0..5, else an error box "Don't set resident
-  priority higher than 5" is shown. **Verified** against data: TOWN `residents` v1 is only 0..5, FACTION `residents` v1 is 0..4 or 100 (9);
-- v0 = 0 entries ("default filler" in fcs.def) are dropped by the spawn list (6.1);
-- `bar squads` (squad, count v0, chance v1 %): the FACTION's default list is used only for towns of TownType 2 (TOWN) or
-  when the entry comes from the town record itself (**Observed**).
-
-The two pools of a town (`read_roaming_population_n4` = `FUN_1408f98d0`): pool 1 = residents, pool 2 = roaming squads
-(`roaming squads` of the TOWN), both `SpawnInfoList`s; pool 2's budget is the FACTION `roaming population` (default 50:
-"adds this number to the max population count for every town to allow short-range roaming squads"), pool 1's budget
-starts at 0 and is raised by the resident counts. Budgets are saved as `pop`/`popd`/`pop2`/`popd2` in GAMESTATE_TOWN
-([save.md](../formats/save.md#towns-gamestate_town-type-94-gamestate_town_instance_list-type-38-state-type-39)).
-How and when the initial resident squads of a town are created at zone load, and how resident squads pick a home
-building, is **Unknown** (the building-assignment code was not traced). Roaming squads leave and come back (the walking is in [pathfinding.md](pathfinding.md)); their AI
-packages (`GoOutOnPatrol`, `Task_PatrolTown`, `Task_TravelToTargetTown`, ...) are not decoded; the destination chooser
-`FUN_14092c5e0` (**Observed**) sorts the candidate towns by distance, skips towns hostile to the squad's faction (3.3), and
-picks one of the nearest 4 at random. **Observed** (base data, counted while building the simulation's roaming squads): 50 towns have
-`roaming squads`, 109 have `bar squads`.
-
-### 6.5 Unique squads and campaigns (survey only)
-
-FACTION `special squads` (UNIQUE_SQUAD_TEMPLATE, v1 = number to maintain, scaled by faction/town health and population)
-are held by the faction's `FactionUniqueSquadManager` (`FUN_1402ddc90`); a wiped squad is replaced after the template's
-`replacement time` (24 h default per fcs.def) (**Observed** from fcs.def and the manager's struct;
-the replacement logic was not decoded). FACTION_CAMPAIGN, `campaigns`, `biomes`, `no-go zones`,
-DIPLOMATIC_ASSAULTS and `raidSizeMult` / `raidFrequencyMult` in `settings.cfg` drive assaults and raids by the
-`FactionWarMgr`; **Unknown**.
-
-## 7. Towns
-
-TOWN (346 merged records): `type` (TownType: 0 NEST, 1 OUTPOST, 2 TOWN, 3 VILLAGE, 4 RUINS, 5 SLAVE_CAMP, 6 MILITARY,
-7 PRISON, 8 NEST_MARKER, 9 POI, 10 NULL; histogram **Verified** by probe: 40, 32, 80, 29, 106, 13, 13, 1, 2, 24, 6),
-`faction`, `is public`, `is secret`, `size radius`, `town radius mult`, `no-foliage range`, `distant mesh`,
-`residents`, `residents override`, `roaming squads`, `bar squads`, `default resident`, `override town` + `world state`,
-`debris`, `debris building`, `loot spawn`, `num centrepoints`, `nest resident population`, the artifact value ranges,
-`trade culture`, `material`, `unexplored name`, `spawn in town centre`. Placed towns are listed in
-`leveldata.level` ([zones.md](../formats/zones.md#leveldatalevel)).
-
-Setup (`Zones_TownSetup` = `FUN_1409353c0`, **Observed**):
-
-- `town radius mult` is clamped to [0.1, 5] (values below 0.1 become 1); the usual value is 1;
-- `no-foliage range` is read; **type 8 (NEST_MARKER) sets it to 0**;
-- the two population pools are created (6.4), the faction's `trade culture` and the town's are combined into price
-  multipliers (`ITEMS_CULTURE.trade prices`, ITEM v0 % with 0 meaning 100, see [economy.md](economy.md#71-culture-items_culture), and `forbidden items`);
-- the map cell(s) the town covers are flagged as inhabited unless the type is 4 (RUINS) or 9 (POI); a type-1 OUTPOST also
-  gets a second flag (used by the placement rules);
-- the town's `is public` flag is stored.
-
-**Override towns** (`FUN_1409ff5a0`, evaluated from `ZoneMapContent::vfunc_4`): for a town that is not the player's, the
-`override town` list is scanned; a candidate whose own `world state` conditions all hold (3.5) and that is not already the
-current replacement becomes the replacement (`replacementTown` in the save); the town is then repopulated from it
-("use it to change and devastate factions"). Which candidate wins when several qualify, and the exact repopulation, are
+Too few: "Assault to {1} canceled due to faction weakness" (when the target is the player's), nothing else. Success: "{1} on the way to
+{2}" (not hostile) or "Warning: {1} moving towards {2}", last start = now, and each `trigger player ally` campaign (needs a `faction
+override`) whose faction is the player's ally (allied flag or relation ≥ 50) is requested there with no delay. No relation, war or world
+state change. Drafted and new platoons stay kept while the campaign is not ended (`FUN_1407ec570`); whether new ones are `persistent` is
 **Unknown**.
 
-## 8. Debris, loot and building contents
+**Requests** (`FUN_1409c9410`): victory/loss trigger rolls, retries, ally help and DIALOGUE_LINE `trigger campaign` (to the speaker's
+faction; target: talking to the player's side, the player-faction town nearest the speaker (XZ, nests excluded, `FUN_140927bb0`),
+and nothing is queued when the player owns none, so a homeless player gets no dialogue campaign, e.g. no crab tournament; another party:
+its platoon's town; no other party: speaker +0x1a0 → +0x88, **Unknown**; **Observed**, `FUN_140680560`) queue a campaign with a due time, target, home and
+target faction. A weighted list [v0, v1, v2] fires one entry when uniform[0,100) < Σ v2 (v2 = percent), due after uniform[v0, v1) hours
+(**Verified** for dialogue by disassembly, **Observed** for the rest). `faction override` hands the request to that faction; a duplicate
+(same campaign and target) pending or active is dropped. Due requests check only world states and the leader (no chance, range, cooldown
+or population); a failed start retries each run, up to 100 times; a gone target is redirected or delayed 5-10 h, at most 10 times
+(**Observed**). Requests can aim at NPC towns. A requested campaign joins the receiving faction's list for good.
 
-`FUN_140938440` (called for nests, and for other towns when `spawn in town centre` is true; **Observed**) scatters decoration
-and loot around the centre:
+**Phases** (`CampaignInstance::vfunc_10`, every war-manager run, loaded or not; times are game hours since the phase began):
+- Any phase but ended: the leader platoon loaded with every member down → defeat.
+- 0 travel: arrived within 0.8 × town radius (XZ) or 400 of a non-town target; then the `dialog announcement` waits, "{1} has arrived at
+  {2}", and phase 1, or straight to ended without victory or defeat when there is no `pt2 AI leader`. A loaded, non-hostile, non-DEFEND
+  campaign within 1.8 × radius of a town with +0x128 set is defeated at once (purpose **Unknown**).
+- 1 at target: victory when the leader is back in its home town (two null towns compare equal); else by `key`: ASSAULT_TOWN wins after
+  4 h, earlier 0.2 h after its first fight once the fight or the standing player characters are gone and the town's buildings test passes;
+  while > 2 player characters hold the town, more than half up, nothing else is checked; DEFEND_TOWN after 12 h when no hostile campaign
+  against the player runs; TRADER_VISIT after 1 h unless trading (**Observed**). Then any key: defeat when < 20 % of its platoons are
+  intact (the flag is recomputed only while loaded).
+- 2 ended: removed after 3 h (platoons unmapped).
+- Unloaded no fight starts, so an unloaded assault always wins at 4 h: a message and its follow-up, nothing happens to the town (the
+  earlier "an empty outpost falls" reading was this).
+- Redirect (`FUN_1409d62f0`): every 0.2 h, a target town gone (or a player town failing slot 70) is replaced by a new target: "{1} has
+  redirected to {2}".
+- Packages: phase 0 `pt1 AI`, 1 `pt2 AI`, 2 `retreat AI`; the leader platoon uses `... leader`, others `... others` (else the leader's).
+  How fast a loaded squad switches is **Unknown**.
+- Moving: unloaded, the leader travels to the target (TRAVEL_TARGET), the others to the leader (TRAVEL_TARGET_FAST), speeds as the
+  unloaded step above. Loaded, followers march on the leader's recorded trail; the leader uses `travel speed loaded` only while all intact
+  platoons are within 6000, else waits (what the mover does with RUN/GROUPED/NO_SPEED_CHANGE: **Unknown**).
 
-- the random generator is seeded **from the town position** (`srand` of a hash of x ^ 0xDEADBEEF and z ^ 0xDEADBEEF), so the
-  layout is the same every time (the debris is never saved, it is regenerated);
-- `debris` (NEST_ITEM; v0, v1, v2): `Rand_IntInRange(v0, v1)` clusters of that item, mesh scale v2 / 100 (0 means 1);
-  each cluster holds `cluster min`..`cluster max` copies within `cluster range` (40 default, from the NEST_ITEM) of a
-  point within `size radius` of the centre;
-- `debris building` (BUILDING; v0 = count, v1/v2 = cluster range min/max): `num centrepoints` (default 4) points are chosen;
-  a new point within 140 units of an earlier one is pushed away; for each entry the count is v0 + a uniform integer in
-  [-v0/2, v0/2] when v0 > 1, v0 = 0 gives a coin-flip 1, then the buildings are placed around the point (they must have
-  no navmesh effect: camp beds, stools, campfires, torch posts);
-- `loot spawn` (VENDOR_LIST, v0, v1): only for nests; `Rand_IntInRange(v0, v1)` items are rolled from the vendor list and
-  dropped at random ground positions inside the area (height above the water line required); the picker is the same as the
-  item-group picker below.
+**End effects** (the only callees): victory: "{1} against {2} has ended" (hostile) and one `victory trigger` roll. Defeat: "{1} was defeated
+on their way to {2}" (not hostile), "{1} against {2} has been defeated" (its leader fought a player squad) or "{1} to {2} has failed"; a
+`loss trigger` roll when it reached the town or fought the player, else a hostile one is requested again in uniform[40, 96) h. No relation,
+world state, ownership, building or town state changes; looting or occupation are only what the loaded `pt2` packages do. In
+every message {1} is the campaign's name and {2} the target town's (the cancel message has only {1}; **Observed**).
 
-**Item groups** (ITEM_PLACEMENT_GROUP, 21 merged records; lists `items`, `weapons`, `clothing`, `containers`, `maps`,
-`blueprints`, `armour blueprints`, `weapon manufacturers`; `min/max respawn time` 24/48 h for 19 of 21, 72/72 for 2;
-`random yaw` true for all): a placed group is a `BuildingItemGroup` = one item slot. Picker `FUN_1409540d0` (**Observed**):
-all list entries are merged into one weighted table, weight = v0, one roll over the total
-decides the entry; a WEAPON entry needs a second weighted pick from `weapon manufacturers`. Respawn
-(`BuildingItemGroup::vfunc_28` = `FUN_140549e60`, per frame while the building is loaded): when the slot's item is
-gone (taken, destroyed, or not a valid item type), the group sets the next respawn time to **now + Rand_IntInRange(min,
-max) hours** (absolute game hours) and marks the slot empty; when the time has passed and the building is loaded, it
-creates a new item (`FUN_140547ed0`). The remaining time is saved as `respawn time`.
-
-Building contents by role (shop stock, restock and vendor money: [economy.md](economy.md#9-shops-stock-money-and-restock); money items in loot lists: [economy.md](economy.md#13-loot-and-money-items)): the FACTION `item spawns armoury/bar/HQ/resident/resident small/treasure` (VENDOR_LIST, v0 %) fill
-containers by the building's designation, overridden by the squad's own `vendors`. Traders refill `vendors fill total
-amount` items every `vendors refresh time` hours (24 default). Artifacts: a TOWN with `gear/item artifacts max value` > 0
-needs a resident whose template has an equal or higher `*artifacts base value`, else the artifacts are lost (fcs.def; the
-placement code was not decoded).
-
-## 9. Settings and constants that matter
+### 9. Settings and constants that matter
 
 | Name | Value | Effect |
 | --- | --- | --- |
 | `Squad size multiplier` (`settings.cfg`) | 1 | M in 5.1 |
 | `Global population multiplier` | 1 | P in 6.2 |
 | `npc range` | settings.cfg value | relevance range, see [game-loop.md](game-loop.md) |
-| CONSTANTS `max squads` / `max squad size` / `max faction size` | 10 / 20 / 30 | stored by the constants loader (`FUN_14086b2b0`); **the code that enforces them was not found**, but the Squads tab shows "Maximum number of squads reached." ([ui-screens.md](ui-screens.md#5-overview-window)), so the squad cap is at least checked in the UI (**Observed**) |
+| `raidFrequencyMult` / `raidSizeMult` (`settings.cfg`; options "Town raid events: frequency" 0.25-3, "size" 0.25-4) | 1 | campaign roll chance; required men = int(`num forces` × size) ([campaigns](#campaigns)) |
+| CONSTANTS `max squads` / `max squad size` / `max faction size` | 10 / 20 / 30 | stored by the constants loader (`FUN_14086b2b0`); **the code that enforces them was not found**, but the Squads tab shows "Maximum number of squads reached." ([ui-screens.md](ui-screens.md#flow-and-data)), so the squad cap is at least checked in the UI (**Observed**) |
 | area tick | 2 s scaled | 6.2 |
 | min distance of a homeless spawn from the player | 1382.4 | 6.2 |
-
-## Data corrections
-
-- fcs.def says the weight of BIOME_GROUP `nests` and `homeless spawns` is "val1"; the code and data use **v0** (nests default 100;
-  homeless v0 1..250, 30 of 653 entries above 40, v1 always 0). **Verified** (probe; `FUN_1408fe6b0` copies the first int).
-- fcs.def says TOWN `debris` "val0+1 is min/max num to spawn"; the code uses v0 and v1 as the min and max count (**Observed**).
-- `enemy classification`, `business relations`, `effect of anger/happy` and `emotion fade rate` are editor-only (section 2).
-- `squad` / `squad2` / `leader` v1 = 100 is a placeholder, not a count (5.1).
 
 ## Unknowns
 
 - What sets relation event kinds 1..12 (call sites of `FactionRelations::vfunc_5`), and what the allied byte (+0) and the
   `trust` floats feed (dialogue conditions, "trustworthy" behaviour).
-- When and where a town's initial resident squads are created (zone activation), how resident squads choose a home
-  building (`building`, `building dislike`, `building designation`), housemates timing, and `bar squads` spawn.
+- What `building designation` changes beyond the bar (it does not enter the chooser); the town node map bar squads use.
 - Nest respawn delay after "wiped out", the default of `DAT_142133588` (the Number of nests multiplier option; **Unknown**, the exe image holds zeros there), the rule that makes `TownPopulationManager::vfunc_4`
   declare a town wiped out (**Observed** gates: roaming pool cap <= 3 and <= 25 roaming members).
-- Faction campaigns (FACTION_CAMPAIGN), raids and assaults (`raidSizeMult`, `raidFrequencyMult`), the unique squad
-  replacement logic, `faction gen` at game start, `NEW_GAME_STARTOFF.faction relations`.
+- Campaigns: Town +0x128, Town +0x388 (tech level), TownBase slots 70 / 92 / 96, the disabled-town flag,
+  the "fought a player squad" test, the announcement wait, whether spawned campaign squads are `persistent`, DIPLOMATIC_ASSAULTS.
+- `faction gen` at game start, `NEW_GAME_STARTOFF.faction relations`.
+- Unique characters: the `Character +0x279 & 7` gate and the 0.1 roll against a town list at platoon unload, platoon +0xac, the unit of
+  `replacement time` (constant 2618.18 from `FUN_14066cd50`), UNIQUE_SQUAD_TEMPLATE `persistent` use and `missions` (DIPLOMATIC_ASSAULTS),
+  the polarity of the import handle test; other readers of `unique` (`FUN_14067b070` dialogue conditions, `FUN_1407609e0` / `FUN_140761550`) not opened.
 - Who enforces CONSTANTS `max squads`, `max squad size`, `max faction size`.
 - Which override town wins among several qualifying candidates; what exactly repopulating a town from its override does.
-- Whether the 1250 radius of the proximity helper is squared; the sector counters a/b (`+0x70`, `+0x98`) beyond "squad counts".
+- Whether the 1250 radius of the proximity helper is squared.
 - Patrol routes: the patrol tasks (`Task_Patrol`, `Task_PatrolTown`, `GoOutOnPatrol*`) were not decoded here (class mapping: [ai-tasks.md](ai-tasks.md#tasktype-to-task-class); packages: [ai.md](ai.md#signal-functions-and-the-package-classes)); no fixed route data
   was found in FCS records (squad templates only name `AI packages`; `patrol approaches towns` is a bool).
 
-## Implementation outline
+## Expression reference
 
-Order that gets a populated, hostile-aware world with the least decoded behaviour:
+- Changing relations: `value += delta`
 
-1. **Data layer** (exists): `GameDatabase`, `LoadOrder`, `WorldLevelData` (towns, placements). Add typed views over FACTION,
-   SQUAD_TEMPLATE, TOWN, BIOME_GROUP, NEST_ITEM, ITEM_PLACEMENT_GROUP and WORLD_EVENT_STATE with the field names above, and
-   a `RefList` view that exposes v0/v1/v2 and the sentinel rules (v1 in {0, 100}).
-2. **FactionRelations**: the table with the entry layout of 3.1, initialisation of 3.2 (verify against the sample saves with
-   [save.md](../formats/save.md)), `IsHostile` (<= -30), `IsAlly` (>= 50 or flag), the "default-hostile faction" test (table default < -30, 3.3), the slot semantics of 3.4 and the dialogue
-   actions. Do not read `enemy classification` and friends.
-3. **WorldState**: AND-evaluation of WORLD_EVENT_STATE against the unique-NPC state and the relation predicates.
-4. **Squad factory**: `CreateRandomSquad(template, position)` exactly as 5.1 (count rule with sentinel, multiplier, role order,
-   grid offsets, animal age), producing `CharacterSpec`s that the character generator in [characters.md](../characters.md)
-   fills in; the platoon wrapper sets faction, packages and home.
-5. **Spawn pools**: `SpawnInfoList`, the weighted pick (weight 0 = 100, world state gate), pool budgets and the
-   spawner of 6.4/6.3 (including the 1250 / 35.4 / 1382.4 distances), then the area-sector tick of 6.2 with the target/current
-   sums, and the nest spawner of 6.3.
-6. **Towns**: `TownSetup` clamps and flags, the override-town evaluator, resident tables (priority rule), bar squads.
-7. **Debris and items**: deterministic position-seeded debris and loot, `ItemPlacementGroup` with the respawn clock in absolute
-   game hours.
-8. Defer: campaigns, raids, unique-squad replacement, patrols (need the AI task layer of [ai.md](ai.md) and [ai-tasks.md](ai-tasks.md), scheduled as in [game-loop.md](game-loop.md)).
-Ids and ranges worth encoding as constants with tests: threshold -30 / 50, event table of 3.4, the 3 x (i mod 8) layout,
-2 s area tick, 1382.4 player distance, `0.7 x N` nest cap, 0.6 regeneration ratio.
+## Evidence index
+
+Evidence scopes below apply only to their named sources/checks.
+
+- 3.1 Storage (**Observed**)
+- 3.2 Initial values (**Verified**)
+- 3.3 Thresholds (**Verified**: -30 and 50 appear in the predicate functions, in the threshold-message function `FUN_1406b28f0` and in the declare-war gate `FUN_1406b3000`; re-read independently)
+- 3.4 Changing relations (**Observed**; the event table cross-checked with the dialogue action numbers)
+- 5.1 Counts and layout (**Observed**; two functions share the count rules, see the sentinel note)
+- 5.2 Procedural squads from a FACTION_TEMPLATE (**Observed**)
+- Campaigns: `FUN_1409cb310` (roll), `CampaignData::vfunc_0/1/2` (`1409c5e80`, `1409c5740`, `1409c4ed0`), loaders `read_chance_per_day_n9`
+  `1409c8bd0` / `read_is_hostile_n11` `1409c7e40` / `read_campaigns_n3` `1409cabd0`, start `FUN_1409c9830` with `uses_leader` `1409c5040` and
+  `FUN_1409c4150`, requests `FUN_1409c9410` / `FUN_1409d27a0`, instance update `CampaignInstance::vfunc_10` `1409c70f0`, end `vfunc_2` / `vfunc_3`,
+  redirect `FUN_1409d62f0`; enum names from the editor (`WarCampaignEnum`, `MoveSpeed`); data census with a throwaway tool over the merged base files
+- Unique characters: manager `FUN_140354560` / `FUN_140349950`, gate `FUN_1405836e0`, transitions `FUN_1407a6200`, `FUN_140330600`, `FUN_140680560`,
+  `FUN_1405cf470`, `FUN_1409a8120`, `FUN_1404ff760`, `FUN_1409a8970`, queries `FUN_1409a7e00`, `FUN_1409c4ed0`, `FUN_1409c5040`; special squads
+  `FUN_1402ddc90`, `FUN_1402dd680`, `FUN_1402de9b0`, `FUN_14057c6f0`; save `FUN_1409a8660` / `FUN_1409aa270`, `FUN_1402deea0` / `FUN_1402df0c0`;
+  `fcs.def` texts; throwaway survey of the merged base files and census of 9 saves (302 usedUniques entries, 3,502 PLATOON records)

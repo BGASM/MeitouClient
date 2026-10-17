@@ -55,16 +55,37 @@ public sealed class CharacterCold
     public System.Numerics.Vector2 FormationOffset { get; set; }
     /// <summary>The path being followed (world positions, the next one at <c>CharacterHot.PathCursor</c>); replaced whole in a serial phase.</summary>
     public Vector3[] Path { get; set; } = [];
+    /// <summary>
+    /// The index into <see cref="Path"/> where its provisional long-range part begins (<see cref="PathResult.Exact"/>; int.MaxValue: none). Reaching it asks for
+    /// the path again, at most every <see cref="MovementSystem.ProvisionalRepathSeconds"/> (<see cref="ProvisionalRepathTick"/>). Set with the path, not hashed.
+    /// </summary>
+    public int PathExact { get; set; } = int.MaxValue;
+    public long ProvisionalRepathTick { get; set; }
+    /// <summary>Times the walker was stopped on the provisional part since a long route last gained a navmesh part (<see cref="MovementSystem.ProvisionalBlockedLimit"/>).</summary>
+    public int ProvisionalBlocked { get; set; }
     /// <summary>The path request in flight, so an answer to an older one is ignored.</summary>
     public long PathRequest { get; set; }
+    /// <summary>
+    /// The request whose path is being followed when it was not the one in flight (an order given again before its path came, holding the right button);
+    /// set only with the asynchronous path service, so not hashed.
+    /// </summary>
+    public long PathApplied { get; set; }
     /// <summary>Belongs to the player's faction: can be selected and ordered.</summary>
     public bool IsPlayer { get; set; }
     /// <summary>Queued move orders (X/Z) after the current one (shift + right click); changed only by the character's own partition or a serial phase.</summary>
     public List<System.Numerics.Vector2> OrderQueue { get; } = [];
+    /// <summary>
+    /// The height a move order was given at (the clicked ground), for the goal <see cref="GoalHeightAt"/>: it picks the floor where floors are stacked.
+    /// Other goals use the character's own height. Derived from orders and not hashed.
+    /// </summary>
+    public float GoalHeight { get; set; } = float.NaN;
+    public System.Numerics.Vector2 GoalHeightAt { get; set; }
     /// <summary>Animation layers in play (made by <see cref="AnimationSystem"/>; null before the first tick it runs).</summary>
     public CharacterAnimation? Animation { get; set; }
     /// <summary>The kind of weapon drawn in the right hand (None while sheathed): the stance animations are chosen for.</summary>
     public Meitou.Data.Gameplay.WeaponKinds DrawnWeapon { get; set; }
+    /// <summary>The numbers of the HUD's extended lines, refreshed by <see cref="BodySystem"/> every tick (display only: not hashed, not saved).</summary>
+    public ExtendedStats Extended { get; set; }
     /// <summary>The race, stats and medical state (null for animals and anything without a race record): see <see cref="BodySystem"/>.</summary>
     public Meitou.Data.Gameplay.Bodies.RaceData? Race { get; set; }
     public Meitou.Simulation.Bodies.CharacterStats? Stats { get; set; }
@@ -82,12 +103,98 @@ public sealed class CharacterCold
     public long DiedTick { get; set; } = -1;
     /// <summary>Where the character came from in a loaded save, with the saved stats and medical state (null for a character the game made itself); see <c>Meitou.Simulation.Saving</c>.</summary>
     public Saving.SavedCharacterLink? Save { get; set; }
+    /// <summary>The look was changed in the character editor (<see cref="Editing.EditCharacter"/>): a save writes its CHARACTER_APPEARANCE back.</summary>
+    public bool LookEdited { get; set; }
     /// <summary>RACE <c>pathfind footprint radius</c> (0: not known, paths use the default human); what the navmesh keeps clear.</summary>
     public float FootprintRadius { get; set; }
     /// <summary>The character is in a fight (set by the combat system): the animation stance takes the combat clips.</summary>
     public bool InCombat { get; set; }
+    /// <summary>The character is running away (set and cleared by the <see cref="FleeSystem"/>, serial phases only): it neither looks for fights nor answers attacks.</summary>
+    public bool Fleeing { get; set; }
+    /// <summary>
+    /// How exposed a sneaking character was at <see cref="StealthExposureTick"/> (set by the <see cref="AggroSystem"/> in its serial commit): what its stealth XP
+    /// rate reads (<see cref="Bodies.XpService.Sneaking"/>).
+    /// </summary>
+    public StealthExposure StealthExposure { get; set; }
+    public long StealthExposureTick { get; set; } = long.MinValue;
+    /// <summary>The hostile NPCs noticing or detecting this sneaker lately (<see cref="AggroSystem"/>, serial commit; display only: not hashed, not saved).</summary>
+    public List<StealthWatcher>? Watchers { get; set; }
+    /// <summary>How much of <see cref="Bodies.MedicalState.Healed"/> the heal floaters have shown, and the tick of the last one (display only: not hashed, not saved).</summary>
+    public float HealShown { get; set; }
+    public long HealTick { get; set; }
     /// <summary>Weapon and worn armour (track F, docs/simulation.md "Combat").</summary>
     public Meitou.Simulation.Combat.Fighter? Fighter { get; set; }
+    /// <summary>The patient of the <see cref="CharacterTask.Treat"/> task (itself for self-treatment); meaningful only while the task is set (<see cref="FirstAid.FirstAidSystem"/>).</summary>
+    public CharacterId TreatTarget { get; set; } = CharacterId.None;
+    /// <summary>The treatment splints instead of bandaging (the original's <c>SPLINT_ORDER</c>, task "Splinting").</summary>
+    public bool TreatSplint { get; set; }
+    /// <summary>The task a self-started treatment goes back to when it ends (<see cref="CharacterTask.Wander"/>, <see cref="CharacterTask.Follow"/> or Idle).</summary>
+    public CharacterTask ResumeTask { get; set; }
+    /// <summary>The medic job (the original's <c>medic</c> toggle): an idle character with a kit treats hurt squad mates by itself. NPCs with a kit do so without it (an engine rule until the AI).</summary>
+    public bool MedicJob { get; set; }
+    /// <summary>The character this one carries on its left shoulder (none: not carrying); the original's <c>isCarrying</c> with the partner handle. Set and cleared by <see cref="Carrying.CarrySystem"/> in serial phases only, together with <see cref="CarriedBy"/> of the other.</summary>
+    public CharacterId Carrying { get; set; } = CharacterId.None;
+    /// <summary>The character carrying this one (none: not carried); the original's <c>isBeingCarried</c> with the partner handle.</summary>
+    public CharacterId CarriedBy { get; set; } = CharacterId.None;
+    /// <summary>Whom the <see cref="CharacterTask.PickUp"/>, <see cref="CharacterTask.Loot"/> or <see cref="CharacterTask.StealthKo"/> task is for; meaningful only while one of those tasks is set.</summary>
+    public CharacterId CarryTarget { get; set; } = CharacterId.None;
+    /// <summary>Seconds into the <c>shoulder lift left</c> clip of a pick-up or put-down, or the <c>knockout</c> swing of a stealth KO, in progress (-1: not yet; the animation system plays the clip at this time).</summary>
+    public float LiftTime { get; set; } = -1;
+    /// <summary>The rescue job (the original's <c>rescue</c> toggle, NUM8): an idle character picks up a downed member of its faction by itself.</summary>
+    public bool RescueJob { get; set; }
+    /// <summary>The orders panel's toggles (<see cref="Simulation.Orders"/>); the player's characters only.</summary>
+    public CharacterOrders Orders { get; set; } = CharacterOrders.Jobs;
+    /// <summary>The speed mode the character's move orders use (the original's saved <c>speed mode</c>: walk, run or no cap); no cap by default.</summary>
+    public byte RunSpeed { get; set; } = SpeedMode.Free;
+    /// <summary>
+    /// CHARACTER <c>NPC class</c> (the editor's CharacterTypeEnum; <c>fcs.def</c>'s default is MILITARY), set from the record at spawn; <c>None</c> for a character without a record
+    /// (hand-made in tests). The crime rules read it (who is police, who may loot, who can be booked); not hashed, it follows from the record.
+    /// </summary>
+    public Meitou.Data.Gameplay.FundamentalType NpcClass { get; set; }
+    /// <summary>The character's bounties by faction (null: none ever); <see cref="Crime.CrimeSystem"/>, serial phases only. Hashed only while set.</summary>
+    public Crime.BountyLedger? Bounties { get; set; }
+    /// <summary>A crime nobody has booked yet (null: none); <see cref="Crime.CrimeSystem"/>, serial phases only. Hashed only while set.</summary>
+    public Crime.PendingCrime? Pending { get; set; }
+    /// <summary>What the AI decided for it (null: a character the AI does not run: the player's, or one whose squad has no AI packages); <see cref="Ai.AiSystem"/>.</summary>
+    public Ai.AiMind? Ai { get; set; }
+    /// <summary>Held still by an interaction (a trader in an open trade, <see cref="Trading.TradeSystem"/>): the AI leaves it alone. Serial phases only.</summary>
+    public bool Engaged { get; set; }
+    /// <summary>
+    /// The personality tag dialogue tests (DC_PERSONALITY_TAG, docs/game/dialogue.md "Line check"): the save's <c>personality</c> when it has one, else rolled from the record on first use
+    /// (<see cref="Dialogue.Personality"/>); 0 not yet known. Follows from the seed, the id and the record, so not hashed.
+    /// </summary>
+    public int Personality { get; set; }
+    /// <summary>The dialogues this character has locked or unlocked (DIALOGUE string id → locked; saved as <c>lok*</c>); null: none changed. <see cref="Dialogue.DialogueSystem"/>; hashed only while set.</summary>
+    public SortedDictionary<string, bool>? DialogueLocks { get; set; }
+    /// <summary>
+    /// The original's <c>Character+0x2f8</c> (save key <c>in something</c>): in a bed or imprisoned in a cage or restraint, with <see cref="InWhat"/> the
+    /// <see cref="Locks.Fixture.Id"/> it is in (null: not known, e.g. a loaded prisoner whose cage the world has not mapped). Set by <see cref="Locks.FixtureRegistry"/>, serial phases only.
+    /// </summary>
+    public Locks.HeldState InSomething { get; set; }
+    public string? InWhat { get; set; }
+    /// <summary>Imprisoned: it does not move, fight, carry or run AI (docs/simulation.md "Cages, beds and locks").</summary>
+    public bool IsImprisoned => InSomething == Locks.HeldState.Imprisoned;
+    /// <summary>
+    /// The prison sentence as the original stores it (docs/game/economy.md 11.5): the start in <see cref="World.GameHours"/> and the length in game hours (save keys <c>sentence</c>,
+    /// <c>psts</c>); served when start + length is not after now. Length 0: none (served).
+    /// </summary>
+    public double SentenceStart { get; set; }
+    public float SentenceLength { get; set; }
+    /// <summary>
+    /// The original's "recently wanted" marker (status <c>+0x110</c>, set to 250 by a booking or a witnessed crime, docs/game/economy.md 11.2/11.8): while above 0 a looker recognises
+    /// the bounty at once. Game seconds counting down (<b>engine</b>: its decrement is Unknown). <see cref="Crime.CrimeSystem"/>; hashed only while set.
+    /// </summary>
+    public float RecentlyWanted { get; set; }
+    /// <summary>The bounty recognition meter (economy.md 11.8; <b>engine</b>: one per target, not per looker): fires at 1. <see cref="Crime.ArrestSystem"/>; hashed only while set.</summary>
+    public float Recognition { get; set; }
+    /// <summary>The escaped-prisoner flag (status <c>+0xe8</c>, docs/game/locks.md "Cages and beds"): left a cage before the sentence was served. Hashed only while set.</summary>
+    public bool Escaped { get; set; }
+    /// <summary>The fixture this character is picking the lock of (<see cref="Locks.LockSystem"/>; null: none). Hashed only while set.</summary>
+    public string? PickingLock { get; set; }
+    /// <summary>The building site the <see cref="CharacterTask.Build"/>, <see cref="CharacterTask.Dismantle"/> or <see cref="CharacterTask.DeliverMaterials"/> task works (<see cref="Construction.BuildSite.Id"/>; null: none). Serial phases only. Hashed only while set.</summary>
+    public string? BuildSite { get; set; }
+    /// <summary>The material delivery bar (0 to 1, filling at 0.2 per second, <see cref="CharacterTask.DeliverMaterials"/>). Hashed with <see cref="BuildSite"/>.</summary>
+    public float BuildBar { get; set; }
 }
 
 /// <summary>
@@ -208,6 +315,24 @@ public sealed class CharacterTable
         return true;
     }
 
+    /// <summary>
+    /// Puts a character at <paramref name="position"/> facing <paramref name="yaw"/>, standing still with no path (a teleport: into a cage). Serial phases or setup only; outside a
+    /// tick both buffers are written, as <see cref="Spawn"/> does.
+    /// </summary>
+    public void Place(int slot, Vector3 position, float yaw)
+    {
+        if (phase == TablePhase.Parallel) throw new InvalidOperationException("characters are placed in the serial phases only");
+        ref var n = ref next[slot];
+        n.Position = position;
+        n.Yaw = yaw;
+        n.Velocity = Vector3.Zero;
+        n.Goal = new Vector2(position.X, position.Z);
+        n.Flags = (ushort)(n.Flags & ~(ushort)MoveFlags.AnyPath);
+        n.Task = (byte)CharacterTask.Idle;
+        n.TaskTime = 0;
+        if (!inTick) previous[slot] = n;
+    }
+
     void Grow()
     {
         int size = previous.Length * 2;
@@ -259,6 +384,40 @@ public sealed class CharacterTable
             hasher.Add(k.InCombat);
             if (k.Animation is { } anim) anim.Hash(ref hasher); else hasher.Add(-1);
             hasher.Add(k.Name.Length);
+            // First aid state adds to the hash only while it is set, so worlds that never use it hash as before.
+            if (c.Task == (byte)CharacterTask.Treat) { hasher.Add(k.TreatTarget); hasher.Add((int)k.ResumeTask); if (k.TreatSplint) hasher.Add(0x53706C74); }
+            if (k.MedicJob) hasher.Add(true);
+            if (k.Fleeing) hasher.Add(0x466C6565);   // only while set, so worlds without fleeing hash as before
+            if (k.StealthExposureTick != long.MinValue) { hasher.Add((int)k.StealthExposure); hasher.Add(k.StealthExposureTick); }   // likewise, once a sneaker was exposed
+            // Carrying, looting and the rescue job add to the hash only while set, so worlds without them hash as before.
+            if (!k.Carrying.IsNone) { hasher.Add(0x43617272); hasher.Add(k.Carrying); }
+            if (!k.CarriedBy.IsNone) { hasher.Add(0x42726E65); hasher.Add(k.CarriedBy); }
+            if (c.Task is (byte)CharacterTask.PickUp or (byte)CharacterTask.PutDown or (byte)CharacterTask.Loot or (byte)CharacterTask.StealthKo) { hasher.Add(k.CarryTarget); hasher.Add(k.LiftTime); hasher.Add((int)k.ResumeTask); }
+            if (k.RescueJob) hasher.Add(0x52657363);
+            // Orders add to the hash only while set, so worlds without them hash as before.
+            if (k.Orders != CharacterOrders.None) { hasher.Add(0x4F726473); hasher.Add((int)k.Orders); }
+            if (k.RunSpeed != SpeedMode.Free) { hasher.Add(0x52756E53); hasher.Add((int)k.RunSpeed); }
+            // Bounties and pending crimes add to the hash only while set, so worlds without crimes hash as before.
+            k.Bounties?.Hash(ref hasher);
+            k.Pending?.Hash(ref hasher);
+            // The AI's decision and the trade hold add to the hash only while set, so worlds without AI packages hash as before.
+            if (k.Ai is { } mind) { hasher.Add(0x41694D64); mind.Hash(ref hasher); }
+            if (k.Engaged) hasher.Add(0x456E6761);
+            if (k.DialogueLocks is { Count: > 0 } locks)
+            {
+                hasher.Add(0x4C6F6B73);
+                foreach (var (dialogue, locked) in locks) { hasher.Add(Rng.StableHash(dialogue)); hasher.Add(locked); }
+            }
+            // Beds, cages and sentences add to the hash only while set, so worlds without them hash as before.
+            if (k.InSomething != Locks.HeldState.None) { hasher.Add(0x496E536D); hasher.Add((int)k.InSomething); hasher.Add(k.InWhat is { } w ? Rng.StableHash(w) : 0UL); }
+            if (k.SentenceLength > 0) { hasher.Add(k.SentenceStart); hasher.Add(k.SentenceLength); }
+            // The arrest state adds to the hash only while set, so worlds without it hash as before.
+            if (k.RecentlyWanted > 0) { hasher.Add(0x52576E74); hasher.Add(k.RecentlyWanted); }
+            if (k.Recognition > 0) { hasher.Add(0x5265636F); hasher.Add(k.Recognition); }
+            if (k.Escaped) hasher.Add(0x45736361);
+            if (k.PickingLock is { } pick) { hasher.Add(0x5069636B); hasher.Add(Rng.StableHash(pick)); }
+            // A builder's site, bar and the task it goes back to add to the hash only while it works one, so worlds without sites hash as before.
+            if (k.BuildSite is { } site) { hasher.Add(0x4275696C); hasher.Add(Rng.StableHash(site)); hasher.Add(k.BuildBar); hasher.Add((int)k.ResumeTask); }
         }
         hasher.Add(free.Count);
         foreach (int slot in free) hasher.Add(slot);

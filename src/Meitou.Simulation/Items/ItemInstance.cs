@@ -14,6 +14,8 @@ public sealed class ItemInstance
     public required string Record { get; init; }
     public string Name { get; init; } = "";
     public FcsRecordType Type { get; init; }
+    /// <summary>The armour section allowed by the record's slot; empty for other items.</summary>
+    public string EquipmentSection { get; init; } = "";
     public string MaterialId { get; set; } = "";
     public string CompanyId { get; set; } = "";
     /// <summary>Where it is: <c>main</c>, <c>shirt</c>, <c>head</c>, <c>boots</c>, <c>armour</c>, <c>legs</c>, <c>hip</c>, <c>back</c>, <c>backpack_attach</c> (a worn backpack), <c>backpack_content</c> (inside it).</summary>
@@ -27,16 +29,37 @@ public sealed class ItemInstance
     public float Quality { get; set; }
     /// <summary>Charges left; for food the record's charges times CONSTANTS <c>food quality mult</c>, which is what is eaten (100 points are one hunger level).</summary>
     public float Charges { get; set; } = 1;
+    /// <summary>The charges of a full unit (the record's, as <see cref="Charges"/> starts); a stack of ammunition refills <see cref="Charges"/> from it when one unit is used up. 0 when not known (an item made elsewhere).</summary>
+    public float MaxCharges { get; set; }
     public int Width { get; init; } = 1;
     public int Height { get; init; } = 1;
     /// <summary>Weight of one unit in kg as it counts in the inventory total (weapons already scaled by <c>weapon inventory weight mult</c>).</summary>
     public float UnitWeight { get; init; }
-    public bool Stackable { get; init; }
+    /// <summary>How many units one cell holds (<see cref="ItemInfo.StackLimit"/>; 1: it does not stack). Inside a backpack the bag's bonus applies (<see cref="Inventory.LimitOf"/>).</summary>
+    public int StackLimit { get; init; } = 1;
     public bool IsFood { get; init; }
+    /// <summary>
+    /// The faction the item was stolen from (-1: none), the item's "taken from" owner of docs/game/carry-loot.md 4.4 reduced to its faction: set when the player's looting is a theft
+    /// (<see cref="Carrying.CarrySystem"/>). The item counts as stolen while its holder is of another faction (<see cref="IsStolenFor"/>).
+    /// </summary>
+    public int StolenFrom { get; set; } = -1;
     /// <summary>A worn backpack's contents (null for other items).</summary>
     public Inventory? Contents { get; init; }
     /// <summary>The factor of the contents' weight (a bag's <c>encumbrance effect</c>).</summary>
     public float ContentsFactor { get; init; } = 1;
+    /// <summary>The INVENTORY_ITEM_STATE a loaded item was read from; saving copies it so the keys the engine does not model survive (null for an item made in play). Not hashed.</summary>
+    public FcsRecord? Saved { get; set; }
+
+    /// <summary>A copy of this item with another quantity (a stack split off; never used for a backpack, whose contents are not copied).</summary>
+    public ItemInstance WithQuantity(int quantity) => new()
+    {
+        Record = Record, Name = Name, Type = Type, EquipmentSection = EquipmentSection, MaterialId = MaterialId, CompanyId = CompanyId, Section = Section, X = X, Y = Y, Quantity = quantity, Level = Level,
+        ItemFunction = ItemFunction, Quality = Quality, Charges = Charges, MaxCharges = MaxCharges, Width = Width, Height = Height, UnitWeight = UnitWeight, StackLimit = StackLimit,
+        IsFood = IsFood, ContentsFactor = ContentsFactor, StolenFrom = StolenFrom,
+    };
+
+    /// <summary>Whether the item is stolen while held by a character of <paramref name="holderFaction"/> (carry-loot.md 4.4: the from-owner is set and of another faction).</summary>
+    public bool IsStolenFor(int holderFaction) => StolenFrom >= 0 && StolenFrom != holderFaction;
 
     /// <summary>The weight this item and what is in it add to the load.</summary>
     public float Weight => UnitWeight * Quantity + (Contents?.ContentWeight() ?? 0) * ContentsFactor;

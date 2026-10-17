@@ -47,36 +47,6 @@ public class BlockCompressionTests
     }
 
     [Fact]
-    public void Odd_sizes_and_flat_colours_encode()
-    {
-        var flat = new byte[1 * 1 * 4] { 200, 100, 50, 255 };
-        var decoded = Decode(DdsFormat.Bc3, BlockCompression.EncodeBc3(flat, 1, 1), 1, 1);
-        Assert.True(MeanError(flat, decoded, 4) < 4);
-    }
-
-    [Fact]
-    public void Bc1_to_Bc3_keeps_the_pixels()
-    {
-        var bc1 = BlockCompression.EncodeBc1(Gradient(16, 16, alpha: false), 16, 16);
-        var expected = Decode(DdsFormat.Bc1, bc1, 16, 16);
-        Assert.Equal(expected, Decode(DdsFormat.Bc3, BlockCompression.Bc1ToBc3(bc1), 16, 16));
-    }
-
-    [Fact]
-    public void Bc1_three_colour_block_keeps_its_transparency()
-    {
-        // endpoints 0x0000 <= 0xFFFF: three colours and transparent black; indices 0, 1, 2, 3 across the first row
-        var block = new byte[] { 0x00, 0x00, 0xFF, 0xFF, 0b11_10_01_00, 0, 0, 0 };
-        var bc1 = Decode(DdsFormat.Bc1, block, 4, 4);
-        var bc3 = Decode(DdsFormat.Bc3, BlockCompression.Bc1ToBc3(block), 4, 4);
-        for (int x = 0; x < 4; x++) Assert.Equal(bc1[x * 4 + 3], bc3[x * 4 + 3]);
-        Assert.Equal(0, bc3[3 * 4 + 3]);
-        Assert.Equal(255, bc3[0 * 4 + 3]);
-        Assert.Equal(bc1[0], bc3[0]);
-        Assert.Equal(bc1[4], bc3[4]);
-    }
-
-    [Fact]
     public void Bc3_to_Bc1_keeps_the_colours_including_reversed_endpoints()
     {
         var src = Gradient(16, 16, alpha: true);

@@ -7,7 +7,11 @@ namespace Meitou.Data.World;
 /// <param name="InstanceId">The instance id inside the layout's INSTANCE_COLLECTION.</param>
 /// <param name="Position">Position in the parent building's frame (its position and rotation, no scale).</param>
 /// <param name="Rotation">Rotation relative to the parent building.</param>
-public sealed record LayoutItem(string InstanceId, GameRecord Building, Vector3 Position, Quaternion Rotation);
+public sealed record LayoutItem(string InstanceId, GameRecord Building, Vector3 Position, Quaternion Rotation)
+{
+    /// <summary>The floor the object stands on: its state's <c>floornum</c> (0 when it has none); in the interior view an object above the viewed floor is hidden.</summary>
+    public int Floor { get; init; }
+}
 
 /// <summary>
 /// Building layouts from <c>interiors.level</c> (docs/formats/zones.md, "Building layouts"): INSTANCE_COLLECTION records whose
@@ -18,12 +22,14 @@ public sealed record LayoutItem(string InstanceId, GameRecord Building, Vector3 
 public sealed class BuildingLayouts
 {
     readonly GameDatabase db;
+    readonly GameDatabase? interiors;
     // (exterior, associated building) -> layouts of that building.
     readonly Dictionary<(bool Exterior, string Building), List<GameRecord>> byBuilding = [];
 
     public BuildingLayouts(GameDatabase db, GameDatabase? interiors)
     {
         this.db = db;
+        this.interiors = interiors;
         if (interiors is null) return;
         foreach (var r in interiors.OfType(FcsRecordType.INSTANCE_COLLECTION).OrderBy(r => r.StringId, StringComparer.Ordinal))
         {
@@ -55,12 +61,23 @@ public sealed class BuildingLayouts
         return null;
     }
 
+    /// <summary>The names of the layouts <see cref="Find"/> can return for <paramref name="building"/> (its own and those of the buildings it shares interiors with).</summary>
+    public IEnumerable<string> Names(GameRecord building, bool exterior)
+    {
+        foreach (var id in building.GetReferences("shares interiors with").Select(r => r.TargetStringId).Prepend(building.StringId))
+            if (byBuilding.TryGetValue((exterior, id), out var list))
+                foreach (var r in list) yield return r.Name;
+    }
+
     /// <summary>The layout's objects whose target is a BUILDING of the game data, in instance id order.</summary>
     public IEnumerable<LayoutItem> Items(GameRecord layout)
     {
         foreach (var i in layout.Instances.Values.Where(i => !i.IsCleared).OrderBy(i => i.Id, StringComparer.Ordinal))
             if (db.Find(i.Target) is { Type: FcsRecordType.BUILDING } b)
-                yield return new LayoutItem(i.Id, b, i.Position, i.Rotation);
+                yield return new LayoutItem(i.Id, b, i.Position, i.Rotation)
+                {
+                    Floor = i.States.Count > 0 && interiors?.Find(i.States[0]) is { } state ? Math.Clamp(state.GetInt("floornum"), 0, 3) : 0,
+                };
     }
 
     /// <summary>

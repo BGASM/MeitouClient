@@ -1,90 +1,56 @@
-# Object rendering and streaming
+# Object rendering
 
-Part of the world view of `meitou-viewer` (and the game, which shares `src/Meitou.Rendering`); options, keys and the rest of the world mode are in [viewer.md](viewer.md#world-mode).
+`WorldObjects`, `WorldObjectLayout`, `WorldObjectRenderer`, `ObjectStreamer`, `ObjectMeshCache`,
+`BuildingLodMesh`, `BuildingLodShaders`, `ObjectRanges`. Placement rules: [zones](formats/zones.md);
+materials: [runtime-materials](formats/runtime-materials.md); geometry: [Ogre mesh](formats/ogre-mesh.md).
 
-- **Objects** (`WorldObjects`, `WorldObjectRenderer`): placements become meshes with `WorldObjectLayout`, built
-  as the game builds them ([formats/zones.md](formats/zones.md#from-placements-to-meshes)): parts chosen with the
-  game's `rand()` seeded from the position, doors added, destroyed states (`destroyed mesh`, upper floors
-  removed), rotating parts at their rolled start angle, and each part's MATERIAL_SPEC from the part, the building
-  or the building's town (`BuildingTowns`; `BuildingMaterial` turns it into textures). A building whose state names an
-  `exterior layout name` also gets that layout's signs and banners (`BuildingLayouts`, from `interiors.level`;
-  [formats/zones.md](formats/zones.md#building-layouts)), counted in the `objects` log line; interior layouts (furniture)
-  and nest debris are not drawn. Map features (and parts
-  without a chosen material) are textured by `MaterialResolver` ([above](#how-mesh-textures-are-resolved); candidate preferred: the one
-  naming the placed record). Draw distance, LOD and streaming are described below ("Object streaming, LOD and distant towns"). The log
-  line `objects` counts destroyed buildings and the foliage resource buildings, which the game draws as foliage rocks (drawn by the foliage below).
-  TERRAIN-mode map features are drawn with the terrain shader through plain per-level vertex arrays (`TerrainRenderer.DrawMeshes`), with the game's `Feature_Terrain` rules ([formats/foliage.md](formats/foliage.md#terrain-mode-meshes)): the one biome of `biomemap.png` at the mesh's origin (the terrain's blend-map mix while that biome's textures are not resident), slope clamped at 1, per-vertex cliff projection weights, no roads, back faces culled; they pick a mesh LOD level but do not fade.
-- **Object streaming, LOD and distant towns** (`ObjectStreamer`, `ObjectMeshCache`, `BuildingLodShaders`, `ObjectRanges`; data side
-  `MeshLod`, `DistantTowns`):
-  - Zones are laid out on worker threads (`WorldObjects.BuildZone`, 3 at a time, nearest first) within the distant range of the eye
-    and dropped one zone width beyond it. A mesh is requested once an instance is within its range, decoded on a worker (including the
-    index buffer with every LOD level back to back), then uploaded in steps of about 1 MB through the shared `UploadQueue`
-    (`WorldTextureCache` slices textures the same way), so a frame is rarely held up more than a few ms (interactive run with
-    `MEITOU_STREAM_LOG=1`: slow-update lines went from 30 to 220 ms down to mostly under 10, rare spikes to 50 ms from driver syncs and
-    scans). Meshes and textures are unloaded again when out of every draw range for a while (next bullet, "Streaming cost and unloading").
-  - **Mesh LOD**: per submesh, from the mesh file's levels (`MeshLod`, the rule in [formats/ogre-mesh.md](formats/ogre-mesh.md#lod)),
-    with the world bounding sphere of the mesh. Level changes are a dithered cross-fade (interleaved gradient noise, per-instance
-    `lo`/`hi` range carried in the instance matrix; the upper level takes the pixels below the threshold and the lower one the rest, so
-    they never both cover a pixel), a smoothstep band of 6% of the level's distance. Manual levels draw another mesh file.
-  - **Draw distance** (the `reach` switch, `F8`): a real object is dropped by `PartRenderingDistance` (zones.md) and fades out over a band near
-    `--object-distance` (default 20000 in Meitou and 12000 in Faithful; the game itself shows real objects only in loaded zones, about 3000).
-    The depth slices split at 1.1 x that (at least 20000), so Meitou's second slice starts at 22000. The terrain LOD error follows the same switch (16 px / 10 px).
-  - **Landmarks** (Meitou only; docs/renderer-native.md 8.19): a placement whose world bounding radius (the mesh's bounds radius, read from the file without
-    loading it, times its largest scale) is 2000 or more is a landmark: the giant map features (the Skylink satellite, rib cages, tower cores, dangler and
-    ring wrecks, pipelines; 90 placements of 31 meshes in the base game, no building part). Landmarks are collected once at start from all populated
-    zones (about a second on a worker), left out of the zones, and kept in one list that `Scan`, `MarkInRange`, the CPU cull and the shadow casters all walk
-    with the same range: `--landmark-distance` (default 150000, Tab slider "Landmark distance (Meitou)", 1000 to 400000) but never less than the object
-    distance, and still capped by the game's part distance for building parts. Their meshes use the far LOD forms and mip streaming like any object. Faithful
-    (`--faithful reach` or `all`, or `--landmark-distance 0`) builds no list: every placement stays in its zone and the object distance rules, so the
-    pictures do not change. Without Meitou at the start there is no list (and no slider); `F8` later moves the distances, not the landmarks.
-    With the Meitou shadows every landmark drawn also casts its shadow however far it is (a landmark shadow map along the sun beyond the cascades;
-    [formats/shadows.md](formats/shadows.md), "Landmark shadows").
-  - **Distant towns**: for a town with a baked mesh (`data/meshes/distant/distant_<handle>.mesh`, `DistantTowns.Find`) the baked mesh
-    rises in as the real buildings fade out, with per-vertex fade from the eye distance (no dither cost); it falls off at
-    `--distant-range` zones (default 10, the game's setting maximum; the game's default is 6; `--no-distant` disables). A town without one
-    shows each building's own `distant mesh` as an instance ("stand-in").
-  - **Batching**: one instanced draw per (mesh, material set, level, town): instance matrix rows are vertex attributes 7 to 10 (divisor 1,
-    re-pointed per batch), uniforms and texture binds are cached. A view of The Hub from 3500 units: 61 draw calls, 155 instances, 0.3 ms
-    CPU (offscreen run, 2026-10-04). Objects are drawn in every depth slice (far first).
-  - Debug: `MEITOU_LOD_DEBUG=1` colours surfaces by LOD level, `=2` draws only wireframe by level (green 0, yellow 1, orange 2, red 3,
-    magenta manual level, blue distant stand-in). `MEITOU_STREAM_LOG=1` prints slow steps. `--distant-range <zones>`, `--no-distant`.
-  - Not done: eviction of meshes, fading of TERRAIN-mode features, cross-fade of manual levels' own materials; the F11 statistics show
-    objects, draw calls, draw CPU ms and what is still loading.
-- Back-face culling is off for objects (open building meshes); the light (`kenshiLight`) and the haze are the atmosphere's (above).
+## Assembly, LOD and streaming
 
-Verified with screenshots (2026-10-04, saved outside the repo): The Hub (`--town "The Hub"`: walls, gates and
-towers join up, buildings upright, roads in the ground texture), zone 44.23 (TERRAIN-mode cliff blocks take
-the biome textures), zone 54.44 (UV-mapped cliff features), zone 31.45 at radius 3, and the whole world from
-above (biome regions as in `biomemap.png`). Building assembly, before/after (2026-10-04): The Hub (21 destroyed
-houses now in their ruined meshes), Brink (wind generators at rolled angles, destroyed shacks), Squin (houses in
-the town material instead of a stray candidate), Stack (`--at -55671,-12401 --radius 0.15 --distance 350 --pitch
-20 --yaw 90`: the Small Shack's door fills its frame).
+Resolve building/part/feature instances from merged records, seeded part choice and placement
+transforms. Preserve interior/exterior, materials, destroyed states, doors, offsets and scale.
+Workers prepare resident mesh/texture content; render thread publishes GPU objects. Shared meshes
+and per-instance state have separate lifetimes. A resident mesh can change finest LOD: refresh
+all draw/ray-geometry references before retiring replaced buffers.
 
-## What the objects cost on the swamp view (2026-10-09)
+Faithful uses researched object/part distances; Meitou `reach` extends size-aware ranges and
+distant landmarks/towns. Distant town stand-ins fade separately from real parts. Source/manual
+and generated levels use projected demand with stable transitions. Do not treat a shorter part
+range as an accidental renderer limit: it can be original fidelity. Visibility/depth/shadow/
+reflection and streaming residency need consistent bounds.
 
-**Observed**, RTX 4070, `--view swamp --size 1920x1080 --upscaler dlss --render-scale native` (the DLAA target view), 512 to 768 frames. The machine was shared with other viewers during some runs, so every figure below is from a paired A/B (`--ab-period 16`, 64 for anything with the shadow cache) or from two builds run alternately, never from one run against another.
+## Batching and depth
 
-- **Where `--ab objects-draw` (1.87 +-0.09 ms) goes.** Three passes draw the same renderer: the main view (the `objects` stage, 0.72 to 0.80 ms), the water reflection pass (its stage is 0.93 to 1.0 ms with the objects and about 0.25 without, so the objects are the larger part of it; they are drawn at the reflection's own LOD bias 3 and object distance) and the shadow cascades (0.29 +-0.08 ms of the `shadows` stage, whose mean of 0.6 to 0.7 is a median of 0.3 plus the spikes of the cached cascades redrawing). The reflection's share belongs to `ReflectionPass` and was not touched.
-- **The main view is fragment-bound, not triangle-bound.** Probe builds (env-var shader edits, not kept), single runs, medians: a fragment shader that writes a constant takes the `objects` stage from 0.81 to 0.25 ms (and the reflection stage from 1.00 to 0.60, so 0.4 ms of the reflection is object shading); clipping every vertex away leaves 0.50 (vertex stage and front end) and takes the shadow stage from 0.72 to 0.55; replacing `kenshiLight` by the albedo (no sun shadow, no sky lighting) saves 0.15; removing the weather's wetness saves nothing (the swamp's rain); a constant haze colour saves 0.03. The rest, about 0.4 ms of the 0.55, is the material: the diffuse and normal fetches (8x anisotropic) and the arithmetic round them. A texture LOD bias 1 coarser saved nothing measurable. 80 batch draws a frame in the main view and 0.6 draws of TERRAIN-mode features, 0.17 us of CPU each: the draw count is not the cost.
-- **Mesh LOD is not a lever here** (a probe that multiplied the LOD distance of what is drawn, the streaming still holding the finer levels; not kept). Main view, objects stage: LOD distance x2 saves 0.08 +-0.11 ms (219 pixels differ by 4 or more); x100, every instance at its coarsest level, saves 0.12 +-0.07 ms and takes the triangles of the main view and the reflection from 1.42 M to 1.09 M, so the rest are in meshes without reduced levels or in instances nearer than their first LOD distance (**Unknown** which; the split was not measured). Shadow cascades with LOD distance x3 (`--ab-period 64`): -0.03 +-0.12 ms. Leaving objects smaller than two texels of a cascade out of it, as foliage meshes are (`ShadowPass.MinFoliageCasterTexels`): -0.01 +-0.08 ms over 2048 frames (711 against 698 object instances a frame). None of the three is in the code.
-- **Batches nearest first** (`WorldObjectRenderer.SortNearestFirst`, Meitou with the `reach` switch; `--ab object-sort`): the colour batches are sorted by their nearest instance before they are drawn, so what a nearer batch covers fails the early depth test. Objects stage -0.03 +-0.02, reflection stage -0.02 +-0.03 (it draws through the same code), frame -0.16 +-0.16; the picture does not change (the cross-fade dither is per pixel, not per draw order). Alpha-tested parts (cut-out cloth, fences) shade before they can fail the depth test, so the gain is small.
-- **Plain lighting only where used.** The mesh shader computed the viewer's plain lighting (with a `pow`) and then overwrote it with `kenshiLight` under the game sky; `BuildingLodShaders.Fragment` now computes it in an `else` branch (same values; the shared `Shaders.MeshFragment` is untouched, because the foliage and the impostor bake patch strings in it). Objects 0.73 to 0.72 ms, within the noise.
-- **The shadow receiver's taps as constants** ([formats/shadows.md](formats/shadows.md), "The filter's taps are constants") saves 0.03 ms of the objects stage and 0.05 of the reflection stage.
-- **Total of this session's changes on the swamp view** (master b985e7b against this branch, paired `--ab occlusion` runs so side A is the default configuration, 512 frames, repeated runs agree within 0.03 ms): GPU total 7.47 against 7.12 ms (-0.35, 4.7 %), objects 0.76 against 0.71, terrain 1.26 against 1.14, reflection 0.97 against 0.92, foliage 1.81 against 1.69 (the shared receiver). The Hub (`--view hub`): 3.94 against 3.90 ms (its cascades cover little). Pictures against master: swamp 13,124 pixels differ by 1/255 and none by more; the Hub 91 pixels by 4 or more, 5 by 12 or more (maximum 16).
+Batch compatible mesh/material/state instances; sort colour batches near-first when enabled.
+Open building meshes are double-sided. Fade uses per-instance dither lo/hi windows; solid,
+fading and distant-town batches have different coverage needs. `EarlyDepth.Enabled` selects
+opaque, discard-free colour only for no-cutout/non-fading parts. Draw solids first; retain
+cutout/dither shaders for other batches. Cache native state per program so solid/fading variants
+do not evict one another. Depth/caster coverage must remain compatible with colour.
 
-- **Triangle sizes and hidden fragments** (**Observed**, 2026-10-09, `--bench-tris`, [bench.md](bench.md#triangles-per-pass-and-triangle-sizes---bench-tris)): on the swamp the objects submit 910 k primitives, 849 k leave the clipper, and the histogram finds 221 k with any visible coverage, 77 % of them under one pixel (171 k); the hub has 93 % (32 k of 34.5 k) and the desert 65 %. The fragment shader ran 1.26 M invocations against 0.37 M samples that pass the depth test: the `discard` of the LOD cross-fade dither (`BuildingLodShaders.Fragment`) gives the main program a late depth test. A probe that put `early_fragment_tests` on the objects program (not kept) took the invocations to 0.52 M, the objects stage from 0.73 to 0.59 ms and the GPU total from 6.79 to 6.39 ms (single run). So the batches nearest first (`object-sort`) could not help, and a program or batch without the dither `discard` is the next change to try; the LOD is also far too fine for the view (mean visible triangle under 2 px^2).
+## Player buildings and the placement ghost
 
-- **Early depth test: the dither's `discard` only where something fades** (**Observed**, 2026-10-09, `--ab early-depth`; the switch is `EarlyDepth.Enabled`). A fragment shader that may `discard` gets its depth test after it runs, so every hidden fragment was shaded; `BuildingLodShaders.Fragment` had two `discard`s, the cross-fade dither and the material's alpha cut-out. Now `Fragment(solid: true)` has neither (the program "objects solid"), and a draw uses it when its batch has no instance mid-fade and its part's material has no cut-out (`AlphaThreshold` 0); the other draws keep the old program. The batches are split for it: the key of `batchMap` gained a kind (solid, fading, town), an instance is "fading" when its dither range is not the whole [0, 1) (`lo > 0` or `hi < 1`; distant towns always, their fade is per vertex), so a mesh at one LOD level can have two batches in a frame, and with the switch off every instance goes to the fading kind, which is the old merging. The solid draws also come first in the draw list (`SolidFirst`, `--ab solid-first`; each group still nearest first), so their depth is there for the coarse depth test of the dithered and cut-out ones. The depth (shadow) program is unchanged: it has no shading to save. Swamp, still camera (`--bench-motion still`), invocations of the objects stage 1.36 M to 1.00 M (the rest are cut-out parts and the batches mid-fade); paired GPU, objects stage -0.07 +-0.02 ms, see [bench.md](bench.md#triangles-per-pass-and-triangle-sizes---bench-tris). Picture: `--upscaler off --bench-motion still`, swamp and hub, 0 pixels differ (the early test changes which fragments run, not which survive). Each part keeps a native state per program (`ColourSolidNative`), so the pipelines of the two programs do not evict each other from the part's two-slot cache.
+Sites and finished buildings of `WorldSnapshot.Buildings` are runtime placements (`WorldObjects.AddRuntime/RemoveRuntime`,
+`BuildingPlacement` with `WorldY` absolute), merged into their zone's layout. Meitou adds one to an already loaded zone
+incrementally (`ObjectStreamer.AddRuntime`, no zone reload, so nothing flickers; a pending zone job falls back to a
+reload). Host diff: [simulation.md](simulation.md#buildings).
 
-## Generated levels (`object-lod-gen`, 2026-10-09)
+**Scaffold.** The original clips each part at `1.2 f` of its mesh height and draws the scaffold grid (`construction.dds`)
+above it ([construction look](game/buildings-production.md#construction-look)). Meitou's approximation: the part's
+instance matrix carries `M44` = `ScaffoldBase` (10000) + the world-space clip height (`f` and the mesh top from its bounds);
+`BuildingLodShaders` keeps pixels below it as the building and above it only a procedural world-space grid
+(cell 0.12, line 0.06), discarding the rest. The shadow pass clips the same. Differences: no `construction.dds`
+texture, no fade of a grid over the built part, and the clip is a world height, so a tilted site clips level.
+Sites always use the fading (discard-capable) batch.
 
-`ObjectLodGen`, `LodCurve`; **Observed** unless marked. Most building parts have no reduced level (324 of the base game's meshes have one level, 1,039 two) and the game's first one starts at 4000, so on the swamp the Rebel camp's platforms (`RebelE platform`, 12.8 k triangles, 15 % of the main view's drawn object triangles), the walkboards (`Swamp_Walkboard`, 2.3 k triangles, 8,111 instances), the look-out tower, walls (`Wall Level 01`) and market stalls drew whole at 1300 to 2500 units, where their triangles are far under a pixel. Meitou now makes coarser levels for them.
+**Ghost.** `WorldObjectRenderer.SetGhosts(GhostDraw[])` draws a building's parts (laid out once at the origin, exterior
+only) at a transform, from the `ObjectStreamer.Loose` pseudo-zone (never streamed out, scanned each frame like the
+landmarks), with 65 % dither coverage and a tint through the push `FlatColour` (`uTint` only reaches grey-channel
+materials): green valid, red invalid, blue queued. Not drawn in shadow or landmarks-only passes.
 
-- **Which meshes**: placed objects drawn the normal way (not the TERRAIN-mode map features, distant-town meshes, meshes with a skeleton link or manual `_LOD` levels, or fewer than 400 triangles in all). The swamp view loads 170 such meshes: 113 get levels, 57 are too small or not eligible. Levels come from `MeshSimplifier` (edge collapse by quadric error, heavy planes on open edges, so silhouettes of open meshes hold) at 50, 25, 12 and 6 % of each part's triangles (floor 24 per part). Every level indexes the part's own vertices, so they share one upload with the file's levels (a mesh's index buffer already held all levels back to back). Two additions to the simplifier for textured buildings, both off for characters and foliage: a collapse is refused when a corner it moves has no vertex at the new point whose UV is about as far away as the move is long (a jump to another UV island, `uvPerWorld`, from `MeshSimplifier.UvPerWorld`), and when a corner must pick a vertex at a seam point the normal counts as much as the UV (front and back sheets of cloth and planks sit on one point). `FoliageLodBuilder.Build` takes `Settings` for this (the foliage's own are the old constants, results unchanged); its shading measure is sign-blind (`TwoSided`), because thin double-sided parts have their back face as nearest triangle.
-- **Where a level starts**: the foliage's screen-size rule (`FoliageScreenLod`, [render-foliage.md](render-foliage.md)) with the objects' constants: deviation (largest surface distance, plus 0.004 radii per radian of shading deviation) under `MEITOU_OBJECT_LOD_PIXELS` (1.5) pixels, or under twice that where the triangles of the level before are under 1.5 px^2. The result is a distance in the game's LOD value (distance minus radius, scale 1), computed once when the mesh loads from the render's pixels per radian (`LodPixelsPerRadian`, so a later resize does not move it), and merged with the file's levels (`ObjectLodGen.Merge`): by ascending distance a level is kept if it has fewer triangles than the one before (a generated one at most 85 % of it), so a generated level can replace a later file level of more triangles. Both lists are kept: with the switch off the file's levels only (the merged level numbers are the same, which keeps the meshes from being remade when it flips). A mesh holds the finest level either list can need.
-- **No cross-fade for generated levels**: the dither cross-fade between two generated (or generated and file) levels showed as grain on the swamp's tents and platforms (forced 50 % blend of levels 1 and 2: grain over every object; each level alone looks right), so they switch at their distance like the foliage's levels; the file's own pairs still fade.
-- **Shadows and the reflection** use the same curve: the cascade's floor (`ShadowLod.ObjectLodFloor`, the LOD value at which a pixel is one texel) is looked up in it, so a level whose deviation is 1.5 pixels of the main view is allowed where one texel of the cascade is as large (about 1.5 texels), and the reflection's LOD bias 3 does as before.
-- **Disk cache**: `%LOCALAPPDATA%\Meitou\objlods` (`MEITOU_OBJECT_LOD_CACHE`), one `.mlod` per (mesh name, SHA-256 of the file, `ObjectLodGen.Version`), the foliage's file format. Cold start of the swamp (8 frames, 1080p): 18 s against 14 s without the levels, 113 meshes built (19 s of worker time, they run beside the other loading); cached: 13 s (14 s with the switch off); the cache of the swamp is 232 files after the hub and Heft views too. The levels of a loaded mesh stay in memory (about 0.9 x its indices). Object meshes resident 202 MB against 195 MB. `MEITOU_OBJECT_LOD_GEN=0` makes nothing; `--ab object-lod-gen` (A new, B file levels only).
-- **Result** (`--view swamp --size 1920x1080 --upscaler dlss --render-scale native`, 768 frames, `--ab-period 16`, on master 7fded9a, two runs agree within 0.02 ms): GPU total 4.62 against 5.13 ms (-0.52 +-0.07; frame 4.69 against 5.15), objects stage 0.39 against 0.64 (-0.25 +-0.01), shadows 0.44 against 0.59 (-0.16 +-0.04), reflection 0.35 against 0.48 (-0.12 +-0.03), the other stages 0 (terrain +0.02). Object triangles a frame (main view and reflection) 0.90 M to 0.48 M. The Hub (`--view hub`): total 3.88 against 4.14 (-0.27 +-0.02), objects 0.22 against 0.50, object triangles 0.52 M to 0.20 M. `--bench-tris` (swamp, 256 frames, shared GPU): the main view's visible object triangles 372 k to 136 k, those under one pixel 85 % to 67 %, samples from triangles under 4 px 24.7 % to 12.9 %.
-- **Pictures** (`--upscaler off --bench-motion still`, A against B): swamp 92,705 pixels differ by 1/255 or more, 20,576 by 4, 4,025 by 12 (mean 0.095, max 57); Hub 14,967 / 9,524 / 4,775 (max 141; the town at 3500 units, the differences are single pixels along roofs and walls); Heft desert 3,278 / 105 / 2 (max 13). Before the no-cross-fade change the swamp's tents were visibly grainy (4,831 pixels by 12).
-- **Unknown / not done**: the deviation is measured in mesh units for instance scale 1; a resize does not move the distances of loaded meshes; alpha-tested parts (fences) are simplified like the rest (the pictures show no hole); skinned and manual-level meshes keep the file's levels; a texture-aware error (UV deviation measured on the surface) was not built, the guard above is only a refusal.
+## Validation
+
+Main, reflection and shadow stages repeat object work; inspect all three. **Observed** swamp
+probes: hidden fragment shading can dominate despite large triangle counts. Generated LOD,
+early depth and sorting change different costs. Validate doors/interiors, town stand-in joins,
+LOD fades, mirrored/reflected geometry and texture/memory pressure in still and moving views.
+[bench.md](bench.md), [render-shadows.md](render-shadows.md), [render-water.md](render-water.md).

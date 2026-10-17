@@ -25,17 +25,22 @@ internal sealed class NavMeshService : IDisposable
     readonly GameDatabase db;
     readonly WorldLevelData levels;
     readonly CollisionCache collisions;
+    readonly NavRuntimeBuildings? runtime;
+    // Bumped by Rebuild: a zone whose build started before the bump is queued again after it publishes (its gather may have missed the change).
+    readonly ConcurrentDictionary<ZoneCoordinate, int> rebuilds = new();
     readonly BlockingCollection<ZoneCoordinate> queue = [];
     readonly ConcurrentDictionary<ZoneCoordinate, TaskCompletionSource<NavZoneReady>> pending = new();
     readonly Thread worker;
     readonly object publishLock = new();
     volatile bool disposed;
 
-    public NavMeshService(GameInstall install, GameDatabase db, WorldLevelData levels, NavmeshWalkability walkability, NavBuildSettings? settings = null, NavMeshCache? cache = null)
+    public NavMeshService(GameInstall install, GameDatabase db, WorldLevelData levels, NavmeshWalkability walkability, NavBuildSettings? settings = null, NavMeshCache? cache = null,
+        NavRuntimeBuildings? runtime = null)
     {
         this.install = install;
         this.db = db;
         this.levels = levels;
+        this.runtime = runtime;
         Walkability = walkability;
         Settings = settings ?? new NavBuildSettings();
         Cache = cache ?? new NavMeshCache();
@@ -61,6 +66,19 @@ internal sealed class NavMeshService : IDisposable
         return existing.Task;
     }
 
+    /// <summary>
+    /// Builds a zone again although its mesh is loaded (the buildings round it changed, <see cref="NavRuntimeBuildings"/>): the new mesh replaces the old one when it is
+    /// published, which is when the task completes. A zone not loaded is not built (it is built with the overlay when it is asked for).
+    /// </summary>
+    public Task<NavZoneReady> Rebuild(ZoneCoordinate zone)
+    {
+        rebuilds.AddOrUpdate(zone, 1, (_, n) => n + 1);
+        var tcs = new TaskCompletionSource<NavZoneReady>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var existing = pending.GetOrAdd(zone, tcs);
+        if (ReferenceEquals(existing, tcs)) queue.Add(zone);
+        return existing.Task;
+    }
+
     /// <summary>Drops a zone's mesh from the loaded world (the cache file stays).</summary>
     public void Unload(ZoneCoordinate zone)
     {
@@ -69,7 +87,7 @@ internal sealed class NavMeshService : IDisposable
 
     void Work()
     {
-        using var gatherer = new ZoneGeometryGatherer(install, db, levels, collisions);
+        using var gatherer = new ZoneGeometryGatherer(install, db, levels, collisions, runtime);
         uint settingsHash = NavMeshCache.SettingsHash(Settings);
         foreach (var zone in queue.GetConsumingEnumerable())
         {
@@ -77,6 +95,7 @@ internal sealed class NavMeshService : IDisposable
             var watch = Stopwatch.StartNew();
             try
             {
+                int rebuildVersion = rebuilds.GetValueOrDefault(zone);
                 uint hash = gatherer.BuildingHash(zone);
                 var mesh = Cache.TryLoad(zone.X, zone.Y, hash, settingsHash);
                 var origin = NavMeshOrigin.Cache;
@@ -89,10 +108,13 @@ internal sealed class NavMeshService : IDisposable
                     try { Cache.Save(mesh, hash, settingsHash); }
                     catch (IOException) { /* a read-only or full disk only costs the next build */ }
                 }
+                mesh.Terrain = gatherer.ZoneHeights(zone);
                 lock (publishLock) Walkability.SetWorld(Walkability.World.With(mesh));
                 var ready = new NavZoneReady(zone, origin, watch.Elapsed.TotalMilliseconds, mesh.PolygonCount);
                 if (pending.TryRemove(zone, out var tcs)) tcs.TrySetResult(ready);
                 ZoneReady?.Invoke(ready);
+                // The buildings changed while this one was built: it may have missed it.
+                if (rebuilds.GetValueOrDefault(zone) != rebuildVersion) _ = Rebuild(zone);
             }
             catch (Exception e)
             {

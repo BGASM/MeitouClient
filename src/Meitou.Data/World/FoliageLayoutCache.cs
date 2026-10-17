@@ -8,10 +8,10 @@ using Meitou.Content;
 
 namespace Meitou.Data.World;
 
-/// <summary>Switches for the derived-data load caches (<c>--no-load-cache</c>, <c>MEITOU_NO_LOAD_CACHE=1</c>): when set nothing is read from or written to them.</summary>
+/// <summary>Switches for the derived-data load caches (<c>--no-load-cache</c>): when set nothing is read from or written to them.</summary>
 public static class LoadCaches
 {
-    public static bool Disabled { get; set; } = Environment.GetEnvironmentVariable("MEITOU_NO_LOAD_CACHE") == "1";
+    public static bool Disabled { get; set; }
 }
 
 /// <summary>What the foliage layout cache did so far (a snapshot of <see cref="FoliageLayoutCache.Stats"/>).</summary>
@@ -29,11 +29,11 @@ public readonly record struct FoliageLayoutCacheStats(int Hits, int Misses, int 
 /// The disk cache of laid-out foliage zones (<see cref="FoliageLayout.Place"/>'s result and the ground it was placed on): the layout is deterministic
 /// (docs/formats/foliage.md, "Random numbers"), so a start with the same game data and code reads it back instead of placing a million meshes.
 /// <para>
-/// <c>%LOCALAPPDATA%\Meitou\foliage\&lt;key&gt;\z&lt;X&gt;.&lt;Y&gt;.&lt;w|f&gt;.mfl</c> (overridden by <c>MEITOU_FOLIAGE_CACHE</c> or the constructor; never in the repository),
+/// <c>%LOCALAPPDATA%\Meitou\foliage\&lt;key&gt;\z&lt;X&gt;.&lt;Y&gt;.&lt;w|f&gt;.mfl</c> (or the constructor's root; never in the repository),
 /// one file per zone and layout kind (whole or far only). The key is a hash of everything the layout reads: the foliage records (every field of the
 /// layers, meshes and grass types reached from the biomes), the towns, the size and write time of the heightmap, blend file, biome map and overlay
-/// tiles, this format's version and a hash of the source of the layout's code (Meitou.Data and Meitou.Core, <see cref="LayoutCodeHash"/>, generated at build time), so any change to
-/// the layout code or its inputs makes a new key, and the same sources give the same key in any directory or build. Settings (foliage and grass range, grass density) are not inputs of the layout and are not in it.
+/// tiles, this format's version and <see cref="LayoutVersion"/>, bumped by hand when a code change alters what the layout places, so an edit elsewhere
+/// keeps the cache. Settings (foliage and grass range, grass density) are not inputs of the layout and are not in it.
 /// </para>
 /// <para>
 /// A file is written to a temporary name and moved into place, carries its key, zone, sizes and a checksum, and is read whole: anything that does not
@@ -45,6 +45,9 @@ public sealed class FoliageLayoutCache
 {
     /// <summary>The file format's version: bump it when the layout of the bytes changes.</summary>
     public const int FormatVersion = 1;
+    /// <summary>The layout's version: bump it whenever a change to the layout code (FoliageLayout, its random numbers, the readers it uses) changes what it places;
+    /// a stale cache otherwise keeps serving the old placement.</summary>
+    public const int LayoutVersion = 1;
     const uint Magic = 0x434C464D;   // "MFLC"
     public const long DefaultMaxBytes = 2048L << 20;
     static readonly TimeSpan AbandonedTemporary = TimeSpan.FromHours(1), StaleKey = TimeSpan.FromDays(30);
@@ -59,9 +62,8 @@ public sealed class FoliageLayoutCache
     public FoliageLayoutCache(GameInstall install, FoliageCatalog catalog, IEnumerable<(Vector2 At, float Range)> towns, string? root = null, long? maxBytes = null)
     {
         this.catalog = catalog;
-        Root = root ?? Environment.GetEnvironmentVariable("MEITOU_FOLIAGE_CACHE")
-            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Meitou", "foliage");
-        MaxBytes = maxBytes ?? (double.TryParse(Environment.GetEnvironmentVariable("MEITOU_FOLIAGE_CACHE_MB"), NumberStyles.Float, CultureInfo.InvariantCulture, out double mb) ? (long)(mb * 1048576) : DefaultMaxBytes);
+        Root = root ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Meitou", "foliage");
+        MaxBytes = maxBytes ?? DefaultMaxBytes;
         key = ComputeKey(install, catalog, towns);
         KeyName = Convert.ToHexString(key.AsSpan(0, 8)).ToLowerInvariant();
         directory = Path.Combine(Root, KeyName);
@@ -92,9 +94,7 @@ public sealed class FoliageLayoutCache
         }
         var inv = CultureInfo.InvariantCulture;
         text.Append("meitou-foliage-layout-cache|").Append(FormatVersion).Append('\n');
-        // The code: a hash of the source of Meitou.Data and Meitou.Core (everything the layout runs), generated at build time (LayoutCodeHash.targets): the same for the same
-        // sources in any directory or build, unlike the assemblies' module ids.
-        text.Append("code|").Append(LayoutCodeHash.Value).Append('\n');
+        text.Append("layout|").Append(LayoutVersion).Append('\n');
         // The records: biomes in colour order, their layers, each layer's meshes (with children) and grass types, field by field.
         var done = new HashSet<Meitou.Data.GameRecord>();
         foreach (var (colour, layers) in catalog.ByBiome.OrderBy(b => b.Key))

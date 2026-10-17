@@ -509,3 +509,9 @@ meitou.user.json
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# Meitou UI kit textures, cropped from the user's install by tools/scripts/meitou-ui-textures.ps1
+docs/meitou-ui/reference/textures/
+
+# Rendered from the game's UI atlas by make-labels.ps1
+labels/

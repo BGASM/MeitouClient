@@ -152,8 +152,8 @@ public sealed class SaveBuilder
         return faction;
     }
 
-    /// <summary>Adds the state of a town or nest. <paramref name="handleType"/> is 13 (TOWN) or 85 (NEST); each gets a container of its own.</summary>
-    public SaveTown AddTown(string name, string instance, string factionId, bool isNest, ZoneCoordinate? zone, int handleType = (int)FcsRecordType.TOWN)
+    /// <summary>Adds the state of a town or nest. <paramref name="handleType"/> is 13 (TOWN) or 85 (NEST); each gets a container of its own, or keeps <paramref name="hand"/> (a level town state's).</summary>
+    public SaveTown AddTown(string name, string instance, string factionId, bool isNest, ZoneCoordinate? zone, int handleType = (int)FcsRecordType.TOWN, Hand? hand = null)
     {
         var r = Quick(FcsRecordType.GAMESTATE_TOWN, name);
         foreach (var k in new[] { "started", "explored", "recently discovered", "discovered", "ded" }) r.Bools[k] = false;
@@ -162,7 +162,12 @@ public sealed class SaveBuilder
         foreach (var k in new[] { "pop", "pop2", "popd", "popd2", "tod" }) r.Floats[k] = 0;
         r.Ints["artifacts count"] = 0;
         r.Ints["plevel"] = 0;
-        new Hand(handleType, nextTownContainer++, Serial(), 0, 0).Write(r, "hand");
+        if (hand is { } h)
+        {
+            h.Write(r, "hand");
+            nextTownContainer = Math.Max(nextTownContainer, h.C + 1);
+        }
+        else new Hand(handleType, nextTownContainer++, Serial(), 0, 0).Write(r, "hand");
         r.Strings["faction"] = factionId;
         r.Strings["instance"] = instance;
         r.Strings["building material"] = "";
@@ -177,7 +182,7 @@ public sealed class SaveBuilder
         return town;
     }
 
-    /// <summary>Adds the world records the game always writes after the towns: BIOMES, RESEARCH and TERRAIN_DECALS, empty. (Weather and research state are not modelled yet.)</summary>
+    /// <summary>Adds the world records the game always writes after the towns: BIOMES, RESEARCH and TERRAIN_DECALS, empty. (Weather is not modelled yet; the research is written by <c>Meitou.Simulation.Saving.ResearchSave</c>.)</summary>
     public void AddEmptyWorldState()
     {
         Quick(FcsRecordType.BIOMES);
@@ -200,7 +205,8 @@ public sealed class SaveBuilder
         var r = new FcsRecord { Type = (int)FcsRecordType.PLATOON, Name = name, StringId = name, Id = NextNumber(Game.Quick) };
         Game.Quick.Records.Add(r);
         Game.Quick.Data.NextId = Math.Max(Game.Quick.Data.NextId, r.Id);
-        foreach (var k in new[] { "intact", "is resident", "canref", "persistent" }) r.Bools[k] = k is "intact" or "canref";
+        // `persistent` with `sqt` 1 (every sqt-1 platoon of the samples is persistent): a caller writing another pool sets both.
+        foreach (var k in new[] { "intact", "is resident", "canref", "persistent" }) r.Bools[k] = k is "intact" or "canref" or "persistent";
         foreach (var k in new[] { "special", "dead", "never been activated", "imprisoned", "runningAwayMode", "homelok", "campaign" }) r.Bools[k] = false;
         r.Floats["towntime"] = 0;
         r.Floats["jobhr"] = 0;
@@ -302,6 +308,13 @@ public sealed class SaveBuilder
         return c;
     }
 
+    /// <summary>Removes a platoon: its PLATOON record and its file (the original deletes the record of a platoon it destroys, docs/game/factions-squads-towns.md "Persistent platoons").</summary>
+    public void RemovePlatoon(SavePlatoon platoon)
+    {
+        Game.Quick.Records.Remove(platoon.Record);
+        Game.Platoons.Remove(platoon);
+    }
+
     /// <summary>
     /// Removes a character from its platoon: its instance, the six state records and everything its inventory holds (items and the inventories of containers
     /// inside it). The other characters keep their slots.
@@ -326,6 +339,69 @@ public sealed class SaveBuilder
         }
         platoon.Characters.Remove(character);
         platoon.CharCount = platoon.Characters.Count;
+    }
+
+    /// <summary>
+    /// Replaces what a character's INVENTORY_STATE holds with <paramref name="items"/>: the old item records (and the contents of containers among them) leave the file, and
+    /// each item gets an INVENTORY_ITEM_STATE (<see cref="SaveInventory"/>) linked by an instance numbered from 1; a container's contents get an INVENTORY_STATE of their
+    /// own, linked by the item's one instance, as the game writes them. An item read from this inventory keeps its record's id and place in the file (and a container its
+    /// contents' state), so an inventory that did not change is written back the same.
+    /// </summary>
+    public void SetInventory(SavePlatoon platoon, SaveCharacter character, IReadOnlyList<SaveItem> items)
+    {
+        var file = platoon.File ?? throw new InvalidOperationException("The platoon has no file.");
+        var inventory = character.Inventory ?? throw new InvalidOperationException("The character has no INVENTORY_STATE.");
+        var old = SaveInventory.Reachable(file, inventory);
+        var oldRecords = file.Records.Where(r => old.Contains(r.StringId)).ToDictionary(r => r.StringId, StringComparer.Ordinal);
+        var reused = new Dictionary<string, FcsRecord>(StringComparer.Ordinal);
+        var added = new List<FcsRecord>();
+        int next = NextNumber(file);
+
+        FcsRecord Take(FcsRecord fresh, string? oldId)
+        {
+            if (oldId is not null && oldRecords.TryGetValue(oldId, out var was) && !reused.ContainsKey(oldId))
+            {
+                (fresh.Id, fresh.StringId, fresh.Name, fresh.Flags) = (was.Id, was.StringId, was.Name, was.Flags);
+                reused[oldId] = fresh;
+            }
+            else
+            {
+                fresh.Id = next;
+                fresh.StringId = $"{next}--INGAME";
+                file.Data.NextId = Math.Max(file.Data.NextId, next++);
+                added.Add(fresh);
+            }
+            return fresh;
+        }
+
+        void Fill(FcsRecord state, IReadOnlyList<SaveItem> list, int depth)
+        {
+            state.Instances.Clear();
+            int index = 0;
+            foreach (var item in list)
+            {
+                var r = Take(SaveInventory.ItemRecord(item), item.Source?.StringId);
+                state.Instances.Add(SaveInventory.Link(++index, r.StringId));
+                if (item.Contents is { } contents && depth < 4)
+                {
+                    string? oldInner = item.Source is { Instances.Count: > 0 } s ? s.Instances[0].Target : null;
+                    var inner = Take(new FcsRecord { Type = (int)FcsRecordType.INVENTORY_STATE, Name = "0" }, oldInner);
+                    r.Instances.Add(SaveInventory.Link(1, inner.StringId));
+                    Fill(inner, contents, depth + 1);
+                }
+            }
+        }
+
+        Fill(inventory, items, 0);
+        // Reused records take the place of the ones they replace; the rest of the old ones leave; new ones go at the end.
+        for (int i = file.Records.Count - 1; i >= 0; i--)
+        {
+            string id = file.Records[i].StringId;
+            if (!old.Contains(id)) continue;
+            if (reused.TryGetValue(id, out var replacement)) file.Records[i] = replacement;
+            else file.Records.RemoveAt(i);
+        }
+        file.Records.AddRange(added);
     }
 
     // ------------------------------------------------------------------ STATS defaults

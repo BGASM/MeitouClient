@@ -17,6 +17,22 @@ internal static class SeedSalts
     /// <summary>Added to the count of slave squads in the key of the next slave squad.</summary>
     public const ulong SlaveSquad = 0x5A1AUL;
 
+    /// <summary>XORed into the key of a homeless squad of an area sector (6.2).</summary>
+    public const ulong HomelessSquad = 0x5EC7UL;
+    /// <summary>XORed into the key of a squad a nest makes (6.3).</summary>
+    public const ulong NestSquad = 0x4E57UL;
+    /// <summary>XORed into the key of the layout of the nests of a biome group (which nest, which cell, which spots).</summary>
+    public const ulong NestLayout = 0x1A70UL;
+
+    /// <summary>Counter of the roll that picks the template of a homeless squad.</summary>
+    public const ulong HomelessPick = 6;
+    /// <summary>Counter of the roll that picks the template of a nest's squad.</summary>
+    public const ulong NestPick = 7;
+    /// <summary>Counter base of a rolled nest's place (marker or cell and spots), apart from its TOWN pick so a changed world-state gate never moves it.</summary>
+    public const ulong NestPlace = 1UL << 20;
+    /// <summary>Counter base of the placement tries of a wild squad (the try is added).</summary>
+    public const ulong WildPlace = 2000;
+
     /// <summary>Counter (under <see cref="RngPurpose.Spawn"/>) of the roll that decides whether a bar squad is present.</summary>
     public const ulong BarChance = 77;
     /// <summary>Counter of the roll that picks which squad template a town's roaming pool draws.</summary>
@@ -25,4 +41,19 @@ internal static class SeedSalts
     public const ulong MemberLook = 1000;
     /// <summary>Counter base of the roll for the look of member n of the player's squad (n is added).</summary>
     public const ulong PlayerLook = 5000;
+    /// <summary>Counters (under <see cref="RngPurpose.Spawn"/>, keyed by the character's id) of a new NPC's bounty roll and its fuzz (<see cref="Crime.SpawnBounties"/>).</summary>
+    public const ulong BountyChance = 0xB0C7UL, BountyFuzz = 0xB0F2UL;
+    /// <summary>The AI's patrol timer and route (<see cref="Ai.AiSystem"/>).</summary>
+    public const ulong AiPatrol = 0x5041UL;
+    /// <summary>A platoon's short-range patrol point off screen (<see cref="Ai.PlatoonJobs"/>).</summary>
+    public const ulong PlatoonPatrol = 0x5050UL;
+
+    /// <summary>Town residents in their buildings (<c>PopulationHomes.cs</c>): counter base of the shuffle of a town's buildings, the counter of the node a squad is
+    /// made at, counter base of the housemate counts, and the salt XORed into a housed squad's key.</summary>
+    public const ulong HomeOrder = 0x40DE00UL, HomeSpot = 0x40DE5UL, Housemates = 0x40A7E00UL, ResidentHome = 0x2E51DUL;
+
+    /// <summary>Faction campaigns (<c>PopulationCampaigns.cs</c>): counters of a roll's pass test and its draw, a follow-up's pick and delay, a request's delay and retry; the
+    /// salt XORed into a campaign squad's key, and counter base of its placement tries.</summary>
+    public const ulong CampaignPass = 0xCA01UL, CampaignDraw = 0xCA02UL, CampaignFollowUp = 0xCA03UL, CampaignDelay = 0xCA04UL, CampaignRetry = 0xCA05UL,
+        CampaignSquad = 0xCA5DUL, CampaignPlace = 0xCA90UL, CampaignTemplate = 0xCA70UL, CampaignDialogue = 0xCAD0UL;
 }

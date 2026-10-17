@@ -11,61 +11,115 @@ using Meitou.Data.World;
 namespace Meitou.Simulation;
 public sealed partial class PopulationSystem
 {
-    /// <summary>The resident entries of a town (6.4): template id and number of squads, v0 = 0 dropped.</summary>
+    /// <summary>
+    /// The resident table of a town (docs/game/factions-squads-towns.md "Town residents", Observed): without <c>residents override</c> the faction's
+    /// <c>residents</c> first, then the town's; with it the town's only. A template listed again is dropped (the first entry wins); then v0 = 0 entries are dropped.
+    /// </summary>
     public static List<RecordLink> ResidentEntries(TownData town, FactionData? faction)
     {
         var list = new List<RecordLink>();
+        if (!town.ResidentsOverride && faction is not null) list.AddRange(faction.Residents);
         list.AddRange(town.Residents);
-        if (!(town.ResidentsOverride && town.Residents.Count > 0) && faction is not null) list.AddRange(faction.Residents);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        list.RemoveAll(e => !seen.Add(e.Id));
         list.RemoveAll(e => e.V0 <= 0);
         return list;
     }
 
+    /// <summary>The town's <c>default resident</c> (first entry), else (without <c>residents override</c>) the faction's; null when neither names one.</summary>
+    public static RecordLink? DefaultResident(TownData town, FactionData? faction) =>
+        town.DefaultResident.Count > 0 ? town.DefaultResident[0]
+        : !town.ResidentsOverride && faction is { DefaultResident.Count: > 0 } f ? f.DefaultResident[0] : null;
+
     // ---- building (pure given the seed; safe on another thread) ----
 
     internal sealed record BuiltMember(MemberPlan Plan, CharacterAppearance? Appearance);
-    internal sealed record BuiltSquad(SquadPlan Plan, Vector2 Position, int Faction, List<BuiltMember> Members);
+    /// <param name="NearY">The height of the spot inside a building it stands on (the floor under it is used); null: on the ground.</param>
+    /// <param name="Home">The building its town gave it as its home; null: none.</param>
+    internal sealed record BuiltSquad(SquadPlan Plan, Vector2 Position, int Faction, List<BuiltMember> Members, float? NearY = null, TownBuilding? Home = null);
     sealed record BuiltTown(int Site, long LoadId, List<BuiltSquad> Squads);
 
-    BuiltTown BuildTown(TownSite site, long loadId, ulong seed, IWalkability walk)
+    /// <summary>
+    /// The town's residents and bar squads. <paramref name="held"/>: a loaded save holds squads of the town (its pinned saved platoons), which are then its whole
+    /// population and nothing is made (docs/formats/save.md "NPC platoons").
+    /// </summary>
+    BuiltTown BuildTown(TownSite site, long loadId, ulong seed, IWalkability walk, bool held = false)
     {
+        if (held) return new BuiltTown(site.Index, loadId, []);
         var town = site.Town;
         int factionIndex = town.Faction is { } fid ? data.FactionIndex(fid) : -1;
         var faction = factionIndex >= 0 ? data.Factions[factionIndex] : null;
         var squads = new List<BuiltSquad>();
         var entries = ResidentEntries(town, faction);
-        for (int e = 0; e < entries.Count; e++)
+        List<TownBuilding>? bars = null;
+        if (site.Buildings.Any(b => b.CanHouse))
+            bars = HouseResidents(site, entries, faction, factionIndex, seed, walk, squads);
+        else
         {
-            if (data.Db.Find(entries[e].Id) is not { } record || !SquadFactory.IsTemplate(record)) continue;
-            var template = SquadTemplate.From(record);
-            for (int k = 0; k < entries[e].V0; k++)
+            // No building data (headless worlds): every entry's squads at spots round the centre (engine choice).
+            for (int e = 0; e < entries.Count; e++)
             {
-                ulong key = Rng.Mix((ulong)site.Index << 40 ^ (ulong)e << 20 ^ (uint)k);
-                if (BuildOne(template, factionIndex, faction, key, seed, Place(site, seed, key, walk)) is { } one) squads.Add(one);
+                if (data.Db.Find(entries[e].Id) is not { } record || !SquadFactory.IsTemplate(record)) continue;
+                var template = SquadTemplate.From(record);
+                for (int k = 0; k < entries[e].V0; k++)
+                {
+                    ulong key = Rng.Mix((ulong)site.Index << 40 ^ (ulong)e << 20 ^ (uint)k);
+                    if (BuildOne(template, factionIndex, faction, key, seed, Place(site, seed, key, walk)) is { } one) squads.Add(one);
+                }
             }
         }
-        // Bar squads (6.4): the town's own list, plus the faction's for towns of type Town; v0 slots each, present with the chance v1 per cent (0 counts as 100).
-        var bars = BarEntries(town, faction);
-        for (int e = 0; e < bars.Count; e++)
+        // Bar squads (Observed, FUN_1409fcd20): per entry floor(v0 x v1 / 200) when v0 > 2, plus one more for each roll of 0..100 that is at most v1, stopping at the
+        // first that is not, at most v0 in all. The original puts each at a random node of the town; Meitou at a node of one of its bars (engine choice), else round the centre.
+        var barEntries = BarEntries(town, faction);
+        for (int e = 0; e < barEntries.Count; e++)
         {
-            if (data.Db.Find(bars[e].Id) is not { } record || !SquadFactory.IsTemplate(record)) continue;
+            if (data.Db.Find(barEntries[e].Id) is not { } record || !SquadFactory.IsTemplate(record)) continue;
             var template = SquadTemplate.From(record);
-            for (int k = 0; k < bars[e].V0; k++)
+            int n = BarCount(barEntries[e].V0, barEntries[e].V1, seed, Rng.Mix(SeedSalts.BarSquad ^ (ulong)site.Index << 40 ^ (ulong)e << 20 ^ 0xFFFFF));
+            for (int k = 0; k < n; k++)
             {
                 ulong key = Rng.Mix(SeedSalts.BarSquad ^ (ulong)site.Index << 40 ^ (ulong)e << 20 ^ (uint)k);
-                int chance = bars[e].V1 <= 0 ? 100 : bars[e].V1;
-                if (Rng.Float(Rng.Hash(seed, key, RngPurpose.Spawn, SeedSalts.BarChance)) * 100 >= chance) continue;
-                if (BuildOne(template, factionIndex, faction, key, seed, Place(site, seed, key, walk)) is { } one) squads.Add(one);
+                if (bars is { Count: > 0 } && BarSpot(bars, seed, key) is { } spot)
+                {
+                    if (BuildOne(template, factionIndex, faction, key, seed, new Vector2(spot.X, spot.Z)) is { } inside) squads.Add(inside with { NearY = spot.Y + SpotLift });
+                }
+                else if (BuildOne(template, factionIndex, faction, key, seed, Place(site, seed, key, walk)) is { } one) squads.Add(one);
             }
         }
         return new BuiltTown(site.Index, loadId, squads);
     }
 
-    /// <summary>The bar squad entries of a town (6.4, Observed): its own <c>bar squads</c>, plus the faction's default list for towns of type Town. v0 = 0 entries are dropped.</summary>
+    /// <summary>The number of squads a bar squad entry (v0 slots, v1 per cent) makes (see <see cref="BuildTown"/>).</summary>
+    internal static int BarCount(int v0, int v1, ulong seed, ulong key)
+    {
+        int n = v0 > 2 ? (int)(v1 * 0.5 * 0.01 * v0) : 0;
+        for (int roll = 0; n < v0; roll++)
+        {
+            if (Rng.Int(Rng.Hash(seed, key, RngPurpose.Spawn, SeedSalts.BarChance + (ulong)roll), 101) > v1) break;
+            n++;
+        }
+        return n;
+    }
+
+    /// <summary>The height above a node a squad is made at before it drops to the floor under it (the original adds 10 to the node's Y).</summary>
+    const float SpotLift = 10;
+
+    /// <summary>A random general node of the town's bars (null when they have none).</summary>
+    static Vector3? BarSpot(List<TownBuilding> bars, ulong seed, ulong key)
+    {
+        var nodes = bars.SelectMany(b => b.Spots).Where(s => s.NodeType == NodeGeneral).ToList();
+        return nodes.Count == 0 ? null : nodes[Rng.Int(Rng.Hash(seed, key, RngPurpose.Spawn, SeedSalts.HomeSpot), nodes.Count)].Position;
+    }
+
+    /// <summary>
+    /// The bar squad entries of a town (Observed): without <c>residents override</c> the faction's <c>bar squads</c> (for towns of type Town only), then the town's;
+    /// with it the town's only. v0 = 0 entries are dropped.
+    /// </summary>
     public static List<RecordLink> BarEntries(TownData town, FactionData? faction)
     {
-        var list = new List<RecordLink>(town.BarSquads);
-        if (town.Type == TownType.Town && faction is not null) list.AddRange(faction.BarSquads);
+        var list = new List<RecordLink>();
+        if (!town.ResidentsOverride && town.Type == TownType.Town && faction is not null) list.AddRange(faction.BarSquads);
+        list.AddRange(town.BarSquads);
         list.RemoveAll(e => e.V0 <= 0);
         return list;
     }
@@ -73,7 +127,7 @@ public sealed partial class PopulationSystem
     /// <summary>One squad: its plan from the factory and a rolled look for every human member. Pure given its arguments (any thread).</summary>
     BuiltSquad? BuildOne(SquadTemplate template, int townFactionIndex, FactionData? townFaction, ulong key, ulong seed, Vector2 position)
     {
-        var plan = SquadFactory.Plan(data.Db, template, settings.SquadSizeMultiplier, seed, key, data.States);
+        var plan = SquadFactory.Plan(data.Db, template, settings.SquadSizeMultiplier, seed, key, States);
         if (plan.TotalMembers == 0) return null;
         // The squad's own faction (its template's) wins over the town's (section 4).
         int squadFaction = template.Faction is { } tf && data.FactionIndex(tf) is var ti and >= 0 ? ti : townFactionIndex;
@@ -82,7 +136,7 @@ public sealed partial class PopulationSystem
         foreach (var m in plan.Members)
         {
             CharacterAppearance? look = null;
-            if (!m.IsAnimal && data.Appearances is { } source)
+            if (data.Appearances is { } source)   // an animal gets its species' shared look (GeneratedAppearances)
                 look = source.Create(m.RecordId, townFaction?.Id, (int)(Rng.Hash(seed, key, RngPurpose.Spawn, SeedSalts.MemberLook + (ulong)n) & 0x7FFFFFFF));
             members.Add(new BuiltMember(m, look));
             n++;

@@ -33,16 +33,20 @@ public sealed class ItemFactory(GameDatabase db, GameConstants constants)
             Record = info.Id,
             Name = info.Name,
             Type = info.Type,
+            EquipmentSection = info.Type == FcsRecordType.ARMOUR && Db.Find(info.Id) is { } armour ? SectionOf(armour) : "",
             Quantity = Math.Max(quantity, 1),
             Quality = quality,
             ItemFunction = info.Function,
             Charges = info.IsFood ? info.Charges * Constants.FoodQualityMult : info.Charges,
+            MaxCharges = info.IsFood ? info.Charges * Constants.FoodQualityMult : info.Charges,
             Width = info.Width,
             Height = info.Height,
             UnitWeight = weapon ? info.Weight * Constants.WeaponInventoryWeightMult : info.Weight,
-            Stackable = info.Stackable,
+            StackLimit = info.StackLimit,
             IsFood = info.IsFood,
-            Contents = info.Type == FcsRecordType.CONTAINER ? new Inventory(Math.Max(info.StorageWidth, 1), Math.Max(info.StorageHeight, 1)) : null,
+            Contents = info.Type == FcsRecordType.CONTAINER
+                ? new Inventory(Math.Max(info.StorageWidth, 1), Math.Max(info.StorageHeight, 1)) { StackBonusMinimum = info.StackBonusMinimum, StackBonusMult = info.StackBonusMult }
+                : null,
             ContentsFactor = info.EncumbranceEffect,
         };
     }
@@ -77,7 +81,22 @@ public sealed class ItemFactory(GameDatabase db, GameConstants constants)
                 if (r.Values.Value0 <= 0) continue;
                 if (Create(r.TargetStringId, r.Values.Value0) is { } item) inventory.Add(item);
             }
+        if (loadout?.Crossbow is { } bow) AddAmmo(inventory, bow.Weapon);
         return inventory;
+    }
+
+    /// <summary>
+    /// An <b>engine choice</b>: a character whose loadout rolled a crossbow gets one item of the crossbow's <c>ammo</c> (one stack of bolts: 10 to 40 shots by the record's
+    /// <c>charges</c>) unless its record's list already gave it some. Only 3 of the 40 base-game CHARACTER records with crossbows list bolts; how the original equips
+    /// NPC crossbowmen with ammunition is <b>Unknown</b> (docs/simulation.md "Combat", ranged).
+    /// </summary>
+    void AddAmmo(Inventory inventory, GameRecord crossbow)
+    {
+        var refs = crossbow.GetReferences("ammo");
+        if (refs.Count == 0) return;
+        string ammo = refs[0].TargetStringId;
+        foreach (var i in inventory.All()) if (i.Record == ammo) return;
+        if (Create(ammo) is { } bolts) inventory.Add(bolts);
     }
 
     void AddWeapon(Inventory inventory, Meitou.Data.Characters.LoadoutWeapon w)
@@ -91,7 +110,7 @@ public sealed class ItemFactory(GameDatabase db, GameConstants constants)
         inventory.Items.Add(item);
     }
 
-    /// <summary>The section a worn ARMOUR goes to by its <c>slot</c> (the save's section names; belt is <b>Unknown</b> and uses <c>main</c>).</summary>
+    /// <summary>The section a worn ARMOUR goes to by its <c>slot</c> (the save's section names).</summary>
     static string SectionOf(GameRecord armour) => (Meitou.Data.Characters.AttachSlot)armour.GetInt("slot") switch
     {
         Meitou.Data.Characters.AttachSlot.Shirt => "shirt",
@@ -99,6 +118,7 @@ public sealed class ItemFactory(GameDatabase db, GameConstants constants)
         Meitou.Data.Characters.AttachSlot.Boots => "boots",
         Meitou.Data.Characters.AttachSlot.Body => "armour",
         Meitou.Data.Characters.AttachSlot.Legs => "legs",
+        Meitou.Data.Characters.AttachSlot.Belt => "belt",
         _ => "main",
     };
 }

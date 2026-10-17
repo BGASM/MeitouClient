@@ -1,70 +1,85 @@
-# Save games: `save/<name>/`
+# Save games
 
-Examined 2026-10-05 on game version 1.0.68 (Steam install, `currentVersion.txt`: "Kenshi 1.0.68 - x64 (Newland)").
+A save is a folder of FCS containers plus portrait PNG, not one blob. **Verified:** sample `wade`
+(70 files, Kenshi1.0.68) and three later base-game saves round-trip through FcsReader/Writer; (checked when written; the real-save tests were removed).
+Early-sample absence does not establish absence in later/modded saves. Sources: SaveManager,
+SaveFileSystem, GameDataContainer and named binary functions in the evidence/table references.
 
-Sources:
-- **Sample save**: one real save, `wade`, found under `%LOCALAPPDATA%\kenshi\save\wade\` (70 files, 6.6 MB; made by a
-  new game on the base game files only, saved three times on 2026-10-04 at 21:48, 22:04 and 22:15 per `save.log`; early in the game,
-  in-game day 1 13:39, one player character). Every
-  **Verified** below that says "the sample" was checked on these 70 files; with a single save, anything about
-  rarer content (player-built bases, long play, mods, dead characters, prisoners) is at most **Observed**. The
-  install's own `save/` folder holds only empty template folders.
-- **Logs**: `save.log` next to `kenshi_x64.exe` (the game's own log of the save file system), `settings.cfg`, `kenshi.log`.
-- **Binary** `kenshi_x64.exe`, decompiled (Ghidra dump, class names from MSVC RTTI): `SaveManager` (`saveGame`,
-  `loadGame`, `importGame`, named by the game's own log strings), `SaveFileSystem` (a `ThreadClass`), `hand` (object
-  handles), `GameDataContainer` (the FCS record container), `ZoneManager`, `EffectHandler*`. Function addresses are in
-  [Functions](#functions); roles of the many small writer/reader pairs come from their callers and from which side of
-  a record they assign (**Observed**).
-- **Readers**: `Meitou.Data.Fcs.FcsReader` parses every file of the sample (see [Format](#file-format)); probes in
-  `MeitouClient-re/probes/save` checked counts and cross-references; base data through `GameDatabase.Load(LoadOrder.BaseGame)`.
+## File format
 
-Related: [fcs-mod.md](fcs-mod.md) (record layout), [zones.md](zones.md) (the same files for the base world),
-[weather.md](weather.md), [characters.md](../characters.md), [terrain.md](terrain.md#world-coordinates) (zone grid).
-The game systems whose state is saved here: [factions-squads-towns.md](../game/factions-squads-towns.md) (factions, relations, platoons, towns),
-[character-stats.md](../game/character-stats.md) (STATS, MEDICAL_STATE), [combat.md](../game/combat.md) (body part state), [ai.md](../game/ai.md) (jobs, packages, Blackboard fields),
-[economy.md](../game/economy.md) (money, trade goods, bounties), [buildings-production.md](../game/buildings-production.md) (building and research state), [game-loop.md](../game/game-loop.md) (clock, autosave timer, pause)
-and [ui-screens.md](../game/ui-screens.md) (load, save and import windows).
+Usual header: int32 type15, nextId, recordCount, ordinary FCS records; no mod metadata/checksum.
+The CAMERA `version` string is game version. Type17 editor-written platoon files also occur;
+accept their real header/sizes/flags rather than forcing type15. [FCS layout](fcs-mod.md).
 
-## Summary
+**Verified/Observed in later saves:** preserve invalid UTF-8 bytes with LosslessUtf8 (byte maps
+to lone U+DC00+byte), and exact NaN/denormal float bits. TERRAIN_DECALS IDs can be binary int32
+in a string slot. Record string IDs reflect quick/platoon/zone origin and `-INGAME-S<hex type>`;
+do not infer numeric ID universally from StringId. Handles have C/CS/I/S/type components;
+join by handle and instance slot, not row position. Slots can be sparse; char-count can lag.
 
-A save is a **folder of FCS game-data files** (file type 15, the header-less layout the world `.zone` files use),
-not a single blob. `quick.save` holds the global state (time, weather, factions, towns); one `.platoon` file per
-squad holds its characters in full (stats, wounds, inventory, appearance, AI); one `.zone` file per zone that was
-ever loaded holds the buildings and loose items of that zone. Everything else (terrain, foliage, the base towns'
-placements, character and building definitions) is **not saved**: it comes from the `.base`/`.mod` files again, and
-the saved records only carry the *state* of things placed by those files, joined by string ids and five-part object
-handles. Most record types are ones `fcs.def` does not declare (the game defines them itself): the `GAMESTATE_*` types, `*_STATE` types, PLATOON, WAR_SAVESTATE, STATE,
-SAVED_STATE, CAMERA and TERRAIN_DECALS. Five reuse a declared type number: ITEM (4) and ITEM_PLACEMENT_GROUP (83) (**Verified** with `fcs_fields.tsv` against the saved keys: of 31 saved ITEM keys only `item function` is a declared ITEM field; none of the 9 saved ITEM_PLACEMENT_GROUP keys is declared), and STATS (**Verified**: the 33 skill fields `fcs.def` declares for STATS, e.g. `strength`,
-`katana`, `toughness2`, all occur as float keys of the saved STATS; the other 7 declared names are editor category headings; the save adds `xp`, `free attribute points`,
-`warrior spirit` and 8 more skills), and RESEARCH and BIOMES (**Verified**: the saved keys, `num finished`, `finished<k>`, `<k>_w_wi_*` ..., are not among their declared fields; the type
-number is reused for game state).
+`SaveGame.ChildCountSize`: byteSize=child count for instanced INVENTORY_STATE/INVENTORY_ITEM_STATE,
+instanced ITEM_PLACEMENT_GROUP, quick.save INSTANCE_COLLECTION and zone1-itemlist; zero for
+platoon collections, zone0-buildinglist, BIOMES, town/list and decals. Editor-written type17
+uses actual byte sizes. Preserve trailers and unknown records/fields/instances losslessly.
 
-## Where saves live
+## Folder and state mapping
+
+User location `%LOCALAPPDATA%/kenshi/save/<name>` when User-save-location1, otherwise install/save.
+`quick.save`: CAMERA/global clock/camera, factions/wars/relations, town state, research, biomes,
+decals, platoon index and redirect records. `platoon/<faction>_<counter>.platoon`: squad and
+character state, stats/medical/appearance/inventory, equipment and AI. `zone/zone.X.Y.zone`:
+buildings/loose items layered over base placements by instance ID. `portraits_texture.png`:
+2048² RGBA, 128px cells; exact serial/index selection remains unknown.
+
+**Verified:** later CAMERA zone lists use hexadecimal keys in X-outer grid order; folders can
+contain an extra zone not listed. Wars pair with factions by `faction`/gamedata StringId, not
+position. Content-file `platoon/` alone means no platoon file, not an empty filename error.
+Every GAMESTATE_BUILDING uses its zone container C, CS11111 and a listed slot. Overlay retains
+base placements and saved targets for IDs present in both.
+
+**Research** (RESEARCH record in `quick.save`, **Verified**: five sample saves): float `num finished`, strings `finished<k>` (RESEARCH ids in the
+order finished; every sample holds only `finished0` = `5359-gamedata.base`), float `num currents` (0). Meitou (`Saving/ResearchSave`) round-trips the
+finished list; research in progress is not modelled and its keys are left as they are.
+
+**Player-built buildings** (Meitou `Saving/BuildingSave`): an instance in the zone's `0-buildinglist` with id `<n>-zone<X>.<Y>-INGAME` and a
+GAMESTATE_BUILDING `<id>-S23` carrying `name`, `owner faction ID`, `floornum`, `destroyed`, `flags`, `is complete`, `pause`, `construction progress`,
+`<i>construction mats`, `world Y pos`, `handle`, `isInsideBuilding` (key set from the original's writer `FUN_1405547f0`, **Verified** by code; no
+sample save holds a player-built building, so a real file was not compared). Meitou-only `meitou parent` (instance id) names a parent the handle cannot.
+
+Save runtime state, derive definitions/race/gear/material/terrain from merged base/mod data,
+regenerate unsaved foliage/weather particles. Reused declared type IDs do not imply declared
+field schema: ITEM, ITEM_PLACEMENT_GROUP, STATS, RESEARCH and BIOMES have saved-state keys.
+Record tables below define the relationships and surveyed keys; use [character-stats](../game/character-stats.md),
+[economy](../game/economy.md), [AI](../game/ai.md) for field semantics.
+
+## Save/load contract
+
+SaveFileSystem writes through working folders and queues file work; save completion and load
+must synchronize with it. Save requests, autosave/quicksave/import and ordered global/platoon/zone
+loading are scoped by the binary references. Meitou: `Meitou.Data.Save` folder readers/writers,
+`SaveGame.ChildCountSize`, `SaveZone.Overlay`, `Meitou.Simulation.Saving` capture/load mapping.
+Capture at a boundary; read/write on workers; replace the active world only after successful load.
+[Simulation save coverage](../simulation.md#saves) lists un-restored state.
+
+## Compatibility exceptions
+
+Do not normalize string bytes, NaNs, zero/non-size byteSize, sparse slots or unknown key sets.
+Optional character keys include shaved/psts/TI/dat/sentence/sheath/floor; optional platoon keys
+include mission/owned/campaign/tags/inventory-refresh-time/slave. Optional town/nest and MEDICAL
+limbs keys vary. Test record keys against surveyed saves, retain extension fields, and preserve
+editor-authored files. Original acceptance of a save synthesized from scratch is unverified.
+
+### Where saves live
 
 | Setting / path | Meaning |
 | --- | --- |
 | `%LOCALAPPDATA%\kenshi\save\<name>\` | **Verified** (`save.log` paths, and the sample is there). Used when `settings.cfg` `User save location=1` (default 1) |
 | `<install>\save\<name>\` | Legacy location, when the key is 0. **Observed** (`FUN_1403e84f0`): if the key is missing from `settings.cfg` and the install-relative save folder already holds saves (`FUN_14036b680` lists saves; presumably in the install-relative folder, since the setting is not applied yet) the game keeps using the install folder (sets 0); otherwise 1. The UI text: "Save games to user directory instead of the kenshi install path" |
 | `settings.cfg` `continue=<name>` | The save the "Continue" button loads; written after every save (kind 1 in `FUN_14047c310`). Sample: `continue=wade` |
-| `settings.cfg` `autosaveindex` | Autosave slot counter (see [Autosave](#autosave-and-quicksave)); absent in the sample (no autosave happened) |
+| `settings.cfg` `autosaveindex` | Autosave slot counter (see [Autosave](#saveload-contract)); absent in the sample (no autosave happened) |
 | `<install>\save.log` | Log of the save file system (**Verified**: the sample's saves are all logged). In the install folder even when saves are in the user folder |
 
-The install's `save/current/{platoon,zone/import}` and `save/quicksave/{characters,platoon,zone/import}` are empty
-(created with the install, **Observed**). `zone/import` is presumably used by the Import Game feature (`FUN_140377710` reads zone files of an imported save, string "imported"; **Unknown**). `characters/<name>.mesh`: **Observed** that the game can write exported character meshes there
-(`FUN_1405eab00`, Ogre `MeshSerializer`); not in the sample, purpose **Unknown**.
-
-Save folder names: free text typed in the save dialog, `quicksave` (the Quicksave hotkey, string `quicksave` in
-`FUN_1403f0260`, which [ui-input.md](../game/ui-input.md#10-settingscfg-and-the-options-window) identifies as the options-tab builder, not an input handler; the quicksave and quickload events 0xe / 0xf both use the save name `quicksave`, [ui-input.md](../game/ui-input.md#6-event-dispatch)), `autosave0` .. `autosave2`. **Observed** (strings and `FUN_14047be70`).
-
-## Folder layout
-
-```
-<name>/
-  quick.save                 global state                      (1 file, 2.26 MB in the sample)
-  portraits_texture.png      character portrait atlas          (2048 x 2048 RGBA)
-  platoon/<faction>_<n>.platoon   one file per squad           (56 files, 6-120 KB)
-  zone/zone.<X>.<Y>.zone     one file per loaded zone          (13 files, 2 KB - 1.4 MB)
-```
+### Folder layout
 
 | Item | Status |
 | --- | --- |
@@ -73,33 +88,15 @@ Save folder names: free text typed in the save dialog, `quicksave` (the Quicksav
 | Platoon file name | **Verified** (56/56): `<faction name>_<n>.platoon` where `<n>` is a per-faction counter; the PLATOON record's `content file` is `platoon/<platoon stringID>.platoon` |
 | Zone file name | **Verified** (13/13 and by `FUN_14036c070`): `zone.<X>.<Y>.zone`, X and Y the zone grid indices ([terrain.md](terrain.md#world-coordinates)) |
 
-There is **no** header, version field or checksum in any file. The version is the string `version` ("1.0.68") in the
-CAMERA record of `quick.save`.
+### Folder layout — layout/example
 
-## Writing and loading
-
-### The save file system (`SaveFileSystem`)
-
-**Observed** (decompiled `FUN_140471de0`, `FUN_1404711e0`, `FUN_140470fc0`, `FUN_140471d10`, `FUN_1404746e0`,
-`FUN_140473c30`, `FUN_140473720`, `FUN_140472ac0`) and **Verified** against `save.log` and the folder:
-
-- `SaveFileSystem` is a worker thread ("Saving") with a **layered virtual folder**. A read of `quick.save`,
-  `platoon/X.platoon` or `zone/zone.X.Y.zone` is resolved through a map "relative name -> layer folder", built by
-  recursively scanning each layer ("Scanning ...", only files, `\` turned into `/`). The loaded save folder is the base layer;
-  later layers override it. Writes always go to a **temporary working folder** `save\_current<N>` (the first
-  `N` = 1, 2, ... whose folder does not exist), created lazily at the first write, with `platoon` and `zone`
-  sub-folders ("Creating temporary folder ..."). At start-up the game scans for residual `_current*` folders
-  (the log's `scanForResidualTempFolders` warning when the save root does not exist yet).
-- **Committing a save** (the save thread, `FUN_140473720`): log `Saving <folder>`, copy the working folder over the
-  named folder ("Copying A to B", one "Copied file ..." per file and directory, "Saving complete: copied in N ms"),
-  then rescan the named folder as the new base layer. **Verified**: the 22:15:52 save of the sample logged 73 copies,
-  exactly the 56 platoon files + `quick.save` + the PNG + 13 zone files + the 2 directories now in `wade`; files of the
-  earlier 22:04 save that no longer exist in the game (e.g. `Tech Hunters_0.platoon`) are gone, so the named folder
-  ends up a copy of the working folder. Zone files are copied unchanged in content (the file times are those of the write into the working folder: six zone files, `zone.20.32`, `zone.20.33`, `zone.21.31`, `zone.21.32`, `zone.21.33` and `zone.22.32`, are dated 22:06, between the 22:04 and 22:15 saves, the other seven and all 56 platoon files 22:15).
-- A copy that cannot find the source logs "Source folder ... is missing" and shows "Could not find the save folder ... Your new
-  save will likely be missing stuff". Save size is small enough that the whole copy took 28-99 ms in the sample.
-- The game does not save while a load is in progress; failures show "Error saving game. Please try again."
-  (the `FUN_140375360` result, `FUN_14047c310`) or "Failed to save game" / "Failed to load game" / "Failed to import game" (`FUN_14047c310`).
+```
+<name>/
+  quick.save                 global state                      (1 file, 2.26 MB in the sample)
+  portraits_texture.png      character portrait atlas          (2048 x 2048 RGBA)
+  platoon/<faction>_<n>.platoon   one file per squad           (56 files, 6-120 KB)
+  zone/zone.<X>.<Y>.zone     one file per loaded zone          (13 files, 2 KB - 1.4 MB)
+```
 
 ### Save requests (`FUN_14047c310`)
 
@@ -112,93 +109,7 @@ A queued request (kind at +0xA0 of the request object) is run on the next frame;
 | 3 | `SaveManager::importGame` (`FUN_140378a30`, flags in +0xA4): new world, keeps the squad of the chosen save |
 | 4 | New game: sets the version string to "1.0.68", reloads the game data and starts the chosen NEW_GAME_STARTOFF |
 
-### What `saveGame` writes (`FUN_140375360`)
-
-Fixed order, **Observed** (the decompile's call order) and **Verified** against the sample's record inventory:
-
-1. Clear the in-memory `GameDataContainer` ("the save container"; `FUN_1406bf5c0`, which differs from the plain clear `FUN_1406bf510` only by not deleting PLATOON records, **Observed**). Write the **player's faction**: an INSTANCE_COLLECTION record
-   holding the player faction's GAMESTATE_FACTION (`FUN_140375100` -> `FUN_140372a60`). The faction writer also writes the faction's WAR_SAVESTATE
-   (`FUN_1409c6890`), the relation tables, `platoonIDs`, and then calls **virtual slot 0xB8 (save) of each platoon in its two platoon lists**: that slot is `FUN_140372ef0`
-   for the RTTI class `Platoon` and `FUN_140377530` for `UniquePlatoon` (**Verified**: both are slot 23 = byte offset 0xB8 of those vtables, `rtti.tsv`, and `FUN_140372a60` calls offset 0xB8 on each platoon of its two lists; the matching loader is slot 24, **Observed**). It writes the PLATOON record and
-   `platoon/<name>.platoon` (`FUN_14036bad0`; the characters' six records come from `FUN_1406280a0`, **Observed**).
-2. Write **all zones that are loaded in memory** (`FUN_14036e450` -> `FUN_14036dde0` -> `FUN_14036c070`), each to `zone/zone.X.Y.zone`.
-   Zones that were unloaded earlier were already written to the working folder at that moment: **Verified** (decompile) that `ZoneManager`'s
-   `ZoneMapContent::deactivate` (`FUN_1409fe980`, named by its own string) calls `Zone::save` when its save flag is set; consistent with the unchanged modification times above.
-   (`Zone::save` has one more caller, `FUN_14036ec10`, a mod-editor warning path: "The following buildings where saved with player's faction".)
-3. Write the **towns**: the GAMESTATE_TOWN_INSTANCE_LIST record (`FUN_14092a6c0`) and one GAMESTATE_TOWN per town (`FUN_14036b710`, virtual slot 0x2A8 of the town).
-4. Create the CAMERA record (type 56, name `0`) and fill it, in this order (**Verified** against the decompile of `FUN_140375360` read twice, call order and string arguments, and the sample's key set): camera tracking (`FUN_1406b0740`), `player money`, `pfaction name`, `version`, `squads`,
-   `members`, `floor num`, the `area` string (the name of the biome group at the camera position, replaced by a one-character placeholder when it equals a certain 4-character literal; the rule is not traced, **Observed**), selection (`FUN_1407f3e60`), biome text (`FUN_140728af0`), decals (`FUN_1408de5d0`, only when the decal manager exists), one more
-   writer `FUN_140387b40` (not read), squad toggles/orders
-   (`FUN_1403ee910`, `FUN_1403eb710`), time and sky (`FUN_14066d7d0`), unique characters (`FUN_1409a8660`). Then RESEARCH (type 21, `FUN_1408310b0`), BIOMES
-   (type 28, `FUN_1408faf40`) and, only when the redirect table is not empty, SAVED_STATE (type 40) named `5-redirect`.
-5. Fill the CAMERA reference list `mods` (one entry per loaded data file), then run the **zone-file check** `FUN_140a0bef0` (it runs at save time too, the same "Zone file
-   missing / Extra zone file" logic as on load), then fill the `zones` list from the zone manager's 64 x 64 grid (every zone whose "has a file" flag at +0x24 is set).
-6. Write the **other factions** (`FUN_140375210`: one INSTANCE_COLLECTION with every faction that is not the player's, each with its WAR_SAVESTATE and platoons), then the portrait atlas
-   (`FUN_140414c80`), then write `quick.save` through `FUN_140471d10` (path) and `FUN_1406bd570` (with the slot-list trailer), and finally commit (above). The log line
-   "Save write time N ms (T: .., F: ..)" gives the total and two sub-timings (**Observed**: the call sites).
-
-### `loadGame` (`FUN_140373f00`)
-
-**Observed** (decompile of `FUN_140373f00`, call order read twice), the order of effects:
-
-1. `FUN_14036c5f0`: the folder must contain `quick.save`. The container is cleared (plain clear `FUN_1406bf510`, PLATOONs included), the folder becomes the base layer of the save file system and `quick.save` is loaded through it.
-2. CAMERA record (type 56, looked up as the one record of that type): time and sky first (`FUN_14066db50`).
-3. The **factions and town lists**: `FUN_1409ef230` (reads every GAMESTATE_FACTION through `FUN_14036f2e0`), then `FUN_1403728c0`, `FUN_140935120`, `FUN_1403722d0` and `FUN_14092ae80`; afterwards a town count of 0 logs "[SaveManager::loadGame] No towns loaded.". The platoon objects come in with the factions (the loader is `Platoon` vtable slot 24 = `FUN_1407ed0f0`, **Observed**: its strings are the PLATOON fields and slot 23 is the writer); the exact call chain from the faction reader is not traced.
-4. Back to CAMERA: the `version` string (turned into a number below), the camera (`FUN_1407ade60`), `pfaction name` (stored as the player faction's name; if there is no player faction object yet the game looks up `204-gamedata.base` and uses its name, else "Nameless"), then `player money` and `floor num`.
-5. BIOMES (`FUN_1408fafc0`).
-6. The `5-redirect` record (if present): pairs of old and new character handles, put in a global redirect table.
-7. The zone-of-the-camera lookup, unique characters (`FUN_1409aa270`), squad toggles (`FUN_1403eef20`, `FUN_140387c50`, `FUN_1403ebf50`), `FUN_1407f3530`.
-8. RESEARCH (`FUN_1408360f0`).
-9. The `zones` list: for each entry (x, y, v2) the zone's "has a save file" flag (+0x24 of the zone object) is set to
-   `v2 != 0`; then `FUN_140a0bef0` compares the list with the files in `zone/` and logs "[Bad save data] Zone file missing: ..." /
-   "Extra zone file: ..."; a mismatch shows the warning "This save is missing zone files. This will likely cause issues such as
-   missing player buildings".
-10. The portrait atlas is loaded (`FUN_140412f90`), then WAR_SAVESTATE records (type 9) are applied through `FUN_1409c9dc0` to the faction named by each record's `faction` string.
-11. Selection (`FUN_1407f3fb0`), biome text (`FUN_140728c10`) and decals (`FUN_1408dc350`).
-12. Version check: the CAMERA `version` is turned into a number `major << 24 | minor << 12 | patch` (`FUN_14047acf0`, `sscanf` of `%d.%d.%d`; **Verified** by reading the packing in the function and the "%d.%d.%d" string);
-   a save below **0.99.99** (the constant string is compared the same way) shows "Kenshi has now been updated to v{1}. You should go back to the main menu and press
-   [Import Game] to start a fresh new game world with your existing squad."; a separate check `FUN_14047d210` (not on `loadGame`'s path: its callers are the menu code `FUN_14047d540` and `FUN_140914c40`) shows "Old save version" for a number below **0.99.0** (constant `"0.99.0"` in that function).
-   (A version that does not parse as `%d.%d.%d` is number 0.)
-
-Whether every key the readers look for is present in the sample's records was checked only for the keys listed in this doc, not exhaustively (**Observed**); nothing was run.
-
-### Autosave and quicksave
-
-- **Observed** (`FUN_14047be70`, called every frame): the `Auto save` setting (read by `FUN_1403e84f0`) gates everything; with it off the timer is held at 0. With it on, and while the zone manager reports nothing loading and the player object's field at +0x298 is empty, a
-  timer accumulates frame time (the PlayerInterface field at +0x298 is the build placement ghost, [ui-input.md](../game/ui-input.md#7-mouse-and-selection), so the timer waits while a building is being placed; **Observed**, the object identity is matched by offset only). When it exceeds `Auto save time (minutes)` x 60 (settings.cfg, default 10) it is set to the sentinel -1 and "Autosaving..." is shown; on the next call the sentinel
-  triggers the save: it reads `autosaveindex` from `settings.cfg` (0 when absent), uses `(index + 1) mod 3` as the new index, stores it back, resets the timer and queues a save request named `autosave<index>` (`FUN_14047b920` with flag 1; presumably kind 1 with `+0xA4` = 1, **Observed** only by its arguments). There are three rotating autosave folders; the quicksave hotkey saves as `quicksave`.
-  Every queued request (also an autosave) writes `continue=<name>` to `settings.cfg` after a successful save (`FUN_14047c310`), so after an autosave the "Continue" button points at it; a request resets the autosave timer.
-- Autosave never ran in the sample (no `autosaveindex` key). **Unknown**: the meaning of the flag byte (+0x11c) that also holds the timer back (copied from a global each frame).
-
-## File format
-
-All files are FCS **file type 15** ([fcs-mod.md](fcs-mod.md#file)): `int32 15`, `int32 nextId`, `int32 recordCount`, then
-the records in the ordinary record layout. **Verified** by `FcsReader` on all 70 files; and by `FUN_1406bd570`, which
-**Observed** always writes the type 15 header (the writer writes the constant 15, then `nextId`, the record count and
-the records).
-
-Differences from `.mod` files, all **Verified** on the sample unless noted:
-
-- **Record string ids** carry the name of the file the record was made or last loaded in: `<n>-quick.save-INGAME` in `quick.save` (**Verified**: 517 of 517 non-platoon records of the first of three later saves, the same pattern in all three; the earlier sample's `<n>--INGAME` is the pattern of records made in a platoon file), `<n>--INGAME` in a platoon file for characters made since the file was last loaded and `<n>-<platoon name>.platoon-INGAME` for those that came from that file (**Verified**, both patterns in all three later saves), `<n>-zone<X>.<Y>-INGAME` for runtime-created zone records, with `-S<hex type>` appended on state records
-  (`...-INGAME-S23`, `-S5e`), and base-derived `<id>-Newwworld-INGAME-S23` for states of base placements (**Verified**, pattern counts over all 6,577 records). The numeric `id` equals the number in the string id for 4,969 of 6,577 records;
-  it differs for the 56 PLATOON records (string id = the platoon name, e.g. `Starving Bandits_3`), the 7 STATE records (`nest<n>-S27`), the 33 nest GAMESTATE_TOWN records, the 16 `0-buildinglist`/`1-itemlist` collections and the 1496 GAMESTATE_BUILDING states (probe). `flags` are 0 in every record (**Verified**: 0 non-zero in 6,577 records of 70 files; the writer `FUN_1406bd570` writes a literal 0 in that slot). Record names are `0` for most types (`ai` for GAMESTATE_AI, the character's
-  name for STATS, `Town state <name>` / `Nest state <name>` for GAMESTATE_TOWN, a faction name for GAMESTATE_FACTION).
-- **Record order** is hash-table order, not sorted (**Verified** on files such as a platoon file with ids 20, 18, 17, 16, 15, 19, 14, 13, 11).
-- **`byteSize` is not a byte size**: in the sample it is 0 for every record except some that have instances, where it
-  equals the instance count (INSTANCE_COLLECTION 9 of 74, INVENTORY_STATE 473 of 498, INVENTORY_ITEM_STATE 26 of 2181 holding a
-  nested inventory). The writer fills the slot at +0xB0 of the in-memory record (**Observed**, `FUN_1406bd570`); the loader ignores it.
-  GAMESTATE_TOWN_INSTANCE_LIST and BIOMES have instances but byteSize 0, so the rule is "a child count kept by some record
-  classes". Meaning for the engine: write 0 or the instance count; both load.
-- **`nextId`** in the header is the **highest numeric id** in the file in 64 of 70 files (probe: `nextId - max id` is 0 for 64 files and 1 for 6), i.e. the last id handed out, not the next free one. In the three later saves (880 files) it is the highest id or one more (**Verified** by `Zone_files_hold_their_buildings_in_their_own_container` for the zone files; 21 to 54 files per save have the +1, zone files in every case counted, plus the editor-saved platoon file below; **Observed**, not asserted by a test); our writer uses the highest id. The loader's use is not traced; write max id (or max id + 1: harmless, **Unknown** whether the game cares).
-- **Trailer** after the records ("slot lists", next section). `.platoon` files have none. This is the same trailer the base-game
-  `.zone` files have ([zones.md](zones.md#file-layout): "meaning Unknown"; see [Handles](#object-handles-and-slot-lists) for what it is).
-- Strings are UTF-8 (the sample has plain ASCII ids and names).
-
 ### Object handles and slot lists
-
-Nearly every reference between live objects is a **five-part handle** stored as five ints with a shared key prefix:
-`<name>TYPE`, `<name>C`, `<name>CS`, `<name>I`, `<name>S` (examples: `handleC`, `ownedbyTYPE`, `isInsideBuildingS`,
-`hometownCS`; in numbered series `internalbuildings-12I`, `usedUniques0handleI`).
 
 | Part | Meaning | Status |
 | --- | --- | --- |
@@ -208,207 +119,259 @@ Nearly every reference between live objects is a **five-part handle** stored as 
 | `I` | slot index of the object in its container | **Verified** within a zone: building `handleI` unique per file (0 duplicates in 1496) and always in that zone's slot list. Platoon members count 1, 2, 3... (**Verified**: the `I` values of the characters of each of the 56 files are exactly 1..n); the platoon's own handle has `I = 0`, `S = 0` (**Verified**, 56 of 56) |
 | `S` | the object's random **serial** | **Observed** (`FUN_1400d1c20`, catalogued earlier as `Handle_NewRandomSerial`): set at allocation to `int(rand01 * 4e9)`, hence the negative values seen; used to detect a stale handle |
 
-`FUN_1400d1c20` allocates a handle from a container: `C` and `CS` from the container (+0x24, +0x28), `I` = the first free slot, `TYPE`
-from the object's virtual, `S` random, and stores the handle back in the object. The record reader `FUN_1406bd000` reads the five ints of a
-handle by prefix and returns the null handle when `<prefix>I` is absent; the writer `FUN_1406bca80` writes them, and when asked to (character handles) first maps
-the handle through the **redirect table** (see `5-redirect`).
-
-**Slot lists (the trailer).** After the last record a file may hold `int32 count` + `count` ascending `int32`s, repeated:
-
-- **Zone files**: one list. **Verified** (13 of 13): it contains the `handleI` of every GAMESTATE_BUILDING of the file (and of every interior building
-  referenced as `internalbuildings-<k>`), plus further indices (e.g. zone 19.28: 1058 entries for 109 buildings), so it is the list of **occupied slots of the zone's object container**
-  (includes slots of objects that have no state record in the file). Zone files without buildings (`zone.21.28`: 5 entries, nextId 6) list slots too (**Observed**: 5 entries for the 4 loose ITEM records plus the collection; their link to the items' handles was not checked, since ITEM records carry no own handle in the saved keys).
-  The same trailer in the base-game `.zone` files ([zones.md](zones.md#file-layout)) is therefore the slot list of the placed objects (**Observed**: same writer).
-- **`quick.save`**: four lists, all ascending. Container ids are numbered per registry (the object kind), not globally: a platoon's `C`, a town's `C` and a zone's `C` overlap numerically.
-  **Verified** on all three later saves (sizes 215 / 385 / 5515 / 6060, 224 / 385 / 6017 / 6090 and 362 / 432 / 9990 / 8019; `Slot_lists_of_quick_save_follow_from_the_platoons_and_towns`):
-  list 0 is the sorted, distinct `handleC` of the PLATOON records (the platoon registry; unloaded platoons count too);
-  list 1 is the town registry: the `handC` of every GAMESTATE_TOWN (towns and nests) united with the `C` of every TOWN (13) or NEST (85) handle that any file refers to (the earlier reading, "the `C` of every CHARACTER handle", was wrong: a character's `C` is its platoon's container).
-  Lists 2 and 3 are still **Unknown** in meaning: both hold every container 1..4096 and every platoon container, 2 also runs on to about 16380 in 324 to 1500 runs, 3 to 11576 in 18 to 27 runs (**Observed**; the 1..4096 part is the 64 x 64 zone registry). A new save writes 1..4096 for both.
-  The lists are written by the object handed to `GameDataContainer::save` as its third argument (the global at `142133f90`, called through its first vtable slot).
-
-## `quick.save`: global state
-
-613 records in the sample (type histogram: WAR_SAVESTATE 103, GAMESTATE_FACTION 103, GAMESTATE_TOWN 337, PLATOON 56, STATE 7,
-INSTANCE_COLLECTION 2, GAMESTATE_TOWN_INSTANCE_LIST 1, CAMERA 1, BIOMES 1, RESEARCH 1, TERRAIN_DECALS 1). Field lists are what the sample contains
-(**Verified** by counting over all records of the type; optional fields are marked).
+**Base buildings keep the level data's handle.** **Verified** (census of saves 2, wade, 1): every saved base-building state whose level-data
+GAMESTATE_BUILDING (the zone files of `leveldata`) has a `handle` carries exactly that handle (3345, 2994 and 178 of as many; the rest of the saved
+states are generated interiors and buildings without a level state), and every platoon `homebuilding` names one of them (339, 313, 20 and save 3's 22
+of as many equal the level handle). So a building of a zone the save never wrote is named by its level state's handle. A handle allocated in play is
+not predictable (**Verified** by code: `I` from a rotating free-slot cursor `FUN_1400cd210`, `S` from `rand()` before the zone's `srand`).
 
 ### CAMERA (type 56, id 1051): the world record
-
-The record misnamed "camera" holds everything that is not a collection. Floats, ints, bools, strings, vec3/4 and two reference lists:
 
 | Fields | Meaning |
 | --- | --- |
 | `version` (string) | "1.0.68", the game version that wrote the save (**Verified** equals `currentVersion.txt`); compared by `FUN_14047acf0` |
-| `time day`, `time hour`, `time minute` (ints) | **Observed**: in-game clock (sample: day 1, 13:39); how the clock advances and wraps is in [game-loop.md](../game/game-loop.md#the-clock) (**Verified** there). Written by `FUN_14066d7d0` |
-| `sky update current time`, `sky update total time`, `sky updating`, `sky ambient color mult`, `sky ambient color mult speed`, `sky clouds density`, `sky clouds density speed` | state of the sky transition ([sky.md](sky.md)); **Observed** |
+| `time day`, `time hour`, `time minute` (ints) | **Observed**: in-game clock (sample: day 1, 13:39); how the clock advances and wraps is in [game-loop.md](../game/game-loop.md#frame-clocks) (**Verified** there). Written by `FUN_14066d7d0` |
+| `sky update current time`, `sky update total time`, `sky updating`, `sky ambient color mult`, `sky ambient color mult speed`, `sky clouds density`, `sky clouds density speed` | state of the camera's 30 s sky transition ([sky.md](sky.md)); **Observed**. The regions' weather is in [BIOMES](#biomes-type-28-quicksave-weather-per-region) |
 | `player money` (int), `squads` (1), `members` (1), `floor num`, `formation` | player squad summary (`FUN_140375360` reads them from the player object) |
 | `pfaction name` ("Nameless") | the player's faction name; **Verified** it equals the name of the GAMESTATE_FACTION whose `gamedata stringID` is `204-gamedata.base` (record 670) |
 | `pos` (vec3), `rot` (vec4 x y z w), `zoom`, `alt` | camera pivot position, rotation and zoom ([camera.md](camera.md)); **Observed** |
 | `selected_gui_object*`, `selected_character*`, `selected_characters<k>*` (handles) | current selection; the sample selects the player's character (handle C 1, I 1, TYPE 1) |
 | `tracking*` (handle) | the character the camera follows (null in the sample) |
 | `area` (string), `biome_text_groud` (BIOME_GROUP id), `biome_text_timer` (float) | the region name banner state; **Verified** `biome_text_groud` resolves to a BIOME_GROUP, `area` is "Okran's Gulf" |
-| `usedUniques<k>` (CHARACTER ids), `num usedUniques`, `usedUniques<k>handle*`, `usedUniquesState<k>`, `usedUniquesPlayer<k>` | unique (story) characters already spawned; **Verified** the 3 ids resolve to CHARACTER records |
+| `usedUniques<k>` (CHARACTER id), `num usedUniques` (int), `usedUniques<k>handle{TYPE,C,CS,I,S}` (ints), `usedUniquesState<k>` (int), `usedUniquesPlayer<k>` (bool) | the unique-NPC table ([unique characters](../game/factions-squads-towns.md#unique-characters)): state 1 alive, 0 dead, 2 imprisoned; player = player involved; handle = the live character. Written for every entry except unclaimed state-2 ones (the `prisoners` uniques, re-derived at load); on load an entry whose id does not resolve is dropped. Import (`importGame`) skips state-1 entries and unclaims non-player state-2 ones by their handle test (polarity **Unknown**). **Verified** by code (`FUN_1409a8660`, `FUN_1409aa270`) and 9 saves (302 entries, all state 1, player false) |
 | bools `bl ditch eject ep feed heal help rescue share shootfirst sit sleep stay`, floats `bs cod gdm ht nnm ps rs`, `formation` | squad behaviour toggles and short-key game toggles (`FUN_1403eb710`, `FUN_1403ee910`): **Observed**; meaning of the short keys **Unknown** |
 | reference list `zones` | one entry per zone **that has a file**, written in grid order (X outer, Y inner; `FUN_140375360` loops 64 x 64): target = the list index in **hexadecimal** ("0".."9", "a", "b", "c" for 13 entries), values `(x, y, 1)` = (zone X, zone Y, has-file flag). **Verified**: the 13 entries equal the 13 files of `zone/` (probe), and the key spelling is seen in the sample |
+| `meitou seed` (string) | Meitou-only: the world seed in decimal, written on every Meitou save and restored before the world's first tick on load (so the nests it did not write roll again where they were, [Nests](#nests-town-list)); a save without it keeps the launch seed. The original's keys are read by name, so it is ignored (as the other Meitou-only keys) |
 | reference list `mods` | one entry per loaded data file, target = the file's name without extension for the `.mod` files (`Newwworld`, `Dialogue`, `rebirth`) and `base` for `gamedata.base`, values `(-1, 0, 0)`; **Verified** (probe, `GameDatabase.Files`) that the four entries are in the load order of the base game (`gamedata.base`, `Newwworld.mod`, `Dialogue.mod`, `rebirth.mod`). **Unknown** whether `loadGame` compares it with the current mod list (no such string seen) |
 
-### Factions (GAMESTATE_FACTION type 37, WAR_SAVESTATE type 9, two INSTANCE_COLLECTIONs)
+### BIOMES (type 28, `quick.save`): weather per region
 
-The in-memory relation table (entry layout, thresholds -30 / 50, how relations change) is in [factions-squads-towns.md](../game/factions-squads-towns.md#3-relations); the three saved floats per entry are the ones described there.
+Written per region by `FUN_1408fad60` (region list walk `FUN_1408faf40`), read by `FUN_1408fae70` (walk `FUN_1408fafc0`); the weather part by
+`FUN_1409ddfe0` / `FUN_1409de200`, the weather instance by `FUN_1409dd250` / `FUN_1409dd5e0`. **Verified** by code and by a census of the owner's six
+saves (71 regions each, mods included):
 
-- One INSTANCE_COLLECTION (id 1055) with 102 instances and one (id 669) with 1 instance (the player's faction). **Verified**: every instance
-  targets a GAMESTATE_FACTION record (102 + 1 = 103), position 0, identity rotation, no states.
-- **GAMESTATE_FACTION** (all 103 base FACTION records are present, **Verified**: 103 = `OfType(FACTION)`): string `gamedata stringID` (the
-  FACTION id), float `prosperity` (1000 at the start, falls below), int `platoonIDs`, int `rank` (102 of them), `known` reference
-  list (the player faction only: 11 factions it has met, values `(0,0,0)`), `sq<k>` / `sqtime<k>` (2: unique squad templates),
-  `global trust` (`known` and `global trust` occur only on the player faction, `rank` on the other 102, **Verified** by counting; the `sq<k>` / `sqtime<k>` pairs are on United Cities and Dust Bandits and name UNIQUE_SQUAD_TEMPLATE records). Then the **relation matrix**, for k = 0 .. 102 (one entry per faction, including itself): float `relation<k>`, `trust<k>`,
-  `trustNeg<k>` and string `relationSID<k>` = the FACTION id the entry is about. **Verified** (probe): 102 factions have 103 entries each = 10,506 `relationSID`, all resolving to FACTION records; the 103rd faction, the player's (`Nameless`, `204-gamedata.base`), has **no** relation table; every other faction's table contains an entry about it.
-  `k` is a per-faction counter, not a global faction index.
-  - `platoonIDs` is the faction's **platoon name counter**: the next `<n>` for `<faction>_<n>.platoon` (**Verified** greater than the highest
-    suffix present for all 14 factions that have platoons; not equal to the number of platoons: only existing platoons are saved).
-  - Initial relation values (sample taken early in a new game): explicit entries of the base FACTION `relations` list are kept
-    exactly (**Verified**: 223 of 223 explicit entries of the 102 factions that have a table, compared with `GameDatabase`; the base lists hold 224 explicit entries, the extra one belongs to the player faction, which has no table); for a pair A -> B with no explicit A -> B entry the value is `min(default relation of A, default relation of B)` (**Verified** for 10,181 of 10,181 such pairs
-    with a probe over every saved entry and the base `default relation` field; an explicit B -> A entry has no effect on A -> B), and A -> A is 100 (**Verified**, 102 of 102 entries). 102 + 223 + 10,181 = 10,506, every saved entry, so the saved matrix of a fresh world is derived entirely from the base FACTION records (a changed relation after play is not covered: **Unknown**). The saved values
-    are -100 .. 100 (distinct values -100, -50, -10, 0, 15, 20, 50, 60, 70, 75, 100).
-- **WAR_SAVESTATE** (103): string `faction`, float `updatetime` (40), ints `num plats`, `num poss`, `num requests`, `num actives`, `fwc id`
-  (all 0 in the sample except `num poss`, 0-16) and `poss sid<k>` (FACTION_CAMPAIGN ids, 77 resolve: the faction's possible campaigns) with `poss time<k>`.
-  **Observed**; semantics beyond the names **Unknown**.
+| Key (`p` = prefix) | Meaning |
+| --- | --- |
+| string `<BIOME_GROUP id>` = `p` | the region's prefix: its index in the save's walk of the region table. The loader finds a region by its id and reads `p`'s keys; a region the record lacks keeps a fresh schedule. So `p` only pairs keys within one save |
+| int `p_nestcount` | the BIOME_GROUP's `num nests` (equal in 71 of 71 regions, all saves) |
+| string `p_w_s_id`, int `p_w_s_end` | current SEASON id and the day it ends (absolute day count). An id the region does not list: season 0 from now, a new weather |
+| string `p_w_w_id` | current WEATHER id; one the season does not list: a new weather is chosen |
+| int `p_w_wi_start`, `p_w_wi_end` | weather start / end in game minutes, `day × 1440 + hour × 60 + minute` (start ≤ now < end in 426 of 426) |
+| float `p_w_wi_str`; int `p_w_wi_ef_str` | strength; the WEATHER's `effect strength min`, truncated to int (426 of 426) |
+| float `p_w_wi_speed`, vec3 `p_w_wi_dir` | current wind speed and direction; direction = `(cos a, 0, −sin a)` of the angle below (rotation about Y of +X; every settled region) |
+| int `p_w_wi_udp` | game minute of the next wind update |
+| int `p_w_wi_bu_t_s` / `_t_e`, float `_bu_s_s` / `_s_e`, `_bu_a_s` / `_a_e` | the last wind change: start/end minute, speed and angle (radians) at each end, lerped linearly. On load one not running at the current minute is marked done and its times zeroed |
+| float `p_w_wi_time` | game-speed seconds the weather has run (dt × speed, `FUN_1409dc0e0`); **Observed** = (now − start) × 20/11 in 57 of 71 regions of the later saves, larger for a new game's first weathers |
+| float `p_w_fog_a` | written for the camera's region only (one per save, 0 in every sample): a fog value read from and restored into the fog manager; meaning **Unknown** |
+| `<k>_<effect group id>_count` / `_start` (int), `_respawn` (float) | weather effect groups, not nests (**Verified** by code, `EffectGroup::vfunc_0/1` `FUN_140103700` / `FUN_140104290`): the id is the group's record (`40561-weather_otto1.mod` = `weather_rain1`), `_start` its first `E<n>` instance, `_count` how many follow, `_respawn` its timer; the writer puts `_respawn` in the float map and the loader reads the int map, so it always loads 0 |
 
-### Towns (GAMESTATE_TOWN type 94, GAMESTATE_TOWN_INSTANCE_LIST type 38, STATE type 39)
+Meitou (`Data/Save/SaveWeather`, the host's `WorldWeather.Restore`): reads every region's season, weather, strength and wind into `WeatherRegionSnapshot`
+(heading = −angle; the fog fade is not saved, so a restored weather starts faded in) and writes them back at save time, with `_w_wi_time` as
+(now − start) × 20/11 and a new region's `_nestcount` from its BIOME_GROUP. Effect-group keys, `_w_fog_a` and the `E<n>` effect instances are carried as read.
+The CAMERA's sky transition is written as finished (`sky updating` false, both times 30, the current sky multiplier and cloud density); the loader snaps the sky.
 
-Town records, nests and the two population pools (`pop`, `popd`, `pop2`, `popd2`) are explained in [factions-squads-towns.md](../game/factions-squads-towns.md#7-towns) and [section 6.4 there](../game/factions-squads-towns.md#64-town-residents-and-roaming-squads).
-
-- **GAMESTATE_TOWN**: 337 records = 304 towns + 33 nests in the early sample; 384 = 304 + 80 and 431 = 304 + 127 in the three later saves (nests are created as the game goes on: **Observed**). **Verified**: the 304 town states' `instance` strings (e.g. `9-rebirth-INGAME`) equal the
-  instance ids of the base game's town list (304 of 304, `WorldLevelData.Towns()`), i.e. **the town placements themselves are not saved**, only their
-  state. The 33 nest states (`is nest` true, name "Nest state Wolf Den 33" ..., handle TYPE 85, empty `instance`) are created by the game at world start: the
-  quick.save TOWN_INSTANCE_LIST record (id 673) holds exactly these 33 as instances (target TOWN id such as `16842-gamedata.base`, absolute position,
-  state id `<instance id>-S5e`, the `-S<hex type>` rule of [zones.md](zones.md#ids)).
-- Fields: bools `discovered explored started recently discovered ded is nest public`, floats `pop pop2 popd popd2 tod`, ints `plevel`, `artifacts count`, handle `hand*`
-  (`handTYPE` 13, or 85 for a nest; `handI` = 0), string `faction` (owner, resolves to FACTION), `building material` (MATERIAL_SPEC), `replacementTown`;
-  `zzX0`, `zzY0` (the zone the town is in, 227 towns); `artifact_<k>_itm / _lvl / _qty / _man / _mat` (77 towns, resolve to
-  weapon/armour/limb-replacement ITEM records, manufacturers, materials); `factions here<k>`; and the reference list **`trade goods`**: 75 ITEM ids, the
-  same 75 in the same order in every one of the 304 towns, with `v0` between 7,028 and 12,978 and `v1 = v2 = 0` (**Verified**). `v0` is the town's random market price factor for that item times 10,000 (factors 0.70 to 1.30, `trade profit margins` 0.3 around 1): **Observed** in [economy.md](../game/economy.md#72-market-factor-a-second-random-per-town-price-multiplier), where the Town writer `FUN_140376b80` stores `trunc(factor x 10000)` and the loader `FUN_1403715c0` divides by 10000.
-- **STATE** (type 39, 7 records with string ids `nest<n>-S27`, name `0`): ints `BTYPE BC BCS BI BS` = a building handle (TYPE 0); the instance state of nest-owned buildings
-  listed on 7 GAMESTATE_TOWN records (**Observed**).
-
-### Research, biomes, decals
-
-- **RESEARCH** (type 21; the research system is described in [buildings-production.md](../game/buildings-production.md#research-and-tech)): float `num finished`, `num currents`, strings `finished<k>` (RESEARCH ids; sample: 1, `5359-gamedata.base`), `current<k>` + `current prog<k>` while researching (the research progress unit is game seconds of bench work, **Observed** in [buildings-production.md](../game/buildings-production.md#research-and-tech); whether `current prog<k>` uses it is **Unknown**).
-- **TERRAIN_DECALS** (type 108): int `total` (0 in the sample); decal placements are instances when present (**Observed**, `FUN_1408de5d0`).
-- **BIOMES** (type 28, id 1054): the state of the weather and the ambient effects, per biome group.
-  - For every BIOME_GROUP in memory (hash order, ordinal `k` = 0, 1, 2, ...; `FUN_1408faf40` -> `FUN_1408fad60`): string key `<BIOME_GROUP id>` = `"<k>"`,
-    int `<k>_nestcount`, and its weather controller's state ([weather.md](weather.md)): `<k>_w_s_id` (SEASON id, 65 resolve), `<k>_w_s_end` (the day the season ends),
-    `<k>_w_w_id` (WEATHER id, 71 resolve), `<k>_w_fog_a`, wind `<k>_w_wi_dir` (vec3), `_speed`, `_str`, `_time`, `_start`, `_end`, `_udp`, `_ef_str`, `_bu_a_s/_a_e/_s_s/_s_e/_t_s/_t_e` (the
-    build-up/transition ramps); and per spawn-table entry `<k>_<record id>_respawn / _count / _start` (respawn timers of nests/animals).
-    The `.mod` weather doc says "saves keep the season id and end day" (weather.md): this is where. **Observed** names via `FUN_1409dd250`, `FUN_1409ddfe0`.
-  - **Instances** `E<n>` (1463 in the sample, targets "0", "1" or "5" (**Verified**, distinct targets listed), position/rotation reused for state) and keys `E<n>_affected`, `E<n>_affectTimerDelay`, `E<n>_extra`: the saved
-    state of **EffectHandler** objects (ambient particle effects: classes `EffectHandlerGlobal`, `Camera`, `Point`, `GlobalPoint`, `Wandering`; the writers are
-    their virtual slot 9, e.g. `EffectHandlerWandering::vfunc_9` = `FUN_140104ec0`). **Observed** from the RTTI names; field meaning **Unknown**.
-
-### `5-redirect` (SAVED_STATE, type 40)
-
-Written only when the redirect table is non-empty (absent in the sample, **Observed** in `FUN_140375360` / `FUN_140373f00`): int `count`, then for each
-entry `i` a character handle `<i>` (old) and `R<i>` (new). Written character handles are mapped through it so that references to replaced characters
-(e.g. after a squad member was re-created) stay valid. **Unknown**: when entries are added.
-
-## `.platoon` files: squads and their characters
-
-One file per PLATOON, named `<faction name>_<n>.platoon`; the PLATOON record in `quick.save` points to it (`content file`).
-
-**PLATOON** (type 34, 56 in the sample, id order unrelated to the files). How squads are created, which roles `squad mem type` stands for (0 SQUAD_1, 1 SQUAD_2, 2 SQUAD_LEADER, 4 SQUAD_SLAVE) and how platoons are stepped is in [factions-squads-towns.md](../game/factions-squads-towns.md#5-creating-a-squad) and [game-loop.md](../game/game-loop.md#factions-and-squads); the AI side of the saved keys (`currentPackage`, `contractjob`, `jobhr`, `towntime`, `homelok`, `runningAwayMode`, `replacementAI`) is the Blackboard of [ai.md](../game/ai.md#jobs-and-player-orders); `money` is the platoon purse of [economy.md](../game/economy.md#2-money-cats): 
-
-- strings `platoon stringID` (= `<faction name>_<n>`, **Verified** 56/56), `faction name`, `faction stringID` (FACTION id, resolves 56/56), `squad template` (SQUAD_TEMPLATE, 56/56),
-  `basetown` (TOWN, 51), `currentPackage` (AI_PACKAGE, 55), `map area name` / `map area sid` (BIOME_GROUP, 6), `contractjob`, `mission data`, `replacementAI` (all empty), and, when the platoon is part of a faction campaign, `campaign` (the writer `FUN_140372ef0` has the key behind a campaign lookup; **absent** from all 56 sample records);
-- bools `canref dead homelok imprisoned intact is resident never been activated persistent runningAwayMode special`; ints `squad index` (position in the faction's squad
-  list: **not** the file suffix, equal for 18 of 56), `sqt` (1 or 2), `char count` (**Verified** equals the number of characters in the file, the file's collection `char count`, and its
-  instance count, 56 of 56 in the early sample; in a save made after play the record's copy is off by -7 to +3 in 55 of 207 platoons while the file's collection count always equals its instances: **Verified** in `Platoons_point_at_their_files_and_agree_with_them`; the file is exact), `money`, `owned stuff count` + `owned<k>*` (building handles), `slave count`, `towntime` (float), `jobhr`;
-- vec3 `position` (world position of the squad), handles `handle*` (TYPE 34), `currenttown*`, `hometown*`, `homebuilding*`, `occupied*`, `separated*`, `target town*`, `mission employer*`, `mission target*`, `mission town*`
-  (TOWN/NEST/BUILDING handles or null);
-- optional trader data: float `inventory refresh time` (16 of 56); a key `is trader` is read by the loader `FUN_1407ed0f0` and written by `FUN_140372ef0` but is absent from the sample (**Observed** in the two functions).
-- `UniquePlatoon` (story squads) saves through `FUN_140377530` (`UniquePlatoon` vtable slot 23), which wraps the normal platoon writer and adds the keys `missionTimer` and `missionRepeatsCount` (**Observed**: strings of that function; no unique platoon in the sample's PLATOON records was checked for them).
-- Which platoons are saved: only those that exist in the world at save time. **Observed**: a fresh world had 56 platoons of 14 factions early in the game (the squads of the zones
-  around the start); the rest of the population is created later by the game, not stored.
-
-**File contents** (**Verified** for all 56 files): a single INSTANCE_COLLECTION (`char count` int) with one instance per character, then for each character exactly six state records in this
-order (**Verified**, 230 of 230): `GAMESTATE_CHARACTER`, `GAMESTATE_AI`, `INVENTORY_STATE`, `MEDICAL_STATE`, `STATS`, `CHARACTER_APPEARANCE`.
-
-- Instance: `target` = the base CHARACTER (194) or ANIMAL_CHARACTER (36) record id (**Verified**: all 230 resolve); `position`, `rotation` (w first) = the character's world position and facing;
-  `states` = the six ids above. Instance ids `<n>--INGAME`.
-- **GAMESTATE_CHARACTER** (type 36): string `name`, `owner faction ID` (FACTION id, 230/230), `sheath`; bools `is leader carrying escap kidn stealth tn shaved`, `defensive mode / chase mode / non combat mode / passive mode / ranged mode / taunt mode`
-  (the player's character only: the stance toggles); floats `age` (0.12 - 1), `decay`, `disguiseblown`, `psts`, `ssct`; ints `speed mode`, `personality`, `squad mem type` (0, 1, 2),
-  `slavestate`, `sentence`, `floor`, `in something`, `portrait_serial`, `portrait_index` (1 character), `TI day`, `TI dat0`; handles `handle*` (TYPE 1, C = platoon container), `carrying*`, `isindoors*`,
-  `in what*` (the building the character is in), `slaver*`, `TI town*`; player-only `bountyfac0`, `bountyexp0`, `amount0`, `crimes0`, `claim0`.
-- **GAMESTATE_AI** (type 67, name `ai`): bool `jobs`; optional `tjob0`, handle `tjobT0*`, vec3 `tjobP0` (a pending target job and its position). When the character has player jobs the AI code also writes `pjobT<i>` entries ([ai.md](../game/ai.md#jobs-and-player-orders), **Observed**; none in the sample).
-- **STATS** (type 25, name = the character's name): 44 float fields: the skill levels (names as the base CHARACTER stat fields: `strength`, `dexterity`, `toughness2`, `perception`, `athletics`, `attack`, `defence`, `dodge`, `katana`,
-  `sabres`, `heavy weapons`, `poles`, `blunt`, `unarmed`, `bow`, `turrets`, `lockpicking`, `thievery`, `stealth`, `assassin`, `medic`, `engineer`, `robotics`, `science`, `weapon smith`, `armour smith`, `bow smith`,
-  `cooking`, `farming`, `labouring`, `tracking`, `swimming`, `climbing`, `endurance`, `mass combat`, `survival`, `ff`, `hackers`, `bluff`, `doctor`, `arrow defence`, ...), `xp`, `free attribute points`, `warrior spirit`.
-  Values are floats (e.g. 17.31): the *current* trained levels (stat numbers, offsets and the XP curve: [character-stats.md](../game/character-stats.md#stats)). The writer is `FUN_14064a8f0` (also cited in [animation.md](../animation.md) for the muscle formula).
-- **MEDICAL_STATE** (type 57): bools `coma dead unconcious incapacitated`; floats `blood` (humans 50 - 100.7 with 100 = full; the 36 animals 120.6 - 228.8, so the full value is per race, **Observed** over the 230 characters; the capacity also scales with strength, [character-stats.md](../game/character-stats.md#blood-and-bleeding)), `bleeding`, `hung` (hunger, 1.7 - 3 in the sample), `fed`, `KO`; and for each of the character's
-  7 limbs `k` = 0 .. 6 the floats `flesh<k>`, `hit<k>`, `bandage<k>`, `rig<k>`, `stun<k>`, `wear<k>`, `hitmult<k>` and string `sid<k>` = the LOCATIONAL_DAMAGE record of the limb (the part model is in [character-stats.md](../game/character-stats.md#body-parts-and-injuries) and [combat.md](../game/combat.md#the-hit-pipeline-medicalsystem)).
-  **Verified**: 230 of 230 characters have exactly 7 limbs; for 183 the order is Head `32-gamedata.quack`, Stomach `100`, Chest `101`, Left Arm `28`, Right Arm `29`, Left Leg `30`, Right Leg `31` (names from the base records, all `-gamedata.quack`; 26 + 10 = 36 characters, the animals, have the two arm slots replaced by `4019-gamedata.base` (Left Foreleg) and `4018-gamedata.base` (Right Foreleg); in 11 + 10 = 21 characters Chest `101` comes before Stomach `100`; all four combinations counted by a probe, 183 + 26 + 11 + 10 = 230). All 1610 `sid<k>` resolve to LOCATIONAL_DAMAGE. **Observed** meaning of the per-part floats (the in-memory `HealthPartStatus` offsets, [character-stats.md](../game/character-stats.md#per-part-state-medicalsystemhealthpartstatus), and the save writer `14064d390` / loader `14064d600` use the same offsets, [combat.md](../game/combat.md#the-hit-pipeline-medicalsystem)): `hit<k>` is the part's hit weight (the relative chance to be struck; the sample values 20-150 are the RACE `combat anatomy` weights), `flesh<k>` its flesh HP (sample 59-176), `stun<k>` the stun, `bandage<k>` the bandaged pool, `rig<k>` the extra buffer of the health fraction, `wear<k>` robot wear and `hitmult<k>` the transient hit-focus multiplier. `hung` is the hunger level 0 to 3 (3 = full; **Verified** thresholds in [character-stats.md](../game/character-stats.md#hunger-and-starvation)); that `fed` is the stomach buffer and `KO` the KO timer is **Unknown** (inferred from names only).
-- **CHARACTER_APPEARANCE** (type 66): reference list `race` (one RACE id, e.g. `17-gamedata.quack`); strings `head` (HEAD), `hair style` / `beard` (ATTACHMENT, may be empty), `idle stance`; vec3 `Skin Tone`; ints `Age`, `body version`
-  (2), `morph index`; bools `sex female`, `in editor`, `from file`; and up to 81 float sliders per character (141 distinct names over the sample; 44 to 81 per record depending on the body type), named like the editor's (`Height`, `Frame`, `Arm bulk`, `Breast size`, `Neck length`, ...; the morph targets
-  `high_brow`, `wide_nose`, ... 43 lower-case names, values -0.89 .. 0.72 in the sample; the capitalised sliders (50 names) 0 .. 147 with 100 as the neutral value, **Observed**; 48 `bone_*` / `stick_*` names, -0.41 .. 1.08, for the non-human bodies). This is what [characters.md](../characters.md) and [animation.md](../animation.md#body-shape-sliders)
-  consume; the writer is `FUN_140072c50` (its defaults are 100 for each slider), the loader `FUN_14052e6c0`.
-- **INVENTORY_STATE** (type 41): no fields; instances (position 0, identity rotation) whose targets are INVENTORY_ITEM_STATE records; instance ids count from 1. Exactly one per character
-  (230 inventories, 1212 items directly in them in the sample, **Verified** by a probe walking the instance and state links; platoon files hold 237 INVENTORY_STATE and 1213 INVENTORY_ITEM_STATE, the 1 extra item being inside a backpack). A container item (backpack) has an INVENTORY_ITEM_STATE whose single instance targets another INVENTORY_STATE (the contents): the
-  7 INVENTORY_STATE not referenced by a character are the contents of 7 backpacks (**Verified**: 7 unreferenced states and 7 nested inventories reached through items).
-- **INVENTORY_ITEM_STATE** (type 42): string `base data sid` (the item's record: ARMOUR 891, ITEM 1018, WEAPON 230, CROSSBOW 14, CONTAINER 26, MAP_ITEM 2 over platoon and zone files: all 2181 resolve in the sample, **Verified** by a probe against `GameDatabase`), `material sid`
-  (MATERIAL_SPECS_CLOTHING / WEAPON), `color sid` (COLOR_DATA), `company sid` (WEAPON_MANUFACTURER, also a RESEARCH id for blueprints; 17 are "<id>.TECH.1"-style strings that are
-  not records), `section` (**Verified** values: `main 263, legs 194, armour 178, boots 139, back 135, head 120, shirt 120, hip 56, backpack_attach 7, backpack_content 1` among the platoon items),
-  `uniform` (FACTION id for faction uniforms; empty otherwise); ints `inventory x`, `inventory y` (cell in the section grid; `back` with `y > 0` is the second back slot, see characters.md), `quantity`, `level`, `item function`;
-  floats `quality`, `charges`; bools `in inventory` (always true here), `death`, optional `unique`; handles `ownedby*`, `insideBuilding*` (null for carried items).
-
-### Which part of a character comes from base data
-
-Saved: everything above. **Not saved**: the CHARACTER record's definition (the instance only names it), meshes, animations, the dialogue. Because `STATS`, `CHARACTER_APPEARANCE` and the inventory are saved in full, a
-save keeps characters exactly even if the base CHARACTER record changes (a later mod change to the record does not alter an existing character). **Observed**.
-
-## `.zone` files: buildings and loose items of a zone
-
-Only zones that have been loaded get a file (13 of 4096 in the sample; the starting area). The file holds the zone's whole placed-object list, not a diff:
-
-- **`0-buildinglist`** (INSTANCE_COLLECTION, absent when the zone has no building): one instance per building, same layout as the base game's ([zones.md](zones.md#zone-files-zonexyzone)):
-  `id`, `target` = BUILDING (or ITEM_PLACEMENT_GROUP) record, absolute X and Z, Y above terrain, rotation w first, `states` = the GAMESTATE_BUILDING id.
-  - **Verified** against `WorldLevelData` for 9 zones with a list: the save list contains **every** base placement (0 only-in-base) with identical position (0 differences, a base entry that a later layer cleared, e.g. `2014-Newwworld-INGAME` in zone 19.29, is cleared in the save too), and the same target for all but
-    6 placements of the sample (1 - 3 per zone; in zone 19.29 two placements have exchanged their targets at the same positions, so a random variant pick is as likely as destruction: **Unknown**). It adds the placements the game generated at runtime: e.g. zone 19.29: base 78 live placements (+1 cleared), save 1065;
-    zone 20.28: base 5, save 224. The generated ones are the **interiors**: **Verified** that 1228 of the 1228 GAMESTATE_BUILDING with `is inside building` true have a runtime id `<n>-zone<X>.<Y>-INGAME`, while of the 268 other states only 1 has one;
-    the item placement groups use such ids too. Only 23 of the 1496 saved states and 0 of the 526 ITEM_PLACEMENT_GROUP have an id that also exists in a base `interiors.level`
-    (`WorldLevelData.Load(..., includeInteriors: true)`), so the saved interior records are created afresh when the zone first loads, not copied from `interiors.level` (**Observed**: the generator is not traced).
-  - Base placement state ids keep their base names (`5339-Newwworld-INGAME-S23`: instance id + `-S` + hex type 0x23 = GAMESTATE_BUILDING); the runtime-created ones use the zone name.
-- **`1-itemlist`** (INSTANCE_COLLECTION): loose items lying in the zone: instances target the `ITEM` records of the same file (20 in zone 20.32, 4 in zone 21.28 which has nothing else).
-  Base-game zone files have no such collection (zones.md lists only `0-buildinglist`), so it is save-specific (**Observed**; `FUN_1409ffad0` looks `1-itemlist` up by name and empties it in the branch that generates a town's content).
-- **GAMESTATE_BUILDING** (type 35; 1496 records in the sample, `destroyed` true for 23: 21 in zone 20.32, 1 in 19.29, 1 in 20.29): see [zones.md](zones.md#zone-files-zonexyzone) for the common fields. In saves: bools `destroyed foliage is complete
-  is inside building is public day pause broken power on gets battery locked repeat`, floats `world Y pos` (absolute height), `construction progress`, `0construction mats`, `1construction mats`, `player furniture Y offset`,
-  `batterycharge`, `hardness`, `production amount`, `resource mult`, `num crafts`, ints `version` (270, the building state version), `flags`, `floornum`, `serialised interior` (1), `lock lvl`, `current shots`, `craft partial item size`,
-  handles `handle*` (TYPE 0, C zone container), `town*` (TYPE 13, the owning town), `residents*` (TYPE 1 / 34 / null), `isInsideBuilding*` (the parent building for interior pieces, null otherwise), `mounted*` (key present on 184, non-null on 22: what is mounted on it),
-  `internalbuildings-<k>*` (up to 170 interior buildings), strings `name`, `owner faction ID` (FACTION id or `nofac`; 1495 + 1 in the sample), `residents template` / `squad template` (SQUAD_TEMPLATE, 48),
-  `exterior layout name` / `interior layout name` (119), `usagenode_<k>` (452, names of the user nodes in use). 25 states carry a second set of fields with suffix `0` (`handle0*`, `doa0`, `gatecode0`, `hardness0`, `lock lvl0`, `state0`, ...): the
-  second part of a gate/door building (**Observed**).
-- **ITEM_PLACEMENT_GROUP** (type 83; 526): string `base data sid` (ITEM_PLACEMENT_GROUP record, 526/526), bool `is inside building`, float `respawn time`, int `floornum`, handle `isInsideBuilding*` (TYPE 0): a furniture/item spawn group inside a building and when it next respawns.
-- **ITEM** (type 4; 41): a loose item: `base data sid` (ITEM 35, WEAPON 6), `material sid`, `company sid`, `quality`, `charges`, `quantity`, `level`, `item function`, `inventory x/y` (0), bools `bare weapon`, `death`, `in inventory` (false),
-  handles `persist*` (the object that owns it for respawn: TYPE 13 TOWN or 85 NEST), `ownedby*`, `insideBuilding*`.
-- **INVENTORY_STATE / INVENTORY_ITEM_STATE** in zone files: the contents of chests, shop shelves and containers in buildings (1,335 entries at (0,0,0) in the base files target INVENTORY_STATE, see zones.md); in the sample 968 of
-  the 2181 INVENTORY_ITEM_STATE (and 261 of the 498 INVENTORY_STATE) are in zone files, 967 of them in section `backpack_content`, 1 in `out`; the other 1213 / 237 are in platoon files (**Verified**, counted).
-
-## Saved, derived and regenerated
+### Saved, derived and regenerated
 
 | Content | Where | Status |
 | --- | --- | --- |
 | Game time, clock, sky transition, weather and season per region | `quick.save` CAMERA, BIOMES | **Verified** present |
-| Factions: relations, trust, prosperity, war campaigns | `quick.save` | **Verified** (present in the sample) |
+| Factions: relations, trust, prosperity, war campaigns | `quick.save` | **Verified** (present in the sample); campaigns: [WAR_SAVESTATE](#war_savestate-type-9-faction-campaigns). Special squads in GAMESTATE_FACTION: `sq<i>` (UNIQUE_SQUAD_TEMPLATE id), float `sqtime<i>` (replacement timer), handle list `<i>:sq list` (live UniquePlatoons) (`FUN_1402deea0` / `FUN_1402df0c0`; `sq`/`sqtime` **Verified** in 9 saves: United Cities and Dust Bandits, `sqtime0` 0; `:sq list` from code only, empty or absent in every sample); PLATOON bool `special` marks a UniquePlatoon, which adds `missionTimer` and `missionRepeatsCount` ([special squads](../game/factions-squads-towns.md#unique-characters)) |
 | Town state (discovery, population, trade goods, artifacts, nests) | `quick.save` | **Verified** (present in the sample); town placements, names and shop lists come from `leveldata.level` |
 | Squads and all character state (stats, wounds, inventory, appearance, AI) | `.platoon` | **Verified** (present in the sample) |
 | Buildings' state, generated interiors, loose items, item placement groups | `.zone` | **Verified** for visited zones |
+| Locks and doors (`lock lvl`, `locked`, `state<i>`, `wants lock<i>`, ...), cage/bed occupancy (`in something`, `in what`) | `.zone`, `.platoon` | **Verified** keys: [locks](../game/locks.md#save-keys) |
 | Research, unique characters, selection, camera | `quick.save` | **Verified** (present in the sample) |
 | Terrain, heightmap, foliage, grass, roads, base building placements, map textures, building and character definitions | data files | **Not in the save** (**Verified**: no such record types; foliage and terrain are rebuilt from the world data, see [foliage.md](foliage.md)) |
 | Zones never loaded | nothing | **Observed**: absent from the `zones` list; the game loads them from the data files and generates their interiors and populations when first visited (`FUN_1409ffad0`) |
 | Population of unvisited areas | nothing | **Observed**: 56 platoons for the start area only |
 
-Because a visited zone's file stores the full building list, a zone later changed by a mod keeps the saved list: the base layers are loaded first and the save's zone file on top
-(**Observed**, `FUN_1409ffad0` loads every data file's zone file and then `zone/zone.X.Y.zone` into the same container; an instance id present in both is overwritten, which matches the FCS merge rules).
+### Character appearance (CHARACTER_APPEARANCE in `.platoon`)
 
-## Cross-checks against base data (the sample vs `GameDatabase` of the four base files)
+**Verified** (dump of save 2's `Nameless_0.platoon`): the same key set as a `.bod2` body file ([characters](../characters.md#body-files-bod2)):
+bools `sex female`, `in editor`; ints `Age`, `body version` (2); floats: every body/face slider of the race's editor limits (`Height`, `Waist`...), the template's
+other sliders at 100 (`Brow height`, `Cheekbone`... not in the human XML), face pose weights by pose name (`wide_nose` 0.02, `close_eyes` -0.64...), `Hair Colour`,
+`Hair Saturation`, `Hair Brightness` (HSB x 100), `Posture`, a float `Age` besides the int; vec3 `Skin Tone`; strings `head` (HEAD), `hair style`, `beard`
+(ATTACHMENTs, mod records allowed), `idle stance`; reference `race`. Meitou (`Saving/SavedKit`) draws every loaded character (player and NPC) from it: the record
+is the look's appearance, worn items its clothes; a character with no saved items keeps clothes rolled from its serial but the saved body and face. A record
+with only race and flags (no head, no floats) is not a look and the look is rolled. The record is written back only for a new character (the generated look) or
+one changed in the character editor (its keys replaced by the edited copy's, so the key set and order stay the original's).
+
+### NPC platoons (Meitou mapping)
+
+Every saved NPC platoon with a `basetown` naming a placed town is restored (a characterless town-bound one is skipped); town-bound ones (template does not travel) are pinned to their town, and a town holding any
+is made of them alone: it makes no residents, default residents, housemates or bar squads (**engine rule**, after the original's: a zone with a save file makes no town
+population, [Zone files](#zone-files) Load; Meitou keys it on the saved platoons). A town Meitou made and unloaded before saving keeps its squads as stored
+platoons, which the save writes like the town's squads in the world, so a Meitou save holds the residents of every town it made a zone file for
+(**Observed**, headless: a new game at The Hub and Squin, and base save 2 at Stack/Mongrel and Shark/Admag, each town left so it unloaded, then save → load → save → load:
+the same characters by name, record and stats in each town). A count per
+template would not do: housing spends a building on a slot whose rolled squad is empty (68 of 200 `hub squatters` plans), so a town's saved squads are fewer than its entries' `v0`, and the rest rolled
+again at load makes new squads (**Observed**, headless new game with town buildings: The Hub 4 of 7 `hub squatters` slots, 36 NPCs; reloaded 42, three more). Each platoon is made with its town (when the town's zone is active, as the
+town's fresh squads are). On save, a restored platoon is rewritten
+only once loaded (its characters from the world), otherwise only its position/package; a squad the population made is written as a new PLATOON with the
+`SaveBuilder` key set plus `basetown` (town id), `hometown` (the town state's `hand`), `homebuilding` (below), `is resident`, `sqt`, `map area sid` / `map area name`
+(the BIOME_GROUP of its cell) and `currentPackage`. **Observed** (headless load of saves 1, 2,
+wade): NPCs within 5 units of their saved positions (save 2: 4 of 107 differ in Y only, flat test ground); a Meitou save → load restores them
+exactly with no fresh squads for save 2 and a new game (with town buildings: 36 NPCs after two save → load cycles for a new game at The Hub; saves 1, 2, 3, wade keep
+86, 116, 18, 114). A pinned platoon is homed in the building its `homebuilding` handle names (state `<id>-S23`
+of zone C-1, X = c % 64, Y = c / 64; ids repeat across zones; a zone without a file: the building whose level state has that handle); that building is taken
+out of the town's free homes. **Unknown:** how the original reuses the saved package.
+
+PLATOON keys (**Verified**):
+- `sqt` is the town pool the platoon counts against (platoon +0xa8; by code: written by `FUN_140372ef0`, read by `FUN_1407ed0f0`, setter `FUN_1409c44b0` makes 0 into 1
+  and 3+ into 2, default 2): 1 residents (and bar squads), 2 roaming; every wild platoon of the samples has 2 (nests have only pool 2).
+- `persistent` (platoon +0x115, [persistent platoons](../game/factions-squads-towns.md#1-object-model)) is true on every `sqt` 1 platoon (census of saves
+  1, 2, 3, wade, new, quicksave and three autosaves: residents, bar squads and the player's, 0 exceptions) and false on most `sqt` 2 ones (some `sqt` 2
+  town platoons are persistent, why **Unknown**). Meitou writes true with `sqt` 1 and false with 2; written false, the original would delete a resident
+  squad when it leaves the loaded area.
+- `is resident` is set exactly on the platoons with a `homebuilding` (census of saves 1, 2, 3, wade: 0 exceptions); Meitou writes both for a squad with a home.
+- `hometown` (handle) puts the platoon into that town's or nest's pool at load (`FUN_1407ec8d0`; the platoon's faction and player status must match the town's);
+  the pool counts living characters, `char count` while the platoon is not active (`FUN_1408f6a40`). `basetown` is only kept as a TOWN record pointer.
+- `homebuilding` (handle) is bound through the game's per-frame system-message queue (`FUN_1407b65b0`): only if the building resolves that frame, else the message is
+  dropped (**Unknown** whether something rebinds it later). Meitou writes the handle of the building's state in the save's zone file (a Meitou save writes a file for
+  every visited zone, [Zone files](#zone-files)), else its level-data handle ([handles](#object-handles-and-slot-lists)).
+
+### Wild and nest platoons (Meitou mapping)
+
+A wild platoon is one whose `basetown` is no placed town: its `hometown` naming a nest of the [town list](#nests-town-list) makes it that nest's, no `hometown` and no
+placed `basetown` makes it homeless (in the samples `basetown` is the nest's TOWN or empty). **Observed** census: save 2 holds 6 nest and 5 homeless platoons
+(49 characters, 8 dead), wade 0 and 4 (10), save 1 4 and 3 (67), all `sqt` 2. Meitou (`SaveLoader.LoadWildPlatoon`, `PopulationWild.cs`) loads each as a stand-in
+at its saved place that never travels and is made as its saved characters when its zone is active: a nest's counts its living members against the nest's pool (as the
+original), a homeless one counts as one of the squads of the sector it stands in (the original files a platoon in the sector of its position, **Verified** by code
+`FUN_1408f6c80`, but a loaded one starts in the sector at the origin and is moved later, so for a while its real sector may spawn beside it; engine choice: bound at once).
+A nest squad more than 3 nest radii from its nest wanders where it stands (engine choice: saves hold nest squads kilometres away). On save the wild squads the
+population made are written as new platoons: a nest's with `basetown` = its TOWN and `hometown` = the nest's handle, a homeless one with neither, `sqt` 2.
+**Observed** (headless, saves 2, wade, 1, the player moved next to each wild platoon): 41 of 49, 10 of 10, 67 of 67 saved wild characters made (the rest dead in the
+save), each at its saved position (0 units off); a held nest or sector made only its remainder; a Meitou save → load gives the same wild characters at the same places
+(78, 10, 96) and no fresh wild squads.
+
+### Nests (town list)
+
+**Verified** by code (`FUN_140935120` from `loadGame`, factory `FUN_140581770`, `Nest` constructor `FUN_140934ab0`): each GAMESTATE_TOWN_INSTANCE_LIST entry whose target
+TOWN has `type` 0 becomes a nest at the entry's position; its handle is the `hand` of the entry's state (a null one gets a new random handle); no other key of the
+`Nest state` is read. Entries (**Observed**, saves 1, 2, wade: 13, 150, 150): id `<n>-quick.save-INGAME`, zero quaternion, state `<id>-S5e` named
+`Nest state <TOWN name> <k>` (`k` a rising number with gaps, origin **Unknown**), keys `hand` (type 85, a town container `C`), `started`, `explored`,
+`recently discovered`, `discovered`, `ded`, `is nest` true, `faction`, `artifacts count`, floats `popd2` (= the TOWN's `nest resident population` in every sample) and
+`pop2` (≤ it), `popd`, `pop`, `tod` (0); some have `zzX0` / `zzY0`. The states sit before the list. A save holds only the nests made so far (save 1: 13; the original
+adds them as areas tick). Meitou takes a save's nests first and rolls the rest of each group's count from the world seed (CAMERA `meitou seed`, restored on load).
+A Meitou save likewise holds only the nests made so far: the save's own plus the rolled ones that have loaded (a squad made, or a saved one at it), at the spot they
+loaded at, with its pool's `pop2` / `popd2` / `ded` / `tod` (a new nest: `popd2` = `nest resident population`, `pop2` 0.7 of it, grown since), `started` true and the player's knowledge as `discovered` / `explored`. On load the roll runs in its
+fixed order and leaves out each roll whose spot (or marker) a saved nest holds, without counting it against the group's count, so whichever subset was saved the
+unwritten nests come out at their old places and no nest is rolled twice (the saved one takes over that roll's key for its squads); a rolled nest's place uses a
+random stream apart from its TOWN pick. **Observed** (headless, base saves 1, 2, wade and a new game, the player sent to 3-4 nests): saved nests = base (13, 150,
+150, 0) + the started ones (3, 3, 4, 4); reloaded with another launch seed, all 325 nests (TOWN and position) and every nest squad's nest equal those before.
+A rolled nest that loads but makes no squad is not written (rolled again). Older Meitou saves' `meitou-nest:` camp states are still read.
+
+### Zone files
+
+**When** (**Verified** by code): `ZoneMapContent::deactivate` (`FUN_1409fe980`) saves a zone (`FUN_14036dde0`) into the save file system's working folder when it
+unloads (single-zone unload `FUN_140a0a4f0` passes its flag on; unloading every zone, `FUN_140a0a7b0`, does not save), and `saveGame` saves every loaded zone
+(`FUN_14036e450`). The zone's container gets a `0-buildinglist` (type 30, name "0") from its buildings, then `1-itemlist` from its loose items; a list left empty is
+deleted; a container with no record left deletes the zone file, else it is written, and the zone's has-file flag (the CAMERA `zones` value) follows. So a save holds a
+file for every zone loaded in the playthrough that has a building or item (save 1: 11 files, 4 without a building). "Delaying saving zone" (`FUN_1403c8cb0`) is not this:
+it writes the navmesh tile cache (`FUN_1403a6f40`, `data/newland/land/navtiles/`) and waits, retrying on a later call with no timer, while a game save runs or its lock is held (**Verified** by code). Platoon files are written only by `saveGame` (`FUN_140372ef0`), every platoon of both faction lists, active and unloaded, with no dirty filter (**Verified** by code), so a save holds the residents of every town ever loaded ([persistent platoons](../game/factions-squads-towns.md#1-object-model)).
+
+**Load** (**Verified** by code, `FUN_1409ffad0`): the level layers' zone files are loaded into the zone's container, then the save's file into the same container
+(by the layers' merge rules, not read in the code: a key the file lacks keeps the level value). No save file means a fresh zone, whose towns make their residents. A file makes it not fresh, unless a town of the zone
+has an override world state (its lists are then replaced) or `0-buildinglist` holds `imported`.
+
+**Content** (**Observed**, census of saves 1, 2, 3, wade against the merged level files, 275 zone files):
+- `0-buildinglist`: every placed building of the zone, the level ones (6688) with the level id, position and rotation (the target differs in 179, see [Unknowns](#unknowns)), the ones made
+  in play with `<n>-zone<X>.<Y>-INGAME` ids; an empty-target, zero-position entry with no state for each level id a later layer clears (107 of 107; never for a layer's removal
+  of an id no earlier layer places, 0 of 147); an entry whose building cannot be made (undefined target) is gone. Instance states: `[<inventory state>, <id>-S23]`, the inventory
+  only when it holds items (a new `-zoneX.Y-INGAME` INVENTORY_STATE).
+- A level building's GAMESTATE_BUILDING has the level state's keys with: `serialised interior` 1 added (all 36561 saved states); `is public night` and `is outside` never
+  written; always `pause`, `destroyed`, `name`, `flags`, `residents template`, `squad template`; a lock's `hardness` and each door i's `hardness<i>` = the
+  BUILDING's `hardness` (3093 of 3093, 614 of 614) and `pause<i>` false; `internalbuildings-<k>` naming the generated furniture (43010 of the level states' 43031 such handles
+  name no level building); `town` the town the building belongs to (3726 of 6743 name another town than the level state; the town states keep the level `hand`, 304 of 304 in
+  saves 1 and 2). Record flags 0, name "0".
+- `serialised interior` = 1 stops the building factory (`FUN_14057cc70`) from generating the interior (**Verified** by code); absent or another value, it is generated.
+- Slot list: the last level layer's list (a layer without one empties it), plus slots allocated in play (the lists Meitou makes this way are within the saved ones in 181 of 183 files, the other two lack
+  one slot each). `nextId` can be above the highest record id.
+- Nest buildings are not saved (no type-85 `town` handle in save 2's 133 files); nest debris are `1-itemlist` ITEMs whose `persist` handle is the nest (222 in save 2).
+
+**Meitou** (`Saving/ZoneSave`, `Data/Save/SaveZoneBuilder`): every zone the population had active, and every zone of a town it made but another town's centre zone (engine choice:
+a town is made and saved whole; three such zones, e.g. Black Desert City's buildings in Scraphouse's 34.28), is visited (`World.VisitedZones`, not hashed). A save keeps the loaded save's zone files (locks, doors and player buildings are written into them) and makes
+the missing ones from the level data as above, with `town` set to the save's town state `hand` and a new save's town states taking their level `hand`; it writes no
+`serialised interior`, no furniture, inventories or loose items (not modelled), so the original makes each interior as for a fresh zone (only the residents differ: the
+saved platoons). **Observed** (headless new game, the player moved to Squin and Stack): 8 visited zones, 8 files, every handle in its slot list, 300 of 300 `town` handles
+name a town state; key set = the real saves' minus the runtime-only keys (`serialised interior`, `internalbuildings`, farm, craft and lock keys of buildings that have none
+here) plus `meitou lock <i>`; doors and an interior chest locked before the save are locked after reload, and a second save writes the same zone files. Base saves 1, 3,
+wade and 2 (moved to Admag) keep every zone file byte for byte except door keys added to buildings whose saved state has none (3 files in save 2, 1 in save 1).
+
+### Locks, cages and sentences
+
+Key types **Verified** by a census of the owner's five saves (every platoon and zone file): building `lock lvl` int, `locked` / `broken` bool, `hardness`
+float; door i `state<i>` int (0/1), `doa<i>` float, `broken<i>` / `locked<i>` / `wants lock<i>` bool, `gatecode<i>` int (-1..6), `lock lvl<i>` int,
+`hardness<i>` float; character `in something` int (0 8135, 1 1159, 2 218), `in what` handle (type 0 BUILDING when set, else 11; prisoners' point at
+generated interior buildings, e.g. `19765-zone39.16-INGAME-S23`), `sentence` int and `psts` float (0 in every sample); platoon `imprisoned` bool.
+Meanings: [locks](../game/locks.md#save-keys), [economy 11.5](../game/economy.md#115-bail-and-sentence) (`sentence` = start in game hours, `psts` = length).
+Dialogue locks (**Observed**, `Character::serialise` writer `FUN_140679900`, reader `FUN_14067f780`): character pairs `lok0`, `lok1`, ..., string = DIALOGUE
+string id, bool of the same key = locked ([dialogue](../game/dialogue.md#memory-and-saves)); Meitou reads and writes them (`Saving/DialogueSave`), and reads `personality` when above 0.
+
+Meitou (`Saving/HeldSave`): reads building keys from the zones' GAMESTATE_BUILDING records when the town registers and writes them back into
+them (the visited zones' files, [Zone files](#zone-files)); the save ids of generated interiors are not mapped, so interior cages and
+beds keep rolled state. `in what` resolves only to a placed building; Meitou-only keys `meitou in something` (int) / `meitou in what` (fixture id)
+carry the rest and win on load. Unchanged held state keeps the original keys as read; a changed one without a building handle writes `in something` 0
+and the null handle. `sentence`/`psts` are written while a sentence is set or the save had them; Meitou's start equals `World.GameHours` (day x 24 + hour).
+
+Meitou-only crime keys (`Saving/CrimeSave`, `LockSystem`, `FixtureRegistry`; the original's keys for these facts are **Unknown**), each written only while set and removed otherwise:
+- GAMESTATE_CHARACTER `meitou escaped` (bool, escaped-prisoner flag), `meitou recently wanted` (float, game seconds left), `meitou recognition` (float 0..1, bounty recognition meter).
+- GAMESTATE_BUILDING `meitou house locked` (bool, a lock-up round locked this home and nothing unlocked it since).
+- GAMESTATE_BUILDING `meitou lock <layout index>` (int level x 4 + broken x 2 + locked) for each interior cage or container whose lock is locked or broken (their ids are not mapped, see above).
+
+### Player outposts
+
+Towns made in play are saved in `quick.save` only, as entries of its one GAMESTATE_TOWN_INSTANCE_LIST (type 38, name "0",
+id `<n>-quick.save-INGAME`), written from the town manager's player-town list (+0x68) and nest list (+0x80)
+(`FUN_14092a6c0`). The level data's towns are not in it: their GAMESTATE_TOWN states are written separately
+(`FUN_14036b710`). **Observed**: the owner's five saves' lists hold only nests (127 and 150 entries), each with a
+`Nest state <name>` state (type-85 handle, no `instance` key); no save has an outpost.
+
+An outpost's entry (**Verified** by code, `Town::vfunc_17` `14036eb20` with `FUN_140386d20`): id = the town's stored
+instance id, or a new `<n>-quick.save-INGAME` (kept on the town, so later saves reuse it); target = the town's TOWN
+record (`player_town_template`); position = the town's, absolute; quaternion (0, 0, 0, 0); state `<id>-S5e`. Its
+GAMESTATE_TOWN (`Town::vfunc_85` `140376b80` and the TownBase writer) is named `Town state <name>` and has the base
+towns' keys: `instance` = the entry id, `is nest` false, `building material`, `public` (false for an outpost), `plevel`,
+`replacementTown`, `trade goods`, `faction` = the player faction, `factions here<i>`, `discovered` / `explored` /
+`recently discovered`, `artifacts count`, the handle `hand*` (type 13 TOWN) and the population floats; plus int
+`override` (Town+0x51c, 0 when made, meaning **Unknown**), written only for a town whose faction is the player's.
+Buildings name it by their `town` handle. Whether the loader takes the name from the record name is **Unknown**.
+
+Meitou writes the level towns' pool keys (`pop`, `popd`, `pop2`, `popd2`, `tod`, `started`, `ded`) for every town it made or loaded pools for, and
+reads them back ([off-screen tier](../simulation.md#off-screen-tier)). `tod` is Meitou's game hours since the world was started or loaded (a loaded save restarts at 0); the original's unit is
+**Unknown** (no sampled state has a nonzero `tod`).
+
+### WAR_SAVESTATE (type 9): faction campaigns
+
+One per faction in `quick.save` (103 of 103 in every owner save), name "0", tied to its faction only by the string `faction` (FACTION
+StringId). Writer `FUN_1409c6890`, reader `FUN_1409c9dc0`; meanings in [campaigns](../game/factions-squads-towns.md#campaigns).
+Numbered keys append the index with no separator (`req sid3`, `p2`); handles as in [object handles](#object-handles-and-slot-lists).
+**Verified** by code (both functions, same keys) and the saves' key sets.
+
+| Key | Kind | Meaning |
+| --- | --- | --- |
+| `faction` | string | FACTION StringId |
+| `fwc id` | int | next campaign id; on load raised to the largest `id c<i>` + 1 |
+| `updatetime` | float | next roll, absolute game hours (day × 24 + hour); read only when present |
+| `num actives`; `dat c<i>` string (FACTION_CAMPAIGN), `target c<i>` handle, `enemy c<i>` string (FACTION, may be ""), `leader c<i>` handle, `home c<i>` handle, `phase c<i>` int (0 travel, 1 at target, 2 ended), `id c<i>` int, `rd c<i>` bool (leader has been in the target town), `trig c<i>` bool (follow-up queued) | | running campaigns |
+| `num requests`; `req sid<i>` string, `req enemysid<i>` string (FACTION), `req time<i>` float (absolute due hour), `req targ<i>` handle, `req home<i>` handle | | queued campaigns |
+| `num poss`; `poss sid<i>` string, `poss time<i>` float | | every campaign the faction knows with its last start (the `repeat limit` clock) |
+| `num plats`; `p<i>` handle, `forces<i>` int | | campaign platoons; `forces` = the campaign's `id c` |
+
+Reader rules (**Verified** by code): a running campaign whose `dat c` does not resolve is skipped; an unknown campaign joins the faction's
+list; phase 1 becomes 2 when the campaign has no `pt2 AI leader`; **phase timers are not saved** (the phase starts again at load, so the
+4 / 12 / 1 / 3 h windows restart); men count, target position and speeds come from the data. A request whose `req sid` or `req enemysid`
+does not resolve is skipped. All `poss time` are zeroed, then set by `poss sid`. `p<i>` is taken only for TYPE 1 or 34 and when it
+resolves. Missing keys read as 0 / "" / false (**Observed**).
+
+**Observed** (owner saves 1, 2, 3, wade, quicksave, autosave0-2, new; up to day 8): no running campaign, request or platoon in any;
+every `fwc id` and all 77 `poss time` are 0 (no campaign ever started; no save has a player outpost, which rolls need). Each faction's
+`poss` list is its merged FACTION `campaigns` list in order (103 of 103). `updatetime` lies in (clock, clock + 6], spread over about
+0.6 h (all 40 in the two day-1 saves). Meitou's `SaveBuilder` writes `updatetime` 40 and zero counts, as a new game; a captured
+world writes its war managers over the loaded state (unknown keys kept, numbered keys past the new counts removed), and a campaign squad
+never made is written as a PLATOON with content file `platoon/` (no file) so its `p<i>` handle resolves.
+
+### Cross-checks against base data (the sample vs `GameDatabase` of the four base files)
 
 | Check | Result |
 | --- | --- |
@@ -420,9 +383,7 @@ Because a visited zone's file stores the full building list, a zone later change
 | `TOWN` states | 304 of 304 instances match base town placements; `trade goods` are 75 ITEM records |
 | Strings that do **not** resolve | `company sid` / `material sid` values with a `.TECH.<n>` suffix (17), `GAMESTATE_TOWN.instance` (instance ids, not records), BIOMES `E<n>` instance targets (numbers) |
 
-## Functions
-
-Catalogued in `MeitouClient-re/ghidra/catalog-save.tsv`. Main entry points (all in `kenshi_x64.exe`):
+### Functions
 
 | Address | Role |
 | --- | --- |
@@ -438,42 +399,22 @@ Catalogued in `MeitouClient-re/ghidra/catalog-save.tsv`. Main entry points (all 
 | `FUN_14036dde0`, `FUN_14036c070`, `FUN_14036e450`, `FUN_1409ffad0`, `FUN_140a0bef0` | zone save, zone file write, save all zones, zone load, zone-file check |
 | `FUN_140372a60` / `FUN_14036f2e0`, `FUN_1409c6890` / `FUN_1409c9dc0` | faction write / read, war state write / read |
 | `FUN_140372ef0` / `FUN_1407ed0f0`, `FUN_1406280a0` / `FUN_140626f50` | platoon write / read, character write / read |
-| `FUN_140552320` / `FUN_14057cc70` | building state write / read (the reader is catalogued elsewhere as `Zones_CreateDoor`: it also creates doors) |
+| `FUN_14092a6c0`, `FUN_14036b710`, `FUN_14092ae80` | town list write ([outposts](#player-outposts)), level town states write, player-town check on load |
+| `FUN_140552320` / `FUN_140552b70`, `FUN_140555650` | building state write / read ([keys](zones.md#placement-keys)); `FUN_14057cc70` (catalogued as `Zones_CreateDoor`) is the building factory |
 
 ## Unknowns
 
 - What `byteSize` encodes beyond "child count for some record classes", and whether the game ever reads it (it does not at load).
 - The two long slot lists (2503 and 2969 ints) at the end of `quick.save`; the `S` serial's use when a handle goes stale (what happens on a mismatch).
-- The roles of BIOMES `E<n>` instances (EffectHandler state fields), the short-key CAMERA floats and bools (`bs cod gdm ht nnm ps rs`, `bl ep`), `TI day/dat0`, `sqt`, `towntime`, `jobhr`, `psts`, `ssct`, and whether MEDICAL `fed` / `KO` are the stomach buffer and the KO timer (the other MEDICAL floats are explained above).
+- The roles of BIOMES `E<n>` instances (EffectHandler state fields), `_w_fog_a`, the short-key CAMERA floats and bools (`bs cod gdm ht nnm ps rs`, `bl ep`), `TI day/dat0`, `towntime`, `jobhr`, `ssct`, and whether MEDICAL `fed` / `KO` are the stomach buffer and the KO timer (the other MEDICAL floats are explained above).
 - Whether `loadGame` rejects or adapts to a `mods` list that differs from the current load order (nothing in the sample: single base-game save).
-- Player-built buildings, prisoners, dead characters, bounties, trade and mission state: not present in an early-game sample. Their records are the same types (GAMESTATE_BUILDING in `0-buildinglist` with `<n>-zone<X>.<Y>-INGAME` ids is presumed) but untested.
-- Exactly when platoon files are written to the working folder between saves (only at save time is certain) and which zones are written on unload ("Delaying saving zone").
+- Prisoners, dead characters, bounties, trade and mission state, and player outposts: not present in an early-game sample. Player-built building and outpost keys are known from the code only ([zones](zones.md#placement-keys), [outposts](#player-outposts)).
 - The condition list of the autosave pause, and how `Import Game` selects squads (`FUN_140378a30`, `FUN_140377710`).
 - How relations, trust and `trustNeg` change during play (only the fresh-world values are explained), and what the player faction (no relation table, but a `known` list and `global trust`) uses instead.
-- Why 6 building placements of the sample have a different target in the save than in the base list (in zone 19.29 two placements have swapped targets, same positions: a random variant pick is a guess).
+- Why level buildings have a different target in the save than in the level list (179 of 6743 in four saves; in zone 19.29 two placements have swapped targets, same positions: a random variant pick is a guess).
 - Saves made by other game versions or with mods: layout of `mods` and unknown record types would show.
 
-## Later saves: what three larger saves added (2026-10-08, stage 10)
-
-Three more saves were read in place (`%LOCALAPPDATA%\kenshi\save\autosave1`, `quicksave`, `wade`; the `wade` folder has since been saved over and holds 358 platoon and 92 zone files, 451 files in all; the other two have 207 / 43 and 224 / 53; all 1.0.68, base load order, one player character, day 2 to 4). Every file of all three reads and
-writes back **byte for byte** (`SaveReadTests.Every_file_of_a_save_reads_and_writes_back_to_the_same_bytes`). What they changed in the picture above is listed here; the sections above were corrected in place where they were wrong.
-
-- **Strings are not always UTF-8.** The instances of TERRAIN_DECALS (in `quick.save`: 270 decals in `autosave1`, 4 in `wade`, 0 in `quicksave`) have a 4-byte binary integer as their id, in the string slot (**Observed**: the id of the first decal is `01 00 00 00`, ids from 128 on contain bytes that are not UTF-8; the round-trip test is what proves the lossless mode),
-  and their position and rotation floats are packed data (denormals and NaN patterns). The reader and writer therefore have a lossless mode (`LosslessUtf8`: an invalid byte becomes the lone surrogate U+DC00 + byte and goes back as that byte) which the save files use; with it all three saves round trip. NaN floats keep their bits.
-- **Not every file is the game's own.** `quicksave/platoon/Nameless_0.platoon`, the player's platoon, is dated a day after the rest of its save and is a **file type 17** file with a header (version 1, empty author, merge info with save counter 2), numeric `id` 0 in every record, real `byteSize`s and record flags 16 or 32: the Forgotten Construction Set saved it
-  (**Observed**: the flags are the editor's modified-record marks, the `STATS` record has flag 32). The save's `quick.save` points at it by `content file` like any other, so a platoon file may be an FCS file. Our reader accepts any FCS file type; our writer leaves such a file as it is.
-- **Unloaded platoons.** A PLATOON whose `content file` is just `platoon/` has no file: 8 of 215, 0 of 224 and 4 of 362 (their `char count` is 1 to 48). **Observed**: the record has the same keys as a loaded platoon's minus the optional `mission ...`, `owned<k>`, `campaign` and `tags<k>` ones; presumably the original's stand-in platoons (the `UnloadedPlatoon` of [game-loop.md](../game/game-loop.md#factions-and-squads)).
-- **The CAMERA `zones` list names 42, 52 and 91 zones and the folders hold 43, 53 and 92 zone files**: the same extra file `zone.41.13.zone` in all three (the game's own "Extra zone file" warning, **Verified**: `The_camera_zone_list_is_in_hex_grid_order_and_names_the_zone_files`). The list is in X-outer grid order with hexadecimal keys and the third value always 1, in all three (**Verified**). A new save lists exactly the zone files it writes.
-- **Wars are paired with factions by id**, not by position: the 103 WAR_SAVESTATE records are in hash order among the GAMESTATE_FACTION records, and each one's `faction` string is the `gamedata stringID` of exactly one faction (**Verified**, 103 of 103 in all three).
-- **Platoon slots are not always 1..n.** In all but two platoons of the three saves the characters take slots 1..n; `Outlaw_5` and `Outlaw_6` have one character each, in slots 3 and 2 (**Observed** in the three saves): a character that left the squad keeps the other slots. Slots are distinct. The PLATOON `char count` is off by up to 7 in a played save (above).
-- **`byteSize` is the child count** for INVENTORY_STATE and INVENTORY_ITEM_STATE with instances, ITEM_PLACEMENT_GROUP with instances (16 of 9195, in zone files), the INSTANCE_COLLECTIONs of `quick.save` (6 of 6) and a zone's `1-itemlist` (82 of 82), and 0 for everything else: platoon-file collections (all 788), `0-buildinglist` (all 121), BIOMES, GAMESTATE_TOWN with instances, GAMESTATE_TOWN_INSTANCE_LIST and TERRAIN_DECALS (**Verified** over every record of the three saves, `SaveGame.ChildCountSize`). The records of the FCS-saved platoon file are the exception (their real size).
-- **Record key sets** (`New_records_have_the_key_sets_of_the_real_ones`): the keys that every record of a type has, over all records of the three saves, are all in the writer's records, and the writer writes no key that a real record never has. Optional keys: GAMESTATE_CHARACTER `shaved psts TI dat<k> sentence sheath floor` and the player-only ones; PLATOON `mission ...`, `owned<k>`, `campaign`, `tags<k>`, `inventory refresh time`, `slave<k>`; GAMESTATE_TOWN `public plevel zzX0 zzY0 building material replacementTown instance trade goods artifact_...` (nests have none of the first six); MEDICAL_STATE `limbs` (2 records).
-- **Zones**: the 29,783 GAMESTATE_BUILDING of the three saves all have their own zone's container as `C`, `CS` 11111 and a slot in the file's list; the saved list laid over the base zone by instance id (`SaveZone.Overlay`) keeps every base placement and takes the saved target for every id in both (**Verified** against `WorldLevelData` for every zone of the three saves).
-- **Time of the three saves**: day 2 14:10 (`autosave1`), day 3 11:06 (`quicksave`), day 4 08:11 (`wade`); the player's money is 1000 in all.
-
-## Implementation (as built, stage 10)
-
-`Meitou.Data.Save` (read and write, no simulation):
+### Implementation (as built, stage 10)
 
 | Type | Role |
 | --- | --- |
@@ -484,14 +425,10 @@ writes back **byte for byte** (`SaveReadTests.Every_file_of_a_save_reads_and_wri
 | `SaveBuilder` | Makes the records of a new save (CAMERA, factions with war state, towns, platoons, characters with their six states) with the key sets above, the id patterns and seeded random serials; can also add to an existing save; `RemoveCharacter` |
 | `SavePortraits` | The blank 2048 x 2048 atlas of a new save |
 
-`UpdateDerived` recomputes what follows from the rest: the CAMERA `zones` list from the zone files, every platoon's `char count`, slot lists 0 and 1 of `quick.save` (2 and 3 are kept, or start as 1..4096), the slot list of a zone file that has none (the slots of its buildings), each file's `nextId` and the child-count `byteSize`s; on a real save it reproduces the game's values
-(`Derived_data_computed_for_a_real_save_is_what_the_game_wrote`). `Write` follows the game's temp-folder discipline: everything goes to `_current<N>` next to the destination, then the old folder is renamed away and the new one renamed in, so a failed write leaves the old save and no working folder.
+## Evidence index
 
-Saves go to a folder of our own while testing (`%LOCALAPPDATA%\Meitou\save-test\` by convention); nothing writes to the original game's `save` folders. The version string written is "1.0.68".
+Evidence scopes below apply only to their named sources/checks.
 
-**Not done / Unknown** (the writer is untested against the original game, which was not run):
-- Whether the original minds that a roaming platoon's PLATOON `position`, which `SaveCapture` updates, then disagrees with the character positions in its `.platoon` file (**Unknown**).
-- Whether the original loads a save made from nothing: its BIOMES, RESEARCH and TERRAIN_DECALS are empty records, towns have no `trade goods`, population pools or artifacts, war states start at defaults (`updatetime` 40), and slot lists 2 and 3 are the zone registry only. A save made from a loaded one carries all of that through unchanged, which is the safe path.
-- The saved look (CHARACTER_APPEARANCE sliders) is written for a new character from its generated `Loadout` record when it has one, but not read back into a drawable `CharacterAppearance`.
-- Inventory contents, AI jobs and orders, the `5-redirect` table, bounties and the rest of the platoon data (missions, owned buildings) are kept as raw records in a loaded save and not interpreted; items a character gains in play are not written.
-- Building placement and state of zones the world changes (there is no building simulation): zone files are carried through unchanged.
+- Save requests (`FUN_14047c310`)
+- What `saveGame` writes (`FUN_140375360`)
+- `loadGame` (`FUN_140373f00`)

@@ -24,9 +24,10 @@ namespace Meitou.Game;
 sealed partial class GameHost
 {
     /// <summary>Tells the world where the camera looks, when it has moved enough to matter (the zones follow it).</summary>
-    void SendFocus()
+    void SendFocus(Vector3? at = null)
     {
-        var target = session.Camera.Current.Target;
+        if (IsDuel) return;   // the duel's worlds keep the focus on its spot (DuelSetup), wherever the camera flies
+        var target = at ?? session.Camera.Current.Target;   // the cinema's camera while it holds the view
         if (sentFocus && Vector3.DistanceSquared(target, lastFocus) < 50 * 50) return;
         session.World.Commands.Enqueue(new Meitou.Simulation.FocusCommand(target) { Tick = session.World.Tick });
         lastFocus = target;
@@ -42,21 +43,40 @@ sealed partial class GameHost
         indexedFor = previous;
     }
 
-    /// <summary>Where a character is drawn: between the last two snapshots, by the simulation's alpha.</summary>
+    /// <summary>Where a character is drawn: between the last two snapshots, by the simulation's alpha (a carried body on its carrier's left shoulder).</summary>
     Vector3 DrawnPosition(CharacterSnapshot c)
     {
         IndexPrevious();
-        return previousById.TryGetValue(c.Id, out var before) ? Vector3.Lerp(before.Position, c.Position, session.SimulationAlpha) : c.Position;
+        var at = previousById.TryGetValue(c.Id, out var before) ? Vector3.Lerp(before.Position, c.Position, session.SimulationAlpha) : c.Position;
+        return at + CarriedOffset(c, c.Yaw);
     }
+
+    /// <summary>A carried body has its carrier's position; it is drawn at <see cref="Meitou.Simulation.Carrying.CarryPose"/> from it, where its ragdoll is posed too.</summary>
+    static Vector3 CarriedOffset(CharacterSnapshot c, float yaw) => c.CarriedBy.IsNone ? Vector3.Zero : Meitou.Simulation.Carrying.CarryPose.Offset(yaw);
 
     /// <summary>Fills the renderer's list from the last two snapshots, interpolated by the simulation's alpha.</summary>
     void FillDrawList(CharacterDrawList list)
     {
         long f0 = Stopwatch.GetTimestamp();
-        try { FillDrawListCore(list); }
+        try { FillDrawListCore(list); FillPortraits(); }
         finally { fillTotal += Stopwatch.GetElapsedTime(f0).TotalMilliseconds; fillCalls++; }
     }
 
+
+    /// <summary>A character's key in the draw list: stable while it exists, new for every world (the renderer keeps its poses by it).</summary>
+    long DrawKey(CharacterId id) => (((long)id.Slot << 32 | (uint)id.Generation) + 1) | (long)worldEpoch << 56;
+
+    /// <summary>The squad bar's portraits for the renderer to draw this frame: its members in their cells (docs/character-renderer.md "Portraits").</summary>
+    void FillPortraits()
+    {
+        if (gpu.Characters is not { } characters) return;
+        characters.PortraitRequests.Clear();
+        if (!player.UiVisible || player.TitleOpen) return;
+        var members = player.SquadBarMembers();
+        // The serial turns each portrait's camera (the original uses a number of the character's; this is the id's, stable for the character).
+        for (int i = 0; i < members.Count; i++)
+            characters.PortraitRequests.Add(new PortraitRequest(DrawKey(members[i].Id), i, (uint)members[i].Id.Slot * 2654435761u ^ (uint)members[i].Id.Generation));
+    }
 
     void FillDrawListCore(CharacterDrawList list)
     {
@@ -75,6 +95,7 @@ sealed partial class GameHost
                 position = Vector3.Lerp(found.Position, c.Position, alpha);
                 yaw = Meitou.Engine.Time.Interp.LerpAngle(found.Yaw, c.Yaw, alpha);
             }
+            position += CarriedOffset(c, yaw);
             var poses = new CharacterPose[c.Animations.Count];
             for (int i = 0; i < poses.Length; i++)
             {
@@ -91,11 +112,36 @@ sealed partial class GameHost
                         }
                 poses[i] = new CharacterPose(layer.Name, time, weight);
             }
-            list.Add(new CharacterInstance(((long)c.Id.Slot << 32 | (uint)c.Id.Generation) + 1, c.Appearance, position, yaw, poses));
+            list.Add(new CharacterInstance(DrawKey(c.Id), player.EditorPreview(c.Id, c.Appearance) ?? c.Appearance, position, yaw, poses)
+            {
+                WeaponDrawn = c.WeaponDrawn, Scale = c.Scale, Hidden = aboveFloor.Contains(c.Id), FullRateAnimation = c.IsPlayer,
+                Bones = Blend(before?.Ragdoll, c.Ragdoll, alpha),
+            });
+            // The editor's next preview look, listed hidden so the renderer prepares it while the last one is still shown.
+            if (player.EditorPending(c.Id) is { } pending)
+                list.Add(new CharacterInstance(DrawKey(c.Id) ^ (1L << 55), pending, position, yaw, poses) { Hidden = true });
         }
     }
 
-    /// <summary>Squares over the characters that have no drawing (animals, failed builds), coloured by faction.</summary>
+    /// <summary>A ragdoll's bones between the last two ticks: rotations by nlerp, root positions and the get-up weight linearly; a bone only in the newer one as it is.</summary>
+    static Meitou.Data.Characters.BonePose? Blend(Meitou.Data.Characters.BonePose? from, Meitou.Data.Characters.BonePose? to, float alpha)
+    {
+        if (to is null || from is null || from.Set.Length != to.Set.Length) return to;
+        var pose = new Meitou.Data.Characters.BonePose(to.Set.Length) { Weight = from.Weight + (to.Weight - from.Weight) * alpha };
+        for (int h = 0; h < to.Set.Length; h++)
+        {
+            if (!to.Set[h]) continue;
+            pose.Set[h] = true;
+            if (!from.Set[h]) { (pose.Rotation[h], pose.Position[h]) = (to.Rotation[h], to.Position[h]); continue; }
+            var b = to.Rotation[h];
+            if (Quaternion.Dot(from.Rotation[h], b) < 0) b = -b;
+            pose.Rotation[h] = Quaternion.Normalize(Quaternion.Lerp(from.Rotation[h], b, alpha));
+            pose.Position[h] = Vector3.Lerp(from.Position[h], to.Position[h], alpha);
+        }
+        return pose;
+    }
+
+    /// <summary>Squares over the characters that have no drawing (a failed build, a world without looks), coloured by faction.</summary>
     void DrawMarkers(DebugOverlay overlay, int width, int height)
     {
         var view = camera.View * camera.Projection(width / (float)Math.Max(height, 1), camera.Near, camera.ViewDistance);

@@ -3,6 +3,81 @@
 What changed in each release, newest first. The release workflow copies the section of the version it builds into the GitHub release
 notes and refuses to release a version without one: add a `## vX.Y.Z` section with one `- ` line per change before running it.
 
+## v0.11.0
+
+- Building: build menu with placement ghost and queue, construction sites with builders and material delivery, dismantling refunds, wall lines with shorts, connectors and wedges, and player outposts; buildings and research are saved and loaded
+- Crime and jail: guards fine or arrest wanted player characters and cage them, sentences, bail, bounty hunters and claiming bounties, lock picking, and locks on doors, cages and containers
+- Ragdolls: full physics ragdolls for knockouts, deaths, carrying and getting up
+- Stealth: sneak animations, NPC spot meters, stealth XP, sneak-up knockouts and indicators for who is noticing you
+- First aid: Splint Injuries order and splint kits, and first aid on your own characters
+- Combat: Ranged keeps the crossbow up, Taunt draws fights, initiative and abort rules, and a "Late dodges and blocks" balance toggle (Faithful off, Meitou on)
+- Map as in the vanilla game: orientation, zoom, camps, nests, town discovery and explored-place tooltips
+- Hover outline and tint on the character under the cursor, picking over a whole body, and a Hardware mouse setting
+- Damage floaters (Off/Simple/Full) and green heal numbers
+- The game writes its output to log.txt next to meitou.exe, capped at 10 MB
+- Fix: a roaming platoon that builds no squad no longer crashes loading a save
+- Project website, with its Docker image built and published to GitHub Container Registry
+
+## v0.10.0
+
+- Meitou UI mode has a live title scene: the real world at sunrise near Okran's Shield, the sun turned into the view, both moons, a lone wanderer and the brush-stroke Kenshi logo; Faithful keeps the original title screen
+- New games, Continue and loading saves use a slower, skippable camera transition through the stars, with lighting animated independently of simulation time
+- Startup and scene loading keep the window responsive, show progress and tips, and warm the new view before play
+- Load original Kenshi saves from the menu or command line, choose new-game starts, and return to the main menu without restarting
+- Faithful HUD improvements: character portraits, inventory and trader item icons, floor controls and visibility, and squad selection/follow shortcuts
+- Right-click character actions include trade, first aid, carrying, rescue and looting
+- Known issue: an existing save-schema test reports an extra `campaign` field when comparing against some original saves
+
+## v0.9.0
+
+- Cinematic camera in the game: numpad shots and the timeline editor, now on F6 (F2..F4 are the game speeds), with keys saved apart from the viewer's; recording steps the whole game at a fixed 60 fps
+- F7 hides the game's interface for clean screenshots and video
+- Game: the viewer's Tab panel rows (time of day, VSync, full screen), Alt+Enter, and F9/F10/F11 placed below the HUD
+- Characters: drawn weapons, feet grounded to their body shape, no more jitter far from the camera, cheaper level of detail and shadows
+- Movement: faster turning, holding right click steers, and a path is kept when you re-order
+- Sharper shadows: a 4096 shadow map by default, with a Tab slider for 1024/2048/4096
+- Tab panel: a weather list replaces "Reroll weather", so you can pick any of the region's weathers for the season
+- Ctrl+F1 flips each Faithful / Meitou switch in turn, one a second, so you can compare them
+- Moving the clock back no longer leaves the old weather's fog behind (e.g. a dust storm hanging over the Hub)
+- Red rain is drawn at half its opacity
+- Faster: shadows and water cost less, and water work is skipped when no water is near
+- Fights: factions turn hostile by their relations, with a leash and self-defence for an idle player
+- First aid and resting: treat, rest and medic orders, automatic aid from NPCs, and medic XP while on the move
+- Carrying: carry downed characters, rescue them, and loot everyone with witnessed theft (Ctrl/Alt+right click, J, K)
+- Crimes and bounties: witnesses, police arrests and a bounty ledger
+- Senses and fleeing: sight cone, hearing, squads sharing what they see, and characters running away
+- Crossbows: reload by skill, aim spread, bolt flight, ammo and friendly fire
+- Animals: drawn and animated with their own meshes, fur, size and clips, with natural weapons; wild squads and nests fill each biome
+- Inventories: stack limits and backpack bonuses, with stacks split and topped up
+- F5 quicksave and F9 quickload into Meitou's own slot
+- `--duel` trailer scene: two Samurai fight at sunset on a cliff top
+- New native in-game interface: front-end menus, inventory and map panels
+
+## v0.7.1
+
+- Plant layouts stay cached across updates: an update no longer makes plants fill in slowly on the first start unless the layout itself changed
+
+## v0.7.0
+
+- Night sky: Kenshi's two planets in the sky, and a new star field that twinkles and fades towards the horizon (Faithful keeps the game's)
+- Planetshine: at night the big planet lights the land, and shadows and water reflections follow its light
+- Night grading: at night dim colours shift towards a moonlit blue-grey, while lamps keep their colour
+- Night air: a faint glow and planet-lit haze near the horizon; the planets are seen through the mist instead of cutting dark holes in it
+- Volumetric clouds with cloud shadows that drift over land and water
+- Clouds lit by the sun and the planet through their depth, with smoother cloud textures
+- Light shafts and the sun's glint on water fade under heavy cloud and rain
+- Water: see-through distance and clarity sliders, glint only where the reflection shows sky, swamp fog in the reflections, swamp ponds no longer turn teal
+- No more straight band across distant water at sunrise and sunset
+- No more DLSS streaks beside the sun while the clock runs, and shadows no longer shimmer as the sun moves
+- Weather dust keeps up with the camera and blows with the wind; particle sizes match the game's
+- Faster: global illumination, ambient occlusion, fog, light shafts, foliage and water all cost less, and the sky is skipped when fog hides it
+- Fewer stutters while travelling: weather changes, uploads and memory are handled in the background (worst frame of a test flight 229 ms to 30 ms)
+- The viewer starts in borderless full screen (Alt+Enter toggles it, --windowed for a window)
+- Cinematic camera: numpad shots, an F2 timeline editor with timed keys and path recording, smooth flights, letterbox and fixed-rate video recording
+- F9 shows an fps counter; grass reaches further
+- The Meitou DLLs ship beside the exes, for code mods
+- Many unused launch options removed
+
 ## v0.6.1
 
 - Tab panel: sliders and checkboxes spread over three columns, so the panel no longer runs off the bottom of the screen

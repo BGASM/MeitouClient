@@ -14,6 +14,8 @@ sealed class ZoneObjects
     public List<PlacedMesh> Items { get; } = [];
     /// <summary>Distant meshes of buildings in towns that have no baked distant town mesh (<see cref="PlacedKind.BuildingDistant"/>).</summary>
     public List<PlacedMesh> Stand { get; } = [];
+    /// <summary>The indoor volumes of the zone's buildings that have an <c>interior mask</c> (docs/formats/zones.md, "Interior view").</summary>
+    public List<InteriorVolume> Interiors { get; } = [];
 }
 
 /// <summary>
@@ -34,14 +36,34 @@ sealed class WorldObjects : IDisposable
 
     readonly HashSet<string> bakedTowns = new(StringComparer.Ordinal);
     readonly Dictionary<ZoneCoordinate, List<BuildingPlacement>> buildingsByZone = [];
+    Dictionary<ZoneCoordinate, ZoneObjects>? staged;
     ThreadLocal<TerrainHeightmap>? heights;
+    InteriorCollisions? interiorCollisions;
 
     // Totals over the zones laid out so far (for the log line).
     int buildings, missing, fromState, destroyed, foliage, empty, features, stand, layouts, layoutObjects, layoutsNotFound;
 
     /// <summary>Zones that have placed buildings or features.</summary>
-    public IEnumerable<ZoneCoordinate> PopulatedZones => buildingsByZone.Keys.Concat(
+    public IEnumerable<ZoneCoordinate> PopulatedZones => staged?.Keys ?? buildingsByZone.Keys.Concat(
         Features.Zones.Select((l, i) => (l, i)).Where(t => t.l.Count > 0).Select(t => MapFeatureFile.ZoneOf(t.i))).Distinct();
+
+    /// <summary>Renderer-only placements, with no changes to the world's records or simulation.</summary>
+    public static WorldObjects Stage(GameInstall install, GameDatabase database, IEnumerable<PlacedMesh> meshes)
+    {
+        var levels = new WorldLevelData();
+        var result = new WorldObjects
+        {
+            Install = install, Database = database, Levels = levels, Towns = new(database, levels),
+            Features = new(), Layouts = new(database, null), DistantTowns = [], staged = [],
+        };
+        foreach (var mesh in meshes)
+        {
+            var zone = WorldLayout.ZoneOf(mesh.Transform.M41, mesh.Transform.M43);
+            if (!result.staged.TryGetValue(zone, out var group)) result.staged[zone] = group = new() { Zone = zone };
+            group.Items.Add(mesh);
+        }
+        return result;
+    }
 
     /// <summary>
     /// Reads the world's placement data once. The region arguments are not used: objects are laid out per zone around the camera
@@ -67,19 +89,77 @@ sealed class WorldObjects : IDisposable
             if (!objects.buildingsByZone.TryGetValue(b.Zone, out var list)) objects.buildingsByZone[b.Zone] = list = [];
             list.Add(b);
         }
+        objects.interiorCollisions = new InteriorCollisions(install);
         objects.heights = new ThreadLocal<TerrainHeightmap>(() => TerrainHeightmap.Open(install), trackAllValues: true);
         Console.WriteLine($"objects   {objects.buildingsByZone.Values.Sum(l => l.Count)} placed buildings and {objects.Features.All().Count()} map features in {objects.PopulatedZones.Count()} zones, " +
             $"{objects.DistantTowns.Count} towns with a distant mesh, {objects.Layouts.Count} building layouts ({watch.ElapsedMilliseconds} ms)");
         return objects;
     }
 
+    // ---- runtime placements (buildings the player placed: docs/simulation.md "Buildings", host seam) ----
+
+    readonly object runtimeLock = new();
+    readonly Dictionary<string, BuildingPlacement> runtime = new(StringComparer.Ordinal);
+    // Replaced whole on every change, so worker threads in BuildZone read a stable snapshot without the lock.
+    volatile Dictionary<ZoneCoordinate, BuildingPlacement[]> runtimeByZone = [];
+
+    /// <summary>Adds (or replaces, by <see cref="BuildingPlacement.InstanceId"/>) a placement that is not in the level data; zones laid out from now on include it.</summary>
+    public void AddRuntime(BuildingPlacement placement)
+    {
+        lock (runtimeLock)
+        {
+            runtime[placement.InstanceId] = placement;
+            Reindex();
+        }
+    }
+
+    /// <summary>Removes a runtime placement; returns it (null when there was none).</summary>
+    public BuildingPlacement? RemoveRuntime(string instanceId)
+    {
+        lock (runtimeLock)
+        {
+            if (!runtime.Remove(instanceId, out var removed)) return null;
+            Reindex();
+            return removed;
+        }
+    }
+
+    /// <summary>Drops every runtime placement (a loaded save replaces the world); returns their zones.</summary>
+    public List<ZoneCoordinate> ClearRuntime()
+    {
+        lock (runtimeLock)
+        {
+            var zones = runtime.Values.Select(p => p.Zone).Distinct().ToList();
+            runtime.Clear();
+            Reindex();
+            return zones;
+        }
+    }
+
+    /// <summary>Whether a runtime placement with this id is still in the store.</summary>
+    public bool HasRuntime(string instanceId) { lock (runtimeLock) return runtime.ContainsKey(instanceId); }
+
+    void Reindex() => runtimeByZone = runtime.Values.GroupBy(p => p.Zone).ToDictionary(g => g.Key, g => g.ToArray());
+
+    IEnumerable<BuildingPlacement> RuntimeIn(ZoneCoordinate zone) => runtimeByZone.TryGetValue(zone, out var list) ? list : [];
+
     /// <summary>Lays out one zone's buildings and map features as the game builds them (docs/formats/zones.md).</summary>
     public ZoneObjects BuildZone(ZoneCoordinate zone)
+    {
+        if (staged is not null) return staged.GetValueOrDefault(zone) ?? new() { Zone = zone };
+        var fixedPlacements = buildingsByZone.GetValueOrDefault(zone);
+        return Lay(zone, fixedPlacements is null ? RuntimeIn(zone) : fixedPlacements.Concat(RuntimeIn(zone)), withFeatures: true);
+    }
+
+    /// <summary>Lays out one runtime placement alone (a building the player placed), for a zone that is already laid out (worker threads).</summary>
+    public ZoneObjects BuildRuntime(BuildingPlacement placement) => Lay(placement.Zone, [placement], withFeatures: false);
+
+    ZoneObjects Lay(ZoneCoordinate zone, IEnumerable<BuildingPlacement> placements, bool withFeatures)
     {
         var result = new ZoneObjects { Zone = zone };
         var map = heights!.Value!;
         var db = Database;
-        if (buildingsByZone.TryGetValue(zone, out var placements))
+        {
             foreach (var b in placements)
             {
                 if (b.Position == Vector3.Zero) continue;
@@ -94,27 +174,30 @@ sealed class WorldObjects : IDisposable
                 GameRecord? townMaterial;
                 lock (Towns) townMaterial = Towns.MaterialOf(town);
                 var position = new Vector3(b.Position.X, y, b.Position.Z);
-                var parts = WorldObjectLayout.Building(db, record, b.InstanceId, position, b.Rotation, new BuildingState(isDestroyed, townMaterial));
+                var parts = WorldObjectLayout.Building(db, record, b.InstanceId, position, b.Rotation, new BuildingState(isDestroyed, townMaterial) { WithInterior = !isDestroyed });
+                // A destroyed building gets no interior view (game: the per-frame interior driver skips it).
+                if (!isDestroyed && InteriorVolume.For(db, record, b.InstanceId, position, b.Rotation, interiorCollisions!) is { } interior) result.Interiors.Add(interior);
                 // Resource buildings ("is foliage", no parts) are drawn by the foliage system as a FOLIAGE_MESH naming them as "building type".
                 if (parts.Count == 0 && record.GetBool("is foliage")) Interlocked.Increment(ref foliage);
                 else if (parts.Count == 0) Interlocked.Increment(ref empty);
                 result.Items.AddRange(parts);
                 Interlocked.Increment(ref buildings);
-                // The state's exterior layout: signs and banners placed relative to the building. Skipped for a destroyed one (Unknown).
-                if (!isDestroyed && state?.GetString("exterior layout name") is { Length: > 0 } layoutName)
+                // The state's exterior layout (signs and banners) and interior layout (furniture), placed relative to the building, each object on its
+                // layout floor. Interior furniture that is not also "is exterior furniture" shows only in the interior view. Skipped for a destroyed building (Unknown).
+                foreach (bool exterior in (ReadOnlySpan<bool>)[true, false])
                 {
-                    if (Layouts.Find(record, layoutName) is not { } layout) Interlocked.Increment(ref layoutsNotFound);
-                    else
+                    if (isDestroyed || state?.GetString(exterior ? "exterior layout name" : "interior layout name") is not { Length: > 0 } layoutName) continue;
+                    if (Layouts.Find(record, layoutName, exterior) is not { } layout) { Interlocked.Increment(ref layoutsNotFound); continue; }
+                    Interlocked.Increment(ref layouts);
+                    foreach (var item in Layouts.Items(layout))
                     {
-                        Interlocked.Increment(ref layouts);
-                        foreach (var item in Layouts.Items(layout))
-                        {
-                            var (at, rotation) = BuildingLayouts.Place(position, b.Rotation, item);
-                            var placed = WorldObjectLayout.Building(db, item.Building, $"{b.InstanceId}/{item.InstanceId}", at, rotation,
-                                new BuildingState(false, townMaterial));
-                            result.Items.AddRange(placed);
-                            if (placed.Count > 0) Interlocked.Increment(ref layoutObjects);
-                        }
+                        var (at, rotation) = BuildingLayouts.Place(position, b.Rotation, item);
+                        var placed = WorldObjectLayout.Building(db, item.Building, $"{b.InstanceId}/{item.InstanceId}", at, rotation,
+                            new BuildingState(false, townMaterial));
+                        bool insideOnly = !exterior && !item.Building.GetBool("is exterior furniture");
+                        foreach (var p in placed)
+                            result.Items.Add(p with { Floor = item.Floor, Interior = insideOnly, ParentPlacementId = b.InstanceId });
+                        if (placed.Count > 0) Interlocked.Increment(ref layoutObjects);
                     }
                 }
                 // Towns without a baked distant mesh: the building's own distant mesh stands in for it far away (what the game's
@@ -126,6 +209,8 @@ sealed class WorldObjects : IDisposable
                     Interlocked.Increment(ref stand);
                 }
             }
+        }
+        if (!withFeatures) return result;
         int featureIndex = zone.Y * WorldLayout.ZoneCount + zone.X;
         var list = featureIndex < Features.Zones.Count ? Features.Zones[featureIndex] : [];
         for (int i = 0; i < list.Count; i++)

@@ -1,0 +1,40 @@
+---
+import Base from '../layouts/Base.astro';
+
+const commands = `dotnet build -c Release
+dotnet test -c Release --filter "Category!=Slow&Category!=Bench"
+dotnet run -c Release --project src/Meitou.Game -- --new-game
+dotnet run -c Release --project tools/Meitou.ModelViewer -- --world --town "The Hub"`;
+const config = `{ "kenshiPath": "<your Kenshi install directory>" }`;
+---
+<Base title="Build · Meitou">
+  <section class="page">
+    <article class="mt-plate">
+      <h2>Build and Run</h2>
+      <p>Building needs the .NET 10 SDK. Release builds are what you want for playing.</p>
+      <pre class="mt-code"><code>{commands}</code></pre>
+    </article>
+
+    <article class="mt-plate">
+      <h2>Game Location</h2>
+      <p>
+        If Kenshi is not a Steam install, set <code>KENSHI_PATH</code> or create a <code>meitou.local.json</code> in the repository, working or executable directory:
+      </p>
+      <pre class="mt-code"><code>{config}</code></pre>
+    </article>
+
+    <article class="mt-plate">
+      <h2>Tests</h2>
+      <dl class="mt-rows">
+        <div><dt>Quick run</dt><dd><code>Category!=Slow&amp;Category!=Bench</code></dd></div>
+        <div><dt>Slow</dt><dd>Needs the game, a GPU or a long run</dd></div>
+        <div><dt>Bench</dt><dd>Asserts timing · needs a quiet machine</dd></div>
+      </dl>
+    </article>
+  </section>
+</Base>
+
+<style>
+  /* minmax(0, 1fr): the track must not grow to the longest code line, so the code blocks scroll instead. */
+  .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-7); max-width: 820px; padding-top: var(--space-7); }
+</style>

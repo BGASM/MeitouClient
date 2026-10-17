@@ -246,6 +246,7 @@ public sealed unsafe class FoliageGrassGpu : IDisposable
 
         var cmd = ctx.Frame.PreFrame;
         var stamps = (ctx.Frame.Timestamps.Allocate(), ctx.Frame.Timestamps.Allocate());
+        FrameProfiler.PreStamp(cmd, StageClock.Uploads);
         cmd.BeginLabel("foliage grass");
         cmd.FillBuffer(counters.Buffer, counters.Offset, 16, 0);
         Barrier(cmd, PipelineStageFlags2.AllTransferBit, AccessFlags2.TransferWriteBit, PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit);
@@ -271,6 +272,7 @@ public sealed unsafe class FoliageGrassGpu : IDisposable
             viewIndex++;
         }
         cmd.EndLabel();
+        FrameProfiler.PreStamp(cmd, StageClock.Cull);
         if (stamps.Item1.IsValid && stamps.Item2.IsValid) pendingTimes.Add(stamps);
         Dispatched++;
         return new GrassResult(draws.Buffer, draws.Offset, counters.Buffer, counters.Offset, n, tables.Patches);
@@ -313,7 +315,7 @@ public sealed unsafe class FoliageGrassGpu : IDisposable
     /// <summary>Bytes <see cref="CopyForReadback"/> writes: the counters (16), then the draws.</summary>
     public static ulong ReadbackBytes(in GrassResult r) => 16 + (ulong)r.MaxDraws * 16;
 
-    /// <summary>Copies a result (counters, then every draw slot) into <paramref name="target"/>, after the kernels (the verify mode).</summary>
+    /// <summary>Copies a result (counters, then every draw slot) into <paramref name="target"/>, after the kernels (the tests read them back).</summary>
     public void CopyForReadback(in GrassResult r, ReadbackBuffer target)
     {
         var cmd = ctx.Frame.PreFrame;

@@ -38,11 +38,14 @@ public sealed unsafe class WaterRenderer : IDisposable
         in vec3 vWorld;
         out vec4 fragColour;
         uniform vec3 uEye;
+        uniform float uWaterFar;
         uniform float uWaterHeight;
         uniform float uHalfWorld;
         uniform float uTime;
         uniform vec3 uSunDir;
         uniform vec3 uSunColour;
+        uniform vec3 uGlintDir;         // the specular glint's light: the sun's direction and colour, or by night the planet's own radiance (WorldLighting.Glint)
+        uniform vec3 uGlintColour;
         uniform vec3 uFogColour;
         uniform float uFogDistance;
         uniform sampler2D uColourMap;   // watercolourmap.png: the biomes' water colour, whole world
@@ -122,13 +125,14 @@ public sealed unsafe class WaterRenderer : IDisposable
             // Lighting: sun specular, sky reflection, a little diffuse for the water colour.
             float gloss = clamp(pb.x, 0.0, 1.0);
             vec3 l = normalize(uSunDir);
-            vec3 h = normalize(l + view);
+            vec3 glintL = normalize(uGlintDir);
+            vec3 h = normalize(glintL + view);
             // The ripples are finer than a pixel far away, so the glint widens and dims with distance instead of staying a hot point.
             float power = max(exp2(gloss * 11.0 + 1.0) / (1.0 + dist / 6000.0), 12.0);
             float spec = pow(max(dot(n, h), 0.0), power) * (power + 8.0) / 25.0 * gloss;
             // Above the game's camera heights (uAtmoAltitude.z, a viewer choice) every water pixel is far away and its widened glint covers
             // a large patch of sea: weigh it by the Fresnel term the game's own sun specular has (F0 0.04), so it stays a soft sheen.
-            float lh = clamp(dot(l, h), 0.0, 1.0);
+            float lh = clamp(dot(glintL, h), 0.0, 1.0);
             spec *= mix(1.0, 0.04 + 0.96 * exp2((-5.55473 * lh - 6.98316) * lh), uAtmoAltitude.z);
             float cosv = max(dot(view, n), 0.0);
             float schlick = 0.02 + 0.98 * pow(1.0 - cosv, 5.0);
@@ -145,7 +149,7 @@ public sealed unsafe class WaterRenderer : IDisposable
                 reflected = mix(reflected, min(texture(uReflection, uv).rgb, vec3(3.0)), inside.x * inside.y);
             }
             vec3 diffuse = waterColour * (max(dot(n, l), 0.0) * uSunColour * 0.6 + uSkyZenith * 0.5 + 0.03);
-            vec3 colour = mix(diffuse, reflected, schlick * gloss) + min(spec, 4.0) * uSunColour * 0.25 + pb.y * waterColour;
+            vec3 colour = mix(diffuse, reflected, schlick * gloss) + min(spec, 4.0) * uGlintColour * 0.25 + pb.y * waterColour;
 
             // Alpha as the game's water: see-through near the camera where shallow, opaque beyond 4000 units.
             float depth = max(0.0, uWaterHeight - terrainHeight(vWorld.xz)) / max(view.y, 0.05);
@@ -156,7 +160,7 @@ public sealed unsafe class WaterRenderer : IDisposable
             a *= clamp(depth / 2.0, 0.0, 1.0);
             a = mix(1.0, a, clamp((4000.0 - dist) / 400.0, 0.0, 1.0));
 
-            fragColour = vec4(atmoApply(colour, uEye, vWorld), a);   // aerial perspective (AtmosphereShaders)
+            fragColour = vec4(atmoApply(colour, uEye, vWorld), a * atmoWaterWeight(dist, uWaterFar));
         }
         """;
 
@@ -177,7 +181,7 @@ public sealed unsafe class WaterRenderer : IDisposable
         uniform vec4 uShoreRect;            // the field's x0, z0, x1, z1 (x1 <= x0: none yet)
         uniform vec4 uShore;                // x the breakers' wave count (cycles since the start, wrapping at 4096), y run-up height, z breaker wavelength, w breaker height
         uniform vec4 uWaveFade;             // eye distances over which the open waves' heights (x to y) and the shore's breakers and foam (z to w) fade out
-        uniform float uWaterDebug;          // 1: show the shore fields (MEITOU_WATER_DEBUG=1)
+        uniform float uLean;                // skip work with zero contribution
         uniform sampler2D uRiverMap;        // RiverFlowBake: RG the flow direction (x, z), B the half-width over 8 texels, A the river weight; world bounds
 
         // The ocean's displacement at p, each cascade read at the mip whose texels are as far apart as the vertices sampling it (finer
@@ -351,7 +355,9 @@ public sealed unsafe class WaterRenderer : IDisposable
                 // fragment shades it), and none where the vertices are too far apart for it.
                 float hump = breakerScale(s) * pow(0.5 - 0.5 * cos(6.2831853 * s.g), 1.5) * smoothstep(0.45, 0.2, spacing / uShore.z);
                 float lift = uShore.y * s.open * max(s.size, s.sizeWet) * (1.0 - smoothstep(10.0, 60.0, s.dist)) * smoothstep(-140.0, -60.0, s.dist);
-                vec3 d = oceanDisplace(p, spacing).xyz * oceanScale(s) * fade;
+                float scale = oceanScale(s) * fade;
+                vec3 d = vec3(0.0);
+                if (uLean < 0.5 || scale > 0.0) d = oceanDisplace(p, spacing).xyz * scale;
                 w += vec3(d.x, d.y + max(hump, lift) * shoreFade, d.z);
             }
             vBase = p;
@@ -366,9 +372,12 @@ public sealed unsafe class WaterRenderer : IDisposable
         in vec2 vBase;
         out vec4 fragColour;
         uniform vec3 uEye;
+        uniform float uWaterFar;
         uniform float uTime;
         uniform vec3 uSunDir;
         uniform vec3 uSunColour;
+        uniform vec3 uGlintDir;         // the specular glint's light: the sun's direction and colour, or by night the planet's own radiance (WorldLighting.Glint)
+        uniform vec3 uGlintColour;
         uniform sampler2D uColourMap;
         uniform sampler2D uFlowMap;
         uniform sampler2D uFoamMap;     // WaterFoam: a lace of bubble rims in R
@@ -451,7 +460,7 @@ public sealed unsafe class WaterRenderer : IDisposable
         vec3 foamLight(vec3 albedo, vec3 n, vec3 world, float shadow)
         {
             vec4 am = uAtmoMaps.z < 0.5 ? vec4(1.0, 1.0, 1.0, 0.5) : textureLod(uAtmoAmbientMap, (world.xz + uAtmoMaps.w) / (2.0 * uAtmoMaps.w), 0.0);
-            vec3 sun = uAtmoSunLight * am.a * 2.0 * shadow;
+            vec3 sun = uAtmoSunLight * am.a * 2.0 * atmoCloudShadow(world) * shadow;
             vec3 diffuse = ATMO_PI * clamp(dot(n, uAtmoLight.xyz), 0.0, 1.0) * sun * 0.96;
             return albedo * (diffuse + atmoIrradiance(n) * 0.96 * am.rgb * uAtmoLight.w);
         }
@@ -495,19 +504,6 @@ public sealed unsafe class WaterRenderer : IDisposable
             float dist = length(toEye);
             vec3 view = toEye / dist;
 
-            // The ocean's slopes, height and lingering foam, per pixel (with the hardware's mips: out of uniform control flow they would be undefined).
-            vec4 oceanSlope = vec4(0.0);
-            float oceanHeight = 0.0, oceanFoam = 0.0;
-            if (uOcean.w > 0.0)
-                for (int c = 0; c < 3; c++)
-                {
-                    vec3 uvw = vec3(p / uOcean[c], float(c));
-                    oceanSlope += texture(uOceanSlope, uvw);
-                    vec4 d = texture(uOceanDisp, uvw);
-                    oceanHeight += d.y;
-                    oceanFoam += d.w * (1.0 - 0.3 * float(c));
-                }
-
             // The motion fades with the eye distance; beyond it (and past the world's edge) this is the game's flat water.
             float fade = outside <= 0.0 ? 1.0 - smoothstep(uWaveFade.z, uWaveFade.w, dist) : 0.0;
             Shore s;
@@ -525,6 +521,21 @@ public sealed unsafe class WaterRenderer : IDisposable
             if (above > 0.0 && above >= max(level, wetLevel)) discard;
             bool swash = above > 0.0;
             float sheet = swash ? level - above : 0.0;   // the swash's thickness (negative: wet sand only)
+
+            // Strength first: explicit gradients captured before discard keep mip selection defined in the branch.
+            float open = oceanScale(s) * (1.0 - smoothstep(9000.0, 14000.0, dist));
+            vec4 oceanSlope = vec4(0.0);
+            float oceanHeight = 0.0, oceanFoam = 0.0;
+            if (uOcean.w > 0.0 && (uLean < 0.5 || open > 0.0))
+                for (int c = 0; c < 3; c++)
+                {
+                    float tile = uOcean[c];
+                    vec3 uvw = vec3(p / tile, float(c));
+                    oceanSlope += textureGrad(uOceanSlope, uvw, dpx / tile, dpy / tile);
+                    vec4 d = textureGrad(uOceanDisp, uvw, dpx / tile, dpy / tile);
+                    oceanHeight += d.y;
+                    oceanFoam += d.w * (1.0 - 0.3 * float(c));
+                }
 
             // The normal: the game's scrolled normal map along the flow, the rain's ripples, then the open waves' slopes added.
             vec2 tex = p * pa.xy;
@@ -568,7 +579,6 @@ public sealed unsafe class WaterRenderer : IDisposable
             nm = normalize(nm);
             // The ocean: its height's slopes over the stretch of its horizontal displacement, and the Jacobian (below about 0.7 the crests
             // fold enough to foam).
-            float open = oceanScale(s) * (1.0 - smoothstep(9000.0, 14000.0, dist));
             vec4 os = oceanSlope * open;
             vec2 spread = max(vec2(1.0) + os.zw, vec2(0.25));
             float jacobian = spread.x * spread.y;
@@ -585,7 +595,8 @@ public sealed unsafe class WaterRenderer : IDisposable
 
             float gloss = clamp(pb.x, 0.0, 1.0);
             vec3 l = normalize(uSunDir);
-            vec3 h = normalize(l + view);
+            vec3 glintL = normalize(uGlintDir);
+            vec3 h = normalize(glintL + view);
             float power = max(exp2(gloss * 11.0 + 1.0) / (1.0 + dist / 6000.0), 12.0);
             float nh = max(dot(n, h), 0.0);
             float spec = pow(nh, power) * (power + 8.0) / 25.0 * gloss;
@@ -594,7 +605,7 @@ public sealed unsafe class WaterRenderer : IDisposable
             float far = smoothstep(800.0, 4000.0, dist);
             float sparkle = smoothstep(0.55, 0.95, textureLod(uFoamMap, p * 0.0023 + n.xz * 0.35 + vec2(uTime * 1.7, uTime * 1.1), 0.0).r);
             spec += pow(nh, power * 0.12) * (power * 0.12 + 8.0) / 25.0 * gloss * sparkle * far * 2.5;
-            float lh = clamp(dot(l, h), 0.0, 1.0);
+            float lh = clamp(dot(glintL, h), 0.0, 1.0);
             spec *= mix(1.0, 0.04 + 0.96 * exp2((-5.55473 * lh - 6.98316) * lh), uAtmoAltitude.z);
             float cosv = max(dot(view, n), 0.0);
             float schlick = 0.02 + 0.98 * pow(1.0 - cosv, 5.0);
@@ -635,7 +646,7 @@ public sealed unsafe class WaterRenderer : IDisposable
 
             // The water's depth along the view (the swash: its own thin sheet). The slant path grows to 20 times the depth at grazing angles, so
             // far water reads opaque; the far clarity (uClarity.y) shortens it towards the plain depth.
-            float floorDepth = max(0.0, vWorld.y - terrainHeight(p));
+            float floorDepth = max(0.0, vWorld.y - (uLean > 0.5 && outside <= 0.0 ? uWaterHeight - s.depth : terrainHeight(p)));
             float depth = (swash ? max(sheet, 0.0) : floorDepth) / pow(max(view.y, 0.05), 1.0 - uClarity.y);
             if (outside > 0.0) depth = 1e4;
             bool refract = uRefract > 0.5;
@@ -649,24 +660,29 @@ public sealed unsafe class WaterRenderer : IDisposable
                 under = texture(uRefraction, gl_FragCoord.xy * uScreen + bend).rgb;
                 // Caustics: the waves focus the sun into a moving web of light on the floor of shallow water (two drifting webs of the foam
                 // texture's cell rims, multiplied).
-                vec2 floorP = p - view.xz / max(view.y, 0.05) * floorDepth * 0.75;
-                float tc = uTime * 30.0;
-                // Softer with the depth (the web blurs a few units down, as the real one does), weaker than a bright sand would show, and gone in
-                // the shallows, far away and in rain.
-                float blur = 1.0 + clamp(floorDepth * 0.15, 0.0, 3.0);
-                float c1 = textureLod(uFoamMap, floorP * 0.011 + vec2(tc * 0.011, tc * 0.006), blur).r;
-                float c2 = textureLod(uFoamMap, mat2(0.8, 0.6, -0.6, 0.8) * floorP * 0.0147 - vec2(tc * 0.008, -tc * 0.01), blur).r;
-                float caustic = (c1 * c2 * 0.8 + (c1 + c2) * 0.04) * 0.5 * max(l.y, 0.0) * smoothstep(1.5, 7.0, floorDepth) * exp(-floorDepth / 18.0) * (1.0 - smoothstep(500.0, 2500.0, dist)) * overcast;
-                under *= 1.0 + caustic * uSunColour;
+                if (uLean < 0.5 || (dist < 2500.0 && floorDepth > 1.5 && l.y > 0.0))
+                {
+                    vec2 floorP = p - view.xz / max(view.y, 0.05) * floorDepth * 0.75;
+                    float tc = uTime * 30.0;
+                    // Softer with the depth (the web blurs a few units down, as the real one does), weaker than a bright sand would show, and gone in
+                    // the shallows, far away and in rain.
+                    float blur = 1.0 + clamp(floorDepth * 0.15, 0.0, 3.0);
+                    float c1 = textureLod(uFoamMap, floorP * 0.011 + vec2(tc * 0.011, tc * 0.006), blur).r;
+                    float c2 = textureLod(uFoamMap, mat2(0.8, 0.6, -0.6, 0.8) * floorP * 0.0147 - vec2(tc * 0.008, -tc * 0.01), blur).r;
+                    float caustic = (c1 * c2 * 0.8 + (c1 + c2) * 0.04) * 0.5 * max(l.y, 0.0) * smoothstep(1.5, 7.0, floorDepth) * exp(-floorDepth / 18.0) * (1.0 - smoothstep(500.0, 2500.0, dist)) * overcast;
+                    under *= 1.0 + caustic * uSunColour;
+                }
                 // Absorption: in clear water red goes first, then green, so the shallows over sand are turquoise and the deep water dark; a
                 // strongly coloured biome water (a swamp's olive, a red lake) filters towards its own colour instead. The biome's opacity (the
                 // game's alpha per unit of depth) sets how fast. The floor fades out from the see-through distance (the game: opaque at 4000) to 1.5 times it.
-                vec3 sigma = mix(vec3(4.5, 1.6, 1.1), 1.0 + 3.0 * (1.0 - hue), smoothstep(0.15, 0.5, saturation));
+                // The clear-water spectrum only for bright water: dark grey water (Shark's ForestLand, 20 20 20) is a murky film in the game, and
+                // red going first turned the mud under it teal; it filters by its own hue instead.
+                vec3 sigma = mix(1.0 + 3.0 * (1.0 - hue), vec3(4.5, 1.6, 1.1), (1.0 - smoothstep(0.15, 0.5, saturation)) * smoothstep(0.06, 0.3, wLuma));
                 vec3 transmit = exp(-depth * max(pa.w, 0.002) * uClarity.x * sigma) * (1.0 - smoothstep(uClarity.z, uClarity.z * 1.5, dist));
                 colour = mix(under * transmit + body * (1.0 - transmit), reflected, schlick * gloss);
             }
             else colour = mix(body, reflected, schlick * gloss);
-            colour += min(spec, 4.0) * uSunColour * 0.25 + pb.y * waterColour;
+            colour += min(spec, 4.0) * uGlintColour * 0.25 * atmoCloudShadow(vWorld) + pb.y * waterColour;
 
             // A breaker's face: light comes through its thin lip, so it is brighter than the water (in its colour), and less see-through.
             float lip = smoothstep(0.22, 0.45, s.g) * (1.0 - smoothstep(0.46, 0.51, s.g)) * clamp(breaker / max(uShore.w, 0.1), 0.0, 1.0) * smoothstep(4.0, 24.0, s.depth);
@@ -690,27 +706,32 @@ public sealed unsafe class WaterRenderer : IDisposable
             // As the foam ages (ageS below: the way run in since the break, and the distance behind the crest) the lace is stretched along
             // the direction of travel about the crest, up to 2.1 times (the lookup's along-shore-normal scale shrinks): the bore's round
             // blobs run out into streaks in its wake. The clump (the bands' envelope) is not stretched.
-            float travel = clamp((s.breakAt - (s.dist - uShore.z * (s.g - 0.5))) / max(s.breakAt + 10.0, 40.0), 0.0, 1.0);
-            float ageS = clamp(0.6 * travel + 0.5 * smoothstep(0.5, 0.95, s.g), 0.0, 1.0);
-            float squeeze = 1.0 - 1.0 / (1.0 + 1.1 * ageS * ageS);
-            vec2 q0 = p + s.dir * (s.dist - uShore.z * s.g) + vec2(wHash(vec2(s.wave, 21.7)), wHash(vec2(s.wave, 5.3))) * 997.0;
-            vec2 q = q0 + s.dir * (uShore.z * (s.g - 0.5) * squeeze);
-            vec2 gx = dpx - s.dir * (dot(s.dir, dpx) * squeeze), gy = dpy - s.dir * (dot(s.dir, dpy) * squeeze);
-            float clump = textureGrad(uFoamMap, q0 * 0.0037 + vec2(0.21, 0.63), dpx * 0.0037, dpy * 0.0037).g;
-            vec2 b1 = vec2(0.5), b2 = vec2(0.5);
-            if (fade > 0.0) { b1 = textureGrad(uFoamMap, q * 0.009, gx * 0.009, gy * 0.009).rg; b2 = textureGrad(uFoamMap, q * 0.027 + 0.37, gx * 0.027, gy * 0.027).rg; }
-            float gw = s.g + (clump - 0.5) * 0.22, dw = s.dist + (clump - 0.5) * 36.0;
-            float crestAt = dw - uShore.z * (gw - 0.5);   // the distance of the crest this point trails (or leads)
-            float broken = smoothstep(s.breakAt + 15.0, s.breakAt - 15.0, crestAt);   // the wave has broken: its foam follows the crest back out to the break point
-            float burst = (1.0 - smoothstep(0.0, 45.0, abs(dw - s.breakAt + 10.0))) * smoothstep(0.42, 0.5, gw) * (1.0 - smoothstep(0.62, 0.8, gw));
-            float bore = broken * smoothstep(0.43, 0.5, gw) * (1.0 - smoothstep(0.54, 0.68, gw));
-            float trail = broken * smoothstep(0.56, 0.66, gw) * (1.0 - smoothstep(0.66, 0.95, gw)) * 0.8;
-            float feather = (1.0 - broken) * smoothstep(0.47, 0.5, gw) * (1.0 - smoothstep(0.5, 0.53, gw)) * smoothstep(s.breakAt + 120.0, s.breakAt + 20.0, dw);
             float amount = max(clamp((0.7 - jacobian) * 3.75, 0.0, 1.0), clamp(oceanFoam * open * 1.5, 0.0, 1.0) * 0.75);
-            // Along the shore the breakers break harder in some stretches than others, and not at all in a few.
-            float stretch = smoothstep(0.2, 0.75, texture(uFoamMap, p * 0.0011).g);
-            float surfFoam = max(max(burst * 1.3, bore * 0.9), max(trail * 1.1, feather * 0.6)) * min(s.size * 1.1, 1.3) * mix(0.275, 1.0, s.brk);
-            float surfAmount = min(surfFoam * surfZone * (0.525 + 0.725 * stretch) * (0.825 + 0.4 * clump) * 1.5, 0.95);   // capped: the lace shows through even the thickest whitewater
+            float surfAmount = 0.0, clump = 0.5, ageS = 0.0;
+            vec2 q = vec2(0.0), b1 = vec2(0.5), b2 = vec2(0.5);
+            // Sheltered ponds have no surf; keep river, open-water and waterline foam independent below.
+            if (uLean < 0.5 || surfZone > 0.0 || swash)
+            {
+                float travel = clamp((s.breakAt - (s.dist - uShore.z * (s.g - 0.5))) / max(s.breakAt + 10.0, 40.0), 0.0, 1.0);
+                ageS = clamp(0.6 * travel + 0.5 * smoothstep(0.5, 0.95, s.g), 0.0, 1.0);
+                float squeeze = 1.0 - 1.0 / (1.0 + 1.1 * ageS * ageS);
+                vec2 q0 = p + s.dir * (s.dist - uShore.z * s.g) + vec2(wHash(vec2(s.wave, 21.7)), wHash(vec2(s.wave, 5.3))) * 997.0;
+                q = q0 + s.dir * (uShore.z * (s.g - 0.5) * squeeze);
+                vec2 gx = dpx - s.dir * (dot(s.dir, dpx) * squeeze), gy = dpy - s.dir * (dot(s.dir, dpy) * squeeze);
+                clump = textureGrad(uFoamMap, q0 * 0.0037 + vec2(0.21, 0.63), dpx * 0.0037, dpy * 0.0037).g;
+                if (fade > 0.0) { b1 = textureGrad(uFoamMap, q * 0.009, gx * 0.009, gy * 0.009).rg; b2 = textureGrad(uFoamMap, q * 0.027 + 0.37, gx * 0.027, gy * 0.027).rg; }
+                float gw = s.g + (clump - 0.5) * 0.22, dw = s.dist + (clump - 0.5) * 36.0;
+                float crestAt = dw - uShore.z * (gw - 0.5);   // the distance of the crest this point trails (or leads)
+                float broken = smoothstep(s.breakAt + 15.0, s.breakAt - 15.0, crestAt);   // the wave has broken: its foam follows the crest back out to the break point
+                float burst = (1.0 - smoothstep(0.0, 45.0, abs(dw - s.breakAt + 10.0))) * smoothstep(0.42, 0.5, gw) * (1.0 - smoothstep(0.62, 0.8, gw));
+                float bore = broken * smoothstep(0.43, 0.5, gw) * (1.0 - smoothstep(0.54, 0.68, gw));
+                float trail = broken * smoothstep(0.56, 0.66, gw) * (1.0 - smoothstep(0.66, 0.95, gw)) * 0.8;
+                float feather = (1.0 - broken) * smoothstep(0.47, 0.5, gw) * (1.0 - smoothstep(0.5, 0.53, gw)) * smoothstep(s.breakAt + 120.0, s.breakAt + 20.0, dw);
+                // Along the shore the breakers break harder in some stretches than others, and not at all in a few.
+                float stretch = smoothstep(0.2, 0.75, textureGrad(uFoamMap, p * 0.0011, dpx * 0.0011, dpy * 0.0011).g);
+                float surfFoam = max(max(burst * 1.3, bore * 0.9), max(trail * 1.1, feather * 0.6)) * min(s.size * 1.1, 1.3) * mix(0.275, 1.0, s.brk);
+                surfAmount = min(surfFoam * surfZone * (0.525 + 0.725 * stretch) * (0.825 + 0.4 * clump) * 1.5, 0.95);   // capped: the lace shows through even the thickest whitewater
+            }
             amount = max(amount, (1.0 - smoothstep(0.0, 4.0, abs(s.dist))) * (0.15 + 0.25 * s.open) * fade);
             // The swash: its front is dense, the sheet behind it thins out.
             if (swash && sheet > 0.0) surfAmount = max(surfAmount, max(0.85 * (1.0 - smoothstep(0.0, runup * 0.2, sheet + (b1.g - 0.5) * runup * 0.3)), 0.35 * (1.0 - sinceCrest)));
@@ -718,6 +739,7 @@ public sealed unsafe class WaterRenderer : IDisposable
             // waterline) and the further behind its crest, the more of it is lace with holes (on the swash too: the sheet thins as it recedes).
             float age = clamp(ageS + (0.5 - clump) * 0.5, 0.0, 1.0);
             vec2 drift = direction * speed * uTime * 0.2;
+            vec2 driftDx = dFdx(drift), driftDy = dFdy(drift);
             // Blotches (the multi-octave noise at two scales) with bubble rims in them; the more foam, the lower the threshold. Up close the
             // foam shows its bubbles (B: fine cell walls), lit on their walls and darker inside.
             vec2 a1 = texture(uFoamMap, p * 0.009 + drift).rg, a2 = texture(uFoamMap, p * 0.027 - drift * 1.3).rg;
@@ -729,7 +751,9 @@ public sealed unsafe class WaterRenderer : IDisposable
                 a1 = mix(a1, r1, rw); a2 = mix(a2, r2, rw);
                 amount = max(amount, rw * (0.02 + 0.55 * rapid));
             }
-            float bubbles = texture(uFoamMap, p * 0.06 - drift * 2.0).b * (1.0 - smoothstep(150.0, 600.0, dist));
+            float bubbles = 0.0;
+            if (uLean < 0.5 || dist < 600.0)
+                bubbles = textureGrad(uFoamMap, p * 0.06 - drift * 2.0, dpx * 0.06 - driftDx * 2.0, dpy * 0.06 - driftDy * 2.0).b * (1.0 - smoothstep(150.0, 600.0, dist));
             float pattern = (a1.g * 0.6 + a2.g * 0.4) * 0.7 + max(a1.r, a2.r) * 0.45 + bubbles * 0.08;
             // Dark and coloured water foams less (a thinner, more broken lace), and the foam takes its colour: white only on clear water, a dirty
             // grey-brown on black water, rust on red.
@@ -773,7 +797,7 @@ public sealed unsafe class WaterRenderer : IDisposable
                 if (swash && sheet <= 0.0)
                 {
                     float wet = (1.0 - sinceCrest) * 0.6;
-                    colour = under * (1.0 - 0.35 * wet) + (reflected * schlick * gloss + min(spec, 4.0) * uSunColour * 0.15) * wet;
+                    colour = under * (1.0 - 0.35 * wet) + (reflected * schlick * gloss + min(spec, 4.0) * uGlintColour * 0.15) * wet;
                 }
             }
             else
@@ -792,15 +816,13 @@ public sealed unsafe class WaterRenderer : IDisposable
                 {
                     // Wet sand: darker and glossy, drying out until the next wave.
                     float wet = (1.0 - sinceCrest) * 0.6;
-                    colour = reflected * schlick * gloss + min(spec, 4.0) * uSunColour * 0.15;
+                    colour = reflected * schlick * gloss + min(spec, 4.0) * uGlintColour * 0.15;
                     a = wet * 0.45;
                 }
                 a = mix(1.0, a, 1.0 - smoothstep(uClarity.z * 0.9, uClarity.z * 1.25, dist));
             }
 
-            if (uWaterDebug > 1.5) { fragColour = vec4(s.river * fade, s.flow * 0.5 + 0.5, 1.0); return; }   // MEITOU_WATER_DEBUG=2: the river weight and flow direction
-            if (uWaterDebug > 0.5) { fragColour = vec4(clamp(s.dist / 400.0, 0.0, 1.0), s.g, s.open, 1.0); return; }   // MEITOU_WATER_DEBUG=1
-            fragColour = vec4(atmoApply(colour, uEye, vWorld), a);
+            fragColour = vec4(atmoApply(colour, uEye, vWorld), a * atmoWaterWeight(dist, uWaterFar));
         }
         """;
 
@@ -832,9 +854,10 @@ public sealed unsafe class WaterRenderer : IDisposable
     {
         public static readonly string[] MapNames = ["uColourMap", "uFlowMap", "uNormalMap", "uParamsA", "uParamsB", "uRainMap", "uFoamMap", "uRiverMap"];
         public readonly LegacyProgram P;
+        public readonly UniformHandle Lean;
         public readonly NativeSegment Segment;
-        public readonly UniformHandle ViewProjection, WaterHeight, Centre, Extent, Eye, HalfWorld, SeaA, SeaB, SeaColour, Time, SunDir, SunColour,
-            FogColour, FogDistance, Reflect, ReflectionViewProjection, Ocean, ShoreRect, GridStep, Shore, WaveFade, Debug, Refract, Screen, Clarity;
+        public readonly UniformHandle ViewProjection, WaterHeight, Centre, Extent, Eye, WaterFar, HalfWorld, SeaA, SeaB, SeaColour, Time, SunDir, SunColour, GlintDir, GlintColour,
+            FogColour, FogDistance, Reflect, ReflectionViewProjection, Ocean, ShoreRect, GridStep, Shore, WaveFade, Refract, Screen, Clarity;
         public readonly SkyColourHandles Sky;
         public readonly SamplerSlot[] Maps;
         public readonly SamplerSlot Reflection, OceanDisp, OceanSlope, ShoreField, Refraction;
@@ -845,6 +868,8 @@ public sealed unsafe class WaterRenderer : IDisposable
             Segment = new NativeSegment(gpu, P, topology, name);
             (ViewProjection, WaterHeight, Centre, Extent, Eye, HalfWorld) = (P.Uniform("uViewProjection"), P.Uniform("uWaterHeight"), P.Uniform("uCentre"),
                 P.Uniform("uExtent"), P.Uniform("uEye"), P.Uniform("uHalfWorld"));
+            (GlintDir, GlintColour) = (P.Uniform("uGlintDir"), P.Uniform("uGlintColour"));
+            WaterFar = P.Uniform("uWaterFar");
             (SeaA, SeaB, SeaColour, Time, SunDir, SunColour) = (P.Uniform("uSeaA"), P.Uniform("uSeaB"), P.Uniform("uSeaColour"), P.Uniform("uTime"),
                 P.Uniform("uSunDir"), P.Uniform("uSunColour"));
             (FogColour, FogDistance, Reflect, ReflectionViewProjection) = (P.Uniform("uFogColour"), P.Uniform("uFogDistance"), P.Uniform("uReflect"),
@@ -852,8 +877,8 @@ public sealed unsafe class WaterRenderer : IDisposable
             (Ocean, ShoreRect, GridStep, Shore, WaveFade) = (P.Uniform("uOcean"), P.Uniform("uShoreRect"), P.Uniform("uGridStep"), P.Uniform("uShore"),
                 P.Uniform("uWaveFade"));
             (OceanDisp, OceanSlope, ShoreField) = (P.Sampler("uOceanDisp"), P.Sampler("uOceanSlope"), P.Sampler("uShoreField"));
+            Lean = P.Uniform("uLean");
             (Refract, Screen, Refraction) = (P.Uniform("uRefract"), P.Uniform("uScreen"), P.Sampler("uRefraction"));
-            Debug = P.Uniform("uWaterDebug");
             Clarity = P.Uniform("uClarity");
             Sky = SkyColourHandles.Resolve(P);
             Maps = MapNames.Select(P.Sampler).ToArray();
@@ -930,19 +955,31 @@ public sealed unsafe class WaterRenderer : IDisposable
     /// <summary>Out to this radius the Meitou grid is fine enough for the waves; beyond it the water is flat.</summary>
     public const float GridDetailRadius = 6000;
 
-    /// <param name="sky">Unused since phase 8 stage 2: the atmosphere comes through the frame globals.</param>
-    public static WaterRenderer Create(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets, SkyRenderer? sky, List<string> messages, ushort[]? coarseHeights = null,
-        int gridSegments = DefaultGridSegments, int oceanSize = OceanWaves.DefaultSize)
+    /// <summary>
+    /// What <see cref="Create"/> reads and works out on the CPU (about 1.5 s at a cold start): the colour, flow, normal and rain maps, the biome water parameters
+    /// baked per blend-map pixel, the open sea, the river flow map baked from the world's heights and the foam. Made by <see cref="Prepare"/> on any thread.
+    /// </summary>
+    public sealed class Source
     {
-        _ = sky;
-        var colour = Load(install, WorldWater.ColourMap);
-        var flow = Load(install, WorldWater.FlowMap);
+        internal RgbaImage? Colour, Flow, Normal, Rain;
+        internal Vector4[] A = [], B = [];
+        internal int BlendWidth, BlendHeight, RiverSize;
+        internal (Vector4 A, Vector4 B, Vector3 Colour) Sea;
+        internal byte[]? River;
+        internal byte[] Foam = [];
+        internal readonly List<string> Messages = [];
+    }
+
+    /// <summary>The CPU part of <see cref="Create"/>, on any thread (it makes no GPU resource).</summary>
+    public static Source Prepare(GameInstall install, GameDatabase db, AssetLocator assets, ushort[]? coarseHeights = null)
+    {
+        var s = new Source { Colour = Load(install, WorldWater.ColourMap), Flow = Load(install, WorldWater.FlowMap) };
         var normalPath = assets.Find("water.png");
-        var normal = normalPath is not null ? TextureLoader.LoadFile(normalPath, allMips: false).Levels[0] : null;
+        s.Normal = normalPath is not null ? TextureLoader.LoadFile(normalPath, allMips: false).Levels[0] : null;
         var rainPath = assets.Find("rain-ripples.png");
-        var rain = rainPath is not null ? TextureLoader.LoadFile(rainPath, allMips: false).Levels[0] : null;
-        if (normal is null) messages.Add("water.png not found: flat water");
-        if (rain is null) messages.Add("rain-ripples.png not found: no rain ripples");
+        s.Rain = rainPath is not null ? TextureLoader.LoadFile(rainPath, allMips: false).Levels[0] : null;
+        if (s.Normal is null) s.Messages.Add("water.png not found: flat water");
+        if (s.Rain is null) s.Messages.Add("rain-ripples.png not found: no rain ripples");
 
         // Biome water parameters blended per blend-map pixel.
         var info = BlendInfoFile.Open(install);
@@ -951,30 +988,47 @@ public sealed unsafe class WaterRenderer : IDisposable
         var fallback = BiomeWater.FromRecord(db.OfType(global::Meitou.Data.Fcs.FcsRecordType.BIOMES).First());
         Vector4 A(BiomeWater w) => new(w.Scale.X, w.Scale.Y, w.InvStrength, w.InvOpacity);
         Vector4 B(BiomeWater w) => new(w.Gloss, w.Glow, w.Distortion.X, 0);
-        var a = BiomeField.Bake(info, blend.Width, blend.Height, blend.Pixels, c => water.TryGetValue(c, out var w) ? A(w) : null, A(fallback));
-        var b = BiomeField.Bake(info, blend.Width, blend.Height, blend.Pixels, c => water.TryGetValue(c, out var w) ? B(w) : null, B(fallback));
+        (s.BlendWidth, s.BlendHeight) = (blend.Width, blend.Height);
+        s.A = BiomeField.Bake(info, blend.Width, blend.Height, blend.Pixels, c => water.TryGetValue(c, out var w) ? A(w) : null, A(fallback));
+        s.B = BiomeField.Bake(info, blend.Width, blend.Height, blend.Pixels, c => water.TryGetValue(c, out var w) ? B(w) : null, B(fallback));
 
-        var sea = OpenSea(a, b, blend.Width, blend.Height, colour);
-        Console.WriteLine($"sea       open-sea water: scale {sea.A.X * 5000:0.#}, {sea.A.Y * 5000:0.#}, gloss {sea.B.X:0.##}, colour {sea.Colour.X:0.##} {sea.Colour.Y:0.##} {sea.Colour.Z:0.##}");
+        s.Sea = OpenSea(s.A, s.B, blend.Width, blend.Height, s.Colour);
+        Console.WriteLine($"sea       open-sea water: scale {s.Sea.A.X * 5000:0.#}, {s.Sea.A.Y * 5000:0.#}, gloss {s.Sea.B.X:0.##}, colour {s.Sea.Colour.X:0.##} {s.Sea.Colour.Y:0.##} {s.Sea.Colour.Z:0.##}");
+        // The river map: baked from the whole-world heights at the flow map's size (the game's flow map does not follow the rivers); none without them.
+        var riverWatch = System.Diagnostics.Stopwatch.StartNew();
+        int riverSize = s.Flow?.Width ?? 0;
+        if (coarseHeights is not null && riverSize > 0 && coarseHeights.Length == (riverSize + 1) * (riverSize + 1))
+        {
+            s.River = RiverFlowBake.Bake(coarseHeights, riverSize, (ushort)Math.Ceiling(WorldWater.Height * ushort.MaxValue / WorldLayout.MaxHeight));
+            s.RiverSize = riverSize;
+            Console.WriteLine($"rivers    flow map baked at {riverSize}² ({riverWatch.ElapsedMilliseconds} ms)");
+        }
+        s.Foam = WaterFoam.Bake();
+        return s;
+    }
+
+    /// <param name="sky">Unused since phase 8 stage 2: the atmosphere comes through the frame globals.</param>
+    /// <param name="source">What <see cref="Prepare"/> made (made here when null).</param>
+    public static WaterRenderer Create(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets, SkyRenderer? sky, List<string> messages, ushort[]? coarseHeights = null,
+        int gridSegments = DefaultGridSegments, int oceanSize = OceanWaves.DefaultSize, Source? source = null)
+    {
+        _ = sky;
+        var s = source ?? Prepare(install, db, assets, coarseHeights);
+        messages.AddRange(s.Messages);
         // As the GL textures were made (WorldGl.Texture2D): a found map has mips only where it repeats; the 1 × 1 stand-in for a missing one
         // always had its (single-level) chain and a trilinear filter.
         SampledImage Rgba(RgbaImage? img, bool repeat, byte[] flat, string name) =>
             img is null ? SampledImage.Rgba8(gpu, 1, 1, flat, repeat, mipmaps: true, name) : SampledImage.Rgba8(gpu, img, repeat, mipmaps: repeat, name);
-        // The river map: baked from the whole-world heights at the flow map's size (the game's flow map does not follow the rivers); none without them.
-        var riverWatch = System.Diagnostics.Stopwatch.StartNew();
-        int riverSize = flow?.Width ?? 0;
-        bool rivers = Environment.GetEnvironmentVariable("MEITOU_RIVERS") != "0" && coarseHeights is not null && riverSize > 0 && coarseHeights.Length == (riverSize + 1) * (riverSize + 1);
-        SampledImage riverMap = rivers
-            ? SampledImage.Rgba8(gpu, riverSize, riverSize, RiverFlowBake.Bake(coarseHeights!, riverSize, (ushort)Math.Ceiling(WorldWater.Height * ushort.MaxValue / WorldLayout.MaxHeight)), repeat: false, mipmaps: false, "water river map")
+        SampledImage riverMap = s.River is { } river
+            ? SampledImage.Rgba8(gpu, s.RiverSize, s.RiverSize, river, repeat: false, mipmaps: false, "water river map")
             : SampledImage.Rgba8(gpu, 1, 1, [128, 128, 0, 0], repeat: false, mipmaps: false, "water river map");
-        if (rivers) Console.WriteLine($"rivers    flow map baked at {riverSize}² ({riverWatch.ElapsedMilliseconds} ms)");
         return new WaterRenderer(gpu,
-            [Rgba(colour, false, [0, 32, 64, 255], "water colour map"), Rgba(flow, false, [128, 128, 0, 255], "water flow map"),
-             Rgba(normal, true, [128, 255, 128, 255], "water normal map"),
-             SampledImage.Rgba32F(gpu, a, blend.Width, blend.Height, "water parameters a"), SampledImage.Rgba32F(gpu, b, blend.Width, blend.Height, "water parameters b"),
-             Rgba(rain, true, [0, 0, 0, 0], "water rain ripples"),
-             SampledImage.Rgba8(gpu, WaterFoam.Size, WaterFoam.Size, WaterFoam.Bake(), repeat: true, mipmaps: true, "water foam"), riverMap],
-            sea.A, sea.B, sea.Colour, gridSegments, oceanSize);
+            [Rgba(s.Colour, false, [0, 32, 64, 255], "water colour map"), Rgba(s.Flow, false, [128, 128, 0, 255], "water flow map"),
+             Rgba(s.Normal, true, [128, 255, 128, 255], "water normal map"),
+             SampledImage.Rgba32F(gpu, s.A, s.BlendWidth, s.BlendHeight, "water parameters a"), SampledImage.Rgba32F(gpu, s.B, s.BlendWidth, s.BlendHeight, "water parameters b"),
+             Rgba(s.Rain, true, [0, 0, 0, 0], "water rain ripples"),
+             SampledImage.Rgba8(gpu, WaterFoam.Size, WaterFoam.Size, s.Foam, repeat: true, mipmaps: true, "water foam"), riverMap],
+            s.Sea.A, s.Sea.B, s.Sea.Colour, gridSegments, oceanSize);
     }
 
     /// <summary>
@@ -1031,9 +1085,36 @@ public sealed unsafe class WaterRenderer : IDisposable
     /// the game's water does (`--no-water-refraction`, for integrated GPUs).</summary>
     public bool Refraction { get; set; } = true;
 
+    /// <summary>Skip zero-contribution work (<c>--ab water-lean</c>).</summary>
+    public bool Lean { get; set; } = true;
+
+    /// <summary>
+    /// The distance to the nearest water in view this frame, from the reflection's rect (<see cref="ReflectionPass.NearestWater"/>), set by the frame
+    /// loop: infinity with none, NaN when unknown (no reflection pass ran). The ocean's FFT and the refraction copy are
+    /// skipped while no water within their reach is in view; unknown gates nothing.
+    /// </summary>
+    public float NearestWater { get; set; } = float.NaN;
+
+    /// <summary>The eye distance past which the fragment stage reads no ocean texture: the open waves' detail fades from 9000 to 14000 units
+    /// (<c>open</c> in <see cref="MeitouFragment"/>; the vertex displacement is gone by <see cref="WaveFadeEnd"/>). The FFT serves nothing beyond it.</summary>
+    public const float OceanFadeEnd = 14000;
+
+    /// <summary>Whether the ocean's FFT has anything to feed this frame: water within <see cref="OceanFadeEnd"/> is in view, or that is unknown.</summary>
+    bool OceanInView => float.IsNaN(NearestWater) || NearestWater <= OceanFadeEnd;
+
+    /// <summary>The slice near plane bounds every fragment's eye distance from below. Beyond both cutoffs neither
+    /// transmitted floor colour nor wet sand contributes, so the blended path is opaque and needs no copy. The same
+    /// bound holds for the nearest water in view: with none nearer, the slice shows no transmitting water at all.</summary>
+    internal bool NeedsRefraction(float near) => Meitou && Refraction &&
+        (!Lean || SliceCanTransmit(near, ClearDistance)) &&
+        (float.IsNaN(NearestWater) || SliceCanTransmit(NearestWater, ClearDistance));
+
+    internal static bool SliceCanTransmit(float near, float clearDistance) =>
+        near < Math.Max(Math.Max(clearDistance, 100f) * 1.5f, ShoreFadeEnd);
+
     /// <summary>The Tab panel's "Water clarity x" (Meitou water; not in the game): the biome's absorption per unit of depth is divided by it, so
-    /// above 1 the floor shows through deeper water. 1 is the game's opacity.</summary>
-    public float Clarity { get; set; } = 1;
+    /// above 1 the floor shows through deeper water. 1 is the game's opacity; the default 0.5 is murkier.</summary>
+    public float Clarity { get; set; } = 0.5f;
 
     /// <summary>The Tab panel's "Far water clarity" (Meitou water; not in the game): 0 absorbs along the true slant path through the water (it is
     /// up to 20 times the depth at grazing angles, so distant shallows read opaque), 1 only along the depth, as if looked at from straight above. Default 0.25.</summary>
@@ -1043,6 +1124,21 @@ public sealed unsafe class WaterRenderer : IDisposable
     /// gone by 1.5 times it (refracted; by 1.25 times when blended). The game's water turns opaque at 4000 units, which from high above leaves
     /// only a disc of clear water under the camera. Default 10000.</summary>
     public float ClearDistance { get; set; } = 10000;
+
+    /// <summary>How overcast the sky is this frame (<c>WorldFrame.Overcast</c>: the cloud density, or the rain's amount where that is more), which the
+    /// Meitou water's sun glint fades under (<see cref="GlintCloudFade"/>).</summary>
+    public float Overcast { get; set; }
+
+    /// <summary>How much of the Meitou water's sun glint a full overcast takes away (docs/render-water.md "Glint under clouds"; not in the game, whose
+    /// specular ignores the weather). Default 0.95.</summary>
+    public float GlintCloudShade { get; set; } = 0.95f;
+
+    /// <summary>What is left of the glint at cloud density <paramref name="c"/>: 1 up to c 0.3, easing (smoothstep) to 1 − shade at full cover.</summary>
+    internal static float GlintCloudFade(float shade, float c)
+    {
+        float t = Math.Clamp((c - 0.3f) / 0.7f, 0, 1);
+        return 1 - Math.Clamp(shade, 0, 1) * t * t * (3 - 2 * t);
+    }
 
     /// <summary>
     /// Copies the scene drawn so far (the slice's opaque geometry, with no pass open) at half the size into the texture the Meitou water refracts:
@@ -1077,7 +1173,7 @@ public sealed unsafe class WaterRenderer : IDisposable
     public void Draw(Matrix4x4 viewProjection, Vector3 eye, WorldLighting light, SkyColours colours, float time, float extent, ReflectionPass? reflection = null)
     {
         var p = Meitou ? meitou : faithful;
-        if (Meitou) ocean.Record();
+        if (Meitou && OceanInView) ocean.Record();   // the FFT only while water near enough to show its detail is in view
         Prepare(p, viewProjection, eye, light, colours, Meitou ? waves.NormalTime : time, extent, reflection);
         if (Meitou) Record(p, gridSource, gridVertices, gridIndexCount);
         else Record(p, quadSource, quadVertices, 0);
@@ -1086,10 +1182,12 @@ public sealed unsafe class WaterRenderer : IDisposable
     void Prepare(WaterProgram h, Matrix4x4 viewProjection, Vector3 eye, WorldLighting light, SkyColours colours, float time, float extent, ReflectionPass? reflection)
     {
         var p = h.P;
+        p.Set(h.Lean, Lean ? 1f : 0f);
         p.Set(h.ViewProjection, in viewProjection);
         p.Set(h.WaterHeight, WorldWater.Height);
         p.Set(h.Centre, eye.X, eye.Z);
         p.Set(h.Extent, extent);
+        p.Set(h.WaterFar, extent / 1.5f);
         p.Set(h.Eye, eye.X, eye.Y, eye.Z);
         p.Set(h.HalfWorld, (float)WorldLayout.HalfWorldSize);
         p.Set(h.SeaA, seaA.X, seaA.Y, seaA.Z, seaA.W);
@@ -1098,6 +1196,10 @@ public sealed unsafe class WaterRenderer : IDisposable
         p.Set(h.Time, time);
         p.Set(h.SunDir, light.SunDirection.X, light.SunDirection.Y, light.SunDirection.Z);
         p.Set(h.SunColour, light.SunColour.X, light.SunColour.Y, light.SunColour.Z);
+        var (glintDirection, glintColour) = light.Glint;
+        if (h == meitou) glintColour *= GlintCloudFade(GlintCloudShade, Overcast);
+        p.Set(h.GlintDir, glintDirection.X, glintDirection.Y, glintDirection.Z);
+        p.Set(h.GlintColour, glintColour.X, glintColour.Y, glintColour.Z);
         p.Set(h.FogColour, light.FogColour.X, light.FogColour.Y, light.FogColour.Z);
         p.Set(h.FogDistance, light.FogDistance);
         if (h == meitou)
@@ -1107,7 +1209,6 @@ public sealed unsafe class WaterRenderer : IDisposable
             p.Set(h.GridStep, gridStep);
             p.Set(h.Shore, waves.Shore);
             p.Set(h.WaveFade, WaveFadeStart, WaveFadeEnd, ShoreFadeStart, ShoreFadeEnd);
-            p.Set(h.Debug, DebugView);
             p.Set(h.Clarity, 1f / Math.Max(Clarity, 0.01f), Math.Clamp(FarClarity, 0f, 1f), Math.Max(ClearDistance, 100f));
             if (ocean.Ready) { p.Bind(h.OceanDisp, ocean.Displacement); p.Bind(h.OceanSlope, ocean.Slopes); }
             if (shore.Ready) p.Bind(h.ShoreField, shore.Sampled());
@@ -1135,9 +1236,6 @@ public sealed unsafe class WaterRenderer : IDisposable
     /// <summary>The eye distances over which the Meitou open waves fade into the flat water (the grid coarsens with the distance), and over which
     /// the shore's breakers and foam fade (they read from much further).</summary>
     public const float WaveFadeStart = 3000, WaveFadeEnd = 5500, ShoreFadeStart = 7000, ShoreFadeEnd = 10000;
-
-    /// <summary><c>MEITOU_WATER_DEBUG=1</c>: the Meitou water shows its shore fields (red the distance to the shore over 400, green the breaker phase, blue the exposure).</summary>
-    static readonly float DebugView = Environment.GetEnvironmentVariable("MEITOU_WATER_DEBUG") switch { "1" => 1f, "2" => 2f, _ => 0f };
 
     static readonly SamplerDesc ClampLinear = new(Silk.NET.Vulkan.Filter.Linear, Silk.NET.Vulkan.Filter.Linear, Silk.NET.Vulkan.SamplerMipmapMode.Nearest, false,
         Silk.NET.Vulkan.SamplerAddressMode.ClampToEdge, Silk.NET.Vulkan.SamplerAddressMode.ClampToEdge, Silk.NET.Vulkan.SamplerAddressMode.ClampToEdge, false,

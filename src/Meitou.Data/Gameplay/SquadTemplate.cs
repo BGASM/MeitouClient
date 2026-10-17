@@ -4,8 +4,8 @@ namespace Meitou.Data.Gameplay;
 
 /// <summary>
 /// A SQUAD_TEMPLATE (or UNIQUE_SQUAD_TEMPLATE, which has the same squad fields) as docs/game/factions-squads-towns.md section 4
-/// describes what the game reads. Only the fields the squad factory (stage 2) and the town residents need are typed; the shop
-/// and building-choice fields stay in the record. How the counts of <see cref="Squad"/>, <see cref="Squad2"/> and the random
+/// describes what the game reads. The fields the squad factory (stage 2), the town residents and the shops (docs/game/economy.md
+/// section 9) need are typed; the building-choice fields stay in the record. How the counts of <see cref="Squad"/>, <see cref="Squad2"/> and the random
 /// picks combine into a squad is section 5.1, a later stage.
 /// </summary>
 public sealed record SquadTemplate
@@ -47,8 +47,37 @@ public sealed record SquadTemplate
     /// <summary><c>building</c>: the home building a resident squad uses (first entry); <c>building designation</c> is the editor's BuildingDesignation.</summary>
     public RecordLink? Building { get; init; }
     public int BuildingDesignation { get; init; }
+    /// <summary>Every <c>building</c> entry (the preferred homes of a resident entry, docs/game/factions-squads-towns.md "Town residents") and <c>building dislike</c>.</summary>
+    public IReadOnlyList<RecordLink> Buildings { get; init; } = [];
+    public IReadOnlyList<RecordLink> BuildingDislike { get; init; } = [];
+    /// <summary><c>layout interior</c> / <c>layout exterior</c>: the layout names the home building is given (empty: none).</summary>
+    public string LayoutInterior { get; init; } = "";
+    public string LayoutExterior { get; init; } = "";
+    /// <summary><c>initial door state</c> (DoorState: 0 CLOSED, 1 OPEN, 2 LOCKED, 3 BROKEN), applied to the home building when it is assigned (docs/game/locks.md "Doors").</summary>
+    public int InitialDoorState { get; init; }
     /// <summary><c>nest</c> links.</summary>
     public IReadOnlyList<RecordLink> Nest { get; init; } = [];
+
+    // The shop (economy.md 9.1).
+    /// <summary><c>is trader</c>: the squad trades (a shop needs <see cref="Vendors"/> too).</summary>
+    public bool IsTrader { get; init; }
+    /// <summary><c>vendors</c>: VENDOR_LIST records, v0 the list's weight, v1 its item count (-1 or less: the list's own <c>items count</c>).</summary>
+    public IReadOnlyList<RecordLink> Vendors { get; init; } = [];
+    /// <summary><c>vendors fill total amount</c> as the stock filler reads it: below 1 means 100.</summary>
+    public int VendorsFillTotalAmount { get; init; } = 100;
+    /// <summary><c>vendor money</c>: the purse of a building shop (0 or less: derived from the stock); the squad filler never reads it.</summary>
+    public int VendorMoney { get; init; }
+    /// <summary><c>vendors refresh time</c> in game hours as the restock reads it: 0 or less means 24000.</summary>
+    public float VendorsRefreshTime { get; init; } = 24;
+    /// <summary><c>buy mult</c>: the trader's price factor, both ways (section 6).</summary>
+    public float BuyMult { get; init; } = 1;
+    /// <summary><c>buys stolen</c>: a knowing fence (section 8).</summary>
+    public bool BuysStolen { get; init; }
+    /// <summary><c>buys illegal</c>: a smuggler.</summary>
+    public bool BuysIllegal { get; init; }
+
+    /// <summary>A squad with a shop: <see cref="IsTrader"/> and at least one vendor list.</summary>
+    public bool HasShop => IsTrader && Vendors.Count > 0;
 
     public static SquadTemplate From(GameRecord r)
     {
@@ -56,6 +85,8 @@ public sealed record SquadTemplate
         var leader = r.GetReferences("leader");
         var building = r.GetReferences("building");
         var faction = r.GetReferences("faction");
+        int fill = RecordReading.Int(r, "vendors fill total amount", 15);
+        float refresh = RecordReading.Float(r, "vendors refresh time", 24);
         return new SquadTemplate
         {
             Id = r.StringId,
@@ -81,8 +112,21 @@ public sealed record SquadTemplate
             PatrolApproachesTowns = r.GetBool("patrol approaches towns"),
             ForceSpeed = r.GetInt("force speed"),
             Building = building.Count > 0 ? RecordLink.From(building[0]) : null,
+            Buildings = Links("building"),
+            BuildingDislike = Links("building dislike"),
+            LayoutInterior = r.GetString("layout interior"),
+            LayoutExterior = r.GetString("layout exterior"),
             BuildingDesignation = r.GetInt("building designation"),
+            InitialDoorState = r.GetInt("initial door state"),
             Nest = Links("nest"),
+            IsTrader = RecordReading.Bool(r, "is trader", false),
+            Vendors = Links("vendors"),
+            VendorsFillTotalAmount = fill < 1 ? 100 : fill,
+            VendorMoney = RecordReading.Int(r, "vendor money", 0),
+            VendorsRefreshTime = refresh <= 0 ? 24000 : refresh,
+            BuyMult = RecordReading.Float(r, "buy mult", 1),
+            BuysStolen = RecordReading.Bool(r, "buys stolen", false),
+            BuysIllegal = RecordReading.Bool(r, "buys illegal", false),
         };
     }
 

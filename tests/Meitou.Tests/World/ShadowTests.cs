@@ -9,50 +9,6 @@ public class ShadowTests
     static readonly Vector3 Sun = Vector3.Normalize(new Vector3(0.5f, 0.6f, 0.3f));
 
     [Fact]
-    public void Splits_follow_the_games_practical_scheme_halved()
-    {
-        var s = KenshiShadows.Splits(1, 5000, 4);
-        Assert.Equal(5, s.Length);
-        Assert.Equal(1f, s[0]);
-        Assert.Equal(5000f, s[4]);
-        // 0.5 · (0.95 · 5000^(i/4) + 0.05 · (1 + 4999 · i/4))
-        Assert.Equal(35.27f, s[1], 1);
-        Assert.Equal(96.10f, s[2], 1);
-        Assert.Equal(376.2f, s[3], 0);
-        for (int i = 1; i < s.Length; i++) Assert.True(s[i] > s[i - 1]);
-    }
-
-    [Fact]
-    public void Quality_indexes_the_map_size_table()
-    {
-        Assert.Equal(1024, KenshiShadows.MapSize(0));
-        Assert.Equal(2048, KenshiShadows.MapSize(1));
-        Assert.Equal(4096, KenshiShadows.MapSize(2));
-        Assert.Equal(4096, KenshiShadows.MapSize(9));
-        var settings = new ShadowSettings(2048);
-        Assert.Equal(2, settings.Grid);
-        Assert.Equal(1024, settings.TileSize);
-    }
-
-    [Fact]
-    public void Light_view_looks_away_from_the_sun_and_switches_up_for_a_vertical_sun()
-    {
-        var r = ShadowCascades.LightRotation(Sun);
-        var z = Vector3.Transform(Sun, r);
-        Assert.Equal(-1f, z.Z, 4);   // the sun is at −z: depth grows away from it
-        var up = Vector3.Transform(Vector3.UnitY, r);
-        Assert.Equal(0f, up.X, 4);   // world up stays in the light view's y-z plane
-        Assert.True(up.Y > 0);
-
-        var high = ShadowCascades.LightRotation(Vector3.Normalize(new Vector3(0.05f, 1, 0.1f)));
-        var zAxis = Vector3.Transform(Vector3.UnitZ, high);
-        Assert.Equal(0f, zAxis.X, 4);   // world +Z is the up now
-        Assert.True(zAxis.Y > 0);
-        foreach (var m in new[] { r, high })
-            Assert.Equal(1f, Math.Abs(m.GetDeterminant()), 4);
-    }
-
-    [Fact]
     public void Every_cascade_holds_its_frustum_from_the_near_plane_to_its_split()
     {
         var cascades = ShadowCascades.Fit(Camera, Sun, new ShadowSettings());
@@ -110,98 +66,6 @@ public class ShadowTests
     }
 
     [Fact]
-    public void A_cascade_in_front_of_a_far_near_plane_is_unused_and_the_rest_still_fit()
-    {
-        var far = Camera with { Near = 60 };   // beyond the first split (35)
-        var cascades = ShadowCascades.Fit(far, Sun, new ShadowSettings());
-        Assert.True(cascades[0].Unused);
-        Assert.False(cascades[1].Unused);
-        foreach (var c in cascades.Skip(1))
-            Assert.Equal(ShadowCascades.StableSize(c.NearDepth, c.FarDepth, Camera.FieldOfViewY, Camera.Aspect), c.Extent.X, 3);
-    }
-
-    [Fact]
-    public void Turning_the_camera_keeps_the_cascade_size()
-    {
-        var settings = new ShadowSettings();
-        var a = ShadowCascades.Fit(Camera, Sun, settings);
-        var turned = Camera with { Forward = Vector3.Normalize(new Vector3(-0.8f, -0.2f, 0.3f)) };
-        var b = ShadowCascades.Fit(turned, Sun, settings);
-        for (int i = 0; i < a.Length; i++) Assert.Equal(a[i].Size.X, b[i].Size.X);
-    }
-
-    [Fact]
-    public void The_receiver_matrix_agrees_with_the_double_precision_projection()
-    {
-        var c = ShadowCascades.Fit(Camera, Sun, new ShadowSettings())[1];
-        var origin = Camera.Eye;
-        var m = c.OriginToTile(origin);
-        var p = Camera.Eye + Camera.Forward * 60 + new Vector3(3, -2, 5);
-        var viaMatrix = Vector4.Transform(new Vector4(p - origin, 1), m);
-        var direct = c.Project(p);
-        Assert.Equal(direct.X, viaMatrix.X, 4);
-        Assert.Equal(direct.Y, viaMatrix.Y, 4);
-        Assert.Equal(direct.Z, viaMatrix.Z, 4);
-        // The caster matrix: clip x, y = 2 uv − 1, z = depth.
-        var clip = Vector4.Transform(new Vector4(p, 1), c.WorldToClip());
-        Assert.Equal(direct.X * 2 - 1, clip.X, 2);
-        Assert.Equal(direct.Z, clip.Z, 2);
-    }
-
-    [Fact]
-    public void Cascades_are_picked_by_the_games_clip_z_test()
-    {
-        var cascades = ShadowCascades.Fit(Camera, Sun, new ShadowSettings());
-        var splits = KenshiShadows.Splits(KenshiShadows.SplitNear, KenshiShadows.DefaultRange, 4);
-        const double n = KenshiShadows.CameraNear, f = KenshiShadows.CameraFar;
-        for (int i = 0; i < 4; i++)
-        {
-            // At the selection depth the game's Direct3D clip z, f (d − n) / (f − n), equals csmParams[i].x = split[i + 1] − split[0].
-            double d = cascades[i].SelectDepth;
-            Assert.Equal(splits[i + 1] - splits[0], f * (d - n) / (f - n), 2);
-        }
-        // About the split plus the near clip less the first split (5 − 1).
-        Assert.Equal(splits[1] + 4, cascades[0].SelectDepth, 1);
-    }
-
-    [Fact]
-    public void A_horizontal_light_keeps_world_up()
-    {
-        // Under the horizon the game's lighting direction has its height clamped to 0; the map is still fitted along it.
-        var flat = Vector3.Normalize(new Vector3(0.8f, 0, -0.6f));
-        var r = ShadowCascades.LightRotation(flat);
-        Assert.Equal(1f, Vector3.Transform(Vector3.UnitY, r).Y, 5);
-        Assert.Equal(-1f, Vector3.Transform(flat, r).Z, 5);
-        foreach (var c in ShadowCascades.Fit(Camera, flat, new ShadowSettings()))
-        {
-            Assert.True(double.IsFinite(c.Translation.X) && double.IsFinite(c.Translation.Z));
-            Assert.InRange(c.Project(Camera.Eye + Camera.Forward * c.FarDepth * 0.9f).Z, 0f, 1f);
-        }
-    }
-
-    [Fact]
-    public void Hex12_offsets_are_the_games_with_its_repeated_tap()
-    {
-        var o = KenshiShadows.PcfOffsets;
-        Assert.Equal(KenshiShadows.PcfTaps, o.Length);
-        Assert.Equal(o[1], o[2]);   // the game lists (−0.5, 0.866) twice
-        Assert.DoesNotContain(new Vector2(-0.5f, -0.866025f), o);
-        foreach (var p in o) Assert.InRange(p.Length(), 0.99f, MathF.Sqrt(7) + 1e-4f);
-        // The repeat (in place of its opposite) pulls the mean off the centre: (0, 2 · 0.866) / 12 kernel units.
-        var mean = o.Aggregate(Vector2.Zero, (a, b) => a + b) / o.Length;
-        Assert.Equal(0f, mean.X, 4);
-        Assert.Equal(2 * 0.866025f / 12, mean.Y, 4);
-    }
-
-    [Fact]
-    public void Stable_size_uses_the_games_formula()
-    {
-        double t = Math.Tan(25 * Math.PI / 180), aspect = 1.5, k = aspect * t * aspect * t + 2 * t;
-        double expected = Math.Max(Math.Sqrt(Math.Pow(100 + 35, 2) * k + Math.Pow(100 - 35, 2)), 2 * 100 * Math.Sqrt(k));
-        Assert.Equal(expected, ShadowCascades.StableSize(35, 100, 50 * Math.PI / 180, aspect), 6);
-    }
-
-    [Fact]
     public void Landmark_box_holds_every_landmark_and_its_sunward_side_is_nearer()
     {
         Assert.Null(MeitouShadowFit.FitLandmarks(Sun, [], 4096));
@@ -222,6 +86,49 @@ public class ShadowTests
         Assert.Equal(box.Project(c).X * 2 - 1, clip.X, 3);
         Assert.Equal(box.Project(c).Z, clip.Z, 3);
         Assert.Equal(box.Size.X / 4096, box.Texel, 3);
+    }
+
+    [Theory]
+    [InlineData(6f, 45f)]     // a close-up: the focus sets the first split
+    [InlineData(48f, 900f)]   // a far view: the practical scheme's own first split
+    public void A_fifth_cascade_splits_the_second_slice_and_leaves_the_others_as_with_four(float near, float focus)
+    {
+        float q = MeitouShadowFit.QuantizedNear(near);
+        var four = MeitouShadowFit.Splits(q, 10000, 4, focus);
+        var five = MeitouShadowFit.Splits(q, 10000, 5, focus);
+        Assert.Equal(6, five.Length);
+        Assert.Equal(four[..2], five[..2]);
+        Assert.Equal(four[2..], five[3..]);
+        // The extra split at the second slice's geometric mean.
+        Assert.Equal(MathF.Sqrt(four[1] * four[2]), five[2], 2);
+        if (focus == 45)
+        {
+            // The close-up's numbers (docs/formats/shadows.md): 6, 87, 1016, 2982, 10000 with four; the fifth lands near 300.
+            Assert.InRange(four[1], 80, 95);
+            Assert.InRange(four[2], 950, 1100);
+            Assert.InRange(five[2], 100, 1000);
+        }
+        // Each cascade's box: the far ones (and the first) the same size as with four, as the same slices with the same margins.
+        var settings = new ShadowSettings(4096);
+        var view = Camera with { Near = q, Focus = focus };
+        for (int i = 0; i < 5; i++)
+        {
+            if (i is 1 or 2) continue;
+            int j = i == 0 ? 0 : i - 1;
+            var a = MeitouShadowFit.Fit(view, Sun, settings, four, j);
+            var b = MeitouShadowFit.Fit(view, Sun, settings, five, i);
+            if (i == 3) Assert.True(b.Texel <= a.Texel * 1.0001, $"cascade {i}: {b.Texel} against {a.Texel}");   // its blend band starts later: no larger
+            else Assert.Equal(a.Texel, b.Texel, 6);
+        }
+        // The new cascade 1 is finer than the four's cascade 1 (several times in the close-up, whose second slice is the deepest step).
+        Assert.True(MeitouShadowFit.Fit(view, Sun, settings, five, 1).Texel < MeitouShadowFit.Fit(view, Sun, settings, four, 1).Texel / (focus == 45 ? 2 : 1.2));
+    }
+
+    [Fact]
+    public void The_box_margins_grow_with_the_cadence_and_stay_as_they_were_for_four()
+    {
+        Assert.Equal([0.02f, 0.06f, 0.08f, 0.08f], Enumerable.Range(0, 4).Select(i => MeitouShadowFit.Margin(i, 4)));
+        Assert.Equal([0.02f, 0.04f, 0.06f, 0.08f, 0.08f], Enumerable.Range(0, 5).Select(i => MeitouShadowFit.Margin(i, 5)));
     }
 
     /// <summary>Where a world point falls on cascade 0's texel grid (light-space x and y in texels, from the box's translation).</summary>

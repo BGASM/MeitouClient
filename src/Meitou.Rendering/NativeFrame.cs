@@ -63,7 +63,8 @@ sealed unsafe class NativeFrame : IDisposable
         ];
         SetLayout = ctx.Shaders.CreateSetLayout(bindings, push ? DescriptorSetLayoutCreateFlags.PushDescriptorBitKhr : 0);
         SetLayouts = [SetLayout, ctx.Bindless.Layout];
-        standIns = [.. FrameConstants.Textures.Select(t => FrameGlobals.Sampler2D(t.Name, cube: t.Kind == BindlessKind.Cube, shadow: t.Kind == BindlessKind.Shadow2D))];
+        standIns = [.. FrameConstants.Textures.Select(t => FrameGlobals.Sampler2D(t.Name, cube: t.Kind == BindlessKind.Cube,
+            shadow: t.Kind is BindlessKind.Shadow2D or BindlessKind.ShadowArray, arrayed: t.Kind is BindlessKind.Texture2DArray or BindlessKind.ShadowArray))];
     }
 
     /// <summary>Set 0 of the native model (six uniform buffers; a push-descriptor set where the device has them).</summary>

@@ -1,12 +1,10 @@
-using System.Globalization;
-
 namespace Meitou.Rendering;
 
 /// <summary>
 /// How much video memory the impostor atlases may hold (docs/impostors.md section 10, renderer-native.md 8.16). The default follows the card:
 /// a share of the device-local budget the driver reports (<c>VulkanDevice.VideoMemory</c>, the same figure <see cref="VramGuard"/> works from, so
 /// the atlases and everything else give way together), clamped between a floor and a cap, never more than <see cref="MaxShare"/> of the budget,
-/// and three quarters of that while the guard is under pressure. An explicit <c>--impostor-budget</c> / <c>MEITOU_IMPOSTOR_BUDGET_MB</c> replaces
+/// and three quarters of that while the guard is under pressure. An explicit <c>--impostor-budget</c> replaces
 /// the rule (the pressure factor still applies).
 /// <para>
 /// <b>Integrated GPUs</b> share the system's memory: the "device-local" heap is system RAM (Intel) or a small carve-out (some AMD APUs), and the
@@ -42,8 +40,4 @@ public static class ImpostorBudget
     /// <summary>The limit in force (MB): <paramref name="overrideMb"/> or the default, three quarters of it under pressure.</summary>
     public static double LimitMb(double? overrideMb, long deviceBudgetBytes, bool integrated, bool pressure) =>
         (overrideMb is > 0 ? overrideMb.Value : DefaultMb(deviceBudgetBytes, integrated)) * (pressure ? PressureFactor : 1);
-
-    /// <summary><c>MEITOU_IMPOSTOR_BUDGET_MB</c>, or null.</summary>
-    public static double? FromEnvironment() =>
-        double.TryParse(Environment.GetEnvironmentVariable("MEITOU_IMPOSTOR_BUDGET_MB"), NumberStyles.Float, CultureInfo.InvariantCulture, out double v) && v > 0 ? v : null;
 }

@@ -28,9 +28,12 @@ public sealed class PursuitSystem(CombatSystem combat) : ITickSystem
             var d = next[t].Position - n.Position;
             float gap = MathF.Sqrt(d.X * d.X + d.Z * d.Z) - CombatTuning.Footprint(table.Cold(i)) - CombatTuning.Footprint(table.Cold(t));
             n.TaskTime -= dt;
-            if (st.Down || st.AttackTech >= 0 || st.ReactTech >= 0 || gap <= CombatTuning.CloseInGap)
+            // A crossbowman walks only while closing in (out of range or the line of fire blocked); aiming and reloading it stands.
+            bool shooting = st.Ranged && st.RangedState != (byte)RangedStates.Closing;
+            bool holding = Orders.Has(table.Cold(i), CharacterOrders.Hold);
+            if (st.Down || st.AttackTech >= 0 || st.ReactTech >= 0 || world.Tick < st.StunUntil || shooting || !st.Ranged && gap <= CombatTuning.CloseInGap || holding)
             {
-                // In reach or mid-swing: stand and fight.
+                // In reach, mid-swing or staggered (the hit reaction carries it), or holding position: stand and fight.
                 if ((n.Flags & Path) != 0)
                 {
                     n.Flags = (ushort)(n.Flags & ~Path);
@@ -54,8 +57,10 @@ public sealed class PursuitSystem(CombatSystem combat) : ITickSystem
 
 /// <summary>
 /// A minimal answer to being attacked (an <b>engine rule</b>, the original's AI is stage 9): every <see cref="CheckEveryTicks"/> ticks, a character that is awake, armed with a
-/// <see cref="Fighter"/>, not the player's and not fighting already, and that someone is attacking, issues its own <see cref="AttackOrder"/> against that attacker, and so do its squad mates
-/// within <see cref="JoinRange"/> units of it. Hostile relations do not start fights by themselves.
+/// <see cref="Fighter"/>, not fighting already, and that someone is attacking, fights that attacker, and so do its squad mates within <see cref="JoinRange"/> units of it that are
+/// free too. An NPC always answers; one of the player's characters answers only while it has no order (task <see cref="CharacterTask.Idle"/>: not walking to an order, treating or
+/// resting), so a player who sends a character away is obeyed; the original's Passive toggle (non-combat mode) would turn it off and is not modelled (its default is off).
+/// The orders go into the world's deferred list for the next tick (<see cref="World.Defer"/>) and are marked <see cref="AttackOrder.Defensive"/>.
 /// </summary>
 public sealed class RetaliationSystem(CombatSystem combat) : ITickSystem
 {
@@ -78,21 +83,42 @@ public sealed class RetaliationSystem(CombatSystem combat) : ITickSystem
             if (!CanFight(table, t, taken)) continue;
             var defenders = new List<CharacterId> { new(t, next[t].Generation) };
             taken.Add(t);
-            var squad = table.Cold(t)!.SquadId >= 0 ? world.Squads.Find(table.Cold(t)!.SquadId) : null;
-            if (squad is not null)
-                foreach (var m in squad.Members)
-                {
-                    if (!table.TryResolveNext(m, out int s) || s == t || !CanFight(table, s, taken)) continue;
-                    var d = next[s].Position - next[t].Position;
-                    if (d.X * d.X + d.Z * d.Z > JoinRange * JoinRange) continue;
-                    defenders.Add(m);
-                    taken.Add(s);
-                }
-            world.Commands.Enqueue(new AttackOrder(defenders, attacker) { Tick = world.Tick + 1 });
+            JoinMates(world, table, t, defenders, taken, CanFight);
+            // The Hold order answers only an attacker within reach (Orders.HoldReach).
+            var from = next[a].Position;
+            for (int k = defenders.Count - 1; k >= 0; k--)
+                if (Orders.Has(table.Cold(defenders[k].Slot), CharacterOrders.Hold) && !Orders.InHoldReach(next[defenders[k].Slot].Position, from)) defenders.RemoveAt(k);
+            if (defenders.Count == 0) continue;
+            world.Defer(new AttackOrder(defenders, attacker) { Tick = world.Tick + 1, Defensive = true });
         }
     }
 
-    bool CanFight(CharacterTable table, int slot, HashSet<int> taken) =>
-        !taken.Contains(slot) && table.Next[slot].Task != (byte)CharacterTask.Attack
-        && table.Cold(slot) is { IsPlayer: false, Fighter: not null, Medical: { Incapacitated: false } };
+    /// <summary>
+    /// Adds the squad mates of <paramref name="slot"/> within <see cref="JoinRange"/> of it that <paramref name="free"/> accepts to <paramref name="fighters"/> and to
+    /// <paramref name="taken"/>, in the squad's member order (the join rule retaliation and <see cref="AggroSystem"/> share).
+    /// </summary>
+    public static void JoinMates(World world, CharacterTable table, int slot, List<CharacterId> fighters, HashSet<int> taken, Func<CharacterTable, int, HashSet<int>, bool> free)
+    {
+        var next = table.Next;
+        var squad = table.Cold(slot)!.SquadId >= 0 ? world.Squads.Find(table.Cold(slot)!.SquadId) : null;
+        if (squad is null) return;
+        foreach (var m in squad.Members)
+        {
+            if (!table.TryResolveNext(m, out int s) || s == slot || !free(table, s, taken)) continue;
+            var d = next[s].Position - next[slot].Position;
+            if (d.X * d.X + d.Z * d.Z > JoinRange * JoinRange) continue;
+            fighters.Add(m);
+            taken.Add(s);
+        }
+    }
+
+    static bool CanFight(CharacterTable table, int slot, HashSet<int> taken)
+    {
+        if (taken.Contains(slot)) return false;
+        byte task = table.Next[slot].Task;
+        if (task == (byte)CharacterTask.Attack) return false;
+        if (table.Cold(slot) is not { Fighter.CanAttack: true, Fleeing: false, IsImprisoned: false, Medical.Incapacitated: false, Carrying.IsNone: true } cold) return false;   // a carrier does not answer (the original's engagement weight is 0 while carrying)
+        // The Passive order (non-combat mode) does not answer attacks by itself.
+        return !cold.IsPlayer || task == (byte)CharacterTask.Idle && (cold.Orders & CharacterOrders.Passive) == 0;
+    }
 }

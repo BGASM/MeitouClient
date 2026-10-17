@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace Meitou.Rendering;
 
 /// <summary>
@@ -12,23 +10,10 @@ public static class FogShadingRate
     /// <summary>How far round a tile the nearest surface is looked for, in blocks of 4 pixels: the camera moves between the depth the rates are made from and the frame they are used in.</summary>
     public const int MarginBlocks = 2;
 
-    /// <summary>The opacity from which a tile is shaded 2 x 2, and from which 4 x 4 (<c>MEITOU_FOG_VRS=a,b</c> overrides).</summary>
-    public static readonly (float TwoByTwo, float FourByFour) Thresholds = ParseThresholds(Environment.GetEnvironmentVariable("MEITOU_FOG_VRS"));
+    /// <summary>The opacity from which a tile is shaded 2 x 2, and from which 4 x 4.</summary>
+    public static readonly (float TwoByTwo, float FourByFour) Thresholds = (DefaultTwoByTwo, DefaultFourByFour);
 
     public const float DefaultTwoByTwo = 0.8f, DefaultFourByFour = 0.97f;
-
-    /// <summary>The thresholds of <paramref name="text"/> ("0.6,0.97"); the defaults when it is empty or not two numbers in 0..1 in order.</summary>
-    public static (float TwoByTwo, float FourByFour) ParseThresholds(string? text)
-    {
-        if (!string.IsNullOrWhiteSpace(text))
-        {
-            var parts = text.Split(',');
-            if (parts.Length == 2 && float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float a) &&
-                float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float b) && a is >= 0 and <= 1 && b >= a && b <= 1.0001f)
-                return (a, b);
-        }
-        return (DefaultTwoByTwo, DefaultFourByFour);
-    }
 
     /// <summary>What shows of a surface behind the haze and the volumes is <c>(1 - hazeHidden) * transmittance</c>; this is the rest, how much the air hides.</summary>
     public static float Opacity(float hazeHidden, float transmittance) => 1f - (1f - Math.Clamp(hazeHidden, 0f, 1f)) * Math.Clamp(transmittance, 0f, 1f);

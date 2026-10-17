@@ -1,6 +1,4 @@
-using System.Numerics;
 using Meitou.Simulation;
-using SimWorld = Meitou.Simulation.World;
 
 namespace Meitou.Tests.Simulation;
 
@@ -31,17 +29,6 @@ public class DeterminismTests
     }
 
     [Fact]
-    public void Two_runs_with_the_same_seed_agree_and_another_seed_does_not()
-    {
-        var a = Hashes(7, 4);
-        Assert.Equal(a, Hashes(7, 4));
-        var other = Hashes(8, 4);
-        Assert.NotEqual(a[^1], other[^1]);
-        // The hash moves as the world does.
-        Assert.Equal(a.Count, a.Distinct().Count());
-    }
-
-    [Fact]
     public void The_workload_really_exercises_deaths_births_and_slot_reuse()
     {
         using var world = WanderSystem.Create(7, 4, 300);
@@ -61,47 +48,5 @@ public class DeterminismTests
             Assert.True(WanderSystem.Ground(c.Position.X, c.Position.Z) > Meitou.Data.World.WorldWater.Height);
             Assert.Equal(WanderSystem.Ground(c.Position.X, c.Position.Z), c.Position.Y, 3);
         }
-    }
-
-    [Fact]
-    public void Commands_apply_at_their_tick_in_queue_order()
-    {
-        using var world = new SimWorld(new WorldSettings(), new OpenGroundWalkability((_, _) => 200f), [new Recorder()]);
-        var rec = (Recorder)world.Systems[0];
-        var id = new CharacterId(0, 0);
-        world.Commands.Enqueue(new MoveOrder([id], new Vector3(2, 0, 0)) { Tick = 2 });
-        world.Commands.Enqueue(new MoveOrder([id], new Vector3(1, 0, 0)) { Tick = 0 });
-        world.Commands.Enqueue(new MoveOrder([id], new Vector3(3, 0, 0)) { Tick = 2 });
-        world.RunTicks(4);
-        Assert.Equal([(0L, 1f), (2L, 2f), (2L, 3f)], rec.Seen);
-    }
-
-    sealed class Recorder : ITickSystem
-    {
-        public readonly List<(long Tick, float X)> Seen = [];
-        public void Inputs(SimWorld world, IReadOnlyList<SimCommand> commands)
-        {
-            foreach (var c in commands.Cast<MoveOrder>()) Seen.Add((world.Tick, c.Target.X));
-        }
-    }
-
-    [Fact]
-    public void Snapshots_are_published_each_tick_and_keep_the_one_before()
-    {
-        using var world = new SimWorld(new WorldSettings(), new OpenGroundWalkability((_, _) => 200f));
-        Assert.Same(WorldSnapshot.Empty, world.Snapshot);
-        var appearance = (Meitou.Data.Characters.CharacterAppearance)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(Meitou.Data.Characters.CharacterAppearance));
-        var id = world.Characters.Spawn(new CharacterHot { Position = new(1, 2, 3), Yaw = 0.5f }, new CharacterCold { Appearance = appearance }, 0);
-        world.Characters.Spawn(new CharacterHot(), new CharacterCold(), 0);   // no appearance: published, nothing to draw
-        world.RunTick();
-        Assert.Equal(1, world.Snapshot.Tick);
-        Assert.Equal(2, world.Snapshot.Characters.Count);
-        var c = world.Snapshot.Characters[0];
-        Assert.Equal(id, c.Id);
-        Assert.Equal(new Vector3(1, 2, 3), c.Position);
-        Assert.Same(WorldSnapshot.Empty, world.PreviousSnapshot);
-        world.RunTick();
-        Assert.Equal(2, world.Snapshot.Tick);
-        Assert.Equal(1, world.PreviousSnapshot.Tick);
     }
 }

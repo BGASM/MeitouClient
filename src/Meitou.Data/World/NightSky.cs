@@ -1,4 +1,5 @@
 using System.Numerics;
+using Meitou.Data.Textures;
 
 namespace Meitou.Data.World;
 
@@ -81,4 +82,166 @@ public sealed record SkyPlanet(string Material, string Texture, Vector3 Directio
         new("Moon", "moon_HI.dds", new Vector3(1, 0.3f, -1), 35, 1),
         new("Moon2", "moon2_HI.dds", new Vector3(1, 0.14f, -0.7f), 10, 4.7310f),
     ];
+}
+
+/// <summary>
+/// Meitou's <c>planetshine</c> (docs/formats/sky.md "Planetshine"; the viewer's own feature, the game has nothing like it): the big planet as the
+/// night's light. The planet is a Lambert sphere lit by the sun, so it sends the land the fraction
+/// <c>E / E_sun = A · (Ω / π) · Φ(α)</c> of the sun's irradiance: <c>A</c> its mean albedo, <c>Ω = 2π (1 − cos r)</c> its solid angle, <c>Φ</c> the
+/// Lambert phase function of the phase angle <c>α</c> (sun–planet–observer). The viewer multiplies the ratio by the sun's light in the game's
+/// own units (<see cref="KenshiLighting.SunLight"/>) and a strength. Moon2 (an eighth of the solid angle) is left out.
+/// </summary>
+public static class Planetshine
+{
+    /// <summary>
+    /// Below <see cref="FullBelow"/> the planet is the only light (the game's sun light is zero from −0.093: <see cref="KenshiLighting.Daylight"/>); above
+    /// <see cref="NoneAbove"/> (2.3° under the horizon, the sun still a quarter as bright as at the horizon) it adds nothing; smoothstep between, so the
+    /// planet comes in only as the sun's last light fades, in deep twilight, and never overlaps the light shafts (which end at −0.02).
+    /// </summary>
+    public const float FullBelow = -0.093f, NoneAbove = -0.04f;
+
+    /// <summary>The mean albedo (grey) assumed when the planet's texture is missing: Unknown, a plausible rocky world.</summary>
+    public const float FallbackAlbedo = 0.3f;
+
+    /// <summary>The first mip level at most this wide is averaged for the albedo (a 4096-wide map: level 5, 128 × 64).</summary>
+    const int AlbedoWidth = 128;
+
+    /// <summary>
+    /// The phase angle in radians: at the planet, between the directions to the sun and to the observer. Both are far away, so the sun's direction
+    /// <paramref name="sun"/> (from the observer) is also the direction from the planet, and the observer lies in <c>−towardsPlanet</c>:
+    /// <c>cos α = −sun · towardsPlanet</c>. 0 with the sun behind the observer (a full planet), π with the sun behind the planet (new).
+    /// </summary>
+    public static float PhaseAngle(Vector3 sun, Vector3 towardsPlanet) =>
+        MathF.Acos(Math.Clamp(-Vector3.Dot(Vector3.Normalize(sun), Vector3.Normalize(towardsPlanet)), -1, 1));
+
+    /// <summary>The Lambert sphere's phase function, <c>(sin α + (π − α) cos α) / π</c>: 1 at α = 0, 0 at α = π.</summary>
+    public static float LambertPhase(float alpha) => (MathF.Sin(alpha) + (MathF.PI - alpha) * MathF.Cos(alpha)) / MathF.PI;
+
+    /// <summary>The solid angle in steradians of a disc of angular radius <paramref name="radius"/> (radians): <c>2π (1 − cos r)</c>.</summary>
+    public static float SolidAngle(float radius) => 2 * MathF.PI * (1 - MathF.Cos(radius));
+
+    /// <summary>The planet's irradiance on a surface facing it, over the sun's: <c>albedo · Ω / π · Φ(α)</c>.</summary>
+    public static float IrradianceRatio(float albedo, float solidAngle, float alpha) => albedo * solidAngle / MathF.PI * LambertPhase(alpha);
+
+    /// <summary>
+    /// The planet's light in the unit of <paramref name="sunLight"/> (the game's <c>uAtmoSunLight</c> scale), for the sun in direction <paramref name="sun"/>:
+    /// <c>sunLight · albedo · Ω / π · Φ(α) · strength</c>, the albedo per colour channel.
+    /// </summary>
+    public static Vector3 Light(Vector3 sun, SkyPlanet planet, Vector3 albedo, float sunLight, float strength) =>
+        sunLight * strength * albedo * IrradianceRatio(1, SolidAngle(planet.AngularRadius), PhaseAngle(sun, planet.Towards));
+
+    /// <summary>
+    /// The radiance of the planet's disc, without any strength: what a mirror shows of it, and what the water's glint should be (the strength-scaled light is an
+    /// irradiance boosted 60 times, a hot spot where the planet itself is dim). The sky pass draws <c>albedo · saturate(n · sun)</c>, brightest at the disc's centre
+    /// (<c>cos α</c>), but that centre reaches the terminator at a quarter phase and is dark from there while a lit crescent remains; the glint stands for the whole disc, so
+    /// it takes the Lambert phase function instead (<c>albedo · Φ(α)</c>, the same Φ the land's light uses): 1 for a full disc, 0.32 at a quarter, 0 for a new planet.
+    /// </summary>
+    public static Vector3 DiscRadiance(Vector3 sun, SkyPlanet planet, Vector3 albedo) =>
+        albedo * MathF.Max(LambertPhase(PhaseAngle(sun, planet.Towards)), 0);   // the phase function is a hair negative (1e-8) at a new planet
+
+    /// <summary>
+    /// How much of the planet's light the lighting takes at the sun's height <paramref name="sunY"/>: 1 up to <see cref="FullBelow"/>, 0 from
+    /// <see cref="NoneAbove"/>, smoothstep between.
+    /// </summary>
+    public static float Weight(float sunY)
+    {
+        float t = Math.Clamp((sunY - FullBelow) / (NoneAbove - FullBelow), 0, 1);
+        return 1 - t * t * (3 - 2 * t);
+    }
+
+    /// <summary>
+    /// The one directional light that stands for the sun and the planet together: the colours add, the direction is the two directions
+    /// weighted by the square root of their luminance (it follows whichever is brighter, and the square root, against the luminance itself, spreads
+    /// the swing over twice as much of the sun's fade so the shadows turn rather than snap). With no planet light the sun's direction and colour
+    /// come back unchanged. Both directions are unit vectors.
+    /// </summary>
+    public static (Vector3 Direction, Vector3 Light) Combine(Vector3 sunDirection, Vector3 sunLight, Vector3 planetDirection, Vector3 planetLight)
+    {
+        float s = Luminance(sunLight), p = Luminance(planetLight);
+        if (p <= 0) return (sunDirection, sunLight);
+        var d = sunDirection * MathF.Sqrt(s) + planetDirection * MathF.Sqrt(p);
+        return (d.LengthSquared() > 1e-12f ? Vector3.Normalize(d) : planetDirection, sunLight + planetLight);
+    }
+
+    /// <summary>Rec. 709 luminance of a linear colour.</summary>
+    public static float Luminance(Vector3 c) => 0.2126f * c.X + 0.7152f * c.Y + 0.0722f * c.Z;
+
+    /// <summary>
+    /// The mean colour of an equirectangular planet map as the sky shader samples it (raw texel values 0..1, not linearised): each row weighted by
+    /// <c>sin(v · π)</c>, the sphere's area in it, so the poles do not count more than the equator.
+    /// </summary>
+    public static Vector3 MeanAlbedo(RgbaImage map)
+    {
+        double r = 0, g = 0, b = 0, total = 0;
+        for (int y = 0; y < map.Height; y++)
+        {
+            double w = Math.Sin(Math.PI * (y + 0.5) / map.Height);
+            for (int x = 0; x < map.Width; x++)
+            {
+                int i = (y * map.Width + x) * 4;
+                r += map.Pixels[i] * w; g += map.Pixels[i + 1] * w; b += map.Pixels[i + 2] * w;
+                total += w;
+            }
+        }
+        return total > 0 ? new Vector3((float)(r / total), (float)(g / total), (float)(b / total)) / 255f : new Vector3(FallbackAlbedo);
+    }
+
+    /// <summary>The mean albedo of a planet DDS, from the first level at most 128 wide (see <see cref="MeanAlbedo(RgbaImage)"/>).</summary>
+    public static Vector3 MeanAlbedo(DdsFile dds)
+    {
+        int level = 0;
+        while (level < dds.MipCount - 1 && (dds.Width >> level) > AlbedoWidth) level++;
+        return MeanAlbedo(DdsDecoder.Decode(dds, 0, level));
+    }
+}
+
+/// <summary>
+/// Meitou's <c>night</c> switch, "night air" (docs/formats/sky.md "Night air"; the viewer's own feature, the game has nothing like it). The game's haze
+/// colour is SkyX's sunlit in-scattering, which is black once the sun is down, so everything past 0.6 D fades to black against a black sky. Meitou gives
+/// the air a faint radiance of its own at night: airglow, plus the big planet's light scattered by the air. The haze fades the far land into it and the
+/// sky adds the same colour above the horizon, falling off with the height, so the two meet without a seam. This class is the reference for the numbers
+/// the shaders get; the arithmetic is in <c>AtmosphereShaders</c> (<c>atmoNightAir</c>).
+/// </summary>
+public static class NightAir
+{
+    /// <summary>The air's own faint glow (HDR, in the units of the haze colour; cool, a little green): luminance 0.043, under the 0.069 an up-facing surface of albedo 0.3 gets from the night's flat ambient (and it shows darker still after the night grade).</summary>
+    public static readonly Vector3 Airglow = new(0.030f, 0.045f, 0.068f);
+
+    /// <summary>
+    /// The share of the planet's light (in the light units of <see cref="Planetshine.Light"/>, luminance) the air sends back towards the eye, and its colour
+    /// (the air is blue: Rayleigh). Unknown physically; chosen by eye so that a gibbous planet adds about half the airglow and a thin crescent next to nothing.
+    /// </summary>
+    public const float PlanetGain = 0.25f;
+    public static readonly Vector3 PlanetTint = new(0.8f, 1.0f, 1.4f);
+
+    /// <summary>The height (the sine of the elevation) over which the glow falls to 1/e above the horizon: 11.5° is 0.2, so 10° keeps 0.4 of it and 30° a twentieth.</summary>
+    public const float FalloffHeight = 0.2f;
+
+    /// <summary>
+    /// The night air's colour at the horizon at full night: <see cref="Airglow"/> plus <see cref="PlanetGain"/> times the planet's light (its luminance, as
+    /// <paramref name="planetLight"/> in the unit <see cref="Planetshine.Light"/> gives) in <see cref="PlanetTint"/>. A thin crescent (light near 0) leaves the airglow.
+    /// </summary>
+    public static Vector3 Colour(Vector3 planetLight) => Airglow + PlanetGain * Planetshine.Luminance(planetLight) * PlanetTint;
+
+    /// <summary>
+    /// How much night air there is at the sun's height <paramref name="sunY"/>: the planetshine's deep-twilight window (1 up to −0.093, 0 from −0.04, smoothstep
+    /// between), so the sunlit haze fades out as the sun's last light does and the night air comes in while it does, never over the daylight.
+    /// </summary>
+    public static float Weight(float sunY) => Planetshine.Weight(sunY);
+
+    /// <summary>The glow's share at the direction's height <paramref name="y"/> (its sine of elevation): 1 at and below the horizon, <c>exp(−y / FalloffHeight)</c> above it.</summary>
+    public static float HorizonFalloff(float y) => MathF.Exp(-MathF.Max(y, 0) / FalloffHeight);
+
+    /// <summary>
+    /// The height (sine of elevation) over which the air in front of a planet thins to 1/e above the horizon. The air hides all of a planet's light at the horizon
+    /// (times the haze's strength, as it does for far land) and less above it. Chosen by eye, no physical basis: a body low over the horizon fades into the glow as
+    /// far hazed ridges do, one 20 degrees up barely.
+    /// </summary>
+    public const float VeilHeight = 0.15f;
+
+    /// <summary>The share of a planet's light the night air in front of it hides, towards a direction of height <paramref name="y"/> at the sun's height <paramref name="sunY"/> (0 by day and in Faithful, where the planet is drawn as the game does).</summary>
+    public static float PlanetVeil(float sunY, float y, float hazeStrength = 1f) => Math.Clamp(Weight(sunY) * hazeStrength * MathF.Exp(-MathF.Max(y, 0) / VeilHeight), 0, 1);
+
+    /// <summary>The night air's radiance towards a direction of height <paramref name="y"/> at the sun's height <paramref name="sunY"/>: what the haze adds to its colour and the sky to its own.</summary>
+    public static Vector3 Radiance(Vector3 planetLight, float sunY, float y) => Colour(planetLight) * (Weight(sunY) * HorizonFalloff(y));
 }

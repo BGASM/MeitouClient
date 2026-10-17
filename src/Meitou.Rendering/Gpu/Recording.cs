@@ -36,7 +36,7 @@ public sealed class JobPool<T> where T : RecordJob, new()
 }
 
 /// <summary>
-/// The recording switch (<c>MEITOU_RECORD_THREADS</c>, docs/viewer.md): how a native host's guests are recorded.
+/// The recording switch (the bench's record-threads switch, docs/viewer.md): how a native host's guests are recorded.
 /// </summary>
 public static class Recording
 {
@@ -45,21 +45,16 @@ public static class Recording
     /// instances take secondary command buffers, recorded one after the other on the render thread (the multithreaded commands, serially: tells
     /// a secondary-buffer difference from a race). 2 (the default; any other value): the secondaries are recorded on the job threads.
     /// </summary>
-    public static int Mode { get; set; } = Environment.GetEnvironmentVariable("MEITOU_RECORD_THREADS") switch
-    {
-        "0" => 0,
-        "1" => 1,
-        _ => 2,
-    };
+    public static int Mode { get; set; } = 2;
 
     /// <summary>Hosts open their rendering with secondaries (modes 1 and 2).</summary>
     public static bool Secondaries => Mode > 0;
 
     /// <summary>
     /// In mode 2, a pass whose jobs record fewer draws than this (<see cref="RecordJob.Size"/> summed) is recorded on the render thread as in mode 1:
-    /// waking the job threads costs more than a few draws (<c>MEITOU_RECORD_MIN_DRAWS</c>, default 32; 0 always threads).
+    /// waking the job threads costs more than a few draws (32; 0 always threads).
     /// </summary>
-    public static int MinThreadedDraws { get; set; } = int.TryParse(Environment.GetEnvironmentVariable("MEITOU_RECORD_MIN_DRAWS"), out int n) ? n : 32;
+    public static int MinThreadedDraws { get; set; } = 32;
 }
 
 /// <summary>
@@ -133,7 +128,6 @@ public sealed class ParallelPass
         RenderJobs.AssertNotInJob();
         if (!Open || inline is not null) throw new InvalidOperationException("ParallelPass.BeginInline outside the pass or inside another inline segment");
         var list = ctx.Frame.BeginSecondary(formats);
-        list.Log = ctx.Log;
         list.BeginLabel(label);
         ctx.Frame.Stats.NativeSegments++;
         return inline = list;
@@ -158,7 +152,7 @@ public sealed class ParallelPass
     {
         if (!Open) throw new InvalidOperationException("ParallelPass.End without Begin");
         if (inline is not null) throw new InvalidOperationException("ParallelPass.End with an inline segment open");
-        bool threaded = Recording.Mode >= 2 && ctx.Log is null && jobCount > 1 && work >= Recording.MinThreadedDraws;
+        bool threaded = Recording.Mode >= 2 && jobCount > 1 && work >= Recording.MinThreadedDraws;
         if (threaded) RenderJobs.For(jobCount, recordOne);
         else for (int k = 0; k < jobCount; k++) RecordEntry(jobs[k], threaded: false);
         if (handles.Length < count) handles = new CommandBuffer[Math.Max(count, handles.Length * 2)];
@@ -191,7 +185,6 @@ public sealed class ParallelPass
         try
         {
             var list = ctx.Frame.BeginSecondary(formats);
-            list.Log = threaded ? null : ctx.Log;
             list.BeginLabel(e.Label);
             e.Job!.Record(list);
             list.EndLabel();

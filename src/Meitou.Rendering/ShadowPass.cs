@@ -10,9 +10,10 @@ namespace Meitou.Rendering;
 
 /// <summary>
 /// The sun's shadow map as the game's CSM mode draws it (docs/formats/shadows.md): four cascades fitted by <see cref="ShadowCascades"/>
-/// (Meitou.Data, backend-independent) in the tiles of one square depth atlas, the casters drawn by the renderers' depth-only entry points
-/// through <see cref="CasterDraw"/>. This class is the thin GPU part: the atlas, the caster state, the uniform blocks the receivers read
-/// (<see cref="ShadowShaders.Functions"/>), timing and the debug views.
+/// (Meitou.Data, backend-independent) in the tiles of the game's square atlas, the one layer of a 2D depth array (the Meitou shadows put each of
+/// their cascades in a layer of its own, the size of a tile), the casters drawn by the renderers' depth-only entry points through
+/// <see cref="CasterDraw"/>. This class is the thin GPU part: the cascade array,
+/// the caster state, the uniform blocks the receivers read (<see cref="ShadowShaders.Functions"/>), timing and the debug views.
 /// </summary>
 public sealed unsafe partial class ShadowPass : IDisposable
 {
@@ -32,9 +33,9 @@ public sealed unsafe partial class ShadowPass : IDisposable
     bool atlasPublished, noiseUploaded;
     byte[]? noisePixels;
     (int Width, int Height) noiseSize;
-    int atlasSize;
+    int atlasSize, atlasLayers;   // one layer's side and the layers of the cascade array (Faithful: the game's atlas, one layer; Meitou: a tile-sized layer per cascade)
     LegacyProgram? debugProgram, atlasProgram;   // the debug views (native, made on first use)
-    UniformHandle debugInverse, debugEye, debugMode;
+    UniformHandle debugInverse, debugEye, debugMode, atlasLayersHandle, atlasGridHandle;
     SamplerSlot debugDepth, atlasSlot;
     Texture? sceneDepth;
     SampledTexture sceneDepthSampled;
@@ -54,7 +55,7 @@ public sealed unsafe partial class ShadowPass : IDisposable
 
     /// <summary>
     /// The shadow blocks and maps as frame globals (docs/renderer-native.md 4.3), native: they replace what <see cref="ShadowShaders"/> publishes
-    /// from GL's binding points and units (still the source without a ShadowPass: --no-shadows, the model viewer). A texture appears where the GL
+    /// from GL's binding points and units (still the source without a ShadowPass: the model viewer). A texture appears where the GL
     /// code bound it to its unit (the atlas with the receiver block, the noise from the first frame, the terrain and blocker maps with the Meitou
     /// block when they are on); before that the readers get the stand-in.
     /// </summary>
@@ -84,6 +85,18 @@ public sealed unsafe partial class ShadowPass : IDisposable
     public VramGuard? Guard { get; set; }
     /// <summary>The distance past which the weather fog hides everything (<see cref="FogVolumes.AtmosphereDistance"/>), set each frame by the caller; shortens the range in Meitou mode.</summary>
     public float? RangeCap { get; set; }
+    /// <summary>On: the range is also capped at the placed fog block's hide distance (<see cref="SetFogHide"/>); the <c>shadow-fogcap</c> A/B switch.</summary>
+    public bool FogCapEnabled { get; set; } = true;
+    readonly ShadowFogCap fogCapState = new();
+    /// <summary>The cap from the placed fog block this frame (<see cref="ShadowFogCap"/>), null for none.</summary>
+    public float? FogCap { get; private set; }
+
+    /// <summary>Called once a frame with <see cref="FogVolumes.ShadowHideDistance"/> (null: none) and <see cref="FogVolumes.ShadowHidePending"/>.</summary>
+    internal void SetFogHide(float? hide, bool pending = false)
+    {
+        if (!FogCapEnabled) { fogCapState.Reset(); FogCap = null; return; }
+        FogCap = fogCapState.Update(hide, pending);
+    }
     /// <summary>The range the cascades are fitted to and the casters are culled by: <see cref="Settings"/>' range, clamped by the guard.</summary>
     public float EffectiveRange
     {
@@ -91,6 +104,7 @@ public sealed unsafe partial class ShadowPass : IDisposable
         {
             float range = Settings.Range, scale = Guard?.RangeScale ?? 1f;
             if (Meitou && RangeCap is { } cap) range = MathF.Min(range, cap);   // beyond the weather fog's distance nothing shows (FogVolumes.AtmosphereDistance)
+            if (Meitou && FogCap is { } fog) range = MathF.Min(range, fog);   // and beyond the placed fog block's hide distance (FogVolumes.ShadowHideDistance)
             return scale >= 1f ? range : Math.Max(Math.Min(range, KenshiShadows.DefaultRange), range * scale);
         }
     }
@@ -105,8 +119,10 @@ public sealed unsafe partial class ShadowPass : IDisposable
     public bool HasNoise => noise is not null;
     /// <summary>The cascades of the last frame (null when nothing was drawn).</summary>
     public ShadowCascade[]? Cascades { get; private set; }
-    /// <summary>The atlas (native; null before the first frame).</summary>
+    /// <summary>The cascade array: the game's atlas as its one layer (Faithful) or a layer per cascade (Meitou) (native; null before the first frame).</summary>
     public Texture? AtlasTexture => atlas;
+    /// <summary>How many cascades the mode in use draws: the game's (<see cref="ShadowSettings.Cascades"/>, 4) for the Faithful CSM, <see cref="MeitouCascades"/> for the Meitou shadows.</summary>
+    public int CascadeCount => Meitou ? MeitouCascades : Math.Clamp(Settings.Cascades, 1, ShadowSettings.MaxCascades);
     public double CpuMs { get; private set; }
     public double GpuMs { get; private set; }
     /// <summary>What the caster callback drew in the last frame (for the log).</summary>
@@ -114,8 +130,12 @@ public sealed unsafe partial class ShadowPass : IDisposable
     /// <summary>CPU time of the callback's parts (terrain, objects, foliage) summed over the cascades of the last frame.</summary>
     public readonly double[] PhaseMs = new double[3];
 
-    /// <summary>Size of the receiver block (std140) the shaders declare in <see cref="ShadowShaders.Functions"/>.</summary>
-    public const int ReceiverBytes = 560;
+    /// <summary>Size of the receiver block (std140) the shaders declare in <see cref="ShadowShaders.Functions"/>: four per-cascade arrays of
+    /// <see cref="ShadowSettings.MaxCascades"/> (a mat4 and three vec4 each), a mat4 and three vec4.</summary>
+    public const int ReceiverBytes = (28 * ShadowSettings.MaxCascades + 28) * 4;
+    // Float offsets of the receiver block's members.
+    const int RectAt = 16 * ShadowSettings.MaxCascades, CascadeAt = 20 * ShadowSettings.MaxCascades, ExtentAt = 24 * ShadowSettings.MaxCascades,
+        LightAt = 28 * ShadowSettings.MaxCascades, OriginAt = LightAt + 16, ForwardAt = LightAt + 20, AtlasAt = LightAt + 24;
 
     /// <summary>
     /// Draws the cascades for this camera and light, then publishes them to the receivers.
@@ -133,7 +153,9 @@ public sealed unsafe partial class ShadowPass : IDisposable
         meitouValid = false;
         var watch = Stopwatch.StartNew();
         Array.Clear(PhaseMs);
-        Resize(Settings.MapSize);
+        // The game's atlas as the array's one layer, the tiles where the game puts them: a cascade drawn at another place in its target
+        // rasterises a few edge texels differently (window coordinates round differently), so per-cascade layers could not be pixel-identical.
+        Resize(Settings.MapSize, 1);
         var cascades = ShadowCascades.Fit(view, Vector3.Normalize(toSun), Effective);
         timer.Begin();
 
@@ -159,14 +181,16 @@ public sealed unsafe partial class ShadowPass : IDisposable
     void SetCasterBias(in Vector4 bias) => casterBias.Set([bias.X, bias.Y, bias.Z, bias.W]);
 
     /// <summary>
-    /// Opens the atlas's rendering as a native host (docs/renderer-native.md 4.5): the caller has the atlas framebuffer bound and the GL state its
-    /// guests read set, and the guests (terrain, objects, foliage, all native) record into the returned list's rendering instance through
-    /// <c>BeginNativeInPass</c>, which finds the host. <paramref name="clear"/>: the whole atlas is cleared by the load op (else it is loaded).
+    /// Opens a rendering of one cascade's layer (or of <paramref name="target"/>, the landmark map) as a native host (docs/renderer-native.md 4.5):
+    /// the guests (terrain, objects, foliage, all native) record into the returned list's rendering instance through <c>BeginNativeInPass</c>,
+    /// which finds the host. <paramref name="clear"/>: the layer is cleared by the load op (else it is loaded).
     /// </summary>
-    CommandList BeginHost(string label, bool clear, Texture? target = null)
+    CommandList BeginHost(string label, bool clear, Texture? target = null, int layer = 0)
     {
         var cmd = Gpu.BeginNative(label);
-        var t = PassTargets.Of(null, target ?? atlas!);
+        var map = target ?? atlas!;
+        var t = PassTargets.Of(null, map);
+        if (layer != 0) t = t with { Depth = new RenderTarget(map.Attachment(0, layer), AttachmentLoadOp.Load, default, map.Image) };
         var depth = clear ? t.Depth with { Load = AttachmentLoadOp.Clear, Clear = new ClearValue(depthStencil: new ClearDepthStencilValue(1f, 0)) } : t.Depth;
         // Wave 4 (docs/renderer-native.md 6): the cascades' segments are secondaries, recorded on the job threads when the host ends.
         bool secondaries = Recording.Secondaries;
@@ -183,15 +207,12 @@ public sealed unsafe partial class ShadowPass : IDisposable
     DrawState CasterState(in AttachmentFormats formats) =>
         DrawState.For(formats, Gpu.Device.DepthClamp, depthTest: true, depthWrite: true, compare: CompareOp.Less, mask: 0, depthClamp: true);
 
-    /// <summary>The cascade's tile of the atlas: the viewport and scissor the casters draw with.</summary>
+    /// <summary>The viewport and scissor the casters draw with (a whole layer, or the landmark map).</summary>
     void SetTile(int x, int y, int s) =>
         Gpu.SetPassViewport(new Viewport(x, y, s, s, 0, 1), new Rect2D(new Offset2D(x, y), new Extent2D((uint)s, (uint)s)));
 
     /// <summary>The <see cref="StageClock"/> stage of the shadow casters' jobs.</summary>
     const int ShadowStage = 12;
-
-    /// <summary>A partial clear of the atlas (a Meitou tile) in its place among the guests (<see cref="GpuContext.ClearDepth"/>).</summary>
-    void ClearTile(CommandList host, Rect2D rect) => Gpu.ClearDepth(host, 1f, rect);
 
     void EndHost(CommandList cmd)
     {
@@ -213,18 +234,20 @@ public sealed unsafe partial class ShadowPass : IDisposable
     {
         var data = new float[ReceiverBytes / 4];
         var origin = view.Eye;
-        for (int i = 0; i < cascades.Length && i < 4; i++)
+        int count = Math.Min(cascades.Length, ShadowSettings.MaxCascades);
+        for (int i = 0; i < count; i++)
         {
             var c = cascades[i];
             Put(data, i * 16, c.OriginToTile(origin));
-            Put(data, 64 + i * 4, c.Tile);
-            Put(data, 80 + i * 4, new Vector4(c.SelectDepth, c.FilterRadius, c.Size.X, c.Size.Y));
-            Put(data, 96 + i * 4, new Vector4(c.Size.Z, 1f / Settings.TileSize, 0, 0));
+            Put(data, RectAt + i * 4, c.Tile);
+            Put(data, CascadeAt + i * 4, new Vector4(c.SelectDepth, c.FilterRadius, c.Size.X, c.Size.Y));
+            Put(data, ExtentAt + i * 4, new Vector4(c.Size.Z, 1f / Settings.TileSize, 0, 0));
         }
-        Put(data, 112, cascades[0].Rotation);
-        Put(data, 128, new Vector4(origin, 1));
-        Put(data, 132, new Vector4(Vector3.Normalize(view.Forward), Math.Min(cascades.Length, 4)));
-        Put(data, 136, new Vector4(atlasSize, 0, noise is not null ? 1 : 0, 0));
+        Put(data, LightAt, cascades[0].Rotation);
+        Put(data, OriginAt, new Vector4(origin, 1));
+        Put(data, ForwardAt, new Vector4(Vector3.Normalize(view.Forward), count));
+        // x: the game's atlas (layer 0 of the array), y: one tile.
+        Put(data, AtlasAt, new Vector4(atlasSize, Settings.TileSize, noise is not null ? 1 : 0, 0));
         Upload(data);
     }
 
@@ -277,12 +300,15 @@ public sealed unsafe partial class ShadowPass : IDisposable
 
     static void Put(float[] d, int at, Vector4 v) { d[at] = v.X; d[at + 1] = v.Y; d[at + 2] = v.Z; d[at + 3] = v.W; }
 
-    void Resize(int size)
+    /// <summary>The cascade array: <paramref name="layers"/> layers of <paramref name="size"/>² (made again when either changes, e.g. the F5 toggle
+    /// between the Faithful and Meitou counts).</summary>
+    void Resize(int size, int layers)
     {
-        if (size == atlasSize && atlas is not null) return;
+        if (size == atlasSize && layers == atlasLayers && atlas is not null) return;
         FreeAtlas();
-        atlasSize = size;
-        atlas = Texture.Create(Gpu, new TextureDesc(Format.D32Sfloat, size, size, Use: TextureUse.Sampled | TextureUse.DepthTarget, Name: "shadow atlas"));
+        (atlasSize, atlasLayers) = (size, layers);
+        atlas = Texture.Create(Gpu, new TextureDesc(Format.D32Sfloat, size, size, Layers: layers, Kind: TextureKind.Texture2DArray,
+            Use: TextureUse.Sampled | TextureUse.DepthTarget, Name: "shadow atlas"));
         // Linear comparison: the faithful receiver reads texel centres, where the weights are 1, 0, 0, 0 (the game's point sampling);
         // other receivers may use the bilinear weights. The plain sampler (no comparison) is the blocker pass's and the debug view's.
         atlasShadow = Sampled(atlas, TextureMinFilter.Linear, TextureMagFilter.Linear, TextureWrapMode.ClampToEdge, compare: true);
@@ -357,7 +383,7 @@ public sealed unsafe partial class ShadowPass : IDisposable
             var d = debugProgram = LegacyProgram.Create(Gpu, ShadowShaders.FullscreenVertex, ShadowShaders.DebugFragment, "shadow debug");
             (debugInverse, debugEye, debugMode, debugDepth) = (d.Uniform("uInverse"), d.Uniform("uEye"), d.Uniform("uMode"), d.Sampler("uSceneDepth"));
             var a = atlasProgram = LegacyProgram.Create(Gpu, ShadowShaders.FullscreenVertex, ShadowShaders.AtlasFragment, "shadow atlas debug");
-            atlasSlot = a.Sampler("uAtlas");
+            (atlasSlot, atlasLayersHandle, atlasGridHandle) = (a.Sampler("uAtlas"), a.Uniform("uLayers"), a.Uniform("uGrid"));
         }
         // The draws' state: every channel, no depth test or write, no culling, no blending (what the post-processing leaves), the multiply for
         // mode 3, blending off for the atlas after the scene view.
@@ -380,10 +406,12 @@ public sealed unsafe partial class ShadowPass : IDisposable
         }
         if ((mode == 1 || mode == 2) && atlas is not null)
         {
-            // The atlas in the lower right corner, plain depth values (a plain sampler never compares).
+            // The cascade layers in the lower right corner as the game's atlas, plain depth values (a plain sampler never compares).
             int side = Math.Min(width, height) / (mode == 1 ? 2 : 3);
             var p = atlasProgram!;
             p.Bind(atlasSlot, atlasPlain);
+            p.Set(atlasLayersHandle, atlasLayers);
+            p.Set(atlasGridHandle, atlasLayers == 1 ? Settings.Grid : (int)Math.Ceiling(Math.Sqrt(atlasLayers)));
             DrawFullscreen(cmd, p, t, scene ? state with { Blend = BlendState.Off } : state, new Viewport(width - side - 8, 8, side, side, 0, 1), "shadow atlas debug");
         }
         cmd.EndRendering();

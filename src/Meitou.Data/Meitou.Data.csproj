@@ -14,5 +14,4 @@
     <PackageReference Include="StbImageSharp" Version="2.30.16" />
     <PackageReference Include="NVorbis" Version="0.10.5" />
   </ItemGroup>
-  <Import Project="LayoutCodeHash.targets" />
 </Project>

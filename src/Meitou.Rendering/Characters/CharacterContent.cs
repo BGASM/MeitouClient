@@ -1,9 +1,11 @@
+using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Meitou.Content;
 using Meitou.Data;
 using Meitou.Data.Characters;
 using Meitou.Data.Fcs;
+using Meitou.Data.Gameplay;
 using Meitou.Data.Ogre;
 using Meitou.Rendering.Gpu;
 
@@ -20,15 +22,23 @@ internal sealed class AssetPart
     public Matrix4x4 Offset = Matrix4x4.Identity;
     /// <summary>Index among the character's bone-attached parts (the matrices <see cref="CharacterRenderer"/> keeps per frame); -1 for shared parts.</summary>
     public int AttachIndex = -1;
+    /// <summary>Only while the weapon in hand is sheathed or drawn (<see cref="CharacterPart.Shown"/>).</summary>
+    public WeaponShown Shown;
+    public bool ShowsWith(bool weaponDrawn) => Shown == WeaponShown.Always || (Shown == WeaponShown.Drawn) == weaponDrawn;
     public required PartMaterial Material;
     /// <summary>The mesh file's bounds (the LOD value's centre and radius), in the part's own space.</summary>
     public required Vector3 BoundsCentre;
     public required float BoundsRadius;
+    /// <summary>Boxes round the mesh for picking (<see cref="PickBox"/>): one per bone of a skinned part, one for an unskinned one.</summary>
+    public PickBox[] PickBoxes = [];
     // This frame's slot in the material table (CharacterRenderer.Update).
     public long MaterialFrame = -1;
     public int MaterialSlot;
     /// <summary>The body mesh, whose vertices take the asset's morph.</summary>
     public bool Morphed;
+    /// <summary>The mesh's shadow-only levels (null: the shadow passes pick among the picture's levels): their distances, level 0 first (the original), and the mesh level the first of them is.</summary>
+    public float[]? ShadowDistances;
+    public int ShadowFirst;
     /// <summary>Nearest distance of a user this frame, for the textures' mip streaming.</summary>
     public float Near;
     float uvScale;
@@ -82,6 +92,14 @@ internal sealed class CharacterAsset
     public string Idle = "idle_stand_relax";
     /// <summary>A sphere round the standing character in its own space (centre height, radius) for culling.</summary>
     public float Height = 20, Radius = 16;
+    /// <summary>An animal (<see cref="CharacterAppearance.Animal"/>): its layers are its own skeleton's clips (<see cref="SkeletonRig.Layer"/>), its sphere from the body mesh's bounds.</summary>
+    public bool Animal;
+    /// <summary>How far the body shape lifts the feet in the bind pose (negative: sinks them); the renderer lowers the character by it.</summary>
+    public float GroundOffset;
+    /// <summary>The skeleton's <c>Bip01 Head</c> (-1: none), which the portrait camera looks at.</summary>
+    public int HeadBone = -1;
+    /// <summary>An item's inventory icon (<see cref="CharacterContent.BuildIcon"/>): one unskinned part, no body (<see cref="Appearance"/> and <see cref="Rig"/> are null) and nothing to pose.</summary>
+    public bool IsIcon;
 }
 
 /// <summary>
@@ -97,16 +115,18 @@ internal sealed class CharacterContent : IDisposable
     readonly GameDatabase db;
     readonly MaterialResolver resolver;
     public WorldTextureCache Textures { get; }
-    readonly Dictionary<string, SkeletonRig> rigs = new(StringComparer.OrdinalIgnoreCase);
     readonly Dictionary<(string Path, int Bones), LoadedMesh?> meshes = [];
     public List<string> Messages { get; } = [];
     public long MeshBytes { get; private set; }
     public int MeshCount => meshes.Count;
+    /// <summary>The render's pixels per radian (<see cref="CharacterRenderer.SetView"/>) when a mesh loads: its generated levels are placed by it and keep their distances after a resize.
+    /// Until the first view: 1080 rows at 50 degrees.</summary>
+    public float LodPixelsPerRadian { get; set; } = Meitou.Data.World.TerrainLod.ProjectionScale(1080, 50 * MathF.PI / 180);
 
     /// <param name="FirstMaterialName">The first submesh's material (script) name, which is all the material resolver takes of a submesh; null: no submesh.</param>
-    sealed record LoadedMesh(GpuObjectMesh Gpu, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs = null);
+    sealed record LoadedMesh(GpuObjectMesh Gpu, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs = null, float[]? ShadowDistances = null, int ShadowFirst = 0, PickBox[]? PickBoxes = null);
 
-    public CharacterContent(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets)
+    public CharacterContent(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets, CharacterRigs? rigs = null)
     {
         this.gpu = gpu;
         this.assets = assets;
@@ -114,6 +134,7 @@ internal sealed class CharacterContent : IDisposable
         resolver = new MaterialResolver(db, OgreMaterialLibrary.LoadConfigured(install, out _), assets);
         Textures = new WorldTextureCache(gpu, assets, "character textures");
         Morphs = new MorphArena(gpu);
+        Rigs = rigs ?? CreateRigs(db, assets);
     }
 
     public GameDatabase Database => db;
@@ -131,110 +152,179 @@ internal sealed class CharacterContent : IDisposable
                     part.Indices.Dispose();
                 }
         meshes.Clear();
+        prepared.Clear();
         MeshBytes = 0;
         Textures.Dispose();
         Morphs.Dispose();
     }
 
     /// <summary>Meshes are loaded by bare name (Kenshi reduces the path first), so resources.cfg's last location wins.</summary>
-    string? FindMesh(string fcsPath)
-    {
-        var bare = Path.GetFileName(fcsPath.Replace('\\', '/'));
-        return assets.Configured.Find(bare) ?? assets.Find(fcsPath);
-    }
+    string? FindMesh(string fcsPath) => FindMesh(assets, fcsPath);
 
-    SkeletonRig? Rig(string name)
-    {
-        var path = assets.Find(name);
-        if (path is null) return null;
-        if (rigs.TryGetValue(path, out var rig)) return rig;
-        return rigs[path] = new SkeletonRig(OgreSkeletonReader.ReadFile(path));
-    }
+    static string? FindMesh(AssetLocator assets, string fcsPath) => assets.Configured.Find(Path.GetFileName(fcsPath.Replace('\\', '/'))) ?? assets.Find(fcsPath);
 
-    readonly Dictionary<string, string?> skeletonNames = new(StringComparer.OrdinalIgnoreCase);
-    /// <summary>The body mesh as <see cref="BodySkeletonName"/> parsed it, for <see cref="Mesh"/> to take instead of reading the file again (cleared by <see cref="Build"/>).</summary>
-    (string Path, OgreMesh Mesh)? parsed;
+    /// <summary>Rigs that find files as the characters' content does; the host makes one to share between the simulation and the renderer.</summary>
+    public static CharacterRigs CreateRigs(GameDatabase db, AssetLocator assets) => new(db, path => FindMesh(assets, path), name => assets.Find(name));
 
-    /// <summary>The skeleton a body mesh file links, read from the file once per path; throws what the reader throws.</summary>
-    string? BodySkeletonName(string path)
-    {
-        if (skeletonNames.TryGetValue(path, out var name)) return name;
-        var mesh = OgreMeshReader.ReadFile(path);
-        parsed = (path, mesh);
-        return skeletonNames[path] = mesh.SkeletonName;
-    }
+    /// <summary>Skeleton rigs and pose setups, shared with the simulation's ragdolls (<see cref="CharacterRenderer.Rigs"/>).</summary>
+    public CharacterRigs Rigs { get; }
 
-    /// <summary>Reads and uploads a mesh file, with its skinning weights for a skeleton of <paramref name="boneCount"/> bones (null: unskinned).</summary>
-    LoadedMesh? Mesh(string path, int? boneCount)
+    SkeletonRig? Rig(string name) => Rigs.Rig(name);
+
+    string? BodySkeletonName(string path) => Rigs.BodySkeletonName(path);
+
+    /// <summary>What a worker makes of a mesh file (<see cref="PrepareMesh"/>): everything but the GPU buffers.</summary>
+    sealed record PreparedMesh(PreparedPart[] Parts, float[] Distances, string? FirstMaterialName, Vector3 Centre, float Radius, MeshMorphs? Morphs, float[]? ShadowDistances, int ShadowFirst, PickBox[] PickBoxes);
+    /// <summary>A prepared mesh (null: it could not be read) and the messages its reading left.</summary>
+    sealed record Prepared(PreparedMesh? Mesh, List<string> Messages);
+    static readonly Prepared Uploaded = new(null, []);
+
+    /// <summary>The meshes prepared or being prepared, by the key of <see cref="meshes"/>; an uploaded one is left as <see cref="Uploaded"/> so no worker prepares it again.</summary>
+    readonly ConcurrentDictionary<(string Path, int Bones), Lazy<Prepared>> prepared = new();
+
+    /// <summary>The preparation of a mesh, made once (any thread; the first caller's level settings stand).</summary>
+    Lazy<Prepared> Prepare(string path, int? boneCount, float lodScale, bool shadowLevels, float pixelsPerRadian) =>
+        prepared.GetOrAdd((path.ToLowerInvariant(), boneCount ?? -1), _ => new Lazy<Prepared>(() => PrepareMesh(path, boneCount, lodScale, shadowLevels, pixelsPerRadian)));
+
+    /// <summary>Reads a mesh file and makes its levels and index buffers (no GPU work, any thread): with its skinning weights for a skeleton of <paramref name="boneCount"/>
+    /// bones (null: unskinned); its generated levels start <paramref name="lodScale"/> times farther than the rule gives.</summary>
+    static Prepared PrepareMesh(string path, int? boneCount, float lodScale, bool shadowLevels, float pixelsPerRadian)
     {
-        var key = (path.ToLowerInvariant(), boneCount ?? -1);
-        if (meshes.TryGetValue(key, out var cached)) return cached;
-        LoadedMesh? result = null;
+        var messages = new List<string>();
         try
         {
-            var mesh = parsed is { } p && p.Path == path ? p.Mesh : OgreMeshReader.ReadFile(path);
-            parsed = null;
+            var mesh = OgreMeshReader.ReadFile(path);
             var model = Model.Build(mesh, boneCount);
-            var morphs = MeshMorphs.From(mesh, model, Messages, Path.GetFileName(path));
-            foreach (var w in model.Warnings) Messages.Add($"{Path.GetFileName(path)}: {w}");
+            var morphs = MeshMorphs.From(mesh, model, messages, Path.GetFileName(path));
+            foreach (var w in model.Warnings) messages.Add($"{Path.GetFileName(path)}: {w}");
             var centre = mesh.Bounds is { } b ? (b.Min + b.Max) / 2 : model.Center;
             float radius = mesh.Bounds is { } bb ? bb.Radius : model.Radius;
             // The LOD value is distance minus this radius. A few character meshes carry a stored radius many times their size (human_female:
             // 116 for a 20 unit tall body), which would keep them at full detail for another hundred units: the model's own extent bounds it.
             radius = Math.Min(radius, Math.Max(model.Radius, 1));
-            var levels = CharacterSwitches.GenerateLods ? GeneratedLevels(mesh, model, radius) : CharacterLod.Levels(mesh);
-            var decoded = new DecodedObjectMesh { Model = model, Levels = levels, Manual = [], Centre = centre, Radius = radius };
-            var gpuMesh = new GpuObjectMesh { Distances = [.. levels.Select(l => l.Distance)], Manual = new GpuObjectMesh?[levels.Count], Centre = centre, Radius = radius };
-            gpu.EnsureFrame();
-            foreach (var part in model.Parts)
+            // Hair and beards (HairLodScale) are alpha-tested cards: a collapse merges cards and strands go while the surface hardly moves, so the deviation underrates it.
+            var levels = GeneratedLevels(mesh, model, radius, pixelsPerRadian * lodScale, LodSettings);
+            // Shadow-only levels (the body, which has no cut-outs): built without the texture guard, whose refusals stop the body at about 1300 triangles, so a crowd's
+            // shadows can be coarser than its picture; never picked by the picture (distance infinity), the depth pass chooses among them by ShadowDistances.
+            float[]? shadowDistances = null;
+            int shadowFirst = levels.Count;
+            if (shadowLevels && GeneratedLevels(mesh, model, radius, pixelsPerRadian, ShadowSettings) is { Count: > 1 } shadow)
             {
-                var prepared = ObjectMeshCache.PreparePart(decoded, part, keepLevels: false);
-                int vertexBytes = part.Vertices.Length * Vertex.Size, indexBytes = prepared.All.Length * 4;
-                var vertices = DeviceBuffer.Create(gpu, (ulong)vertexBytes, BufferUse.Vertex, AllocationName);
-                var indices = DeviceBuffer.Create(gpu, (ulong)indexBytes, BufferUse.Index, AllocationName);
-                gpu.Uploads.Write(vertices, 0, MemoryMarshal.AsBytes(part.Vertices.AsSpan()));
-                gpu.Uploads.Write(indices, 0, MemoryMarshal.AsBytes(prepared.All.AsSpan()));
-                var gp = new GpuObjectPart
-                {
-                    SubMeshIndex = part.SubMeshIndex, MaterialName = part.MaterialName, HasTangents = part.HasTangents, HasColours = part.HasColours,
-                    Vertices = vertices, Indices = indices, Offset = prepared.Offset, Count = prepared.Count, UvScale = prepared.UvScale,
-                    Attributes = ObjectMeshCache.VertexAttributes(vertices),
-                };
-                gpuMesh.Parts.Add(gp);
-                gpuMesh.Bytes += vertexBytes + indexBytes;
+                shadowDistances = [.. shadow.Select(l => l.Distance)];
+                levels.AddRange(shadow.Skip(1).Select(l => l with { Distance = float.PositiveInfinity }));
             }
-            MeshBytes += gpuMesh.Bytes;
-            result = new LoadedMesh(gpuMesh, mesh.SubMeshes.FirstOrDefault()?.MaterialName, centre, radius, morphs);
+            var decoded = new DecodedObjectMesh { Model = model, Levels = levels, Manual = [], Centre = centre, Radius = radius };
+            var parts = model.Parts.Select(part => ObjectMeshCache.PreparePart(decoded, part, keepLevels: false)).ToArray();
+            return new(new PreparedMesh(parts, [.. levels.Select(l => l.Distance)], mesh.SubMeshes.FirstOrDefault()?.MaterialName, centre, radius, morphs, shadowDistances, shadowFirst, PickBox.From(model)), messages);
         }
         catch (Exception e) when (e is OgreFormatException or IOException or EndOfStreamException or InvalidDataException)
         {
-            Messages.Add($"{Path.GetFileName(path)}: {e.Message}");
+            messages.Add($"{Path.GetFileName(path)}: {e.Message}");
+            return new(null, messages);
         }
-        return meshes[key] = result;
     }
 
-    /// <summary>
-    /// Meitou mode (default; MEITOU_CHARACTER_LOD=faithful keeps the files' own levels): mesh levels generated by edge collapse from level 0 for every
-    /// mesh, at distances in proportion to the mesh's size (about 5, 11, 22 and 45 radii), because the files' own are few and far (human_female has
-    /// none, the male body's only level starts at 200 units).
-    /// </summary>
-    static List<MeshLodLevel> GeneratedLevels(OgreMesh mesh, Model model, float radius)
+    /// <summary>A mesh by file, uploaded the first time: prepared here unless a worker has done it (<see cref="Fetched"/>), or after waiting for the worker preparing it.</summary>
+    LoadedMesh? Mesh(string path, int? boneCount, float lodScale = 1, bool shadowLevels = false)
     {
-        float[] fractions = [0.5f, 0.25f, 0.12f, 0.05f];
-        float[] radii = [5, 11, 22, 45];
-        var chains = new uint[model.Parts.Count][][];
-        Parallel.For(0, chains.Length, p => chains[p] = MeshSimplifier.Chain(model.Parts[p].Vertices, model.Parts[p].Indices, fractions, 40));
-        var levels = new List<MeshLodLevel> { new(0, mesh.SubMeshes.Select(s => (uint[]?)s.Indices.Indices).ToList()) };
-        long previous = model.Parts.Sum(p => (long)p.Indices.Length);
-        float unit = Math.Max(radius, 2);
-        for (int k = 0; k < fractions.Length; k++)
+        var key = (path.ToLowerInvariant(), boneCount ?? -1);
+        if (meshes.TryGetValue(key, out var cached)) return cached;
+        var (ready, messages) = Prepare(path, boneCount, lodScale, shadowLevels, LodPixelsPerRadian).Value;
+        prepared[key] = new Lazy<Prepared>(Uploaded);
+        Messages.AddRange(messages);
+        return meshes[key] = ready is null ? null : Upload(ready);
+    }
+
+    LoadedMesh Upload(PreparedMesh ready)
+    {
+        var gpuMesh = new GpuObjectMesh { Distances = ready.Distances, Manual = new GpuObjectMesh?[ready.Distances.Length], Centre = ready.Centre, Radius = ready.Radius };
+        gpu.EnsureFrame();
+        foreach (var made in ready.Parts)
         {
-            long total = chains.Sum(c => (long)c[k].Length);
-            if (total > previous * 0.85) continue;
-            previous = total;
+            var part = made.Part;
+            int vertexBytes = part.Vertices.Length * Vertex.Size, indexBytes = made.All.Length * 4;
+            var vertices = DeviceBuffer.Create(gpu, (ulong)vertexBytes, BufferUse.Vertex, AllocationName);
+            var indices = DeviceBuffer.Create(gpu, (ulong)indexBytes, BufferUse.Index, AllocationName);
+            gpu.Uploads.Write(vertices, 0, MemoryMarshal.AsBytes(part.Vertices.AsSpan()));
+            gpu.Uploads.Write(indices, 0, MemoryMarshal.AsBytes(made.All.AsSpan()));
+            var gp = new GpuObjectPart
+            {
+                SubMeshIndex = part.SubMeshIndex, MaterialName = part.MaterialName, HasTangents = part.HasTangents, HasColours = part.HasColours,
+                Vertices = vertices, Indices = indices, Offset = made.Offset, Count = made.Count, UvScale = made.UvScale,
+                Attributes = ObjectMeshCache.VertexAttributes(vertices),
+            };
+            gpuMesh.Parts.Add(gp);
+            gpuMesh.Bytes += vertexBytes + indexBytes;
+        }
+        MeshBytes += gpuMesh.Bytes;
+        return new LoadedMesh(gpuMesh, ready.FirstMaterialName, ready.Centre, ready.Radius, ready.Morphs, ready.ShadowDistances, ready.ShadowFirst, ready.PickBoxes);
+    }
+
+    readonly Dictionary<CharacterAppearance, Task> fetching = [];
+    int fetchesRunning;
+    /// <summary>How many appearances are prepared on workers at once (the workers are shared with the objects and the foliage).</summary>
+    const int FetchLimit = 6;
+
+    /// <summary>
+    /// Whether <see cref="Build"/> will find the appearance's skeleton read and its meshes prepared, so that it only uploads. The first call starts that on a worker
+    /// (at most <see cref="FetchLimit"/> ordinary requests at once) and the answer is false until it is done.
+    /// Essential scene actors can bypass that cap and use the urgent queue. Render thread.
+    /// </summary>
+    public bool Fetched(CharacterAppearance c, bool urgent = false)
+    {
+        if (fetching.TryGetValue(c, out var task)) return task.IsCompleted;
+        if (!urgent && Volatile.Read(ref fetchesRunning) >= FetchLimit) return false;
+        var bodyPath = FindMesh(c.BodyMesh);
+        if (bodyPath is null) return true;   // Build reports it
+        var parts = c.Parts.Select(p => (Path: FindMesh(p.Mesh), Shared: p.Mode == AttachMode.SharedSkeleton, Scale: PartLodScale(c, p))).Where(p => p.Path is not null).ToList();
+        float pixels = LodPixelsPerRadian;
+        Interlocked.Increment(ref fetchesRunning);
+        bool Fetch()
+        {
+            try
+            {
+                if (BodySkeletonName(bodyPath) is not { } name || Rig(name) is not { } rig) return true;
+                _ = Prepare(bodyPath, rig.BoneCount, 1, true, pixels).Value;
+                foreach (var (path, shared, scale) in parts) _ = Prepare(path!, shared ? rig.BoneCount : null, scale, false, pixels).Value;
+            }
+            catch (Exception) { }   // a file that cannot be read: Build meets it again on the render thread and reports it
+            finally { Interlocked.Decrement(ref fetchesRunning); }
+            return true;
+        }
+        fetching[c] = urgent ? BackgroundWork.RunUrgent(Fetch) : BackgroundWork.Run(Fetch);
+        return false;
+    }
+
+    /// <summary>How much farther a part's generated levels start (<see cref="HairLodScale"/> for a person's hair and beard).</summary>
+    static float PartLodScale(CharacterAppearance c, CharacterPart part) => part.Record.Type == FcsRecordType.ATTACHMENT && c.Animal is null ? HairLodScale : 1;
+
+    /// <summary>The steps (share of a part's triangles), floor per part, limits and guards the character levels are built with: the objects' limits, and collapses keep the
+    /// texture coordinates (without that a face's eyes and mouth smeared across their UV islands from the second level on).</summary>
+    static readonly FoliageLodBuilder.Settings LodSettings = new([0.5f, 0.25f, 0.12f, 0.05f], 40, 0.25f, 3.2f, 0.85f, true);
+
+    /// <summary>The shadow-only levels' settings: as <see cref="LodSettings"/> without the texture guard (a shadow map shows no texture), down to 5 %.</summary>
+    static readonly FoliageLodBuilder.Settings ShadowSettings = LodSettings with { UvAware = false };
+
+    /// <summary>How much farther the levels of hair and beards start: reduced at the rule's distance their dark strands thinned visibly at 200 units; never reduced they were
+    /// about 650k of a 500-character crowd's 2.0M triangles.</summary>
+    internal const float HairLodScale = 4;
+
+    /// <summary>
+    /// Mesh levels generated by edge collapse from level 0 for every mesh, because the files' own are few and far (human_female has none, the male body's only level starts at
+    /// 200 units). Each level starts where its deviation from the original is under the objects' tolerance in rendered pixels (<see cref="ObjectLodGen.Distances"/>, measured in
+    /// the bind pose at <paramref name="pixelsPerRadian"/>), so a face or a weapon keeps its detail as long as it would show.
+    /// </summary>
+    static List<MeshLodLevel> GeneratedLevels(OgreMesh mesh, Model model, float radius, float pixelsPerRadian, FoliageLodBuilder.Settings settings)
+    {
+        var levels = new List<MeshLodLevel> { new(0, mesh.SubMeshes.Select(s => (uint[]?)s.Indices.Indices).ToList()) };
+        var parts = model.Parts.Where(p => p.Indices.Length > 0).ToList();
+        if (parts.Count == 0 || FoliageLodBuilder.Build(model, radius, settings) is not { } set) return levels;
+        var distances = ObjectLodGen.Distances(set, ObjectLodGen.TriangleExtent(parts), radius, pixelsPerRadian);
+        for (int k = 1; k < set.Levels; k++)
+        {
             var subs = new uint[]?[mesh.SubMeshes.Count];
-            for (int p = 0; p < chains.Length; p++) subs[model.Parts[p].SubMeshIndex] = chains[p][k];
-            levels.Add(new MeshLodLevel(unit * radii[k], subs));
+            for (int p = 0; p < parts.Count; p++) subs[parts[p].SubMeshIndex] = set.Indices[p][k - 1];
+            levels.Add(new MeshLodLevel(distances[k], subs));
         }
         return levels;
     }
@@ -242,6 +332,7 @@ internal sealed class CharacterContent : IDisposable
     /// <summary>Assembles the asset for <paramref name="c"/>; null when its body mesh or skeleton cannot be found.</summary>
     public CharacterAsset? Build(CharacterAppearance c)
     {
+        fetching.Remove(c);
         var bodyPath = FindMesh(c.BodyMesh);
         if (bodyPath is null) { Messages.Add($"body mesh not found: {c.BodyMesh}"); return null; }
         // The body's own skeleton link (Kenshi shares that instance with worn items); the rig's bone count decides the weights kept.
@@ -249,14 +340,22 @@ internal sealed class CharacterContent : IDisposable
         try { skeletonName = BodySkeletonName(bodyPath); }
         catch (Exception e) when (e is OgreFormatException or IOException or EndOfStreamException or InvalidDataException) { Messages.Add($"{c.BodyMesh}: {e.Message}"); return null; }
         var rig = skeletonName is null ? null : Rig(skeletonName);
-        if (rig is null) { parsed = null; Messages.Add($"{c.BodyMesh} has no skeleton ({skeletonName})"); return null; }
-        var body = Mesh(bodyPath, rig.BoneCount);
-        parsed = null;
+        if (rig is null) { Messages.Add($"{c.BodyMesh} has no skeleton ({skeletonName})"); return null; }
+        var body = Mesh(bodyPath, rig.BoneCount, shadowLevels: true);
         if (body is null) return null;
 
-        var asset = new CharacterAsset { Appearance = c, Rig = rig };
-        asset.Shape = Shape(c, rig);
-        if (CharacterSwitches.Morphs && body.Morphs is { } bodyMorphs && bodyMorphs.Deltas(c.PoseWeights, c.Character?.GetBool("shaved") == true && bodyMorphs.HasCuttableHorns) is { } deltas)
+        var asset = new CharacterAsset { Appearance = c, Rig = rig, Animal = c.Animal is not null };
+        if (asset.Animal)
+        {
+            // An animal's sphere from its body's bounds (a leviathan is 190 units tall): centred above the feet, grown by the bounds' offset across the ground so any heading fits.
+            asset.Height = Math.Max(2 * body.Centre.Y, 1);
+            asset.Radius = body.Radius + new Vector2(body.Centre.X, body.Centre.Z).Length();
+        }
+        var setup = Rigs.For(c);
+        asset.Shape = setup?.Shape;
+        asset.GroundOffset = setup?.GroundOffset ?? 0;
+        asset.HeadBone = rig.Handle("Bip01 Head") ?? -1;
+        if (body.Morphs is { } bodyMorphs && bodyMorphs.Deltas(c.PoseWeights, c.Character?.GetBool("shaved") == true && bodyMorphs.HasCuttableHorns) is { } deltas)
         {
             var key = string.Join(';', c.PoseWeights.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => FormattableString.Invariant($"{p.Key}={p.Value}"))) + "@" + bodyPath + (c.Character?.GetBool("shaved") == true);
             asset.MorphBase = Morphs.Add(key, deltas);
@@ -264,20 +363,21 @@ internal sealed class CharacterContent : IDisposable
         asset.Parts.Add(new AssetPart
         {
             Label = $"body {Path.GetFileName(bodyPath)}", Mesh = body.Gpu, Shared = true, Material = BodyMaterial(c),
-            BoundsCentre = body.Centre, BoundsRadius = body.Radius,
-            Morphed = asset.MorphBase != 0,
+            BoundsCentre = body.Centre, BoundsRadius = body.Radius, PickBoxes = body.PickBoxes ?? [],
+            Morphed = asset.MorphBase != 0, ShadowDistances = body.ShadowDistances, ShadowFirst = body.ShadowFirst,
         });
         foreach (var part in c.Parts)
         {
             var path = FindMesh(part.Mesh);
             if (path is null) continue;
             bool shared = part.Mode == AttachMode.SharedSkeleton;
-            var loaded = Mesh(path, shared ? rig.BoneCount : null);
+            // An animal's fur is a shell over the whole body (5.5k triangles on the bonedog, more than its body), not a few hair cards: it takes the rule's own distances.
+            var loaded = Mesh(path, shared ? rig.BoneCount : null, PartLodScale(c, part));
             if (loaded is null || loaded.Gpu.Parts.Count == 0) continue;
             var ap = new AssetPart
             {
                 Label = $"{part.Record.Type} '{part.Record.Name}' .{part.Field}", Mesh = loaded.Gpu, Shared = shared, Material = ItemMaterial(c, part, path, loaded),
-                BoundsCentre = loaded.Centre, BoundsRadius = loaded.Radius,
+                BoundsCentre = loaded.Centre, BoundsRadius = loaded.Radius, Shown = part.Shown, PickBoxes = loaded.PickBoxes ?? [],
             };
             if (!shared)
             {
@@ -292,27 +392,12 @@ internal sealed class CharacterContent : IDisposable
             asset.Parts.Add(ap);
         }
 
-        if (CharacterSwitches.Log)
-            foreach (var p in asset.Parts)
-                Console.WriteLine($"character-log  {p.Label}: levels [{string.Join(", ", p.Mesh.Distances.Select(d => d.ToString("0")))}] triangles [{string.Join(", ", Enumerable.Range(0, p.Mesh.Distances.Length).Select(l => p.Mesh.Parts.Sum(g => g.Count[l] / 3)))}] radius {p.BoundsRadius:0.0} {(p.Shared ? "shared" : "bone " + p.Bone)}; {p.Material.Description}");
-        // The posture libraries, held at the body file's sliders (docs/animation.md, "Posture sliders").
-        if (c.Body is { } bodyFile)
+        if (setup is not null)
         {
-            asset.Idle = bodyFile.IdleStance ?? asset.Idle;
-            foreach (var (animation, slider) in new[] { ("postures", "Posture"), ("neck set", "Neck position"), ("shoulder set", "Shoulder set") })
-                if (bodyFile.Floats.ContainsKey(slider) && rig.Layer(db, animation) is { } def)
-                    asset.Fixed.Add((def, def.Clip.Length * bodyFile.Get(slider) / 100));
+            asset.Idle = setup.Idle;
+            asset.Fixed.AddRange(setup.Fixed);
         }
         return asset;
-    }
-
-    /// <summary>Body-shape sliders as bone sizes (docs/animation.md, "Body shape sliders"); only skeletons with exactly 30 bones, as in Kenshi.</summary>
-    BodyShapeData? Shape(CharacterAppearance c, SkeletonRig rig)
-    {
-        if (rig.BoneCount != CharacterShape.HumanBoneCount) return null;
-        var input = CharacterShape.InputFor(db, c);
-        var shape = CharacterShape.Compute(input, name => rig.Handle(name) is not null);
-        return rig.Shape(shape.BoneSize, shape.PositionalSize, shape.MovementScale);
     }
 
     // ---- materials (CharacterScene.BodyMaterial / PartMaterial) ----
@@ -336,8 +421,10 @@ internal sealed class CharacterContent : IDisposable
             BeardAlpha = Channel(c.Beard?.GetInt("head alpha channel" + f, 1) ?? 1),
             ShirtColour = colour is null ? Vector3.One : CharacterAppearance.Rgb(colour.GetInt("color 1")), HasShirtColour = colour is not null,
         };
-        m.Tex[CharacterShaders.SlotDiffuse] = Texture(c.BodyTexture, true);
-        m.Tex[CharacterShaders.SlotNormal] = Texture(c.BodyNormal, true);
+        // Animal meshes put the mirrored half of the body at u 1..2 (goat, bull, beak thing: Observed, the meshes' texture coordinates), so their textures repeat; a
+        // person's body texture has the transparent border (the head sits beside it at v -1..0). That Kenshi repeats them is an engine reading (the animal material was not read).
+        m.Tex[CharacterShaders.SlotDiffuse] = Texture(c.BodyTexture, c.Animal is null);
+        m.Tex[CharacterShaders.SlotNormal] = Texture(c.BodyNormal, c.Animal is null);
         m.Tex[CharacterShaders.SlotBodyMask] = Texture(c.BodyMask, true);
         m.Tex[CharacterShaders.SlotHeadDiffuse] = Texture(Tex(c.Head, "texture map"), true);
         m.Tex[CharacterShaders.SlotHeadNormal] = Texture(Tex(c.Head, "normal map"), true);
@@ -422,5 +509,53 @@ internal sealed class CharacterContent : IDisposable
         m.Tex[CharacterShaders.SlotNormal] = Texture(candidate?.Normal, false);
         m.DoubleSided = candidate?.DoubleSided ?? false;
         return m;
+    }
+
+    // ---- item icons ----
+
+    /// <summary>The material record an icon is drawn with: the instance's, else the item's first (likeliest) <c>material</c> reference.</summary>
+    public GameRecord? IconMaterialOf(GameRecord item, string materialId)
+    {
+        static bool IsSpec(GameRecord? r) => r is { Type: FcsRecordType.MATERIAL_SPECS_CLOTHING or FcsRecordType.MATERIAL_SPEC or FcsRecordType.MATERIAL_SPECS_WEAPON };
+        if (materialId.Length > 0 && db.Find(materialId) is { } chosen && IsSpec(chosen)) return chosen;
+        return item.GetReferences("material").OrderByDescending(r => r.Values.Value0).Select(r => db.Find(r.TargetStringId)).FirstOrDefault(IsSpec);
+    }
+
+    /// <summary>
+    /// The asset of <paramref name="item"/>'s inventory icon (docs/game/ui-screens.md "Item icons"): its mesh (a weapon's bare blade) unskinned, with the textures of <paramref name="spec"/>,
+    /// undyed (the game dyes with the instance's colour, which is not known: its saved picture of an armour whose record names a <c>color</c> has no colour part and shows none). Null when the mesh is missing or unreadable.
+    /// </summary>
+    public CharacterAsset? BuildIcon(GameRecord item, GameRecord? spec)
+    {
+        string field = ItemIconStyle.MeshOf(item);
+        if (field.Length == 0 || FindMesh(field) is not { } path) { Messages.Add($"icon mesh not found: {field}"); return null; }
+        // The level the icon is drawn at is the first: the generated ones start far out.
+        var loaded = Mesh(path, null, float.MaxValue / 4);
+        if (loaded is null || loaded.Gpu.Parts.Count == 0) return null;
+        var m = new PartMaterial { Shading = CharacterShaders.ShadeItem };
+        if (spec is not null)
+        {
+            m.Description = $"icon {spec.Type} '{spec.Name}'";
+            m.Tex[CharacterShaders.SlotDiffuse] = Texture(Tex(spec, "texture map"), false);
+            m.Tex[CharacterShaders.SlotNormal] = Texture(Tex(spec, "normal map"), false);
+            m.ClipOnNormalAlpha = Tex(spec, "normal map") is not null;
+            m.DoubleSided = spec.GetInt("material type") == 2;
+        }
+        else
+        {
+            var candidate = loaded.FirstMaterialName is null ? null : resolver.Candidates(path, new OgreSubMesh { MaterialName = loaded.FirstMaterialName }).FirstOrDefault();
+            m.Description = candidate?.Description ?? "untextured";
+            m.Tex[CharacterShaders.SlotDiffuse] = Texture(candidate?.Diffuse, false);
+            m.Tex[CharacterShaders.SlotNormal] = Texture(candidate?.Normal, false);
+            m.ClipOnNormalAlpha = candidate?.Normal is not null;
+            m.DoubleSided = candidate?.DoubleSided ?? false;
+        }
+        var asset = new CharacterAsset { Appearance = null!, Rig = null!, IsIcon = true, AttachCount = 1 };
+        asset.Parts.Add(new AssetPart
+        {
+            Label = $"icon {item.Type} '{item.Name}'", Mesh = loaded.Gpu, Shared = false, Material = m, AttachIndex = 0,
+            BoundsCentre = loaded.Centre, BoundsRadius = loaded.Radius,
+        });
+        return asset;
     }
 }

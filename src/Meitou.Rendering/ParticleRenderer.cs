@@ -250,29 +250,15 @@ public sealed unsafe class ParticleRenderer : IDisposable
             }
     }
 
+    /// <summary>Engine choice (2026-10-12, the user's taste): weather effects drawn fainter than the game's data says. Vain's red rain (`Kenshi_red_Rain`) at half its opacity.</summary>
+    static float EffectOpacity(string effect) => effect.Equals("Kenshi_red_Rain", StringComparison.OrdinalIgnoreCase) ? 0.5f : 1;
+
     public void Update(double seconds, WorldCamera camera)
     {
         long start = Stopwatch.GetTimestamp();
         UpdateInner(seconds, camera);
-        phaseUpdate = Stopwatch.GetTimestamp() - start;
-        updateTotal += phaseUpdate;
+        updateTotal += Stopwatch.GetTimestamp() - start;
         updateFrames++;
-    }
-
-    // MEITOU_PARTICLE_LOG=1: one line for every frame whose particle work (Update + Prepare) takes over 2 ms on the render thread, with where the time went.
-    static readonly bool PhaseLog = Environment.GetEnvironmentVariable("MEITOU_PARTICLE_LOG") == "1";
-    long phaseQueue, phaseRun, phaseUpdate, phaseSync, phaseWarm, phaseAdvance, phasePreload, phaseGroups, phaseStart, phaseCollect, phaseTexture;
-    int phaseTextureLoads;
-
-    static double Ms(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;
-
-    void LogPhases(long prepareTicks)
-    {
-        double total = Ms(phaseUpdate + prepareTicks);
-        if (total >= 2)
-            Console.WriteLine($"particles frame {updateFrames}: {total:0.0} ms (update {Ms(phaseUpdate):0.0}, prepare {Ms(prepareTicks):0.0}): sync wait {Ms(phaseSync):0.0} (task queued {Ms(phaseQueue):0.0}, ran {Ms(phaseRun):0.0}), prewarm {Ms(phaseWarm):0.0} (weather change {Ms(phaseAdvance):0.0}, texture preload {Ms(phasePreload):0.0}), groups {Ms(phaseGroups):0.0}, start {Ms(phaseStart):0.0}, collect {Ms(phaseCollect):0.0}, texture {Ms(phaseTexture):0.0} ({phaseTextureLoads} loads); {weatherGroups.Groups.Count} groups, {activeUnits} units");
-        phaseSync = phaseWarm = phaseGroups = phaseStart = phaseCollect = phaseTexture = 0;
-        phaseTextureLoads = 0;
     }
 
     void UpdateInner(double seconds, WorldCamera camera)
@@ -282,24 +268,13 @@ public sealed unsafe class ParticleRenderer : IDisposable
         if (!Enabled) { lastSeconds = seconds; return; }
         var view = new EffectCamera(camera.Eye, camera.Forward);
         // A weather change: the groups made on the side are swapped in once warmed (with the frame's simulation finished, so nothing runs on the old ones).
-        long t0 = Stopwatch.GetTimestamp();
         bool changed = weatherGroups.Advance(view, Now());
-        long tAdvance = Stopwatch.GetTimestamp();
-        phaseAdvance = tAdvance - t0;
-        if (PhaseLog && Ms(phaseAdvance) >= 1)
-        {
-            var (freeze, make, queue) = weatherGroups.LastStartTicks;
-            Console.WriteLine($"particles frame {updateFrames}: weather change took {Ms(phaseAdvance):0.0} ms (last start: freeze {Ms(freeze):0.00}, make {Ms(make):0.00}, queue {Ms(queue):0.00}; last swap {Ms(weatherGroups.LastSwapTicks):0.00})");
-        }
-        if (changed && PhaseLog)
-            Console.WriteLine($"particles frame {updateFrames}: weather groups swapped in: {weatherGroups.Groups.Count} groups for {weatherGroups.Input.Region} {weatherGroups.SwapLatency * 1000:0} ms after the change (dwell and warm-up)");
         if (changed || (weatherGroups.Building && !ReferenceEquals(weatherGroups.BuildingGroups, preloaded)))
         {
             preloaded = weatherGroups.Building ? weatherGroups.BuildingGroups : weatherGroups.Groups;
             PreloadTextures(preloaded);   // decoded on a worker while the groups are warmed
         }
-        phasePreload = Stopwatch.GetTimestamp() - tAdvance;
-        if (weatherGroups.Groups.Count == 0 && placerGroups.Count == 0) { lastSeconds = seconds; phaseWarm = Stopwatch.GetTimestamp() - t0; return; }
+        if (weatherGroups.Groups.Count == 0 && placerGroups.Count == 0) { lastSeconds = seconds; return; }
         float dt = double.IsNaN(lastSeconds) ? 0 : (float)Math.Clamp(seconds - lastSeconds, 0, 0.25);
         lastSeconds = seconds;
         var input = weatherGroups.Input;
@@ -309,14 +284,9 @@ public sealed unsafe class ParticleRenderer : IDisposable
                 g.Prewarm(PrewarmSeconds ?? Math.Min(ParticleSimulation.LongestLife(g.System), MaxAutoPrewarm), view, input);
             toWarm.Clear();
         }
-        long t1 = Stopwatch.GetTimestamp();
-        phaseWarm = t1 - t0;
         foreach (var g in weatherGroups.Groups) g.Update(dt, view, input);
         foreach (var g in placerGroups) g.Update(dt, view, input);
-        long t2 = Stopwatch.GetTimestamp();
-        phaseGroups = t2 - t1;
         StartSimulation();
-        phaseStart = Stopwatch.GetTimestamp() - t2;
     }
 
     IReadOnlyList<EffectGroup>? preloaded;
@@ -367,8 +337,7 @@ public sealed unsafe class ParticleRenderer : IDisposable
         job.Wait();
         waitTicks = Stopwatch.GetTimestamp() - start;
         waitTotal += waitTicks;
-        phaseSync += waitTicks;
-        (phaseQueue, phaseRun, simulationTicks) = (job.QueueTicks, job.RunTicks, job.RunTicks);
+        simulationTicks = job.RunTicks;
         simulationTotal += job.RunTicks;
         simulationFrames++;
     }
@@ -389,7 +358,6 @@ public sealed unsafe class ParticleRenderer : IDisposable
         long ticks = Stopwatch.GetTimestamp() - start;
         drawTotal += ticks;
         drawFrames++;
-        if (PhaseLog) LogPhases(ticks);
     }
 
     /// <summary>Draws prepared this frame for the scene target (full size) and for the low-resolution target.</summary>
@@ -468,14 +436,13 @@ public sealed unsafe class ParticleRenderer : IDisposable
                 // Built in ordinary memory and copied over in one go: the frame constants are write-combined upload memory, where per-field
                 // writes and the partition's reads are slow (this was 5 ms for 18000 particles).
                 if (scratch.Length < n) scratch = new ParticleInstance[Math.Max(n, scratch.Length * 2)];
-                int written = sim.Collect(t, scratch.AsSpan(0, n), u.Tint, u.Alpha, offset);
+                int written = sim.Collect(t, scratch.AsSpan(0, n), u.Tint, u.Alpha * EffectOpacity(u.Effect.Name), offset);
                 if (written == 0) continue;
                 int close = PartitionByDepth(scratch.AsSpan(0, written), forward, nearPlane);
                 var instances = constants.Allocate((ulong)(written * InstanceBytes), 16);
                 scratch.AsSpan(0, written).CopyTo(new Span<ParticleInstance>(instances.Pointer, written));
                 long collected = Stopwatch.GetTimestamp() - collectStart;
                 collectTotal += collected;
-                phaseCollect += collected;
                 int divisor = 1;
                 float fill = 0;
                 if (pixelsPerUnit > 0 && (material.Blend == ParticleBlend.Alpha || material.Blend == ParticleBlend.Add))
@@ -524,7 +491,6 @@ public sealed unsafe class ParticleRenderer : IDisposable
     public void DrawCoverage(Silk.NET.Vulkan.ColorComponentFlags mask)
     {
         if (!HasCoverage || FullCount == 0) return;
-        if (Environment.GetEnvironmentVariable("MEITOU_COVERAGE_LOG") == "1") Console.WriteLine($"coverage  {draws.Count} draws, mask {mask}");
         var cmd = gpu.BeginGuest("particle coverage");
         var targets = gpu.CurrentTargets();
         var baseState = gpu.CurrentState();
@@ -693,7 +659,6 @@ public sealed unsafe class ParticleRenderer : IDisposable
     {
         if (material.Texture is not { } name) return white;
         if (textures.TryGetValue(name, out var cached)) return cached ?? white;
-        long loadStart = Stopwatch.GetTimestamp();
         if (!decoding.TryGetValue(name, out var task)) task = StartDecode(name);
         if (!task.IsCompleted)
         {
@@ -705,8 +670,6 @@ public sealed unsafe class ParticleRenderer : IDisposable
         if (task.IsFaulted) Console.WriteLine($"warning   particle texture {name}: {task.Exception?.GetBaseException().Message}");
         else if (task.Result is { } decoded) image = SampledImage.Rgba8(gpu, decoded, repeat: !material.Clamp, mipmaps: true, "particle " + name);
         textures[name] = image;
-        phaseTexture += Stopwatch.GetTimestamp() - loadStart;
-        phaseTextureLoads++;
         return image ?? white;
     }
 

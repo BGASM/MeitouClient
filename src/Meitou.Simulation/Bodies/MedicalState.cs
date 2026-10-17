@@ -29,6 +29,8 @@ public sealed partial class MedicalState
 
     /// <summary>Save key <c>bleeding</c>: the current bleed rate (blood per game hour), recomputed each tick.</summary>
     public float Bleeding { get; private set; }
+    /// <summary>All the flesh healing has restored since this body was made (display only: the heal floaters read it; not saved or hashed).</summary>
+    public float Healed { get; private set; }
 
     /// <summary>Save key <c>hung</c>: the hunger level 0 to 3 (3 full; 2 and above well fed, below 1 starving).</summary>
     public float Hunger { get; set; } = MaxHunger;
@@ -84,10 +86,23 @@ public sealed partial class MedicalState
             p.Flesh = p.MaxHp;
             return p;
         });
-        var state = new MedicalState(parts);
-        state.Blood = BloodCapacity(race, strength, hasStats);
+        var state = new MedicalState(parts) { HasStatsObject = hasStats, ScaleK = hpMultiplier, ScaleZ = bodyScale };
+        state.Blood = BloodCapacity(race, strength, hasStats, hpMultiplier, bodyScale);
         return state;
     }
+
+    /// <summary>
+    /// False for an animal: the character's slot 0x250 (the humanoid stats object) is null for a <c>CharacterAnimal</c> (<b>Observed</b>, docs/game/animals.md), so the blood
+    /// capacity takes s = 1 and the hit path cannot sever limbs. Set at creation; ANDed with <see cref="MedicalContext.HasStats"/>.
+    /// </summary>
+    public bool HasStatsObject { get; init; } = true;
+    /// <summary>The character's slot-0x390 factor k (1 for humans; an animal's size, lerp(age, scale min, scale max)): the parts' HP multiplier, the blood capacity and the hunger rate.</summary>
+    public float ScaleK { get; init; } = 1;
+    /// <summary>The character's slot-0x238 factor z (1 for humans; an animal's <c>HP mult</c>): the parts' body scale and the blood capacity.</summary>
+    public float ScaleZ { get; init; } = 1;
+
+    /// <summary>This character's blood capacity under <paramref name="ctx"/> (its stats object and scale factors applied).</summary>
+    public float Capacity(in MedicalContext ctx) => BloodCapacity(ctx.Race, ctx.Strength, ctx.HasStats && HasStatsObject, ScaleK, ScaleZ);
 
     /// <summary>
     /// The blood capacity (<c>FUN_1406440a0</c>): <c>min blood</c> + (<c>max blood</c> - <c>min blood</c>) x s x k x z, s = strength / 100 for a character with a stats
@@ -201,7 +216,7 @@ public sealed partial class MedicalState
             if (p.IsVital) sum += (m - (p.Flesh + p.Stun)) * k * 0.25f / m * 100;
             if (p.Flesh - p.Stun < 0) sum += MathF.Abs(p.Flesh - p.Stun) * k * p.Template.KoMult / m * 100;
         }
-        float cap = BloodCapacity(ctx.Race, ctx.Strength, ctx.HasStats);
+        float cap = Capacity(ctx);
         if (cap > 0) sum += MathF.Abs(cap - Blood) * k * 0.5f / cap * 100;
         return sum;
     }

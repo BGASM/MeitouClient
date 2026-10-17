@@ -7,10 +7,19 @@ using Meitou.Simulation.Bodies;
 namespace Meitou.Simulation.Combat;
 
 /// <summary>Orders the characters to fight <see cref="Target"/> (the AI's "attack" task, a player's attack command): they draw their weapon, close in and attack until one of them is down.</summary>
-public sealed record AttackOrder(IReadOnlyList<CharacterId> Attackers, CharacterId Target) : SimCommand;
+public sealed record AttackOrder(IReadOnlyList<CharacterId> Attackers, CharacterId Target) : SimCommand
+{
+    /// <summary>A fight the attackers did not pick: an answer to being attacked (<see cref="RetaliationSystem"/>). The player's defence does not count as an assault on the other faction.</summary>
+    public bool Defensive { get; init; }
+}
 
 /// <summary>What a resolved blow did, for the log (a combat log, damage numbers, tests).</summary>
-public readonly record struct CombatLogEntry(long Tick, int Attacker, int Defender, int Blow, BlowOutcome Outcome, int Part, float Cut, float Blunt, float Pierce, float Stun, bool Knockout, bool Death);
+public readonly record struct CombatLogEntry(long Tick, int Attacker, int Defender, int Blow, BlowOutcome Outcome, int Part, float Cut, float Blunt, float Pierce, float Stun, bool Knockout, bool Death)
+{
+    /// <summary>A crossbow bolt (blow 0), and whether it hit the character it was shot at (false: a friend or another enemy in the way).</summary>
+    public bool Ranged { get; init; }
+    public bool Intended { get; init; }
+}
 
 /// <summary>Settings of the <see cref="CombatSystem"/> that are the host's choice rather than the game's.</summary>
 public sealed record CombatOptions
@@ -23,4 +32,8 @@ public sealed record CombatOptions
     public bool RecordLog { get; init; }
     /// <summary>The speed (units per second) a character closes in at when it has no speed stat set.</summary>
     public float ApproachSpeed { get; init; } = 30;
+    /// <summary>How many enemies may melee one target at once (before the race's extra slots); null: CONSTANTS <c>max num attack slots</c> (1).</summary>
+    public int? AttackSlots { get; init; }
+    /// <summary>A dodge or block that passed its roll but starts too late joins its clip partway so it still counts (Meitou balance choice); false: the game's rule, it fails.</summary>
+    public bool LateDefences { get; init; }
 }

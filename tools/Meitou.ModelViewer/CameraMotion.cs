@@ -16,7 +16,7 @@ sealed class CameraMotion(WorldCamera camera, Gpu gpu, Vector3 centre, bool circ
 
     /// <summary>The motion <c>--bench-motion</c> names.</summary>
     public static CameraMotion For(string name, WorldOptions o, WorldCamera camera, Gpu gpu) => new(camera, gpu, camera.Target, name == "fly", Math.Max(o.FlyRadius, 1), o.FlySpeed,
-        name == "turn" ? o.BenchTurn * MathF.PI / 180 : 0, name == "orbit" ? o.BenchOrbit : 0);
+        name == "turn" ? 0.5f * MathF.PI / 180 : 0, name == "orbit" ? o.BenchOrbit : 0);   // the turn: 0.5 degrees a frame
 
     /// <summary>The old fly benchmark's: the circle, or the turn when MEITOU_FLY_TURN gives a rate, plus the orbit of MEITOU_BENCH_ORBIT.</summary>
     public static CameraMotion Fly(WorldOptions o, WorldCamera camera, Gpu gpu, float turnRadians, float orbitPixels) =>
@@ -27,7 +27,7 @@ sealed class CameraMotion(WorldCamera camera, Gpu gpu, Vector3 centre, bool circ
     /// <summary>Moves the camera to its place at frame <paramref name="i"/> (1-based; the circle starts at its east point).</summary>
     public void Step(int i)
     {
-        if (circle)
+        if (circle && angleStep != 0)   // a speed of 0 leaves the camera exactly where it was placed (else its target drops to the ground, a pose of its own)
         {
             float a = i * angleStep;
             float x = centre.X + radius * (MathF.Cos(a) - 1), z = centre.Z + radius * MathF.Sin(a);

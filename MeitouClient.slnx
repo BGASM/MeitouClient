@@ -9,6 +9,7 @@
     <Project Path="src/Meitou.Rendering.Display/Meitou.Rendering.Display.csproj" />
     <Project Path="src/Meitou.Rendering/Meitou.Rendering.csproj" />
     <Project Path="src/Meitou.Simulation/Meitou.Simulation.csproj" />
+    <Project Path="src/Meitou.Ui/Meitou.Ui.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Meitou.Tests/Meitou.Tests.csproj" />

@@ -31,6 +31,7 @@ static class CharacterShaders
     const string PushMembers = """
             vec3 flatColour;
             uint depthIndex;
+            vec4 fill;          // rgb; a unused
         """;
 
     static readonly string Structs = $$"""
@@ -84,6 +85,7 @@ static class CharacterShaders
         out vec4 vTangent;
         out vec2 vUv;
         flat out uint vMaterial;
+        flat out uint vInterior;
         //MOTION_OUT
 
         void main()
@@ -101,12 +103,13 @@ static class CharacterShaders
             uint slot = floatBitsToUint(aColour.x);
             if (aInstanceData.w != 0u && slot != 0u && slot < 0x1000000u) local += morphs.deltas[aInstanceData.w + slot].xyz;
             vec4 p = world * vec4(local, 1.0);
-            vWorld = p.xyz;
+            vWorld = p.xyz + view.eye;   // the instances are relative to the eye (CharacterRenderer.DrawView)
             mat3 n = mat3(world);
             vNormal = n * aNormal;
             vTangent = vec4(n * aTangent.xyz, aTangent.w);
             vUv = aUv;
             vMaterial = aInstanceData.y;
+            vInterior = aInstanceData.z & 1u;
             gl_Position = view.viewProjection * p;
             //MOTION_BODY
         }
@@ -147,6 +150,7 @@ static class CharacterShaders
         in vec4 vTangent;
         in vec2 vUv;
         flat in uint vMaterial;
+        flat in uint vInterior;
         layout(location = 0) out vec4 fragColour;
 
         bool flag(uint f, uint bit) { return (f & bit) != 0u; }
@@ -217,7 +221,8 @@ static class CharacterShaders
                 bool clip = flag(f, 512u);
                 if (flag(f, 2u) || clip) nm = tex(m.tex[1], uv);
                 vec3 cm = flag(f, 1024u) ? tex(m.tex[2], uv).rgb : vec3(0.0);
-                cut = clip && nm.a < 0.6;
+                // Inventory RTT materials reject at 0.5; worn clothing retains its separate 0.6 threshold.
+                cut = clip && nm.a < (view.fogDistance < 0.0 ? 0.5 : 0.6);
                 if (flag(f, 1024u))
                 {
                     float intensity = dot(d.rgb, vec3(1.0 / 3.0));
@@ -243,7 +248,26 @@ static class CharacterShaders
             vec3 v = normalize(view.eye - vWorld);
             gloss = clamp(gloss, 0.0, 1.0);
             vec3 colour;
+            giInterior = vInterior != 0u;
             if (view.fogDistance > 0.0 && uAtmoParams.x > 0.5) colour = kenshiLight(albedo, n, v, gloss, vWorld);
+            else if (view.fogDistance < 0.0)
+            {
+                // An inventory icon (CharacterRenderer.DrawIcon, a negative fog distance): the game's rtticons.hlsl, one white punctual light along the view axis and no ambient
+                // (CalcPunctualLight: diffuse = pi * N.L * (1 - mean specular colour), GGX specular for roughness 1 - 0.99 * gloss, specular colour 0.4). The game stores that linear
+                // result as it is in an 8-bit target, so the icon target is UNORM, not sRGB (the lit values match the saved pictures: backpack mean 133 102 77 computed, 142 114 91 saved).
+                const float PI = 3.14159265;
+                vec3 l = normalize(view.lightDir);
+                vec3 hv = normalize(v + l);
+                float nl = clamp(dot(n, l), 0.0, 1.0), lh = clamp(dot(l, hv), 0.0, 1.0), nh = clamp(dot(n, hv), 0.0, 1.0);
+                float rough = 1.0 - gloss * 0.99, alpha = rough * rough, alphaSqr = alpha * alpha;
+                float denom = max(1e-6, nh * nh * (alphaSqr - 1.0) + 1.0);
+                float D = alphaSqr / (PI * denom * denom);
+                float fresnel = exp2((-5.55473 * lh - 6.98316) * lh);
+                float k = alpha * 0.5, k2 = k * k, vis = 1.0 / (lh * lh * (1.0 - k2) + k2);
+                float fv = (0.4 + (1.0 - 0.4) * fresnel) * vis;
+                float specular = nl * D * fv / PI;
+                colour = clamp(albedo * (PI * nl * 0.6) + specular, 0.0, 1.0);
+            }
             else
             {
                 vec3 l = normalize(view.lightDir);
@@ -254,6 +278,8 @@ static class CharacterShaders
                 vec3 sunLight = vec3(1.0, 0.97, 0.92);
                 colour = albedo * (ambient + diff * sunLight) + spec * diff * sunLight;
             }
+            // A presentation fill (CharacterRenderer.Fill, 0 in play): ambient light, stronger towards the silhouette as a back light rims it.
+            if (view.fogDistance > 0.0) colour += albedo * pc.fill.rgb * (1.0 + 2.0 * pow(1.0 - max(dot(n, v), 0.0), 3.0));
             if (view.fogDistance > 0.0) colour = atmoApply(colour, view.eye, vWorld);
             fragColour = vec4(colour, 1.0);
         }
@@ -327,12 +353,14 @@ struct CharacterMaterialRecord
 [InlineArray(CharacterShaders.TextureSlotCount)]
 struct TextureSlots { uint first; }
 
-/// <summary>The C# side of the push block (<c>flatColour</c>, <c>depthIndex</c>): 16 bytes. <c>DepthIndex</c> is the near depth texture's bindless index in the motion pass and 0 otherwise.</summary>
+/// <summary>The C# side of the push block (<c>flatColour</c>, <c>depthIndex</c>, <c>fill</c>): 32 bytes. <c>DepthIndex</c> is the near depth texture's bindless index in the motion pass and 0 otherwise.</summary>
 [StructLayout(LayoutKind.Sequential)]
 struct CharacterPush
 {
     public Vector3 FlatColour;
     public uint DepthIndex;
+    /// <summary>The colour pass's fill light (<see cref="CharacterRenderer.Fill"/>; w unused).</summary>
+    public Vector4 Fill;
 }
 
 /// <summary>One instance (144 bytes): the model matrix whose rows the vertex program reads, the palette's first bone, the material's index, the morph base and last frame's matrix.</summary>

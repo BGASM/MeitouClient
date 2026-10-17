@@ -7,8 +7,8 @@ public readonly record struct RegionFog(float Enabled, Vector3 Colour, float Dis
 
 /// <summary>
 /// A region's wind change in progress: from (speed, heading) at <see cref="StartMinute"/> to the targets over <see cref="DurationMinutes"/> (docs/formats/weather.md
-/// "Wind"). The heading is an angle in the ground plane, direction = (cos h, sin h) in (x, z); the interpolation takes the shorter way round
-/// (<b>Observed</b>: the game's interpolation of an angle that wraps was not traced).
+/// "Wind"). The heading is an angle in the ground plane, direction = (cos h, sin h) in (x, z); the angle is lerped linearly, so a change across ±π
+/// goes the long way round as the game's does (<b>Verified</b>: <c>FUN_1409dc0e0</c> lerps with <c>FUN_1409b1cd0</c>; a save caught mid-change agrees).
 /// </summary>
 public readonly record struct WindInterpolation(double StartMinute, double DurationMinutes, float Speed0, float Heading0, float Speed1, float Heading1)
 {
@@ -16,7 +16,7 @@ public readonly record struct WindInterpolation(double StartMinute, double Durat
     {
         float u = DurationMinutes <= 0 ? 1 : (float)Math.Clamp((minute - StartMinute) / DurationMinutes, 0, 1);
         float speed = Speed0 + (Speed1 - Speed0) * u;
-        float heading = Heading0 + WeatherRegion.WrapPi(Heading1 - Heading0) * u;
+        float heading = Heading0 + (Heading1 - Heading0) * u;
         return (speed, new Vector2(MathF.Cos(heading), MathF.Sin(heading)));
     }
 }
@@ -115,7 +115,9 @@ public sealed class WeatherRegion
         float targetEnabled = w.FogEnabled ? 1 : 0;
         float targetDistance = w.FogDistanceAt(WindSpeed);
         float k = fogFadeMinutes <= 0 ? 1 : (float)Math.Clamp((minute - WeatherStartMinute) / fogFadeMinutes, 0, 1);
-        if (k >= 1) return new RegionFog(targetEnabled, w.FogColour, targetDistance);
+        // A time before the weather began only comes from a clock moved back (the viewer's time slider, its camera keys' time of day): the fade is over, as it
+        // would be after it; holding k at 0 there showed the previous weather's fog (a dust storm's, say) for as long as the clock stayed before the start.
+        if (k >= 1 || minute < WeatherStartMinute) return new RegionFog(targetEnabled, w.FogColour, targetDistance);
         var from = fogFrom;
         float enabled = from.Enabled + (targetEnabled - from.Enabled) * k;
         // Observed: a side that is off lends its colour and distance to the other, so only the on/off weight fades (an "off" record's distance is not meant to be seen).
@@ -127,23 +129,21 @@ public sealed class WeatherRegion
     // ---- choosing ----
 
     /// <summary>
-    /// The viewer's "reroll weather" (not the game's): starts a different weather of the current season now, by the same weighted pick among the
-    /// candidates other than the current one, with a new duration and strength. False when the season has no other candidate.
+    /// The viewer's weather list (not the game's): starts the season's weather <paramref name="entry"/> (an index into <see cref="SeasonDef.Weathers"/>) now, with a
+    /// new duration and strength, fading the fog in as after any change.
     /// </summary>
-    public bool Reroll(WeatherTime now)
+    public void Pick(WeatherTime now, int entry)
     {
-        if (Choose(Season.Season, now.WholeHour, exclude: WeatherEntryIndex) < 0) return false;
-        StartWeather(now, first: false, FogAt(now.Minutes), reroll: true);
+        StartWeather(now, first: false, FogAt(now.Minutes), pick: Math.Clamp(entry, 0, Season.Season.Weathers.Count - 1));
         SyncWind(now.Minutes);
-        return true;
     }
 
-    void StartWeather(WeatherTime now, bool first, RegionFog previousFog = default, bool reroll = false)
+    void StartWeather(WeatherTime now, bool first, RegionFog previousFog = default, int pick = -1)
     {
         double t = now.Minutes;
         var season = Season.Season;
 
-        int entry = reroll ? Choose(season, now.WholeHour, exclude: WeatherEntryIndex) : Choose(season, now.WholeHour);
+        int entry = pick >= 0 ? pick : Choose(season, now.WholeHour);
         var chosen = season.Weathers[entry];
         int minutes = RollMinutes(chosen.MinMinutes, chosen.MaxMinutes);
         double end = t + minutes;
@@ -183,20 +183,18 @@ public sealed class WeatherRegion
 
     /// <summary>
     /// The index of the season's next weather: a weighted pick among the weathers with weight above 0 that are not out of their time window (the
-    /// controller's whole hour in [start, end]); a single candidate is taken as is, none gives the season's last weather. With <paramref name="exclude"/>
-    /// (the reroll) that entry and entries of the same weather are no candidates, and none gives −1.
+    /// controller's whole hour in [start, end]); a single candidate is taken as is, none gives the season's last weather.
     /// </summary>
-    int Choose(SeasonDef season, int hour, int exclude = -1)
+    int Choose(SeasonDef season, int hour)
     {
         var candidates = new List<int>(season.Weathers.Count);
         long sum = 0;
         for (int i = 0; i < season.Weathers.Count; i++)
         {
             var w = season.Weathers[i];
-            if (exclude >= 0 && ReferenceEquals(w.Weather, season.Weathers[exclude].Weather)) continue;
             if (w.Weight > 0 && w.Weather.IsInWindow(hour)) { candidates.Add(i); sum += w.Weight; }
         }
-        if (candidates.Count == 0) return exclude >= 0 ? -1 : season.Weathers.Count - 1;
+        if (candidates.Count == 0) return season.Weathers.Count - 1;
         if (candidates.Count == 1) return candidates[0];
         double r = random.NextDouble() * sum;
         long running = 0;

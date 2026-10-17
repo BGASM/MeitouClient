@@ -98,6 +98,8 @@ public sealed record AnimationDefinition
     public IReadOnlyList<string> Stumbles { get; init; } = [];
     public bool BigStumble { get; init; }
     public int StumbleFrom { get; init; }
+    /// <summary><c>category</c> (CharacterAnimCategory: 0 ANIM_NORMAL ... 8 RANGED). Only category 0 is chosen as movement, idle or stumble; the RANGED clips (crossbow aim and reload) are played by the combat system's timing like techniques.</summary>
+    public int Category { get; init; }
     /// <summary>A COMBAT_TECHNIQUE (attack, block or dodge): played by the combat system's timing, never chosen as movement or idle.</summary>
     public bool Technique { get; init; }
     /// <summary>
@@ -105,6 +107,21 @@ public sealed record AnimationDefinition
     /// simulation moves the character by the rest (<see cref="AnimationLengths.Root"/>).
     /// </summary>
     public bool Relocates { get; init; }
+
+    /// <summary>
+    /// An ANIMAL_ANIMATION as a definition (docs/game/animals.md "Animations"): read like an ANIMATION, but on the whole body (every animal record says <c>lower</c>; an
+    /// animal has no body halves), published under its clip (<c>anim name</c>: the records share names, two <c>sleeponfloor</c>s play <c>sleep</c> and <c>gotosleep</c>,
+    /// and the renderer finds the clip in the animal's own skeleton), and in <see cref="AnimationLibrary.AnimalCategory"/> so no humanoid selector takes it.
+    /// </summary>
+    public static AnimationDefinition FromAnimal(GameRecord r) => From(r) with
+    {
+        Name = r.GetString("anim name", "") is { Length: > 0 } clip ? clip : r.Name,
+        Area = AnimationArea.All,
+        Category = AnimationLibrary.AnimalCategory,
+        Relocates = false,
+        WeaponLeft = 2, WeaponRight = 2, CombatMode = 2, StealthMode = 2, Kinds = WeaponKinds.All,
+        LeftLegMin = 1000, LeftLegMax = 1000, RightLegMin = 1000, RightLegMax = 1000,
+    };
 
     /// <summary>A COMBAT_TECHNIQUE as a definition: its <c>anim name</c>, blocks on the upper body (their lower-body tracks are deleted), the rest on the whole body.</summary>
     public static AnimationDefinition FromTechnique(GameRecord r) => new()
@@ -174,6 +191,7 @@ public sealed record AnimationDefinition
             LeftLegIdeal = r.GetFloat("L leg damage ideal", 100),
             RightLegIdeal = r.GetFloat("R leg damage ideal", 100),
             Stumbles = [.. r.GetReferences("stumbles").Select(x => x.TargetStringId)],
+            Category = r.GetInt("category"),
             BigStumble = r.GetBool("big stumble", true),
             StumbleFrom = r.GetInt("stumble from"),
         };
@@ -181,8 +199,8 @@ public sealed record AnimationDefinition
 
     /// <summary>
     /// The speed weight of a movement clip at speed <paramref name="v"/> (<b>Verified</b>, docs/animation.md "Choosing candidates"): a ramp rising from
-    /// <c>min speed</c> to <c>move speed</c> (1 throughout when <c>min speed</c> is under 1), falling to 0 at <c>max speed</c> (staying 1 when <c>max speed</c>
-    /// is under 0.5), 0 outside, sharpened by 1 / (1 + e^(-10 (2r - 1))); 1 when both the speed and <c>min speed</c> are under -40.
+    /// <c>min speed</c> to <c>move speed</c> (1 throughout when <c>min speed</c> is under 1), falling to 0 at <c>max speed</c> (when <c>max speed</c> is under 0.5
+    /// the line goes on past it: 1 for a max of 0, 0 at forward speeds for a backing-off clip), 0 outside, sharpened by 1 / (1 + e^(-10 (2r - 1))); 1 when both the speed and <c>min speed</c> are under -40.
     /// </summary>
     public float SpeedWeight(float v)
     {
@@ -205,11 +223,13 @@ public sealed record AnimationDefinition
         return Ramp(health, min, ideal, max, false, false);
     }
 
-    static float Ramp(float v, float min, float peak, float max, bool flatBelow, bool flatAbove)
+    static float Ramp(float v, float min, float peak, float max, bool flatBelow, bool lineAbove)
     {
         if (v < min) return 0;
         if (v <= peak) return flatBelow || peak <= min ? 1 : (v - min) / (peak - min);
-        if (flatAbove) return 1;
+        // Past the peak the original (FUN_14051cd10) falls along the line through (peak, 1) and (max, 0), also beyond max when max is under 0.5: with a max
+        // left at 0 that line rises (the fastest clip stays at 1), with a negative max (a backing-off clip) it falls on (0 at forward speeds).
+        if (lineAbove) return max == peak ? 0 : Math.Clamp(1 - (v - peak) / (max - peak), 0, 1);
         if (v >= max) return 0;
         return max <= peak ? 1 : (max - v) / (max - peak);
     }
@@ -236,7 +256,8 @@ public sealed record AnimationDefinition
         return Hand(WeaponLeft, s.Left, Kinds) && Hand(WeaponRight, s.Right, Kinds)
             && Mode(CombatMode, s.Combat) && Mode(StealthMode, s.Stealth)
             && Crouched == s.Crouched && Prone == s.Prone
-            && CarryingLeft == s.CarryingLeft && CarryingRight == s.CarryingRight && BeingCarried == s.BeingCarried;
+            // The carrying booleans are tested on upper and overlay picks only (docs/animation.md): a carrier's legs walk with the ordinary lower clips.
+            && (Area == AnimationArea.Lower || CarryingLeft == s.CarryingLeft && CarryingRight == s.CarryingRight && BeingCarried == s.BeingCarried);
     }
 }
 
@@ -296,18 +317,111 @@ public sealed class AnimationLibrary
     /// <summary>The index of a COMBAT_TECHNIQUE's definition by its string id, or -1.</summary>
     public int IndexOfTechnique(string stringId) => techniques.TryGetValue(stringId, out int i) ? i : -1;
 
+    /// <summary>The index of an ANIMATION record's definition by its string id, or -1.</summary>
+    public int IndexOfRecord(string stringId) => all.FindIndex(d => d.Id == stringId && !d.Technique);
+
+    /// <summary>The RANGED ANIMATION record of the crossbow's aim (<c>aimH</c>, clip <c>aimshoot</c>) and the default reload (<c>reload 1 phase</c>), by record name.</summary>
+    public const string RangedAimRecord = "aimH", RangedReloadRecord = "reload 1 phase";
+
     /// <summary>
     /// The usable ANIMATION records (normal category, not disabled, no weather overlay), then the COMBAT_TECHNIQUE records of humanoids (<c>animal</c> 8 or
-    /// less, the set Kenshi's startup preprocessing gathers; docs/animation.md) as <see cref="AnimationDefinition.FromTechnique"/>.
+    /// less, the set Kenshi's startup preprocessing gathers; docs/animation.md) as <see cref="AnimationDefinition.FromTechnique"/>, then the RANGED (category 8)
+    /// records, which only the combat system plays (appended last so the indices of the others do not move).
     /// </summary>
-    public static AnimationLibrary FromDatabase(GameDatabase db) => new(db.OfType(FcsRecordType.ANIMATION)
+    public static AnimationLibrary FromDatabase(GameDatabase db)
+    {
+        var library = new AnimationLibrary(Humanoid(db)
+            // The animals' after everything (no earlier index moves): every ANIMAL_ANIMATION, then the creature techniques (animal 9 and up), which only animals play.
+            .Concat(db.OfType(FcsRecordType.ANIMAL_ANIMATION)
+                .OrderBy(r => r.StringId, StringComparer.Ordinal)
+                .Select(AnimationDefinition.FromAnimal))
+            .Concat(db.OfType(FcsRecordType.COMBAT_TECHNIQUE)
+                .Where(r => r.GetInt("animal") > 8)
+                .OrderBy(r => r.StringId, StringComparer.Ordinal)
+                .Select(r => AnimationDefinition.FromTechnique(r) with { Category = AnimalCategory })));
+        library.BuildAnimals(db);
+        return library;
+    }
+
+    /// <summary>The humanoid part of <see cref="FromDatabase"/> (its order is what the hashed library indices of people are).</summary>
+    static IEnumerable<AnimationDefinition> Humanoid(GameDatabase db) => db.OfType(FcsRecordType.ANIMATION)
         .Where(r => !r.GetBool("disabled") && r.GetInt("category") == 0 && r.GetInt("weather type") == 0)
         .OrderBy(r => r.StringId, StringComparer.Ordinal)
         .Select(AnimationDefinition.From)
         .Concat(db.OfType(FcsRecordType.COMBAT_TECHNIQUE)
             .Where(r => r.GetInt("animal") <= 8)
             .OrderBy(r => r.StringId, StringComparer.Ordinal)
-            .Select(AnimationDefinition.FromTechnique)));
+            .Select(AnimationDefinition.FromTechnique))
+        .Concat(db.OfType(FcsRecordType.ANIMATION)
+            .Where(r => !r.GetBool("disabled") && r.GetInt("category") == RangedCategory && r.GetInt("weather type") == 0)
+            .OrderBy(r => r.StringId, StringComparer.Ordinal)
+            .Select(AnimationDefinition.From))
+        // Category 3 after those (so no earlier index moves): the carried body's held pose "carry me". Played by name only; every selector takes category 0.
+        .Concat(db.OfType(FcsRecordType.ANIMATION)
+            .Where(r => !r.GetBool("disabled") && r.GetInt("category") == CarriedCategory && r.GetInt("weather type") == 0)
+            .OrderBy(r => r.StringId, StringComparer.Ordinal)
+            .Select(AnimationDefinition.From));
+
+    /// <summary>The category of the animal definitions (ANIMAL_ANIMATION records and creature techniques): no ANIMATION record has it, so no humanoid selector takes them.</summary>
+    public const int AnimalCategory = -1;
+
+    /// <summary>The ANIMAL_ANIMATION record name of the lying clips: one record plays <c>gotosleep</c> once (the fall), another <c>sleep</c> in a loop.</summary>
+    public const string AnimalLyingRecord = "sleeponfloor";
+
+    readonly Dictionary<string, AnimalClips> animals = new(StringComparer.Ordinal);
+
+    /// <summary>The clip set of an ANIMAL_CHARACTER (by string id); null for anything else (people).</summary>
+    public AnimalClips? Animal(string recordId) => animals.GetValueOrDefault(recordId);
+
+    /// <summary>
+    /// Every ANIMAL_CHARACTER's clip set from its <c>animations</c> list (docs/game/animals.md "Animations"): the movement clips (non-zero <c>move speed</c>), the idles
+    /// (<c>idle</c>, by <c>idle chance</c>) and its <c>sleeponfloor</c> records (the one that does not loop is the fall, the looping one the lying clip), each followed by
+    /// every other <c>sleeponfloor</c> record as a fallback (engine choice: most lists name one or none; the system takes the first whose clip the skeleton has).
+    /// </summary>
+    void BuildAnimals(GameDatabase db)
+    {
+        var index = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < all.Count; i++) if (all[i].Category == AnimalCategory && !all[i].Technique) index.TryAdd(all[i].Id, i);
+        var lying = db.OfType(FcsRecordType.ANIMAL_ANIMATION).Where(r => r.Name == AnimalLyingRecord && index.ContainsKey(r.StringId))
+            .OrderBy(r => r.StringId, StringComparer.Ordinal).ToList();
+        int[] Pick(IEnumerable<GameRecord> own, bool loop) =>
+            [.. own.Concat(lying).Where(r => r.Name == AnimalLyingRecord && r.GetBool("loop") == loop).Select(r => index[r.StringId]).Distinct()];
+        foreach (var a in db.OfType(FcsRecordType.ANIMAL_CHARACTER))
+        {
+            var listed = a.GetReferences("animations").Select(r => db.Find(r.TargetStringId))
+                .OfType<GameRecord>().Where(r => index.ContainsKey(r.StringId)).DistinctBy(r => r.StringId).ToList();
+            var defs = listed.Select(r => index[r.StringId]).ToList();
+            string? race = a.GetReferences("race").Where(r => r.Values.Value0 > 0).Select(r => r.TargetStringId).FirstOrDefault();
+            animals[a.StringId] = new AnimalClips(
+                a.StringId, race,
+                [.. defs.Where(i => all[i].MoveSpeed != 0).OrderBy(i => all[i].Id, StringComparer.Ordinal)],
+                [.. defs.Where(i => all[i].Idle && all[i].MoveSpeed == 0).Select(i => (i, (float)Math.Max(all[i].IdleChance, 0)))],
+                Pick(listed, loop: false), Pick(listed, loop: true));
+        }
+    }
+
+    /// <summary>
+    /// The movement clips among <paramref name="candidates"/> to play at speed <paramref name="v"/>, as (index, weight): each weighted by its speed weight, normalised to sum 1
+    /// (the humanoid rule without the stance and the legs, which the animal records do not have). Nothing is added when none weighs anything.
+    /// </summary>
+    public void Movement(IReadOnlyList<int> candidates, float v, List<(int Index, float Weight)> into)
+    {
+        int first = into.Count;
+        float total = 0;
+        foreach (int i in candidates)
+        {
+            float w = all[i].SpeedWeight(v);
+            if (!(w > 0)) continue;
+            into.Add((i, w));
+            total += w;
+        }
+        for (int k = first; k < into.Count; k++) into[k] = (into[k].Index, into[k].Weight / total);
+    }
+
+    /// <summary>CharacterAnimCategory 8, RANGED.</summary>
+    public const int RangedCategory = 8;
+    /// <summary>The ANIMATION category of <c>carry me</c> (3 in the data; the enum name is not known here).</summary>
+    public const int CarriedCategory = 3;
 
     readonly System.Collections.Concurrent.ConcurrentDictionary<(AnimationArea, AnimationStance), int[]> candidates = new();
     readonly System.Collections.Concurrent.ConcurrentDictionary<AnimationStance, (int Index, float Weight)[]> idles = new();
@@ -323,7 +437,7 @@ public sealed class AnimationLibrary
         for (int i = 0; i < self.all.Count; i++)
         {
             var d = self.all[i];
-            if (d.MoveSpeed == 0 || d.Idle || d.IsAction || d.Area == AnimationArea.Overlay) continue;
+            if (d.Category != 0 || d.MoveSpeed == 0 || d.Idle || d.IsAction || d.Area == AnimationArea.Overlay) continue;
             if ((key.Item1 == AnimationArea.Upper) != (d.Area == AnimationArea.Upper)) continue;
             if (d.FitsExceptLegs(key.Item2)) list.Add(i);
         }
@@ -364,7 +478,7 @@ public sealed class AnimationLibrary
         for (int i = 0; i < all.Count; i++)
         {
             var d = all[i];
-            if (d.Stumbles.Count == 0 || d.BigStumble != big || d.StumbleFrom != side || !d.Stumbles.Contains(part) || !d.FitsExceptLegs(stance)) continue;
+            if (d.Category != 0 || d.Stumbles.Count == 0 || d.BigStumble != big || d.StumbleFrom != side || !d.Stumbles.Contains(part) || !d.FitsExceptLegs(stance)) continue;
             float w = d.Chance / 100f * (i == playing ? 0.25f : 1);
             into.Add((i, w));
             total += w;
@@ -388,13 +502,13 @@ public sealed class AnimationLibrary
         for (int i = 0; i < self.all.Count; i++)
         {
             var d = self.all[i];
-            if (d.Idle && !d.IsAction && d.Area == AnimationArea.Upper && d.CombatMode != 0 && (d.Kinds & held) != 0) list.Add((i, Math.Max(d.IdleChance, 0)));
+            if (d.Category == 0 && d.Idle && !d.IsAction && d.Area == AnimationArea.Upper && d.CombatMode != 0 && (d.Kinds & held) != 0) list.Add((i, Math.Max(d.IdleChance, 0)));
         }
         if (list.Count == 0)
             for (int i = 0; i < self.all.Count; i++)
             {
                 var d = self.all[i];
-                if (d.Idle && !d.IsAction && d.Area == AnimationArea.All && d.Fits(s with { Combat = d.CombatMode == 1 })) list.Add((i, Math.Max(d.IdleChance, 0)));
+                if (d.Category == 0 && d.Idle && !d.IsAction && d.Area == AnimationArea.All && d.Fits(s with { Combat = d.CombatMode == 1 })) list.Add((i, Math.Max(d.IdleChance, 0)));
             }
         return list.ToArray();
     }, this);
@@ -406,43 +520,132 @@ public sealed class AnimationLibrary
         for (int i = 0; i < self.all.Count; i++)
         {
             var d = self.all[i];
-            if (d.Idle && !d.IsAction && d.Area == AnimationArea.All && d.Fits(s)) list.Add((i, Math.Max(d.IdleChance, 0)));
+            if (d.Category == 0 && d.Idle && !d.IsAction && d.Area == AnimationArea.All && d.Fits(s)) list.Add((i, Math.Max(d.IdleChance, 0)));
         }
         return list.ToArray();
     }, this);
+
+    readonly System.Collections.Concurrent.ConcurrentDictionary<AnimationStance, int> carryIdles = new();
+
+    /// <summary>
+    /// The held arm pose of a carrier standing (or of a carried body): the first idle overlay or upper clip, in record order, whose carrying booleans are set and fit the stance
+    /// (<c>stand carrying left</c> in the base game); -1 when none. Played over a whole-body idle of the same stance without the carrying (engine choice).
+    /// </summary>
+    public int CarryIdle(in AnimationStance stance) => carryIdles.GetOrAdd(Canonical(stance), static (s, self) =>
+    {
+        for (int i = 0; i < self.all.Count; i++)
+        {
+            var d = self.all[i];
+            if (d.Category == 0 && d.Idle && !d.IsAction && d.Area is AnimationArea.Overlay or AnimationArea.Upper && (d.CarryingLeft || d.CarryingRight || d.BeingCarried) && d.Fits(s)) return i;
+        }
+        return -1;
+    }, this);
 }
 
-/// <summary>The length in seconds of every clip of the humanoid skeletons (what a synched movement clip needs to turn a phase into a time).</summary>
+/// <summary>
+/// The clips an ANIMAL_CHARACTER plays, as indices into its <see cref="AnimationLibrary"/> (<see cref="AnimationLibrary.Animal"/>): from its own <c>animations</c> list, the
+/// movement clips, the idles with their weights, and the fall and lying candidates in order (its own first). <paramref name="RaceId"/> picks the skeleton's clip lengths
+/// (<see cref="AnimationLengths.For"/>). Its techniques are the creature techniques of its weapon's category, which the combat system chooses.
+/// </summary>
+public sealed record AnimalClips(string RecordId, string? RaceId, int[] Movement, (int Index, float Weight)[] Idles, int[] Fall, int[] Lying);
+
+/// <summary>
+/// The length in seconds of every clip of the humanoid skeletons (what a synched movement clip needs to turn a phase into a time), and, per animal race, the clips of that
+/// race's own skeleton (<see cref="For"/>: an animal's clips are in the skeleton its body mesh links, and their names repeat across species with other lengths).
+/// </summary>
 public sealed class AnimationLengths
 {
     readonly Dictionary<string, float> lengths = new(StringComparer.OrdinalIgnoreCase);
     readonly Dictionary<string, (float[] Times, System.Numerics.Vector2[] Offsets)> roots = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, AnimationLengths> species = new(StringComparer.Ordinal);
 
     public static readonly AnimationLengths Empty = new();
 
-    /// <summary>The clips of every <c>*_skeleton.skeleton</c> under <c>data/character/meshes</c> (the first file to name a clip wins).</summary>
-    public static AnimationLengths Load(string installRoot)
+    /// <summary>
+    /// The clips of every <c>*_skeleton.skeleton</c> under <c>data/character/meshes</c> (the first file to name a clip wins); with <paramref name="db"/> also the clips of
+    /// the skeleton each ANIMAL_CHARACTER's race's body mesh links (<see cref="For"/>), read in parallel, one table per skeleton file.
+    /// </summary>
+    public static AnimationLengths Load(string installRoot, GameDatabase? db = null)
     {
         var result = new AnimationLengths();
         var dir = Path.Combine(installRoot, "data", "character", "meshes");
-        if (!Directory.Exists(dir)) return result;
-        foreach (var file in Directory.EnumerateFiles(dir, "*_skeleton.skeleton", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
-        {
-            try
-            {
-                var skeleton = OgreSkeletonReader.ReadFile(file);
-                var root = skeleton.Bones.FirstOrDefault(b => b.Name == "Bip01");
-                foreach (var a in skeleton.Animations)
-                {
-                    if (!result.lengths.TryAdd(a.Name, a.Length) || root is null) continue;
-                    var track = a.Tracks.FirstOrDefault(t => t.Bone == root.Handle);
-                    if (track is null || track.KeyFrames.Count == 0) continue;
-                    result.roots[a.Name] = ([.. track.KeyFrames.Select(k => k.Time)], [.. track.KeyFrames.Select(k => new System.Numerics.Vector2(k.Translation.X, k.Translation.Z))]);
-                }
-            }
-            catch (Exception e) when (e is IOException or InvalidDataException or FcsFormatException) { }
-        }
+        if (Directory.Exists(dir))
+            foreach (var file in Directory.EnumerateFiles(dir, "*_skeleton.skeleton", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+                result.AddSkeleton(file);
+        if (db is not null) result.LoadAnimals(installRoot, db);
         return result;
+    }
+
+    /// <summary>Adds the clips of a skeleton file (a clip already known keeps its first length).</summary>
+    void AddSkeleton(string file)
+    {
+        try
+        {
+            var skeleton = OgreSkeletonReader.ReadFile(file);
+            var root = skeleton.Bones.FirstOrDefault(b => b.Name == "Bip01");
+            foreach (var a in skeleton.Animations)
+            {
+                if (!lengths.TryAdd(a.Name, a.Length) || root is null) continue;
+                var track = a.Tracks.FirstOrDefault(t => t.Bone == root.Handle);
+                if (track is null || track.KeyFrames.Count == 0) continue;
+                roots[a.Name] = ([.. track.KeyFrames.Select(k => k.Time)], [.. track.KeyFrames.Select(k => new System.Numerics.Vector2(k.Translation.X, k.Translation.Z))]);
+            }
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException or FcsFormatException or OgreFormatException or EndOfStreamException) { }
+    }
+
+    /// <summary>
+    /// Per race of an ANIMAL_CHARACTER: the race's <c>male mesh</c> (animal races name the same mesh for both), the skeleton that mesh links (read from the mesh file; looked
+    /// for beside it, then anywhere under <c>data</c>), and that skeleton's clips. Races sharing a skeleton share its table.
+    /// </summary>
+    void LoadAnimals(string installRoot, GameDatabase db)
+    {
+        var races = db.OfType(FcsRecordType.ANIMAL_CHARACTER)
+            .SelectMany(a => a.GetReferences("race").Where(r => r.Values.Value0 > 0).Take(1).Select(r => db.Find(r.TargetStringId)))
+            .OfType<GameRecord>().Where(r => r.Type == FcsRecordType.RACE).DistinctBy(r => r.StringId).ToList();
+        var skeletonOf = new System.Collections.Concurrent.ConcurrentDictionary<string, string?>(StringComparer.Ordinal);
+        Parallel.ForEach(races, race => skeletonOf[race.StringId] = SkeletonFile(installRoot, race.GetPath("male mesh")));
+        var tables = new System.Collections.Concurrent.ConcurrentDictionary<string, AnimationLengths>(StringComparer.OrdinalIgnoreCase);
+        Parallel.ForEach(skeletonOf.Values.OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase), file =>
+        {
+            var table = new AnimationLengths();
+            table.AddSkeleton(file);
+            tables[file] = table;
+        });
+        foreach (var race in races)
+            if (skeletonOf[race.StringId] is { } file && tables.TryGetValue(file, out var table)) species[race.StringId] = table;
+    }
+
+    /// <summary>The skeleton file a mesh (an FCS path) links: beside the mesh, else the first file of that name under <c>data</c>; null when either is missing.</summary>
+    static string? SkeletonFile(string installRoot, string fcsMesh)
+    {
+        if (fcsMesh.Length == 0) return null;
+        var mesh = Path.Combine(installRoot, fcsMesh.Replace('\\', Path.DirectorySeparatorChar).TrimStart('.', Path.DirectorySeparatorChar));
+        try
+        {
+            if (!File.Exists(mesh)) return null;
+            if (OgreMeshReader.ReadFile(mesh).SkeletonName is not { Length: > 0 } name) return null;
+            var beside = Path.Combine(Path.GetDirectoryName(mesh)!, name);
+            if (File.Exists(beside)) return beside;
+            return Directory.EnumerateFiles(Path.Combine(installRoot, "data"), Path.GetFileName(name), SearchOption.AllDirectories).Order(StringComparer.Ordinal).FirstOrDefault();
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException or OgreFormatException or EndOfStreamException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>The clips of an animal race's own skeleton (<paramref name="raceId"/> a RACE string id); this table for anything else (people, a race not loaded).</summary>
+    public AnimationLengths For(string? raceId) => raceId is not null && species.TryGetValue(raceId, out var table) ? table : this;
+
+    /// <summary>Whether <see cref="For"/> has a table of its own for the race (an animal race whose skeleton was read).</summary>
+    public bool HasSpecies(string raceId) => species.ContainsKey(raceId);
+
+    /// <summary>Whether the table knows the clip (its skeleton has an animation of that name).</summary>
+    public bool Has(string clip) => lengths.ContainsKey(clip);
+
+    /// <summary>Sets an animal race's table (tests).</summary>
+    public AnimationLengths AddSpecies(string raceId, AnimationLengths table)
+    {
+        species[raceId] = table;
+        return this;
     }
 
     public AnimationLengths Add(string clip, float seconds)

@@ -34,8 +34,14 @@ public sealed class WorldSession : IDisposable
         Clock = clock ?? new GameClock(startHour);
         Bindings = bindings ?? new InputBindings();
         Camera = new CameraRig(ground);
-        World = new World(settings, walkability ?? new OpenGroundWalkability(ground), systems);
+        worldSettings = settings;
+        worldWalkability = walkability ?? new OpenGroundWalkability(ground);
+        World = new World(settings, worldWalkability, systems);
+        World.Fixtures.Doors = worldWalkability as Meitou.Simulation.Locks.IDoorGate;
     }
+
+    readonly WorldSettings worldSettings;
+    readonly IWalkability worldWalkability;
 
     /// <summary>The point the world was loaded around.</summary>
     public Vector3 Focus { get; }
@@ -46,8 +52,8 @@ public sealed class WorldSession : IDisposable
     /// <summary>The game-time simulation tick.</summary>
     public SimulationClock Simulation { get; } = new();
     public GameClock Clock { get; }
-    /// <summary>The simulated world; it ticks with the simulation clock.</summary>
-    public World World { get; }
+    /// <summary>The simulated world; it ticks with the simulation clock. Replaced as a whole by <see cref="ReplaceWorld"/> (a loaded save); read it again after a frame, do not keep it.</summary>
+    public World World { get; private set; }
     /// <summary>The snapshot the last simulation tick published and the one before it, for interpolating by <see cref="SimulationAlpha"/>.</summary>
     public WorldSnapshot CurrentSnapshot => World.Snapshot;
     public WorldSnapshot PreviousSnapshot => World.PreviousSnapshot;
@@ -78,22 +84,51 @@ public sealed class WorldSession : IDisposable
     {
         int n = Simulation.Advance(realSeconds);
         for (int i = 0; i < n; i++) SimulationTick();
+        if (Simulation.IsPaused) World.ApplyPausedInterfaceCommands();
         return n;
     }
 
     /// <summary>One simulation tick: the world runs its phases, the game clock moves by one tick of game time.</summary>
     void SimulationTick()
     {
+        World.GameHours = Clock.TotalHours;
         World.RunTick();
         Clock.Advance(Simulation.TickSeconds);
     }
 
-    /// <summary>Called when the session is disposed, for the systems that own threads.</summary>
-    public void Dispose()
+    /// <summary>
+    /// Swaps in a new world made from <paramref name="systems"/> (same settings and walkability) at a tick boundary, for a loaded save. <paramref name="setup"/>
+    /// fills the new world (before its first tick, as <c>SaveLoader.Load</c> needs); when it throws the old world stays and the new one and its systems are disposed.
+    /// The old world and its systems are disposed after the swap. The control tick, the camera, the input and the simulation clock carry on; the game clock is the
+    /// caller's to set. Call it between frames or from a control tick's handler, never from inside a world tick.
+    /// </summary>
+    public World ReplaceWorld(IEnumerable<ITickSystem> systems, Action<World>? setup = null)
     {
-        World.Dispose();
-        foreach (var s in World.Systems) (s as IDisposable)?.Dispose();
+        var list = systems.ToList();
+        var next = new World(worldSettings, worldWalkability, list);
+        next.Floaters = World.Floaters;   // the host keeps drawing the floaters across the swap
+        try { setup?.Invoke(next); }
+        catch
+        {
+            Discard(next);
+            throw;
+        }
+        var old = World;
+        World = next;
+        Discard(old);
+        // The navmesh door table follows the new world: the old one's locked doors are forgotten, the new one's told.
+        if (worldWalkability is Meitou.Simulation.Locks.IDoorGate gate) { gate.ResetDoors(); next.Fixtures.Doors = gate; }
+        return next;
     }
+
+    static void Discard(World world)
+    {
+        world.Dispose();
+        foreach (var s in world.Systems) (s as IDisposable)?.Dispose();
+    }
+
+    /// <summary>Called when the session is disposed, for the systems that own threads.</summary>
+    public void Dispose() => Discard(World);
 
     /// <summary>One control tick: the actions from the input (pause, speed), then the camera.</summary>
     public ActionState Tick()

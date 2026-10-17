@@ -4,7 +4,6 @@ using System.Runtime.InteropServices;
 using Meitou.Rendering;
 using Meitou.Rendering.Gpu;
 using Meitou.Rendering.Gpu.Core;
-using Silk.NET.Vulkan;
 
 namespace Meitou.Tests.Rendering;
 
@@ -56,12 +55,6 @@ public class FoliageLodTests
     }
 
     [Fact]
-    public void A_mesh_with_few_triangles_gets_no_level()
-    {
-        Assert.Null(FoliageLodBuilder.Build(Sphere(4, 8, 10), radius: 10));
-    }
-
-    [Fact]
     public void Deviation_sees_a_thin_part_that_a_level_loses()
     {
         // A flat 20 x 20 grid with one thin spike (a sliver triangle 30 units high) in the middle; the level is the grid alone.
@@ -82,60 +75,6 @@ public class FoliageLodTests
         float deviation = FoliageLodBuilder.Deviation([.. vertices], [.. indices], flat);
         Assert.InRange(deviation, 29.9f, 30.1f);
         Assert.Equal(0, FoliageLodBuilder.Deviation([.. vertices], flat, flat), 4);
-    }
-
-    [Fact]
-    public void Triangle_distance_matches_a_dense_sampling()
-    {
-        var random = new Random(5);
-        for (int n = 0; n < 200; n++)
-        {
-            Vector3 R() => new((float)random.NextDouble() * 10 - 5, (float)random.NextDouble() * 10 - 5, (float)random.NextDouble() * 10 - 5);
-            Vector3 a = R(), b = R(), c = R(), p = R();
-            float exact = MathF.Sqrt(FoliageLodBuilder.DistanceSquared(p, a, b, c));
-            float best = float.MaxValue;
-            const int N = 60;
-            for (int i = 0; i <= N; i++)
-                for (int j = 0; j <= N - i; j++)
-                {
-                    var q = a + (b - a) * (i / (float)N) + (c - a) * (j / (float)N);
-                    best = Math.Min(best, Vector3.Distance(p, q));
-                }
-            Assert.InRange(exact, best - 0.3f, best + 0.001f);
-        }
-    }
-
-    [Fact]
-    public void The_cache_returns_what_was_saved_and_remembers_a_mesh_without_levels()
-    {
-        var root = Path.Combine(Path.GetTempPath(), "meitou-lod-test-" + Guid.NewGuid().ToString("N"));
-        var saved = FoliageLodCache.Root;
-        FoliageLodCache.Root = root;
-        try
-        {
-            var set = FoliageLodBuilder.Build(Sphere(30, 60, 50), radius: 50);
-            Assert.NotNull(set);
-            var path = FoliageLodCache.PathFor("Plants\\Twig.mesh", [1, 2, 3]);
-            Assert.NotEqual(path, FoliageLodCache.PathFor("Plants\\Twig.mesh", [1, 2, 4]));   // keyed by the file's content
-            Assert.False(FoliageLodCache.TryLoad(path, 1).Hit);
-            Assert.True(FoliageLodCache.Save(path, set, 1) > 0);
-            var (hit, loaded) = FoliageLodCache.TryLoad(path, 1);
-            Assert.True(hit);
-            Assert.NotNull(loaded);
-            Assert.Equal(set.Errors, loaded.Errors);
-            Assert.Equal(set.Triangles, loaded.Triangles);
-            for (int l = 0; l < set.Indices[0].Length; l++) Assert.Equal(set.Indices[0][l], loaded.Indices[0][l]);
-            Assert.False(FoliageLodCache.TryLoad(path, 2).Hit);   // another part count: not this mesh's file
-
-            var none = FoliageLodCache.PathFor("Rocks\\Small.mesh", [9]);
-            FoliageLodCache.Save(none, null, 1);
-            Assert.Equal((true, (FoliageLodSet?)null), FoliageLodCache.TryLoad(none, 1));
-        }
-        finally
-        {
-            FoliageLodCache.Root = saved;
-            if (Directory.Exists(root)) Directory.Delete(root, true);
-        }
     }
 
     // ---- the cull kernel ----

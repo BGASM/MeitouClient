@@ -106,10 +106,6 @@ public sealed unsafe class WorldTextureCache : IDisposable
     /// <summary>The images' allocation name (the F12 VRAM pie groups by it).</summary>
     readonly string allocationName;
     long lastTrim;
-    static readonly bool StreamLog = Environment.GetEnvironmentVariable("MEITOU_STREAM_LOG") == "1";
-    /// <summary>MEITOU_MIP_LOG=1: a line for every image loaded with more levels dropped than the quality setting's, and for every swap.</summary>
-    static readonly bool MipLog = Environment.GetEnvironmentVariable("MEITOU_MIP_LOG") == "1";
-    static readonly string[]? MipSkip = Environment.GetEnvironmentVariable("MEITOU_MIP_SKIP")?.Split(',', StringSplitOptions.RemoveEmptyEntries);
 
     /// <param name="name">The images' allocation name, by owner ("object textures", "foliage textures").</param>
     public WorldTextureCache(GpuContext gpu, AssetLocator assets, string name)
@@ -121,6 +117,16 @@ public sealed unsafe class WorldTextureCache : IDisposable
 
     public List<string> Messages { get; } = [];
     public int PendingCount => pending.Count + (steps.Count > 0 ? 1 : 0);
+    /// <summary>Recently used textures whose initial load is still deferred (e.g. by memory pressure).
+    /// Includes the once-per-second range marking; unused deferred foliage textures do not hold up a scene.</summary>
+    public int UnresidentUsedCount
+    {
+        get
+        {
+            long now = Environment.TickCount64;
+            return cache.Values.Count(t => t.State == WorldTexture.Residency.Unloaded && now - t.LastUsed <= 2000);
+        }
+    }
 
     /// <summary>GPU memory of the resident textures (all levels, RGBA8) and how many there are.</summary>
     public long ResidentBytes { get; private set; }
@@ -146,9 +152,9 @@ public sealed unsafe class WorldTextureCache : IDisposable
     public long UnstreamedBytes { get; private set; }
 
     /// <summary>Unused for this long: unloaded.</summary>
-    public double IdleSeconds { get; set; } = StreamingTuning.IdleSeconds;
+    public double IdleSeconds { get; set; } = 60;
     /// <summary>Above this the least recently used textures that were unused for <see cref="PressureIdleSeconds"/> go too.</summary>
-    public double HighWaterMb { get; set; } = StreamingTuning.IdleSeconds > 1e8 ? double.MaxValue : TextureQuality.MemoryBudgetMb(TextureQuality.Level);
+    public double HighWaterMb { get; set; } = TextureQuality.MemoryBudgetMb(TextureQuality.Level);
     public double PressureIdleSeconds { get; set; } = 8;
     /// <summary>The high-water mark as a share of the driver's video memory budget: the mark is the smaller of <see cref="HighWaterMb"/> and this share (the default share is what
     /// the fixed mark was on the 11.4 GB card it was tuned on), and three quarters of it under the guard's pressure.</summary>
@@ -186,7 +192,6 @@ public sealed unsafe class WorldTextureCache : IDisposable
             return t;
         }
         cache[key] = t = new WorldTexture { Border = border, Owner = this, Name = name, LastUsed = Environment.TickCount64 };
-        if (MipSkip is { } skip && skip.Any(s => name.Contains(s, StringComparison.OrdinalIgnoreCase))) t.KeepAllMips = true;
         byNumber.Add(t);
         t.Number = (uint)byNumber.Count;
         // The game reduces texture fields to the bare file name (runtime-materials.md); a path still works.
@@ -301,13 +306,12 @@ public sealed unsafe class WorldTextureCache : IDisposable
                 if (!wait && (watch.Elapsed.TotalMilliseconds >= budgetMs || ranSteps > 0 && !stepCosts.Fits(steps.Peek().Method, watch.Elapsed.TotalMilliseconds, budgetMs))) break;
                 var step = steps.Dequeue();
                 var one = System.Diagnostics.Stopwatch.StartNew();
-                if (StreamLog) Gpu.UploadProfile.Take();
                 gpu.EnsureFrame();
                 step();
                 double stepMs = one.Elapsed.TotalMilliseconds;
                 stepCosts.Learn(step.Method, stepMs);
                 ranSteps++;
-                if (StreamLog) { string parts = Gpu.UploadProfile.Take(); if (stepMs > 3) Console.WriteLine($"slow texture step {step.Method.Name}: {stepMs:0.0} ms [{parts}]"); }
+                if (stepMs > 3) SpikeLog.Note($"slow texture step {step.Method.Name}", ms: stepMs);
                 continue;
             }
             int found = -1;
@@ -327,7 +331,7 @@ public sealed unsafe class WorldTextureCache : IDisposable
         {
             var trim = System.Diagnostics.Stopwatch.StartNew();
             Trim();
-            if (StreamLog && trim.Elapsed.TotalMilliseconds > 3) Console.WriteLine($"slow texture trim: {trim.Elapsed.TotalMilliseconds:0.0} ms");
+            if (trim.Elapsed.TotalMilliseconds > 3) SpikeLog.Note("slow texture trim", ms: trim.Elapsed.TotalMilliseconds);
         }
     }
 
@@ -463,12 +467,8 @@ public sealed unsafe class WorldTextureCache : IDisposable
     readonly StepCosts stepCosts = new();
     const int SlabBytes = 512 << 10;
 
-    /// <summary>
-    /// MEITOU_UNCOMPRESSED_TEXTURES=1 decodes every texture to RGBA8 on the CPU and uploads that (the way it was before; uses 4 to 8 times the GPU memory
-    /// of BC1/BC3 textures). Otherwise DDS textures in BC1, BC2, BC3, BC4 or BC5 with a full mip chain go to the GPU as they are stored (BC4 through a swizzle that shows it as grey).
-    /// </summary>
-    static readonly bool Uncompressed = Environment.GetEnvironmentVariable("MEITOU_UNCOMPRESSED_TEXTURES") == "1";
-
+    // DDS textures in BC1, BC2, BC3, BC4 or BC5 with a full mip chain go to the GPU as they are stored (BC4 through a swizzle that shows it as grey);
+    // the rest is decoded to RGBA8 on the CPU.
     static TextureData Load(string path, int dropMips, float need, bool streaming, float perDistance, float bias, int extra)
     {
         using var file = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.SequentialScan);
@@ -480,7 +480,7 @@ public sealed unsafe class WorldTextureCache : IDisposable
             var dds = DdsReader.ReadKept(file, w => TextureQuality.DropTopMips(w, Math.Max(dropMips, MipStreaming.Drop(w.Width, w.Height, need, streaming, perDistance, bias, extra))), out var whole);
             int dropped = whole.MipCount - dds.MipCount;
             bool droppable = TextureQuality.DropTopMips(whole, 1).MipCount < whole.MipCount;
-            if (!Uncompressed && CanUploadCompressed(dds))
+            if (CanUploadCompressed(dds))
             {
                 // Only the level the swizzle test looks at is decoded on the CPU.
                 int level = Math.Max(Array.FindIndex(dds.Surfaces.ToArray(), s => s.Width <= 256 && s.Height <= 256), 0);
@@ -648,8 +648,6 @@ public sealed unsafe class WorldTextureCache : IDisposable
         }
         if (t.Replacing && data.Dropped == t.Dropped) t.CannotDrop = true;   // nothing changed: do not ask again
         t.CannotDrop |= !data.Droppable;
-        if (MipLog && (data.Dropped > t.QualityDrop || t.Dropped > t.QualityDrop))
-            Console.WriteLine($"mips      {allocationName} {t.Name} {data.FileWidth}x{data.FileHeight}: {t.Dropped} -> {data.Dropped} levels dropped (quality {t.QualityDrop}), need {t.Need:0.0}");
         if (t.Refine) { t.Refine = false; Refining--; }
         t.Replacing = false;
         t.TooFineSince = 0;
@@ -669,16 +667,6 @@ public sealed unsafe class WorldTextureCache : IDisposable
 
     public void Dispose()
     {
-        if (Environment.GetEnvironmentVariable("MEITOU_TEX_STATS") == "1")
-        {
-            var res = cache.Values.Where(t => t.State == WorldTexture.Residency.Resident).ToList();
-            var byPath = res.GroupBy(t => t.Path!.ToLowerInvariant()).ToList();
-            long dup = byPath.Sum(g => g.Sum(t => t.Bytes) - g.First().Bytes);
-            Console.WriteLine($"texstats  {allocationName}: {res.Count} resident, {byPath.Count} distinct paths, duplicates {dup / 1048576.0:0} MB ({res.Count(t => t.Border)} border variants), keys {cache.Count}");
-            foreach (var t in res.OrderByDescending(t => t.Bytes).Take(12)) Console.WriteLine($"texstats    {t.Bytes / 1048576.0:0.0} MB {t.Name} {t.Native?.Desc.Width}x{t.Native?.Desc.Height}");
-            var hist = res.GroupBy(t => t.Native?.Desc.Width ?? 0).OrderBy(g => g.Key).Select(g => $"{g.Key}:{g.Count()}x{g.Sum(t => t.Bytes) / 1048576.0:0}MB");
-            Console.WriteLine("texstats    by width " + string.Join(", ", hist));
-        }
         foreach (var t in pending) t.Pending?.Wait();
         foreach (var t in cache.Values) Release(t);
     }

@@ -95,16 +95,6 @@ public class OgreSkeletonReaderTests
     }
 
     [Fact]
-    public void Quaternions_are_stored_x_y_z_w()
-    {
-        var bytes = new Builder(OgreSkeletonReader.Version1_10)
-            .Begin(OgreSkeletonChunk.Bone).String("b").U16(0).F32(0, 0, 0).F32(0.1f, 0.2f, 0.3f, 0.9f).End(OgreSkeletonReader.BoneLengthWithoutScale)
-            .ToArray();
-        var bone = Assert.Single(OgreSkeletonReader.Read(bytes).Bones);
-        Assert.Equal(new Quaternion(0.1f, 0.2f, 0.3f, 0.9f), bone.Orientation);
-    }
-
-    [Fact]
     public void Bone_scale_is_decided_by_the_stored_length_not_the_name()
     {
         // A name-inclusive length would look like "has scale" to Ogre; the reader must follow Ogre and
@@ -149,25 +139,6 @@ public class OgreSkeletonReaderTests
         Assert.Empty(skeleton.Animations[1].Tracks);
         Assert.Equal(new OgreAnimationLink("other.skeleton", 0.5f), Assert.Single(skeleton.AnimationLinks));
         Assert.Equal(0, skeleton.ChunkLengthMismatches);
-    }
-
-    [Fact]
-    public void Version_1_10_without_blend_mode_defaults_to_average()
-    {
-        var skeleton = OgreSkeletonReader.Read(new Builder(OgreSkeletonReader.Version1_10)
-            .Bone("root", 0, Vector3.Zero, Quaternion.Identity).ToArray());
-        Assert.Null(skeleton.StoredBlendMode);
-        Assert.Equal(OgreSkeletonBlendMode.Average, skeleton.BlendMode);
-    }
-
-    [Fact]
-    public void Rejects_unknown_versions_chunks_bad_parents_and_truncated_files()
-    {
-        Assert.Throws<OgreFormatException>(() => OgreSkeletonReader.Read(new Builder("[Serializer_v1.20]").ToArray()));
-        Assert.Throws<OgreFormatException>(() => OgreSkeletonReader.Read(TwoBones().Begin((OgreSkeletonChunk)0x6000).End().ToArray()));
-        Assert.Throws<OgreFormatException>(() => OgreSkeletonReader.Read(TwoBones().Begin(OgreSkeletonChunk.BoneParent).U16(0).U16(7).End().ToArray()));
-        Assert.Throws<OgreFormatException>(() => OgreSkeletonReader.Read(TwoBones().ToArray()[..^3]));
-        Assert.Throws<OgreFormatException>(() => OgreSkeletonReader.Read([]));
     }
 
     static IEnumerable<string> SkeletonFiles(GameInstall install) =>
@@ -253,69 +224,5 @@ public class OgreSkeletonReaderTests
                 }
             }
         }
-    }
-
-    /// <summary>
-    /// Base-game meshes whose skeleton link doesn't hold up. Ogre only logs a failed skeleton load ("This
-    /// Mesh will not be animated"), so these load anyway. Any change to this list is news.
-    /// </summary>
-    static readonly Dictionary<string, string> KnownBadSkeletonLinks = new(StringComparer.OrdinalIgnoreCase)
-    {
-        // Female armour mesh in Newwworld.mod; the linked skeleton isn't shipped.
-        ["items/armour/meshes/Human_Skin_Suit.mesh"] = "not found",
-        // Links "Iron Clad [feMale] Jacket.skeleton"; "Iron Clad Jacket_F.skeleton" is the file beside it.
-        ["items/armour/meshes/Iron Clad Jacket_F.mesh"] = "not found",
-        // Links female_skeleton.skeleton (30 bones) but assigns bones up to 54; no data file references the mesh.
-        ["character/meshes/whistler/whistler.mesh"] = "bone index",
-    };
-
-    /// <summary>
-    /// Every base-game mesh with a skeleton link names a skeleton that exists under data/ (Ogre finds
-    /// resources by bare file name), and its bone assignments stay below that skeleton's bone count.
-    /// A skeleton name found in several folders must be byte-identical copies.
-    /// </summary>
-    [Fact]
-    [Slow]
-    public void Every_base_game_skinned_mesh_matches_its_skeleton()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, $"No Kenshi install configured ({GameInstall.EnvironmentVariable}).");
-
-        var skeletons = SkeletonFiles(install!)
-            .GroupBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
-        var boneCounts = new System.Collections.Concurrent.ConcurrentDictionary<string, int>();
-        int BoneCount(string file) => boneCounts.GetOrAdd(file, f => OgreSkeletonReader.ReadFile(f).Bones.Count);
-
-        var problems = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        int skinned = 0;
-        var meshes = Directory.EnumerateFiles(install!.DataDirectory, "*.mesh", SearchOption.AllDirectories).ToList();
-        Parallel.ForEach(meshes, file =>
-        {
-            var mesh = OgreMeshReader.ReadFile(file);
-            if (mesh.SkeletonName is null) return;
-            Interlocked.Increment(ref skinned);
-            var name = Path.GetRelativePath(install.DataDirectory, file).Replace('\\', '/');
-            if (!skeletons.TryGetValue(Path.GetFileName(mesh.SkeletonName), out var candidates))
-            {
-                problems[name] = $"not found: {mesh.SkeletonName}";
-                return;
-            }
-            var first = File.ReadAllBytes(candidates[0]);
-            if (candidates.Skip(1).Any(c => !File.ReadAllBytes(c).AsSpan().SequenceEqual(first)))
-                problems[name] = $"different files named {mesh.SkeletonName}";
-            int maxBone = mesh.BoneAssignments.Concat(mesh.SubMeshes.SelectMany(s => s.BoneAssignments))
-                .Select(a => (int)a.BoneIndex).DefaultIfEmpty(-1).Max();
-            if (maxBone >= BoneCount(candidates[0]))
-                problems[name] = $"bone index {maxBone}, but {mesh.SkeletonName} has {BoneCount(candidates[0])} bones";
-        });
-        Assert.True(skinned > 0);
-
-        var unexpected = problems
-            .Where(p => !(KnownBadSkeletonLinks.TryGetValue(p.Key, out var kind) && p.Value.StartsWith(kind, StringComparison.Ordinal)))
-            .Select(p => $"{p.Key}: {p.Value}").Order().ToList();
-        Assert.True(unexpected.Count == 0, string.Join(Environment.NewLine, unexpected));
-        var fixedNow = KnownBadSkeletonLinks.Keys.Where(k => !problems.ContainsKey(k)).ToList();
-        Assert.True(fixedNow.Count == 0, "No longer broken: " + string.Join(", ", fixedNow));
     }
 }

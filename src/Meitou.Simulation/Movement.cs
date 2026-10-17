@@ -14,6 +14,24 @@ public enum CharacterTask : byte
     Follow = 3,
     /// <summary>Fights the target of an <see cref="Combat.AttackOrder"/> (the combat system owns the character's attacks and reactions; movement leaves it alone).</summary>
     Attack = 4,
+    /// <summary>Walks to <see cref="CharacterCold.TreatTarget"/> and bandages it with a first aid kit (<see cref="FirstAid.FirstAidSystem"/> owns it; the movement system leaves it alone).</summary>
+    Treat = 5,
+    /// <summary>Sits on the ground resting: blood recovers at <c>resting heal rate mult</c> and hunger falls at <c>bed hunger rate</c> (<see cref="FirstAid.FirstAidSystem"/>); any other order replaces it.</summary>
+    Rest = 6,
+    /// <summary>Walks to <see cref="CharacterCold.CarryTarget"/> and lifts it onto the left shoulder (<see cref="Carrying.CarrySystem"/> owns it; the original's <c>LIFT_PERSON</c>).</summary>
+    PickUp = 7,
+    /// <summary>Sets the carried character down (<see cref="Carrying.CarrySystem"/>; the original's <c>PUT_DOWN_OBJECT</c>).</summary>
+    PutDown = 8,
+    /// <summary>Walks to <see cref="CharacterCold.CarryTarget"/> (a downed or dead character) and takes everything from its inventory that fits (<see cref="Carrying.CarrySystem"/>).</summary>
+    Loot = 9,
+    /// <summary>Creeps up behind <see cref="CharacterCold.CarryTarget"/> and swings to knock it out (<see cref="Carrying.CarrySystem"/>; the original's <c>Task_StealthKO</c>).</summary>
+    StealthKo = 10,
+    /// <summary>Walks to <see cref="CharacterCold.BuildSite"/> and builds it, delivering what it carries when the site wants it (<see cref="Construction.ConstructionSystem"/>; the original's <c>Task_Build</c>, orders 2 and 95).</summary>
+    Build = 11,
+    /// <summary>Walks to <see cref="CharacterCold.BuildSite"/> and takes it apart (<see cref="Construction.ConstructionSystem"/>; <c>Task_Dismantle</c>, order 96).</summary>
+    Dismantle = 12,
+    /// <summary>At <see cref="CharacterCold.BuildSite"/>, filling the 5 s bar that hands over one unit per missing material (<see cref="Construction.ConstructionSystem"/>; <c>Task_AddMaterialsToBuilding</c>).</summary>
+    DeliverMaterials = 13,
 }
 
 /// <summary>Bits of <see cref="CharacterHot.Flags"/> the movement system uses.</summary>
@@ -31,10 +49,12 @@ public enum MoveFlags : ushort
     AnyPath = NeedPath | Pending | HasPath,
 }
 
-/// <summary>Speed modes (docs/game/pathfinding.md "Speed"): 0 caps at the race walk speed, 1 at 55, 2 and 3 do not cap.</summary>
+/// <summary>Speed modes (docs/game/pathfinding.md "Speed"), also the HUD speed icon's index (Walk, Jog, Run, Group): 0 caps at the race walk speed, 1 at 55, 2 does not cap, 3 keeps to the slowest of the squad.</summary>
 public static class SpeedMode
 {
-    public const byte Walk = 0, Run = 1, Free = 2;
+    public const byte Walk = 0, Run = 1, Free = 2, Group = 3;
+    /// <summary>The number of modes the HUD arrows cycle through.</summary>
+    public const int Count = 4;
     public const float RunCap = 55;
 
     public static float Cap(byte mode, float walkSpeed) => mode switch { Walk => walkSpeed, Run => RunCap, _ => 999 };

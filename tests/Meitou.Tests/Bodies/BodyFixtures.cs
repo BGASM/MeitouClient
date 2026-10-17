@@ -66,7 +66,7 @@ static class BodyFixtures
     public static BodyPartTemplate RightLeg { get; } = new() { StringId = "31-t", Name = "Right Leg", Type = BodyPartType.Leg, Collapses = true, Severance = true, CollapsePart = 16, KoMult = 0.5f };
 
     /// <summary>Part indices of <see cref="Human"/> (the order of the Greenlander's <c>combat anatomy</c>: right leg, left arm, left leg, head, stomach, right arm, chest).</summary>
-    public const int RLeg = 0, LArm = 1, LLeg = 2, HeadIx = 3, StomachIx = 4, RArm = 5, ChestIx = 6;
+    public const int RLeg = 0, LArm = 1, HeadIx = 3, RArm = 5;
 
     /// <summary>A Greenlander: anatomy 80/100, 140/100, 140/100, arms 80 and 40, legs 80 and 80; good Science, Farming, Cooking.</summary>
     public static RaceData Human { get; } = new()
@@ -79,13 +79,6 @@ static class BodyFixtures
             new AnatomyEntry(RightLeg, 80, 100), new AnatomyEntry(LeftArm, 80, 100), new AnatomyEntry(LeftLeg, 80, 100), new AnatomyEntry(Head, 80, 100),
             new AnatomyEntry(Stomach, 140, 100), new AnatomyEntry(RightArm, 40, 100), new AnatomyEntry(Chest, 140, 100),
         ],
-    };
-
-    /// <summary>A skeleton-type robot: never hungry, blood 100/100, heal rate 2, bleed rate 0.1.</summary>
-    public static RaceData Robot { get; } = new()
-    {
-        StringId = "r-t", Name = "Skeleton", IsRobot = true, HungerRate = 0, HealRate = 2, BleedRate = 0.1f, MinBlood = 100, MaxBlood = 100, HealStat = StatsEnumerated.Robotics,
-        Anatomy = Human.Anatomy,
     };
 
     public static MedicalContext Context(RaceData? race = null, BodyOptions? options = null, float toughness = 50, float strength = 50) =>

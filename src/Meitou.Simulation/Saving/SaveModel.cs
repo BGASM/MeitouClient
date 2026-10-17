@@ -43,6 +43,9 @@ public sealed class SavedCharacterLink
     /// <summary>Read from the character's STATS and MEDICAL_STATE records; null when the race or the data could not be resolved. The host's body systems take these over.</summary>
     public CharacterStats? Stats { get; set; }
     public MedicalState? Medical { get; set; }
+    /// <summary>The bed or cage state and fixture read from the save (<see cref="HeldSave"/>): while the character still has them, the original's keys are written back as read.</summary>
+    public Locks.HeldState InSomething { get; set; }
+    public string? InWhat { get; set; }
 }
 
 /// <summary>A player platoon of the save that is now a <see cref="Squad"/> in the world.</summary>
@@ -61,8 +64,14 @@ public sealed class LoadedSave
     public HashSet<(string Platoon, int Slot)> SpawnedSlots { get; } = [];
     /// <summary>The relation table of the data right after loading (faction by faction, row by row): a value that still equals it was not changed in play, and the save keeps its own.</summary>
     public float[] RelationBaseline { get; set; } = [];
-    /// <summary>The roaming platoons made from the save's NPC platoons: the world's platoon id to the save's platoon name.</summary>
+    /// <summary>The travelling stand-ins made from the save's NPC platoons: the world's platoon id to the save's platoon name.</summary>
     public Dictionary<int, string> RoamingPlatoons { get; } = [];
+    /// <summary>NPC platoons that stay in their placed town (residents, bar squads, slaves): pinned stand-ins, made when the town loads, which then makes none of its own.</summary>
+    public int TownBoundPlatoons { get; set; }
+    /// <summary>Wild NPC platoons (a nest's or homeless): stand-ins that stay where they are, made when their zone loads, counted by their nest or sector.</summary>
+    public int WildPlatoons { get; set; }
+    /// <summary>The CAMERA <c>mods</c> entries the running load order lacks (the save was made with mods this game does not load).</summary>
+    public List<string> MissingMods { get; } = [];
     /// <summary>What was left out or changed, one line each (a record that could not be resolved, characters that are dead, platoons without a town...).</summary>
     public List<string> Notes { get; } = [];
 

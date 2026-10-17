@@ -23,27 +23,32 @@ public sealed class WorldRenderOptions
     public int Debug { get; set; }
     /// <summary>
     /// Terrain LOD (<see cref="Meitou.Data.World.TerrainLod"/>): the screen-space height error allowed near the eye, in pixels of
-    /// the picture rendered (<c>--terrain-error</c>, the Tab slider), and the error it grows to from twice <see cref="TerrainRampStart"/>
-    /// on (<c>--terrain-far-error</c>; equal to the near one: no ramp).
+    /// the picture rendered (<c>--terrain-error</c>, the Tab slider), the same at every distance (no far ramp: it made pond outlines blocky).
     /// </summary>
     public float TerrainPixelError { get; set; } = DefaultTerrainPixelError;
-    public float TerrainFarPixelError { get; set; } = DefaultTerrainFarPixelError;
-    public float TerrainRampStart { get; set; } = DefaultTerrainRampStart;
-    public const float DefaultTerrainPixelError = 10, DefaultTerrainFarPixelError = 10, DefaultTerrainRampStart = 7500;
+    public const float DefaultTerrainPixelError = 10;
     /// <summary>
     /// Pixels per world unit at distance 1 in the picture being drawn: the frame sets it from the render height (after the
     /// upscaler's render scale) and the field of view, the reflection pass from its own (half-size) target.
     /// </summary>
     public float TerrainPixelScale { get; set; } = TerrainLod.ProjectionScale(720, 50 * MathF.PI / 180);
     /// <summary>The LOD rule these options give.</summary>
-    public TerrainLod TerrainLod => new(TerrainPixelScale, TerrainPixelError, TerrainFarPixelError, TerrainRampStart);
+    public TerrainLod TerrainLod => new(TerrainPixelScale, TerrainPixelError, TerrainPixelError, 0);
     /// <summary>Beyond this distance the terrain takes the biomes' ground colour (the game's material distance is 30000).</summary>
     public float MaterialDistance { get; set; } = 30000;
 }
 
 /// <summary>Sun and sky light for the world shaders (from <see cref="WorldSky"/>).</summary>
-public readonly record struct WorldLighting(Vector3 SunDirection, Vector3 SunColour, Vector3 AmbientSky, Vector3 AmbientGround, Vector3 FogColour, float FogDistance)
+public readonly record struct WorldLighting(Vector3 SunDirection, Vector3 SunColour, Vector3 AmbientSky, Vector3 AmbientGround, Vector3 FogColour, float FogDistance,
+    Vector3 GlintDirection = default, Vector3 GlintColour = default)
 {
+    /// <summary>
+    /// What the water's specular glint is lit by: the light's own direction and colour (<see cref="SunDirection"/>, <see cref="SunColour"/>) unless a
+    /// separate glint light was given (<see cref="GlintDirection"/> not zero): at night under planetshine, the sun's radiance plus the planet's own
+    /// (unboosted) disc radiance, where <see cref="SunColour"/> is the strength-scaled light that lights the land.
+    /// </summary>
+    public (Vector3 Direction, Vector3 Colour) Glint => GlintDirection == default ? (SunDirection, SunColour) : (GlintDirection, GlintColour);
+
     public static readonly WorldLighting Default = new(Vector3.Normalize(new Vector3(0.45f, 0.75f, 0.3f)), new(1, 0.96f, 0.88f),
         new(0.36f, 0.40f, 0.46f), new(0.20f, 0.19f, 0.17f), new(0.62f, 0.68f, 0.74f), 60000);
 }
@@ -69,12 +74,11 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     readonly TerrainQuadtree spare;   // the reflection's own tree (its own, smaller picture), so the two passes do not reset each other's ranges every frame
     TerrainQuadtree current = null!;   // the tree the running Draw selects with
     TerrainTextures? textures;
+    bool ownsTextures = true;
+    internal TerrainTextures? TextureSet => textures;
     Frame frame;
 
     const int GridCells = 64;
-
-    /// <summary><c>MEITOU_TERRAIN_LOD_LOG=1</c>: print the level ranges when they change and the drawn nodes per level now and then.</summary>
-    static readonly bool LodLog = Environment.GetEnvironmentVariable("MEITOU_TERRAIN_LOD_LOG") == "1";
 
     record struct Frame(Matrix4x4 ViewProjection, Vector3 Eye, WorldRenderOptions Options, WorldLighting Light);
 
@@ -98,7 +102,6 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
                 Silk.NET.Vulkan.ShaderStageFlags.VertexBit | Silk.NET.Vulkan.ShaderStageFlags.FragmentBit)], 0);
         Silk.NET.Vulkan.DescriptorSetLayout[] sets = [nativeFrame.SetLayout, gpu.Bindless.Layout, constantsLayout];
         patchColour = new TerrainProgram(gpu, sets, TerrainShaders.PatchVertexNative(), TerrainShaders.FragmentNative(), "terrain");
-        if (TerrainProbe.Names is { } probeNames) { var (pv, pf) = TerrainShaders.ProbeNative(probeNames); patchProbe = new TerrainProgram(gpu, sets, pv, pf, "terrain probe"); }
         patchDepth = new TerrainProgram(gpu, sets, TerrainShaders.PatchVertexNative(), TerrainShaders.DepthFragmentNative(), "terrain depth");
         patchPrepass = new TerrainProgram(gpu, sets, TerrainShaders.PatchVertexNative(), TerrainShaders.PrepassFragmentNative(), "terrain prepass");
         meshColour = new TerrainProgram(gpu, sets, TerrainShaders.MeshVertexNative(), TerrainShaders.MeshFragmentNative(), "terrain meshes");
@@ -114,7 +117,7 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
             coarseTexture = HeightTexture(batch, coarse, coarseSize, coarseSize);
             fineTexture = HeightTexture(batch, fine.Raw, fine.Columns, fine.Rows);
         }
-        PublishGlobals();
+        Activate();
 
         // The patch grid and its index ranges: the whole grid, then the four quarters.
         var grid = new float[(GridCells + 1) * (GridCells + 1) * 2];
@@ -179,7 +182,7 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     readonly List<(TerrainTexture Texture, int Frame)> retired = [];
 
     /// <summary>Uses biome textures and land maps from now on (null: untextured).</summary>
-    public void SetTextures(TerrainTextures? t) => textures = t;
+    public void SetTextures(TerrainTextures? t, bool owns = true) { textures = t; ownsTextures = owns; }
 
     /// <summary>The textures the TERRAIN-mode meshes' biome rows come from (null: none, every row -1): a caller keeping
     /// <see cref="FeatureBiomeRowAny"/> per placement computes it again when this object changes.</summary>
@@ -250,15 +253,11 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     /// <summary>Draws the terrain; nodes whose highest point is under <paramref name="cullBelow"/> are skipped (the reflection pass clips everything below the water). <paramref name="secondary"/>: the reflection's call, with its own quadtree for its own LOD distance.</summary>
     public void Draw(Matrix4x4 viewProjection, Vector3 eye, Vector4[] frustum, WorldRenderOptions options, WorldLighting light, float cullBelow = float.NegativeInfinity, bool secondary = false, bool defer = false)
     {
-        long timing = StepTiming.Now();
         current = secondary ? spare : quadtree;
-        if (current.SetRanges(options.TerrainLod) && LodLog)
-            Console.WriteLine($"terrain   lod {(secondary ? "reflection" : "main")} {options.TerrainLod}: ranges {string.Join(" ", current.Ranges.SkipLast(1).Select(r => r.ToString("0")))}");
+        current.SetRanges(options.TerrainLod);
         frame = new Frame(viewProjection, eye, options, light);
         var fog = FogCull;
         current.Select(eye, bounds, (min, max) => max.Y >= cullBelow && WorldCamera.Intersects(frustum, min, max) && (fog is null || !fog.Hidden(min, max, FogVolumes.CullKind.Terrain)), nodes);
-        if (LodLog && !secondary && (frameNumber < 4 || frameNumber % 60 == 1))
-            Console.WriteLine($"terrain   frame {frameNumber} nodes per level (whole + quarters): {string.Join(" ", Enumerable.Range(0, current.LevelCount).Select(l => $"{nodes.Count(n => n.Level == l && n.Quadrant < 0)}+{nodes.Count(n => n.Level == l && n.Quadrant >= 0)}"))}");
 
         SortNearestFirst(eye);
         PreparePatches(current);
@@ -267,14 +266,14 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
             if (options.Wireframe != 2)
             {
                 PrepareConstants(material: true, patches: true);
-                if (defer && !secondary && options.Wireframe == 0 && !(TerrainProbe.On && TerrainProbe.NoDraw))
+                if (defer && !secondary && options.Wireframe == 0)
                 {
                     // Depth only now, the colour after the objects and foliage (DrawDeferred): the colour program then runs only where the terrain is what is seen.
-                    RecordPatches(patchPrepass, "terrain prepass", StepTiming.PatchColour, PatchMode.Prepass);
+                    RecordPatches(patchPrepass, "terrain prepass", PatchMode.Prepass);
                     (latePending, lateFrame) = (true, frame);
                 }
-                else if (!(TerrainProbe.On && !secondary && TerrainProbe.NoDraw))
-                    RecordPatches(TerrainProbe.On && !secondary && patchProbe is not null ? patchProbe : patchColour, "terrain", StepTiming.PatchColour, PatchMode.Solid);
+                else
+                    RecordPatches(patchColour, "terrain", PatchMode.Solid);
                 DrawnChunks += nodes.Count;
                 DrawnTriangles += patchTriangles;
             }
@@ -283,10 +282,9 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
                 // The debug outline (Wireframe 1 and 2): the same patches as lines in a dark grey, pulled towards the eye as GL's polygon offset (-1, -1) did.
                 PrepareConstants(material: true, patches: true);
                 constants.Wireframe = 1;
-                RecordPatches(patchColour, "terrain wireframe", StepTiming.PatchColour, PatchMode.Wireframe);
+                RecordPatches(patchColour, "terrain wireframe", PatchMode.Wireframe);
             }
         }
-        StepTiming.Add(StepTiming.PatchColour, timing, nodes.Count);
     }
 
     bool latePending;
@@ -301,11 +299,9 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     {
         if (!latePending) return;
         latePending = false;
-        long timing = StepTiming.Now();
         frame = lateFrame;
         PrepareConstants(material: true, patches: true);
-        RecordPatches(TerrainProbe.On && patchProbe is not null ? patchProbe : patchColour, "terrain", StepTiming.PatchColour, PatchMode.Late);
-        StepTiming.Add(StepTiming.PatchColour, timing, nodes.Count);
+        RecordPatches(patchColour, "terrain", PatchMode.Late);
     }
 
     double[] nodeKeys = [];
@@ -363,7 +359,6 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
 
     readonly NativeFrame nativeFrame;
     readonly Silk.NET.Vulkan.DescriptorSetLayout constantsLayout;
-    readonly TerrainProgram? patchProbe;
     readonly TerrainProgram patchColour, patchDepth, patchPrepass, meshColour, meshSolid, meshDepth;   // meshSolid: meshColour without the cross-fade discard (EarlyDepth)
     readonly ulong uniformAlign;
     readonly uint standIn2D, standInArray, standInUInt;
@@ -611,9 +606,8 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     /// dynamic state, the sets, the pipeline, the grid's vertex and index buffers once; per node its push constants and the draw of its index
     /// range.
     /// </summary>
-    void RecordPatches(TerrainProgram p, string label, int timingKind, PatchMode mode = PatchMode.Solid)
+    void RecordPatches(TerrainProgram p, string label, PatchMode mode = PatchMode.Solid)
     {
-        long t0 = StepTiming.Now();
         // Prepare (wave 4, docs/renderer-native.md 6.2): the pass's targets and state now, the pipeline, the sets, the draws, into a job.
         var targets = gpu.CurrentTargets();
         var state = PatchState(gpu.CurrentState(), mode);
@@ -629,7 +623,6 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
         patchDraws.AsSpan(0, count).CopyTo(job.Draws);
         job.Count = count;
         gpu.Record(label, job);
-        StepTiming.Segment(timingKind, t0);
     }
 
     readonly JobPool<PatchJob> patchJobs = new();
@@ -710,6 +703,17 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     /// The heights as frame globals (docs/renderer-native.md 4.3): the two textures (native, with the linear, clamped sampler their GL versions
     /// had) and the <see cref="TerrainShaders.HeightFunctions"/> uniforms, read when a consumer draws or applies its globals.
     /// </summary>
+    sealed class ActiveTerrain { public TerrainRenderer? Owner; }
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<GpuContext, ActiveTerrain> activeTerrain = new();
+
+    internal void Activate()
+    {
+        var binding = activeTerrain.GetValue(gpu, static _ => new());
+        if (ReferenceEquals(binding.Owner, this)) return;
+        binding.Owner = this;
+        PublishGlobals();
+    }
+
     void PublishGlobals()
     {
         var g = gpu.Globals;
@@ -734,55 +738,11 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     /// </summary>
     public int DrawMeshes(List<(MeshBindings Mesh, int IndexCount, Matrix4x4 Model)> meshes, bool depth = false)
     {
-        long t0 = MeshTiming > 0 ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
-        int draws = DrawMeshesCore(meshes, depth);
-        if (MeshTiming > 0)
-        {
-            long dt = System.Diagnostics.Stopwatch.GetTimestamp() - t0;
-            int k = depth ? 1 : 0;
-            if (meshSeen[k]++ < StepTiming.WarmCalls) return draws;   // the first calls: pipelines, registrations, cold caches
-            meshTicks[k] += dt; meshCalls[k]++; meshDraws[k] += draws;
-            if (MeshTiming == 2)
-            {
-                // The same call again at once, timed alone: the cost with this path's code and data warm in the caches (diagnostic only:
-                // the pictures of such a run are not for comparison).
-                long w0 = System.Diagnostics.Stopwatch.GetTimestamp();
-                DrawMeshesCore(meshes, depth);
-                meshWarmTicks[k] += System.Diagnostics.Stopwatch.GetTimestamp() - w0;
-            }
-        }
-        return draws;
-    }
-
-    /// <summary>
-    /// <c>MEITOU_MESH_TIMING=1</c>: the CPU time of <see cref="DrawMeshes"/> (colour and depth), printed when the renderer is disposed.
-    /// <c>=2</c> also records each call a second time and reports that one as "warm" (docs/renderer-native.md 7.1, cold and warm cost).
-    /// </summary>
-    static readonly int MeshTiming = int.TryParse(Environment.GetEnvironmentVariable("MEITOU_MESH_TIMING"), out int mode) ? mode : 0;
-    readonly long[] meshTicks = new long[2], meshWarmTicks = new long[2], meshCalls = new long[2], meshDraws = new long[2], meshSeen = new long[2];
-
-    void ReportMeshTiming()
-    {
-        StepTiming.Report();
-        if (MeshTiming == 0) return;
-        double ms(long t) => t * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-        string Kind(int k) =>
-            FormattableString.Invariant($"{meshCalls[k]} calls {ms(meshTicks[k]):F2} ms ({(meshCalls[k] > 0 ? ms(meshTicks[k]) * 1000 / meshCalls[k] : 0):F1} us/call)") +
-            (MeshTiming == 2 ? FormattableString.Invariant($" warm {(meshCalls[k] > 0 ? ms(meshWarmTicks[k]) * 1000 / meshCalls[k] : 0):F1} us/call") : "");
-        Console.WriteLine($"terrain meshes  colour {Kind(0)}, depth {Kind(1)}, {meshDraws[0] + meshDraws[1]} draws ({meshDraws[0]} colour, {meshDraws[1]} depth)");
-    }
-
-    int DrawMeshesCore(List<(MeshBindings Mesh, int IndexCount, Matrix4x4 Model)> meshes, bool depth)
-    {
         if (depth) return DrawMeshesDepth(meshes);
-        long t0 = StepTiming.Now();
         if (!GroupMeshes(meshes, biomes: true)) return 0;
-        StepTiming.Group(StepTiming.MeshColour, t0);
         PrepareConstants(material: true, patches: false);
         // No placement of this path fades (row 1's w is 0): the program without the discard, so the depth test runs first (EarlyDepth).
-        int draws = EarlyDepth.Enabled ? DrawGroups(meshSolid, Solid, "terrain meshes solid", StepTiming.MeshColour) : DrawGroups(meshColour, Colour, "terrain meshes", StepTiming.MeshColour);
-        StepTiming.Add(StepTiming.MeshColour, t0, draws);
-        return draws;
+        return EarlyDepth.Enabled ? DrawGroups(meshSolid, Solid, "terrain meshes solid") : DrawGroups(meshColour, Colour, "terrain meshes");
     }
 
     /// <summary>This call's placements (each group's contiguous, <see cref="MeshGroup.Offset"/> instances in), in the frame's constants.</summary>
@@ -800,9 +760,8 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     /// </summary>
     public void DrawDepth(Matrix4x4 viewProjection, Vector3 eye, Vector4[] frustum, WorldRenderOptions options, float coarseTexel = 0)
     {
-        long timing = StepTiming.Now();
         depthReady = true;
-        if (quadtree.SetRanges(options.TerrainLod) && LodLog) Console.WriteLine($"terrain   lod main {options.TerrainLod}: ranges {string.Join(" ", quadtree.Ranges.SkipLast(1).Select(r => r.ToString("0")))}");
+        quadtree.SetRanges(options.TerrainLod);
         frame = new Frame(viewProjection, eye, options, frame.Light);
         quadtree.FloorLevel = ShadowLod.TerrainFloorLevel(coarseTexel, quadtree.Spacing(0), TerrainLod.Roughness, quadtree.LevelCount);
         try { quadtree.Select(eye, bounds, (min, max) => WorldCamera.Intersects(frustum, min, max), nodes); }
@@ -811,10 +770,9 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
         if (nodes.Count > 0)
         {
             PrepareConstants(material: false, patches: true);
-            RecordPatches(patchDepth, "terrain depth", StepTiming.PatchDepth);
+            RecordPatches(patchDepth, "terrain depth");
             DepthTriangles += patchTriangles;
         }
-        StepTiming.Add(StepTiming.PatchDepth, timing, nodes.Count);
     }
 
     /// <summary>Terrain triangles the depth draws have drawn since the counter was last reset (by the caller).</summary>
@@ -822,13 +780,9 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
 
     int DrawMeshesDepth(List<(MeshBindings Mesh, int IndexCount, Matrix4x4 Model)> meshes)
     {
-        long t0 = StepTiming.Now();
         if (!depthReady || !GroupMeshes(meshes, biomes: false)) return 0;   // the frame's matrix is the cascade's once DrawDepth has run
-        StepTiming.Group(StepTiming.MeshDepth, t0);
         PrepareConstants(material: false, patches: false);
-        int draws = DrawGroups(meshDepth, Depth, "terrain mesh depth", StepTiming.MeshDepth);
-        StepTiming.Add(StepTiming.MeshDepth, t0, draws);
-        return draws;
+        return DrawGroups(meshDepth, Depth, "terrain mesh depth");
     }
 
     // ---- the TERRAIN-mode meshes, instanced ----
@@ -948,9 +902,8 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     /// group's placements. The vertex array is exported again only when the stamp moved.
     /// </para>
     /// </summary>
-    int DrawGroups(TerrainProgram p, int kind, string label, int timingKind)
+    int DrawGroups(TerrainProgram p, int kind, string label)
     {
-        long t0 = StepTiming.Now();
         var job = OpenMeshSegment(p, kind, label, placements.Handle, placements.Offset, out var s);
         foreach (var g in meshGroupList)
         {
@@ -963,7 +916,7 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
                 IndexCount = (uint)g.IndexCount, Instances = (uint)g.Count, FirstInstance = (uint)g.Offset,
             });
         }
-        CloseMeshSegment(job, label, timingKind, t0);
+        gpu.Record(label, job);
         return meshGroupList.Count;
     }
 
@@ -980,7 +933,7 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     /// the frame and terrain sets, and the placements' rows from <paramref name="rows"/> at locations 7 to 10.</summary>
     MeshJob OpenMeshSegment(TerrainProgram p, int kind, string label, Silk.NET.Vulkan.Buffer rows, ulong rowsOffset, out MeshSegment s)
     {
-        // Prepare (wave 4, docs/renderer-native.md 6.2): what the segment's commands need, into a job recorded by CloseMeshSegment.
+        // Prepare (wave 4, docs/renderer-native.md 6.2): what the segment's commands need, into a job recorded by the caller.
         var targets = gpu.CurrentTargets();
         var state = gpu.CurrentState();
         s = new MeshSegment
@@ -1072,13 +1025,6 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
         }
     }
 
-    /// <summary>Records a mesh segment (GL's state is left as it was: phase 8, every successor sets the state it draws with).</summary>
-    void CloseMeshSegment(MeshJob job, string label, int timingKind, long t0)
-    {
-        gpu.Record(label, job);
-        StepTiming.Segment(timingKind, t0);
-    }
-
     /// <summary>A TERRAIN-mode mesh drawn indirect (<see cref="DrawMeshesIndirect"/>): the vertex array (position at 0, normal at 1), its index
     /// count, and whether its placements mirror (the winding turns round), as <see cref="DrawMeshes"/> groups them.</summary>
     public readonly record struct IndirectMesh(MeshBindings Mesh, int IndexCount, bool Mirrored);
@@ -1093,37 +1039,21 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     public int DrawMeshesIndirect(ReadOnlySpan<IndirectMesh> meshes, Silk.NET.Vulkan.Buffer rows, ulong rowsOffset, Silk.NET.Vulkan.Buffer args, ulong argsOffset, bool depth = false, bool solid = false)
     {
         if (meshes.Length == 0) return 0;
-        long t0 = MeshTiming > 0 ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
-        int draws;
-        long timing = StepTiming.Now();
         if (depth)
         {
             if (!depthReady) return 0;   // the frame's matrix is the cascade's once DrawDepth has run
             PrepareConstants(material: false, patches: false);
-            draws = DrawIndirect(meshes, rows, rowsOffset, args, argsOffset, meshDepth, Depth, "terrain mesh depth", StepTiming.MeshDepth);
-            StepTiming.Add(StepTiming.MeshDepth, timing, draws);
+            return DrawIndirect(meshes, rows, rowsOffset, args, argsOffset, meshDepth, Depth, "terrain mesh depth");
         }
-        else
-        {
-            PrepareConstants(material: true, patches: false);
-            // solid: none of these placements is mid cross-fade (the caller splits them), so the program without the discard draws them (EarlyDepth).
-            draws = solid && EarlyDepth.Enabled
-                ? DrawIndirect(meshes, rows, rowsOffset, args, argsOffset, meshSolid, Solid, "terrain meshes solid", StepTiming.MeshColour)
-                : DrawIndirect(meshes, rows, rowsOffset, args, argsOffset, meshColour, Colour, "terrain meshes", StepTiming.MeshColour);
-            StepTiming.Add(StepTiming.MeshColour, timing, draws);
-        }
-        if (MeshTiming > 0)
-        {
-            long dt = System.Diagnostics.Stopwatch.GetTimestamp() - t0;
-            int k = depth ? 1 : 0;
-            if (meshSeen[k]++ >= StepTiming.WarmCalls) { meshTicks[k] += dt; meshCalls[k]++; meshDraws[k] += draws; }
-        }
-        return draws;
+        PrepareConstants(material: true, patches: false);
+        // solid: none of these placements is mid cross-fade (the caller splits them), so the program without the discard draws them (EarlyDepth).
+        return solid && EarlyDepth.Enabled
+            ? DrawIndirect(meshes, rows, rowsOffset, args, argsOffset, meshSolid, Solid, "terrain meshes solid")
+            : DrawIndirect(meshes, rows, rowsOffset, args, argsOffset, meshColour, Colour, "terrain meshes");
     }
 
-    int DrawIndirect(ReadOnlySpan<IndirectMesh> meshes, Silk.NET.Vulkan.Buffer rows, ulong rowsOffset, Silk.NET.Vulkan.Buffer args, ulong argsOffset, TerrainProgram p, int kind, string label, int timingKind)
+    int DrawIndirect(ReadOnlySpan<IndirectMesh> meshes, Silk.NET.Vulkan.Buffer rows, ulong rowsOffset, Silk.NET.Vulkan.Buffer args, ulong argsOffset, TerrainProgram p, int kind, string label)
     {
-        long t0 = StepTiming.Now();
         var job = OpenMeshSegment(p, kind, label, rows, rowsOffset, out var s);
         if (meshGroups.Count > 4096) meshGroups.Clear();   // meshes come and go with streaming
         for (int i = 0; i < meshes.Length; i++)
@@ -1141,7 +1071,7 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
                 Args = args, ArgsOffset = argsOffset + (ulong)i * 20,
             });
         }
-        CloseMeshSegment(job, label, timingKind, t0);
+        gpu.Record(label, job);
         return meshes.Length;
     }
 
@@ -1174,15 +1104,13 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
 
     public void Dispose()
     {
-        ReportMeshTiming();
         gridVertices.Dispose();
         gridIndices.Dispose();
         coarseTexture.Dispose();
         fineTexture.Dispose();
         foreach (var r in retired) r.Texture.Dispose();
-        textures?.Dispose();
+        if (ownsTextures) textures?.Dispose();
         foreach (var p in new[] { patchColour, patchDepth, patchPrepass, meshColour, meshSolid, meshDepth }) p.Dispose();
-        patchProbe?.Dispose();
         rockBake?.Dispose();
         gpu.Bindless.Free(BindlessKind.Texture2D, standIn2D);
         gpu.Bindless.Free(BindlessKind.Texture2DArray, standInArray);
@@ -1190,56 +1118,5 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
         nativeFrame.Dispose();
         var (vk, device, layout) = (gpu.Device.Vk, gpu.Device.Device, constantsLayout);
         gpu.Device.Frames.DeferDelete(() => vk.DestroyDescriptorSetLayout(device, layout, null));
-    }
-}
-
-/// <summary>
-/// <c>MEITOU_TERRAIN_TIMING=1</c>: CPU time of the terrain patches (colour, shadow depth), the TERRAIN-mode meshes (colour, depth), the Meitou
-/// blocker map and the terrain shadow sweep, per call and per draw, printed when the terrain renderer is disposed (docs/renderer-native.md
-/// 7.1, wave 3 agent B and wave 3b step O). For the native segments also the segment alone (<c>BeginNativeInPass</c> to <c>EndNative</c>)
-/// and its draw loop alone, two stamps each; for the meshes the grouping of the placements. The first <see cref="WarmCalls"/> calls of the
-/// patches and the meshes are left out.
-/// </summary>
-internal static class StepTiming
-{
-    public static readonly bool On = Environment.GetEnvironmentVariable("MEITOU_TERRAIN_TIMING") == "1";
-    public const int PatchColour = 0, PatchDepth = 1, Blocker = 2, Sweep = 3, MeshColour = 4, MeshDepth = 5;
-    const int Kinds = 6;
-    static readonly string[] Names = ["patches colour", "patches depth", "blocker map", "terrain sweep", "meshes colour", "meshes depth"];
-    static readonly long[] ticks = new long[Kinds], calls = new long[Kinds], draws = new long[Kinds], segment = new long[Kinds], loop = new long[Kinds], group = new long[Kinds], seen = new long[Kinds];
-    /// <summary>Calls left out at the start per kind (pipeline creation, first registrations, cold caches of the first frames); none for the
-    /// blocker map and the sweep (the sweep runs once).</summary>
-    static readonly int[] warm = [WarmCalls, WarmCalls, 0, 0, WarmCalls, WarmCalls];
-    public const int WarmCalls = 100;
-    static bool Counted(int kind) => seen[kind] >= warm[kind];
-
-    public static long Now() => On ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
-
-    public static void Add(int kind, long start, int count)
-    {
-        if (!On || seen[kind]++ < warm[kind]) return;
-        ticks[kind] += System.Diagnostics.Stopwatch.GetTimestamp() - start;
-        calls[kind]++;
-        draws[kind] += count;
-    }
-
-    public static void Segment(int kind, long start) { if (On && Counted(kind)) segment[kind] += System.Diagnostics.Stopwatch.GetTimestamp() - start; }
-    public static void Loop(int kind, long start) { if (On && Counted(kind)) loop[kind] += System.Diagnostics.Stopwatch.GetTimestamp() - start; }
-    public static void Group(int kind, long start) { if (On && Counted(kind)) group[kind] += System.Diagnostics.Stopwatch.GetTimestamp() - start; }
-
-    public static void Report()
-    {
-        if (!On) return;
-        for (int k = 0; k < Kinds; k++)
-        {
-            if (calls[k] == 0) continue;
-            double f = 1e6 / System.Diagnostics.Stopwatch.Frequency, us = ticks[k] * f;
-            double perDraw(long t) => draws[k] > 0 ? t * f / draws[k] : 0;
-            Console.WriteLine(FormattableString.Invariant(
-                $"terrain timing  {Names[k],-15} {calls[k]} calls, {draws[k]} draws, {us / calls[k]:F1} us/call, {perDraw(ticks[k]):F2} us/draw") +
-                (segment[k] > 0 ? FormattableString.Invariant($", segment {segment[k] * f / calls[k]:F1} us/call {perDraw(segment[k]):F3} us/draw, loop {perDraw(loop[k]):F3} us/draw") : "") +
-                (group[k] > 0 ? FormattableString.Invariant($", grouping {group[k] * f / calls[k]:F1} us/call") : ""));
-            ticks[k] = calls[k] = draws[k] = segment[k] = loop[k] = group[k] = seen[k] = 0;
-        }
     }
 }

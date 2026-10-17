@@ -510,7 +510,6 @@ public sealed class ImpostorBakeJob : IDisposable
         {
             if (!TexturesReady()) return false;
             var t0 = watch.Elapsed.TotalMilliseconds;
-            if (UploadProfile.On) UploadProfile.Take();
             mainParts = baker.Upload(meshes.Main, source.IsRock);
             leavesParts = leaves is not null ? baker.Upload(meshes.Leaves!) : [];
             double t1 = watch.Elapsed.TotalMilliseconds;
@@ -521,7 +520,6 @@ public sealed class ImpostorBakeJob : IDisposable
         }
         // Rows whose frame has completed go to the assembler, in order, one after the other on a worker.
         double tRead = watch.Elapsed.TotalMilliseconds;
-        if (UploadProfile.On) UploadProfile.Take();
         while (rows.Count > 0 && ReadbackBuffer.Completed(gpu, rows[0].Frame))
         {
             var (row, _, buffer) = rows[0];
@@ -550,8 +548,8 @@ public sealed class ImpostorBakeJob : IDisposable
         if (recorded < size.Grid)
         {
             var t0 = watch.Elapsed.TotalMilliseconds;
-            if (UploadProfile.On) UploadProfile.Take();
             var cmd = gpu.Frame.PreFrame;
+            FrameProfiler.PreStamp(cmd, StageClock.Uploads);
             cmd.BeginLabel("impostor bake");
             for (int k = 0; k < RowsPerStep && recorded < size.Grid; k++, recorded++)
             {
@@ -561,6 +559,7 @@ public sealed class ImpostorBakeJob : IDisposable
                 rows.Add((recorded, gpu.Frame.Number, buffer));
             }
             cmd.EndLabel();
+            FrameProfiler.PreStamp(cmd, StageClock.Bake);
             cmd.Invalidate();   // the baker bound its own pipelines and sets
             render += watch.Elapsed.TotalMilliseconds - t0;
             SlowNote("record", $"rows up to {recorded} of {size.Grid}", watch.Elapsed.TotalMilliseconds - t0);
@@ -591,12 +590,10 @@ public sealed class ImpostorBakeJob : IDisposable
         return true;
     }
 
-    /// <summary>MEITOU_STREAM_LOG=1: a line for a part of a bake step that took 3 ms or more, with what the profile saw meanwhile (the driver calls, the collector).</summary>
+    /// <summary>With <c>--log-spikes</c>: a note for a part of a bake step that took 3 ms or more.</summary>
     void SlowNote(string part, string what, double ms)
     {
-        if (!UploadProfile.On) return;
-        string parts = UploadProfile.Take();
-        if (ms >= 3) Console.WriteLine($"slow bake {part} {source.Name}: {ms:0.0} ms, {what} [{parts}]");
+        if (ms >= 3) SpikeLog.Note($"slow bake {part} {source.Name}", ms: ms);
     }
 
     /// <summary>Waits for the workers (offline: <see cref="ImpostorBaker.Bake"/> steps until done instead).</summary>

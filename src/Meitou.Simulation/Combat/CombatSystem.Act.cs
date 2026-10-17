@@ -10,7 +10,11 @@ public sealed partial class CombatSystem
 {
     // ------------------------------------------------------------------ act
 
-    static float Eff(CharacterCold c, StatsEnumerated stat) => c.Stats![stat] * c.Medical!.StatMultiplier(stat);
+    /// <summary>A stat as the combat formulas read it: times the injury and hunger multiplier and the stats' read-time scale (an animal's age, docs/game/animals.md).</summary>
+    /// <summary>The guarding state: the fighter's own, or the Block order (its tooltip's +20 melee defence; docs/game/combat.md).</summary>
+    static bool Guarding(CharacterCold c) => c.Fighter!.Guarding || Orders.Has(c, CharacterOrders.Block);
+
+    static float Eff(CharacterCold c, StatsEnumerated stat) => c.Stats![stat] * c.Stats.Scale * c.Medical!.StatMultiplier(stat);
 
     int PauseTicks(World world, int slot, int counter)
     {
@@ -18,10 +22,13 @@ public sealed partial class CombatSystem
         return Math.Max(1, (int)MathF.Ceiling((CombatTuning.PauseMin + u * (CombatTuning.PauseMax - CombatTuning.PauseMin)) / world.TickSeconds));
     }
 
-    /// <summary>The ticks a technique's clip takes at <c>anim speed mult</c> x <paramref name="rate"/> clip seconds per second.</summary>
-    int Ticks(CombatTechnique t, float rate, float dt)
+    /// <summary>
+    /// The ticks a technique's clip takes at <c>anim speed mult</c> x <paramref name="rate"/> clip seconds per second; the clip's length is from the fighter's skeleton (an
+    /// animal's own, <see cref="AnimationLengths.For"/>: <c>attack1</c> is 0.77 s on a bonedog and 5 s on a beak thing).
+    /// </summary>
+    int Ticks(CombatTechnique t, float rate, float dt, CharacterCold cold)
     {
-        float clip = lengths.Of(t.AnimName);
+        float clip = lengths.For(cold.Fighter is { IsAnimal: true } ? cold.Race?.StringId : null).Of(t.AnimName);
         if (clip <= 0) clip = CombatTuning.DefaultClipSeconds;
         return Math.Max(2, (int)MathF.Ceiling(clip / (MathF.Max(t.AnimSpeedMult, 0.1f) * MathF.Max(rate, 0.05f)) / dt));
     }
@@ -41,7 +48,7 @@ public sealed partial class CombatSystem
         float dex = Eff(cold, StatsEnumerated.Dexterity) * fighter.DexterityMult;
         float skill = attack
             ? fighter.Unarmed ? Eff(cold, StatsEnumerated.MartialArts) : Eff(cold, StatsEnumerated.MeleeAttack) + fighter.Weapon!.Stats.AttackMod
-            : Eff(cold, StatsEnumerated.MeleeDefence) + fighter.DefenceBonus + (fighter.Weapon?.Stats.DefenceMod ?? 0) + (fighter.Guarding ? 20 : 0);
+            : Eff(cold, StatsEnumerated.MeleeDefence) + fighter.DefenceBonus + (fighter.Weapon?.Stats.DefenceMod ?? 0) + (Guarding(cold) ? 20 : 0);
         float t = 0.01f * (0.6f * dex + 0.4f * skill);
         return attack ? MathF.Min(1.2f, WeaponStats.Lerp(t, 0.8f, 1.2f) * g) : MathF.Min(4f, WeaponStats.Lerp(t, 0.6f, 4f) * g);
     }
@@ -80,13 +87,22 @@ public sealed partial class CombatSystem
                 continue;
             }
 
-            // 2. Helpless after a heavy hit.
+            // 2. Helpless in a hit reaction until its clip ends; every BreakOutSeconds of it the character may break out into a block against a blow coming at it
+            // (the original's +0x124; its 10 % lower bound on the swing's progress is not modelled).
             if (now < s.StunUntil)
             {
                 s.AttackTech = -1;
                 s.NextBlow = 0;
-                s.ReactTech = -1;
-                continue;
+                int every = Math.Max(1, (int)MathF.Round(CombatTuning.BreakOutSeconds / dt));
+                bool chance = s.StumbleClip >= 0 && now > s.StumbleStart && (now - s.StumbleStart) % every == 0;
+                if (s.ReactTech >= 0 && now >= s.ReactStart + s.ReactTicks) s.ReactTech = -1;
+                if (chance && s.ReactTech < 0)
+                {
+                    React(world, i, ref s, cold, key, now, dt);
+                    if (s.ReactTech >= 0 && !techniques[s.ReactTech].IsDodge) { s.StunUntil = now; s.StumbleClip = -1; }
+                    else s.ReactTech = -1;
+                }
+                if (now < s.StunUntil) continue;
             }
 
             // 3. The target.
@@ -100,30 +116,75 @@ public sealed partial class CombatSystem
                 EndFight(table, i);
             }
 
-            // 4. The reaction and the attack in progress.
-            if (s.ReactTech >= 0 && now >= s.ReactStart + s.ReactTicks) s.ReactTech = -1;
+            // 3b. A crossbowman fights with the crossbow or the melee weapon; with the crossbow the ranged controller runs instead of the melee attack (a blow aimed at it is still met).
+            ChooseMode(world, i, ref s, cold, fighting);
+            if (s.Ranged)
+            {
+                if (s.ReactTech >= 0 && now >= s.ReactStart + s.ReactTicks) s.ReactTech = -1;
+                if (s.ReactTech < 0 && s.AttackTech < 0) React(world, i, ref s, cold, key, now, dt);
+                TickRanged(world, i, ref s, cold, effects, now, dt);
+                continue;
+            }
+
+            // 4. The reaction and the attack in progress. A block that ends leaves a short wait (a dodge goes straight back to deciding).
+            if (s.ReactTech >= 0 && now >= s.ReactStart + s.ReactTicks)
+            {
+                if (!techniques[s.ReactTech].IsDodge) s.ReadyTick = Math.Max(s.ReadyTick, now + (int)MathF.Ceiling(CombatTuning.AfterBlockPause / dt));
+                s.ReactTech = -1;
+            }
+            float incoming = Incoming(world, i, now, out int yielder);
+            // One that lost the initiative roll to it: it turns on that one (FUN_140666a30 sets the winner to attack the asker).
+            if (yielder >= 0 && yielder != s.TargetSlot && !s.Ranged)
+            {
+                s.TargetSlot = yielder;
+                s.TargetGeneration = prev[yielder].Generation;
+                fighting = true;
+            }
+            bool aborted = false;
             if (s.AttackTech >= 0)
             {
                 var tech = techniques[s.AttackTech];
-                if (s.NextBlow > 0 && fighting && now >= s.AttackStart + (int)MathF.Ceiling(tech.StrikeProgress(s.NextBlow) * s.AttackTicks))
-                {
-                    effects.Emit(i, s.TargetSlot, BlowEffect, s.AttackSeq, default, s.NextBlow);
-                    s.Thrown++;
-                    s.NextBlow = s.NextBlow < tech.Blows ? s.NextBlow + 1 : 0;
-                }
-                if (now >= s.AttackEnd)
+                // Given up to defend: still in the first half of the swing while a blow at it is past its half (docs/game/combat.md "Pacing").
+                // It goes straight to the defence; one that may not defend yet (after a failed roll) keeps swinging.
+                if (incoming > CombatTuning.AbortIncomingProgress && (now - s.AttackStart) < CombatTuning.AbortOwnProgress * s.AttackTicks && now >= s.DefendReadyTick)
                 {
                     s.AttackTech = -1;
                     s.NextBlow = 0;
-                    s.ReadyTick = now + PauseTicks(world, i, s.AttackSeq);
+                    aborted = true;
+                }
+                else if (s.NextBlow > 0 && fighting && now >= s.AttackStart + (int)MathF.Ceiling(tech.StrikeProgress(s.NextBlow) * s.AttackTicks))
+                {
+                    effects.Emit(i, s.TargetSlot, BlowEffect, s.AttackSeq, default, s.NextBlow);
+                    s.Thrown++;
+                    int blow = s.NextBlow;
+                    s.NextBlow = s.NextBlow < tech.Blows ? s.NextBlow + 1 : 0;
+                    // Someone attacking it: the swing ends at this blow's stop frame and it decides again (FUN_14060a590).
+                    if (incoming >= 0) Stop(ref s, tech, blow);
                 }
             }
+            if (s.AttackTech >= 0 && now >= s.AttackEnd)
+            {
+                s.AttackTech = -1;
+                s.NextBlow = 0;
+                float pause = s.LastOutcome switch
+                {
+                    BlowOutcome.Blocked => CombatTuning.BlockedPause,
+                    BlowOutcome.Dodged => CombatTuning.DodgedPause,
+                    BlowOutcome.Missed => CombatTuning.MissedPause,
+                    _ => CombatTuning.HitPause,
+                };
+                s.ReadyTick = now + Math.Max(1, (int)MathF.Ceiling(pause / dt));
+            }
 
-            // 5. Reacting comes before attacking: a free character looks for blows coming at it.
-            if (s.ReactTech < 0 && s.AttackTech < 0) React(world, i, ref s, cold, key, now, dt);
-
-            // 6. A free attacker in reach starts a technique.
-            if (fighting && s.AttackTech < 0 && s.ReactTech < 0 && now >= s.ReadyTick) StartAttack(world, i, ref s, cold, key, now, dt);
+            // 5. Deciding tries attacking first (asking the target, StartAttack); only when that fails does a fighter defend against the blows coming at it,
+            // from anyone (docs/game/combat.md "Pacing"). Being attacked cuts the pause after an attack short; an opponent that lost the initiative to it
+            // may be swung at at once.
+            if (s.ReactTech < 0 && s.AttackTech < 0)
+            {
+                bool yielded = fighting && read[s.TargetSlot].YieldTo == i && now < read[s.TargetSlot].YieldUntil;
+                if (!aborted && fighting && (now >= s.ReadyTick || incoming >= 0 || yielded)) StartAttack(world, i, ref s, cold, key, now, dt);
+                if (s.AttackTech < 0 && now >= s.DefendReadyTick) React(world, i, ref s, cold, key, now, dt);
+            }
         }
     }
 
@@ -133,23 +194,117 @@ public sealed partial class CombatSystem
         var prev = table.Previous;
         int t = s.TargetSlot;
         var fighter = cold.Fighter!;
+        if (!fighter.CanAttack || Orders.Has(cold, CharacterOrders.Block)) return;   // the Block order: defends, starts no attack
         var tc = table.Cold(t)!;
         float gap = Vector2.Distance(new(prev[i].Position.X, prev[i].Position.Z), new(prev[t].Position.X, prev[t].Position.Z)) - CombatTuning.Footprint(cold) - CombatTuning.Footprint(tc);
         bool moving = new Vector2(prev[t].Velocity.X, prev[t].Velocity.Z).Length() >= 1;
         float weaponReach = fighter.Unarmed ? 99 : fighter.Weapon!.Data.Length * 0.5f;
         float skill = Eff(cold, fighter.WeaponSkill);
         float roll = CombatRolls.Float(world.Seed, key, CombatRoll.Technique, (ulong)(s.AttackSeq + 1));
-        int pick = TechniqueChooser.ChooseAttack(techniques, fighter.Kind, 0, false, skill, gap, moving, weaponReach, roll);
+        int pick = TechniqueChooser.ChooseAttack(techniques, fighter.Kind, fighter.TechniqueCategory, false, skill, gap, moving, weaponReach, roll);
         if (pick < 0) return;
+        // In reach with a technique: ask the target (and hold an attack slot).
+        if (!HasSlot(world, i, t, tc) || !HasInitiative(world, i, ref s, t, cold, tc, now)) return;
         var tech = techniques[pick];
         s.AttackSeq++;
         s.AttackTech = pick;
         s.AttackStart = now;
-        s.AttackTicks = Ticks(tech, PlayRate(cold, tech, attack: true), dt);
+        s.AttackTicks = Ticks(tech, PlayRate(cold, tech, attack: true), dt, cold);
         s.AttackEnd = now + Math.Max(1, (int)MathF.Ceiling(tech.EndProgress * s.AttackTicks));
         s.NextBlow = 1;
+        s.LastOutcome = BlowOutcome.Missed;
         s.AttackReach = TechniqueChooser.ReachOf(tech, moving, weaponReach);
         s.AttackSkill = Eff(cold, fighter.Unarmed ? StatsEnumerated.MartialArts : StatsEnumerated.MeleeAttack) + (fighter.Unarmed ? fighter.UnarmedBonus : fighter.AttackBonus + (fighter.Weapon?.Stats.AttackMod ?? 0));
+    }
+
+    /// <summary>
+    /// Whether <paramref name="i"/> may swing at <paramref name="t"/> now, asking the target first (<b>Verified</b>, FUN_14060c670 / FUN_140666a30, docs/game/combat.md
+    /// "Pacing"): yes when the target lost the initiative to it; not while the target is swinging at it (it defends instead); yes while the target is staggered,
+    /// defending or not fighting it; otherwise an initiative roll on both attack skills (the skill roll with <c>attack chance factor</c>, 50/50 at equal skill),
+    /// drawn from the pair and tick so both sides agree. The loser yields: the winner may swing at it at once (the original sets the winner to attack).
+    /// </summary>
+    bool HasInitiative(World world, int i, ref CombatSlot s, int t, CharacterCold cold, CharacterCold tc, int now)
+    {
+        ref readonly var target = ref read[t];
+        var prev = world.Characters.Previous;
+        bool atMe = target.TargetSlot == i && target.TargetGeneration == prev[i].Generation;
+        if (target.YieldTo == i && now < target.YieldUntil) return true;
+        if (target.AttackTech >= 0 && atMe) return false;   // it is swinging at me: I defend (FUN_140666a30)
+        // One that would not swing back (not fighting, the Block or Passive order) cannot take the initiative.
+        if (now < target.StunUntil || target.ReactTech >= 0 || target.Down || target.TargetSlot < 0 || tc.Fighter is not { CanAttack: true }
+            || Orders.Has(tc, CharacterOrders.Block | CharacterOrders.Passive)) return true;
+        if (s.YieldTo == t && now < s.YieldUntil) return false;
+        // The target is free (deciding or in its pause): one draw for the pair and tick, the lower slot's view.
+        int lo = Math.Min(i, t), hi = Math.Max(i, t);
+        float skillI = Eff(cold, cold.Fighter!.Unarmed ? StatsEnumerated.MartialArts : StatsEnumerated.MeleeAttack);
+        float skillT = Eff(tc, tc.Fighter.Unarmed ? StatsEnumerated.MartialArts : StatsEnumerated.MeleeAttack);
+        float lowSkill = lo == i ? skillI : skillT, highSkill = lo == i ? skillT : skillI;
+        float a = 1 + combat.AttackChanceFactor * MathF.Max(0, highSkill - lowSkill), b = 1 + combat.AttackChanceFactor * MathF.Max(0, lowSkill - highSkill);
+        float k = b / a, lowWins = k >= 1 ? 1 - 1 / (2 * k) : k / 2;
+        ulong pair = ((ulong)(uint)lo << 32) | (uint)hi;
+        float roll = CombatRolls.Float(world.Seed, pair, CombatRoll.Initiative, (ulong)(uint)now);
+        if ((roll < lowWins) == (i == lo)) return true;
+        s.YieldTo = t;
+        s.YieldUntil = now + Math.Max(1, (int)MathF.Ceiling(CombatTuning.YieldSeconds / world.TickSeconds));
+        return false;
+    }
+
+    struct IncomingScan
+    {
+        public CombatSlot[] Read;
+        public int Self, SelfGeneration, Now, Yielder;
+        public float Most;
+    }
+
+    /// <summary>
+    /// How far through the most advanced attack aimed at <paramref name="i"/> is (0 to 1, from the last tick's state; -1 when nobody is swinging at it), and the
+    /// lowest slot that lost the initiative roll to it and still yields (<paramref name="yielder"/>, -1: none).
+    /// </summary>
+    float Incoming(World world, int i, int now, out int yielder)
+    {
+        var prev = world.Characters.Previous;
+        var scan = new IncomingScan { Read = read, Self = i, SelfGeneration = prev[i].Generation, Now = now, Most = -1, Yielder = -1 };
+        world.Grid.Query(prev[i].Position.X, prev[i].Position.Z, CombatTuning.ReactionScanRadius, ref scan, static (int other, ref IncomingScan st) =>
+        {
+            if (other == st.Self) return;
+            ref readonly var a = ref st.Read[other];
+            if (a.YieldTo == st.Self && st.Now < a.YieldUntil && !a.Down && (st.Yielder < 0 || other < st.Yielder)) st.Yielder = other;
+            if (a.AttackTech < 0 || a.NextBlow == 0 || a.TargetSlot != st.Self || a.TargetGeneration != st.SelfGeneration || a.AttackTicks <= 0) return;
+            st.Most = MathF.Max(st.Most, Math.Clamp((st.Now - a.AttackStart) / (float)a.AttackTicks, 0, 1));
+        });
+        yielder = scan.Yielder;
+        return scan.Most;
+    }
+
+    struct SlotScan
+    {
+        public CombatSlot[] Read;
+        public CharacterTable Table;
+        public int Self, Target, TargetGeneration, Ahead;
+        public float X, Z, MyDistance;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="i"/> holds one of its target's attack slots (docs/game/combat.md "Pacing": <see cref="AttackSlots"/> plus the target race's
+    /// <c>extra attack slots</c>, FUN_140666310): the fighters at the target, nearest first (slot order on a tie), take them; the rest wait (the original circles, not modelled).
+    /// </summary>
+    bool HasSlot(World world, int i, int t, CharacterCold tc)
+    {
+        int slots = Math.Max(1, AttackSlots + (tc.Race?.ExtraAttackSlots ?? 0));
+        var prev = world.Characters.Previous;
+        float x = prev[t].Position.X, z = prev[t].Position.Z;
+        var scan = new SlotScan { Read = read, Table = world.Characters, Self = i, Target = t, TargetGeneration = prev[t].Generation, X = x, Z = z };
+        scan.MyDistance = Vector2.DistanceSquared(new(prev[i].Position.X, prev[i].Position.Z), new(x, z));
+        world.Grid.Query(x, z, CombatTuning.ReactionScanRadius, ref scan, static (int other, ref SlotScan st) =>
+        {
+            if (other == st.Self) return;
+            ref readonly var o = ref st.Read[other];
+            if (o.TargetSlot != st.Target || o.TargetGeneration != st.TargetGeneration || o.Down || o.Ranged) return;
+            ref readonly var p = ref st.Table.Previous[other];
+            float d = Vector2.DistanceSquared(new(p.Position.X, p.Position.Z), new(st.X, st.Z));
+            if (d < st.MyDistance || d == st.MyDistance && other < st.Self) st.Ahead++;
+        });
+        return scan.Ahead < slots;
     }
 
     struct Scan
@@ -194,22 +349,33 @@ public sealed partial class CombatSystem
         float block, dodge = 0;
         if (fighter.CanBlock)
         {
-            float d = DefenceFormulas.Defence(meleeDefence, fighter.Weapon!.Stats.DefenceMod, true, fighter.DefenceBonus, fighter.Guarding);
+            float d = DefenceFormulas.Defence(meleeDefence, fighter.Weapon!.Stats.DefenceMod, true, fighter.DefenceBonus, Guarding(cold));
             block = DefenceFormulas.BlockChance(d, attack.AttackSkill, combat);
         }
         else
         {
             block = 0;
-            float effective = DefenceFormulas.EffectiveDefence(Eff(cold, StatsEnumerated.MartialArts), fighter.EncumbranceFactor, Speed.LegFactor(cold.Medical!), fighter.DefenceBonus, fighter.Guarding);
+            float effective = DefenceFormulas.EffectiveDefence(Eff(cold, StatsEnumerated.MartialArts), fighter.EncumbranceFactor, Speed.LegFactor(cold.Medical!), fighter.DefenceBonus, Guarding(cold));
             dodge = DefenceFormulas.BlockChance(effective, attack.AttackSkill, combat, 0, 95);
         }
-        int pick = TechniqueChooser.ChooseReaction(techniques, fighter.Kind, 0, false, fighter.CanBlock, direction, block, dodge, chanceRoll, pickRoll);
-        if (pick < 0) return;
+        int pick = TechniqueChooser.ChooseReaction(techniques, fighter.Kind, fighter.TechniqueCategory, false, fighter.CanBlock, direction, block, dodge, chanceRoll, pickRoll);
+        if (pick < 0)
+        {
+            // No defence (a failed dodge roll, or nothing fits): none is tried again for a while (the original's +0x14c).
+            s.DefendReadyTick = now + (int)MathF.Ceiling(CombatTuning.NoDefenceSeconds / dt);
+            return;
+        }
         var reaction = techniques[pick];
-        int ticks = Ticks(reaction, PlayRate(cold, reaction, attack: false), dt);
-        // The reaction is timed so that it is at its "blocked frame" when the blow arrives; with less lead time it starts at once and is less far along.
+        int ticks = Ticks(reaction, PlayRate(cold, reaction, attack: false), dt, cold);
+        // The reaction is timed so that it is at its "blocked frame" when the blow arrives; with less lead time it starts at once and is less far along,
+        // With LateDefences (Meitou balance choice, docs/simulation.md "Combat") never too little for the roll it passed to count: a late one joins its clip partway.
         int strike = scan.Strike;
         int start = Math.Max(now, strike - (int)MathF.Round(reaction.StrikeProgress(1) * ticks));
+        if (LateDefences)
+        {
+            float least = reaction.IsBlock ? HitOutcomes.BlockProgress : HitOutcomes.DodgeFrom;
+            start = Math.Min(start, strike - (int)MathF.Ceiling(least * ticks) - 1);
+        }
         s.ReactTech = pick;
         s.ReactStart = start;
         s.ReactTicks = ticks;

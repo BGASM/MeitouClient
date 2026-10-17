@@ -3,6 +3,7 @@ using Meitou.Data.Characters;
 using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay;
 using Meitou.Data.Gameplay.Bodies;
+using Meitou.Data.Gameplay.Combat;
 using Meitou.Simulation.Bodies;
 using Meitou.Simulation.Combat;
 using Meitou.Simulation.Items;
@@ -62,21 +63,88 @@ sealed class CharacterAssembly(PopulationData data)
             foreach (var item in inventory.Items.Where(i => i.Section == section && i.Type == FcsRecordType.WEAPON))
                 if (weapon is null && combat.Weapon(item.Record) is { } w)
                     weapon = WeaponInstance.Create(item.Level * 0.01f, w, combat.Manufacturer(item.CompanyId), combat.WeaponMaterial(item.MaterialId), combat.Constants);
-        var armour = inventory.Items.Where(i => i.Type == FcsRecordType.ARMOUR && combat.Armour(i.Record) is not null)
+        var armour = inventory.Items.Where(i => i.Type == FcsRecordType.ARMOUR && Items.InventoryCommands.IsEquipmentSection(i.Section) && combat.Armour(i.Record) is not null)
             .Select(i => ArmourPiece.Create(combat.Armour(i.Record)!, i.Quality * 0.01f));
-        return new Fighter(weapon, armour);
+        // The crossbow: the first CROSSBOW in the weapon sections (back, then hip), its quality the level x 0.01 like a weapon's.
+        CrossbowInstance? crossbow = null;
+        foreach (var section in new[] { "back", "hip" })
+            foreach (var item in inventory.Items.Where(i => i.Section == section && i.Type == FcsRecordType.CROSSBOW))
+                if (crossbow is null && combat.Crossbow(item.Record) is { } x)
+                    crossbow = CrossbowInstance.Create(item.Level * 0.01f, x, combat.Constants, data.BodyOptions.GlobalDamageMultiplier);
+        return new Fighter(weapon, armour) { Crossbow = crossbow };
     }
 
-    /// <summary>Gives a character with a race its stats and medical state, its inventory and fighter, and the top speed of the speed chain (stage 7). Animals (no race) are left as they are.</summary>
-    public void Attach(CharacterId id, CharacterCold cold, ref CharacterHot hot, GameRecord? record, GameRecord? race, ulong seed)
+    /// <summary>
+    /// An animal's fighter (docs/game/animals.md): its natural weapon, the ANIMAL_CHARACTER's <c>weapon</c> (a WEAPON of a creature category) made by its <c>weapon level</c>
+    /// manufacturer; no armour. The weapon's level is the manufacturer's first model's level, with that model (an <b>engine choice</b>: the original makes the item without a
+    /// level argument, and its default was not traced, <b>Unknown</b>). No weapon (or one not in the data) gives a fighter without an attack.
+    /// </summary>
+    Fighter MakeAnimalFighter(AnimalData animal)
     {
+        var combat = data.Combat;
+        WeaponInstance? weapon = null;
+        if (animal.WeaponId is { } wid && combat.Weapon(wid) is { } w)
+        {
+            var maker = animal.WeaponLevelId is { } mid ? combat.Manufacturer(mid) : null;
+            var model = maker is { Models.Count: > 0 } ? maker.Models[0] : (WeaponModelEntry?)null;
+            weapon = WeaponInstance.Create((model?.Level ?? 0) * 0.01f, w, maker, model is { } m ? combat.WeaponMaterial(m.ModelStringId) : null, combat.Constants);
+        }
+        return new Fighter(weapon) { IsAnimal = true };
+    }
+
+    Fighter FighterOf(GameRecord? record, Inventory inventory) => AnimalData.From(record) is { } animal ? MakeAnimalFighter(animal) : MakeFighter(inventory);
+
+    public void RefreshEquipment(CharacterCold cold)
+    {
+        if (cold.Inventory is not { } inventory) return;
+        var fighter = FighterOf(data.Db.Find(cold.RecordId), inventory);
+        fighter.Guarding = cold.Fighter?.Guarding ?? false;
+        fighter.EncumbranceFactor = cold.Fighter?.EncumbranceFactor ?? 1;
+        cold.Fighter = fighter;
+        if (cold.Appearance is not { } look || look.Animal is not null) return;
+        var body = look.Loadout?.Appearance.Record ?? look.Body?.Record;
+        if (Saving.SavedKit.LoadoutOf(body, Saving.SavedKit.FromInventory(inventory), data.Db, look.Loadout?.Seed ?? 0) is { } kit &&
+            data.Appearances?.Create(cold.RecordId, kit) is { } updated)
+            cold.Appearance = updated;
+    }
+
+    /// <summary>
+    /// <see cref="Attach"/> for a character loaded from a save: the race, stats and medical state are the saved ones (not rolled), the inventory and the fighter are
+    /// the saved <paramref name="inventory"/> when there is one, else built from the character's record and look like a new character's; the fighter from the inventory. The top
+    /// speed is the loader's.
+    /// </summary>
+    public void AttachSaved(CharacterCold cold, RaceData race, CharacterStats stats, MedicalState medical, GameRecord? record, Inventory? inventory = null)
+    {
+        cold.NpcClass = NpcClassOf(record);
+        cold.Race = race;
+        cold.Stats = stats;
+        cold.Medical = medical;
+        cold.Inventory = inventory ?? data.Items.Build(record, cold.Appearance?.Loadout);
+        cold.Fighter = FighterOf(record, cold.Inventory);
+        cold.WaterFactor = race.WaterAvoidance * (cold.Faction == data.PlayerFaction && data.PlayerFaction >= 0 ? 0.5f : 1);
+    }
+
+    /// <summary>
+    /// CHARACTER <c>NPC class</c> (<b>Verified</b>, carry-loot.md 4.3: read by <c>FUN_14062b210</c>, the editor's CharacterTypeEnum, <c>fcs.def</c> default MILITARY); None without a
+    /// CHARACTER record (an animal's ANIMAL_CHARACTER, or nothing).
+    /// </summary>
+    public static FundamentalType NpcClassOf(GameRecord? record) =>
+        record is { Type: Meitou.Data.Fcs.FcsRecordType.CHARACTER } ? (FundamentalType)record.GetInt("NPC class", (int)FundamentalType.Military) : FundamentalType.None;
+
+    /// <summary>
+    /// Gives a character with a race its stats and medical state, its inventory and fighter, and the top speed of the speed chain (stage 7). An animal (ANIMAL_CHARACTER, whose
+    /// record names its race) gets its body at <paramref name="age"/> and its natural weapon (docs/game/animals.md). Anything without a race is left as it is.
+    /// </summary>
+    public void Attach(CharacterId id, CharacterCold cold, ref CharacterHot hot, GameRecord? record, GameRecord? race, ulong seed, float age = 1)
+    {
+        cold.NpcClass = NpcClassOf(record);
         if (race is null) return;
-        var (raceData, stats, medical) = data.Bodies.Create(race, record, seed, Rng.Key(id));
+        var (raceData, stats, medical) = data.Bodies.Create(race, record, seed, Rng.Key(id), age);
         cold.Race = raceData;
         cold.Stats = stats;
         cold.Medical = medical;
         cold.Inventory = data.Items.Build(record, cold.Appearance?.Loadout);
-        cold.Fighter = MakeFighter(cold.Inventory);
+        cold.Fighter = FighterOf(record, cold.Inventory);
         cold.WaterFactor = raceData.WaterAvoidance * (cold.Faction == data.PlayerFaction && data.PlayerFaction >= 0 ? 0.5f : 1);
         hot.MaxSpeed = Speed.Run(raceData, stats, medical, 1);
     }

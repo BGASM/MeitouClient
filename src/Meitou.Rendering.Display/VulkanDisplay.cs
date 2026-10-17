@@ -61,6 +61,7 @@ public sealed unsafe class VulkanDisplay : IDisposable
         {
             Window = Silk.NET.Windowing.Window.Create(options.Value with { API = GraphicsAPI.DefaultVulkan, VSync = false });
             Window.Initialize();
+            SetWindowIcon(Window);
             var surface = Window.VkSurface ?? throw new InvalidOperationException("the window has no Vulkan surface support");
             var names = surface.GetRequiredExtensions(out uint count);
             var extensions = new string[count];
@@ -72,6 +73,21 @@ public sealed unsafe class VulkanDisplay : IDisposable
         Console.WriteLine($"vulkan    {Device.DeviceName}");
         Context = new GpuContext(Device);
         if (options is not null) presenter = new VulkanPresenter(Context, vsync) { PresentFunction = Streamline is { DlssSupported: true } s ? s.PresentProxy : null };
+    }
+
+    /// <summary>The two moons as the window's icon (the embedded 256 x 256 RGBA); a window system that refuses it keeps the default.</summary>
+    static void SetWindowIcon(IWindow window)
+    {
+        try
+        {
+            using var stream = typeof(VulkanDisplay).Assembly.GetManifestResourceStream("meitou-256.rgba");
+            if (stream is null) return;
+            var pixels = new byte[256 * 256 * 4];
+            stream.ReadExactly(pixels);
+            var icon = new Silk.NET.Core.RawImage(256, 256, pixels);
+            window.SetWindowIcon(ref icon);
+        }
+        catch (Exception e) { Console.WriteLine($"window icon  {e.Message}"); }
     }
 
     /// <summary>Starts a frame of the given size; false when nothing can be shown (a minimised window): skip drawing.</summary>
@@ -103,13 +119,11 @@ public sealed unsafe class VulkanDisplay : IDisposable
 
     /// <summary>
     /// <c>%LOCALAPPDATA%\Meitou\pipeline-cache.bin</c> (the driver checks the header and ignores a cache from another device or driver);
-    /// <c>MEITOU_PIPELINE_CACHE</c> overrides the path, <c>MEITOU_PIPELINE_CACHE=0</c> turns it off. Null when there is no place for it.
+    /// <c>--no-load-cache</c> turns it off. Null when there is no place for it.
     /// </summary>
     static string? PipelineCacheFile()
     {
-        var env = Environment.GetEnvironmentVariable("MEITOU_PIPELINE_CACHE");
-        if (env == "0") return null;
-        if (!string.IsNullOrEmpty(env)) return env;
+        if (Meitou.Data.World.LoadCaches.Disabled) return null;
         var root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrEmpty(root)) return null;
         try

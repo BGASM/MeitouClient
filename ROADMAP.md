@@ -1,109 +1,46 @@
 # Roadmap
 
-Goal: a drop-in replacement for `kenshi_x64.exe` that loads the original `data/`, `mods/` and
-saves unchanged. Compatibility is the constraint everything else bends around, so work goes from
-the data inward. The viewers came early because they are the quickest check that a reader is right.
+Goal: replace `kenshi_x64.exe` while loading original content, mods and saves unchanged.
+Current capabilities and usage: [README.md](README.md). Research index: [docs/README.md](docs/README.md).
+Project rules: [AGENTS.md](AGENTS.md). Engine constraints: [DECISIONS.md](DECISIONS.md).
 
-## Ground rules
+## Original engine
 
-- **No assets in the repo.** Everything is read from the user's install (`KENSHI_PATH` /
-  `meitou.local.json`). `.gitignore` blocks Kenshi asset extensions so fixtures can't leak in;
-  tests that need the game skip when it isn't configured.
-- **Clean-room readers for proprietary formats.** Ogre, MyGUI and ParticleUniverse are MIT, so
-  porting their code/format logic is fine. Havok, PhysX and Wwise are proprietary: we write our
-  own readers from observed file structure, never link their SDKs or redistribute their DLLs.
-- **Behaviour from facts.** Game logic is reimplemented from the FCS schema, the data, observed
-  in-game behaviour, and facts learned by decompiling the original binaries for interoperability
-  (formats, merge rules, formulas, constants). Decompiled output never enters the repo and code is
-  never copied or translated from it; the facts go into `docs/` in our own words (see CLAUDE.md).
+**Observed from the install:** Ogre 2.0 Tindalos (Direct3D 11, Octree scene manager, Terrain, Overlay and MeshLodGenerator), MyGUI, ParticleUniverse, SkyX, PhysX 2.x (`PhysXLoader64`, `NxCharacter`), Havok, Wwise, OIS and Steamworks. Havok Behavior/Animation is linked, but characters animate through Ogre; see [animation.md](docs/animation.md). Format coverage: [overview](docs/formats/overview.md).
 
-## Original engine (from the install)
+## Technology
 
-Ogre 2.0 "Tindalos" (Direct3D 11 render system, Octree scene manager, Terrain plugin, MeshLodGenerator,
-Overlay), MyGUI, ParticleUniverse, SkyX, PhysX 2.x (`PhysXLoader64`, `NxCharacter`), Havok
-(navmesh; Behavior/Animation is linked but characters animate through Ogre, see
-[docs/animation.md](docs/animation.md)), Wwise (`.bnk`), OIS input, Steamworks.
+- C# / .NET 10; Silk.NET windowing and Vulkan 1.3 native rendering.
+- Independent Faithful MyGUI-compatible and styled Meitou UI modes; public control/style/action
+  registration. [Native UI](docs/native-ui.md), [MyGUI](docs/formats/mygui.md).
+- DotRecast navigation with our own builder/cache; original Havok tiles are references.
+- Rigid-body physics: BepuPhysics2 (ragdolls). Planned audio: clean-room Wwise bank/WEM decoding
+  and OpenAL Soft. Do not link proprietary SDKs or redistribute their DLLs.
 
-## Format inventory
+## Compatibility work
 
-See [docs/formats/overview.md](docs/formats/overview.md) for every format found in the install
-and how far each is analyzed. Detailed layouts live next to it in `docs/formats/`.
+| Area | Remaining work / authoritative reference |
+| --- | --- |
+| Data | Exact workshop subscription selection. [FCS](docs/formats/fcs-mod.md), [resource lookup](docs/formats/overview.md). |
+| Characters | Remaining body/attachment/material parity and exact original random sequence. [Characters](docs/characters.md), [animation](docs/animation.md), [renderer](docs/character-renderer.md). |
+| Navigation | Global pathing, dynamic doors and navmesh cache/lifetime gaps. [Pathfinding](docs/game/pathfinding.md), [simulation](docs/simulation.md#navmesh). |
+| AI | Wars, prisoners/slavers, planner and full off-screen town simulation. [AI research](docs/game/ai.md), [runtime](docs/simulation.md#ai). |
+| Dialogue | Dialogue runtime, conversation window, speech bubbles, event integration and recruiting. [Dialogue](docs/game/dialogue.md). |
+| Economy | Building shops, production, construction, farming and research. [Economy](docs/game/economy.md), [production](docs/game/buildings-production.md). |
+| Saves | Restore towns, NPC squads and world state beyond the player's squad; preserve original save compatibility. [Save format](docs/formats/save.md), [runtime mapping](docs/simulation.md#saves). |
+| UI | Full control, font, mod and interaction fidelity; runtime code-module loading. [Parity](docs/faithful-ui-parity.md), [native UI](docs/native-ui.md). |
+| Physics | Thrown bodies, physics props, character collision; ragdoll gaps in [simulation](docs/simulation.md#ragdolls). [Collision](docs/formats/collision.md). |
+| Audio | Banks/WEM reader, ambient/music/speech/events and controls. |
 
-## Technology choices (defaults, open to change)
+## Rendering
 
-- **Rendering:** Silk.NET, Vulkan only (OpenGL was removed, DECISIONS 18). The renderers write GL-shaped calls (`IGl`) with our own
-  GLSL (Kenshi's HLSL is read for facts only); `VkGl` translates them onto Vulkan 1.3.
-- **Physics:** BepuPhysics2 (pure C#), tuned to match PhysX character/ragdoll behaviour.
-- **Audio:** own Wwise bank/WEM decoder → OpenAL Soft (Silk.NET).
-- **UI:** own renderer for MyGUI `.layout` / skins, so GUI mods keep working.
-- **Input/windowing:** Silk.NET.
+Current algorithms and limitations live in the feature docs, rather than a separate phase log:
+[terrain](docs/render-terrain.md), [objects](docs/render-objects.md), [foliage](docs/render-foliage.md),
+[water](docs/render-water.md), [sky](docs/render-sky.md), [clouds](docs/render-clouds.md),
+[shadows](docs/render-shadows.md), [post](docs/render-post.md), [GI](docs/render-gi.md).
+Faithful preserves original behaviour; Meitou quality improvements remain independently selectable.
+Optional GI may trade performance for lighting quality.
 
-## Phases
+## Open design question
 
-Status as of 2026-10-05. Details and open questions live in the linked docs.
-
-1. **Data layer** — *done.* FCS `.mod`/`.base` reader and writer (byte-identical round trip of every
-   base-game file), `fcs.def` types, load order (`mods.cfg`, `mods/`, Steam workshop) and record
-   merging as `kenshi_x64.exe` does it, which differs from the mod editor in places
-   ([fcs-mod.md](docs/formats/fcs-mod.md)). Open: derived `wall master` references; workshop
-   subscriptions are approximated by every downloaded item.
-2. **Ogre assets** — *done.* Mesh, skeleton, material/shader script and DDS/image readers;
-   resource lookup as Kenshi registers it; runtime materials from FCS records; `meitou-viewer`.
-   Characters ([characters.md](docs/characters.md)): body, head, hair, armour, weapons, `.phs`
-   attach points, `.bod2` appearance, body-shape bone scales, face poses, mesh LOD, blended
-   animation layers, and a seeded generator for loadout and random appearance. Open: clipping of
-   hidden body parts, muscle normal blend, stump meshes, the game's exact random sequence.
-3. **World** — *mostly done.* `fullmap.tif` heights, zone/level files, `features.dat`
-   ([terrain.md](docs/formats/terrain.md), [zones.md](docs/formats/zones.md)); `meitou-viewer --world`
-   with CDLOD terrain to the horizon textured by biome, water, sky and sun path, and buildings
-   assembled like the game (seeded part choice, town materials, doors, destroyed states). In
-   progress: detail streaming around the camera, infinite sea. To do: foliage (including the
-   visible mineable rocks), building LOD, scene reflections, global pathing data.
-4. **Havok** — *not started.* Tagfile (`.hkt`) reader; navmesh tiles
-   (`newland/land/navtiles`). Character animation does not need it (Ogre skeleton animations).
-   Research: navmesh manager, tile files, path queries and movement in
-   [pathfinding.md](docs/game/pathfinding.md).
-5. **Simulation core** — *in progress* ([docs/simulation.md](docs/simulation.md), branch `sim`, since 2026-10-07).
-   Headless and deterministic (golden state hashes at any thread count), independent of rendering. Stages: 0 time
-   model, 1 skeleton (world, tick phases, worker pool, seeded randomness, state hash), 2 population (squad factory,
-   residents, bar and roaming squads, zones), 3 movement, 4 characters drawn, 5 navmesh (own builder, interiors, doors,
-   cache), 6 player (new game, selection, orders, HUD), 7 bodies, 8 melee combat: done and wired into the game.
-   10 saves: the world mapping to and from save folders is done, the game does not load or save yet. 9 AI proper
-   (packages, tasks, off-screen squads), ranged combat, dialogue (`Dialogue.mod`), economy and towns: not started. Research (2026-10-05, from
-   the full decompile): [game-loop.md](docs/game/game-loop.md), [character-stats.md](docs/game/character-stats.md),
-   [combat.md](docs/game/combat.md), [ai.md](docs/game/ai.md), [factions-squads-towns.md](docs/game/factions-squads-towns.md),
-   [economy.md](docs/game/economy.md), [buildings-production.md](docs/game/buildings-production.md); each ends
-   with its open questions and an implementation outline.
-6. **Saves** — *started.* Read and write original save games. Format researched and checked
-   against real saves: [save.md](docs/formats/save.md) (FCS type-15 files, handles, what is saved). The save folder
-   reader and writer and the world mapping exist (stage 10 of [simulation.md](docs/simulation.md#saves)); the game
-   does not use them yet.
-7. **Presentation** — *partly.* `meitou` boots into the world with the Kenshi camera on a fixed 30 Hz tick with interpolated
-   drawing (`src/Meitou.Engine`, `src/Meitou.Game`, [docs/engine.md](docs/engine.md)); the world renderers are a library
-   (`src/Meitou.Rendering`, on Vulkan), shared with the viewer. To do: game renderer
-   (shadows, effects) with graphics options (terrain LOD distance, now fixed at its useful maximum, and
-   material distance), MyGUI-compatible UI ([ui-screens.md](docs/game/ui-screens.md),
-   [ui-input.md](docs/game/ui-input.md)), audio, particles, physics/ragdolls.
-8. **Parity** — *not started.* Side-by-side comparison against the original, mod compatibility
-   test suite.
-
-## Meitou water (branch `meitou-water`, since 2026-10-08)
-
-A Faithful / Meitou switch `water`: Faithful keeps today's water (the game's shading, one flat quad) unchanged; Meitou
-adds visual-only motion (gameplay water stays flat at Y = 100). On the game clock (`GameHours`, paused = still). Budget:
-at most +0.5 ms GPU in the F12 `water` stage on the same views; a quality setting scales it down for integrated GPUs.
-
-1. **Waves and surf** — a camera-centred polar grid instead of the quad (fine near, coarse far, flat at the edge);
-   an FFT ocean (three cascades, JONSWAP spectrum led by the weather's wind; first four Gerstner waves, replaced on
-   2026-10-08); breakers that run towards the shore along a baked shore distance field (gated by its exposure), steepen, break into foam and run up
-   the beach and back; crest foam. One draw plus a 0.2-0.4 ms compute pass; refraction (a half-size copy of the scene), absorption by depth, caustics, crest light, glitter and lingering foam (2026-10-08). Then a checkpoint for the owner to play it.
-2. **Rivers and scum** — `flowmap.png` RG does not follow the river channels (checked 2026-10-08, docs/formats/terrain.md), so a river
-   map is derived from the heights (`RiverFlowBake`): flow carried along the channel, faster where narrow and shallow, foam streaks
-   and rapids, no ocean waves or breakers in rivers (done, 2026-10-08, partial coverage, see docs/render-water.md). Still to do: the biomes' scum (the B channel), which
-   the game draws and the viewer never has.
-3. Foam against objects (stilts, piers) needs the scene depth: optional, later.
-
-## Open questions
-
-- How far to support script-extender mods (RE_Kenshi / KenshiLib plugins hook native code and
-  can't work as-is in a managed engine).
+Script-extender compatibility: [RE_Kenshi / KenshiLib feasibility](docs/formats/rekenshi.md). Existing DLLs need native object/hook compatibility; extension-data support and source ports are practical candidates. No runtime compatibility layer exists.

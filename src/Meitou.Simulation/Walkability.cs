@@ -8,6 +8,12 @@ public sealed record PathResult(IReadOnlyList<Vector3> Points)
 {
     public static readonly PathResult NotFound = new([]);
     public bool Found => Points.Count > 0;
+    /// <summary>
+    /// How many of the points, from the start, follow the real walkable surface; the rest are a provisional long-range route over the terrain through
+    /// zones whose navmesh is not loaded, to be asked for again on the way (all of them for an ordinary path).
+    /// </summary>
+    public int Exact { get; init; } = int.MaxValue;
+    public bool IsProvisional => Exact < Points.Count;
 }
 
 /// <summary>
@@ -22,6 +28,10 @@ public interface IWalkability
     /// <summary>Whether a character may stand at world X/Z.</summary>
     bool IsWalkable(float x, float z);
     PathResult FindPath(Vector3 from, Vector3 to);
+    /// <summary>Height a character now at height <paramref name="nearY"/> stands at: where floors are stacked (a walkway over a street, an upper storey), the one under it, not the highest.</summary>
+    float GroundHeight(float x, float z, float nearY) => GroundHeight(x, z);
+    /// <summary>Whether a character now at height <paramref name="nearY"/> may stand at world X/Z (a surface only far above it, such as a wall top, does not count).</summary>
+    bool IsWalkable(float x, float z, float nearY) => IsWalkable(x, z);
 }
 
 /// <summary>
@@ -58,4 +68,33 @@ public interface IAgentWalkability : IWalkability
 {
     /// <summary>A path for an agent of <paramref name="footprintRadius"/> units; 0 or less means the default human, and a water cost factor of <paramref name="waterFactor"/> (0 or less: the default).</summary>
     PathResult FindPath(Vector3 from, Vector3 to, float footprintRadius, float waterFactor);
+}
+
+/// <summary>Finding a walkable spot near a point (a stand-in's characters coming back into the world, docs/simulation.md "Off-screen tier").</summary>
+public static class WalkableSpots
+{
+    static readonly float[] Radii = [4, 8, 16, 32, 64, 128];
+    static readonly Vector2[] Directions = [.. Enumerable.Range(0, 8).Select(k => new Vector2(MathF.Cos(k * MathF.PI / 4), MathF.Sin(k * MathF.PI / 4)))];
+
+    /// <summary>
+    /// <paramref name="at"/> when it is walkable, else the first walkable point on rings of 4 to <paramref name="maxRadius"/> units round it (eight directions each, nearest
+    /// ring first, a fixed order); false (and <paramref name="spot"/> = <paramref name="at"/>) when there is none.
+    /// </summary>
+    public static bool Nearest(IWalkability walk, Vector2 at, out Vector2 spot, float maxRadius = 128)
+    {
+        spot = at;
+        if (walk.IsWalkable(at.X, at.Y)) return true;
+        foreach (float r in Radii)
+        {
+            if (r > maxRadius) break;
+            foreach (var dir in Directions)
+            {
+                var p = at + dir * r;
+                if (!walk.IsWalkable(p.X, p.Y)) continue;
+                spot = p;
+                return true;
+            }
+        }
+        return false;
+    }
 }

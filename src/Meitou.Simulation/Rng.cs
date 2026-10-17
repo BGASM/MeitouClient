@@ -15,6 +15,24 @@ public enum RngPurpose : uint
     Loot = 5,
     Slow = 6,
     Animation = 7,
+    Flee = 8,
+    Sense = 9,
+    /// <summary>Crossbow shots: the deviation cone, the damage roll and the friendly-fire pass (docs/simulation.md "Combat", ranged).</summary>
+    Ranged = 10,
+    /// <summary>The economy: town market factors, shop stock, shop purses, fencing (docs/simulation.md "Trade").</summary>
+    Trade = 11,
+    /// <summary>Which towns a map item reveals (<see cref="Items.MapItems"/>).</summary>
+    MapItem = 12,
+    /// <summary>The stealth knock-out roll (<see cref="Carrying.CarrySystem.StealthKoChance"/>).</summary>
+    StealthKo = 13,
+    /// <summary>Lock levels at creation and the pick rolls (<see cref="Locks.FixtureRegistry"/>, <see cref="Locks.Lockpicking"/>), keyed by the fixture's id.</summary>
+    Lock = 14,
+    /// <summary>The refund counts of a dismantled site (<see cref="Construction.ConstructionSystem"/>), keyed by the site's id and the material entry.</summary>
+    Build = 15,
+    /// <summary>The faction campaigns (<c>PopulationCampaigns.cs</c>): rolls, follow-ups, request delays and the campaign squads' places, keyed by the faction.</summary>
+    Campaign = 16,
+    /// <summary>Dialogue: line and text picks, chance rolls, interjectors, personalities (<see cref="Dialogue.DialogueSystem"/>).</summary>
+    Dialogue = 17,
 }
 
 /// <summary>

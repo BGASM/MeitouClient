@@ -1,0 +1,598 @@
+using System.Globalization;
+using System.Numerics;
+using Meitou.Data;
+using Meitou.Data.Fcs;
+using Meitou.Data.Gameplay;
+using Meitou.Data.World;
+using Meitou.Simulation.Crime;
+
+namespace Meitou.Simulation.Locks;
+
+/// <summary>
+/// The world's doors, lockable containers, cages and beds (docs/simulation.md "Cages, beds and locks"; the original's rules in docs/game/locks.md and docs/game/economy.md 11.5).
+/// A town's fixtures are registered once, when the population first spawns it (<see cref="RegisterSite"/>), in building order, and stay when the town unloads. Lock levels are
+/// rolled from the world seed and the fixture's id, so the order towns load in never changes them. Everything here runs in serial phases (or before the first tick).
+/// <list type="bullet">
+/// <item><b>Locks</b>: level = owner faction's <c>doors lock level</c> + uniform int in [-r, r] (<c>lock level random</c>) + the record's <c>lock level bonus</c> (a door's own,
+/// its hardness the parent's), doors at least 1, others at least 0, at most 100; locks start unlocked; the owner is the placement's <c>owner faction ID</c>, else the town's.</item>
+/// <item><b>Doors</b>: the squad's <c>initial door state</c> applies when its home is assigned (<see cref="ApplyInitialDoorState"/>). <see cref="Doors"/> hears a building as
+/// blocked for paths while every one of its doors is effectively locked and none broken (<b>engine choice</b>: the navmesh has one door state per building).</item>
+/// <item><b>Cages</b>: <see cref="FindCage"/> (the original's weights, cages a carrier cannot reach left out), <see cref="Imprison"/> (recorded in <see cref="CagingsOf"/> and <see cref="Caged"/>),
+/// <see cref="Release"/>, <see cref="GetOut"/>, <see cref="LiftOut"/>; beds <see cref="EnterBed"/> / <see cref="LeaveBed"/>.</item>
+/// </list>
+/// </summary>
+public sealed class FixtureRegistry
+{
+    /// <summary>The cage finder's distance scale: weight clamp(1 - d^2 / 4608^2, 1e-5, 1), x100 for the carrier's faction, x100 in its home (economy.md 11.7, <b>Observed</b>).</summary>
+    public const float CageSearchScale = 4608;
+    /// <summary>A sentence above this bounty is <see cref="LifeSentence"/> hours (economy.md 11.5).</summary>
+    public const int LifeBounty = 25000;
+    public const float LifeSentence = 999999;
+
+    readonly List<Fixture> all = [];
+    readonly Dictionary<string, Fixture> byId = new(StringComparer.Ordinal);
+    readonly Dictionary<string, List<Fixture>> byBuilding = new(StringComparer.Ordinal);
+    readonly List<string> buildings = [];
+    readonly HashSet<int> sites = [];
+    readonly HashSet<string> initialApplied = new(StringComparer.Ordinal);
+    readonly Dictionary<string, GameRecord?> functions = new(StringComparer.Ordinal);
+    // (cage id, faction) -> the game hour until which a walk there is known to fail (engine: the "no path" memo of FindCage). Sorted, so it hashes in a fixed order.
+    readonly SortedDictionary<(string Cage, int Faction), double> unreachable = new(Comparer<(string Cage, int Faction)>.Create((a, b) =>
+        string.CompareOrdinal(a.Cage, b.Cage) is var c and not 0 ? c : a.Faction.CompareTo(b.Faction)));
+    readonly List<Imprisonment> cagings = [];
+    long cagingsTick = -1;
+    IDoorGate? doors;
+
+    public int Count => all.Count;
+    /// <summary>Every fixture, in registration order.</summary>
+    public IReadOnlyList<Fixture> All => all;
+    public Fixture? Find(string id) => byId.GetValueOrDefault(id);
+    /// <summary>The fixtures of a placed building (its doors, own lock, interior cages, containers and beds).</summary>
+    public IReadOnlyList<Fixture> OfBuilding(string buildingInstance) => byBuilding.TryGetValue(buildingInstance, out var l) ? l : [];
+    public bool IsRegistered(int site) => sites.Contains(site);
+
+    /// <summary>Navigation's door table (null: headless, nothing to tell). Setting it tells it every registered building's state.</summary>
+    public IDoorGate? Doors
+    {
+        get => doors;
+        set
+        {
+            doors = value;
+            foreach (var b in buildings) SyncDoors(b);
+        }
+    }
+
+    /// <summary>The GAMESTATE_BUILDING records of a loaded save by building instance id (<see cref="Saving.SaveLoader"/>): a building registered later takes its lock and door state from them.</summary>
+    public IReadOnlyDictionary<string, FcsRecord>? Saved { get; set; }
+
+    // ------------------------------------------------------------------ registration
+
+    /// <summary>Registers the fixtures of a town's buildings (<see cref="TownSite.Buildings"/>) once, then binds the held characters whose <see cref="CharacterCold.InWhat"/> names one.</summary>
+    public void RegisterSite(World world, PopulationData data, int site)
+    {
+        if (site < 0 || site >= data.Sites.Count || !sites.Add(site)) return;
+        int townFaction = site < data.SiteFactions.Count ? data.SiteFactions[site] : -1;
+        foreach (var b in data.Sites[site].Buildings) RegisterBuilding(world, data, site, b, townFaction);
+        Bind(world);
+    }
+
+    void RegisterBuilding(World world, PopulationData data, int site, TownBuilding b, int townFaction)
+    {
+        if (byBuilding.ContainsKey(b.InstanceId)) return;
+        var db = data.Db;
+        int owner = b.OwnerFactionId is { } o && data.FactionIndex(o) is var fi and >= 0 ? fi : townFaction;
+        var faction = owner >= 0 && owner < data.Factions.Count ? data.Factions[owner] : null;
+        var list = new List<Fixture>();
+        var record = db.Find(b.BuildingId);
+        if (record is not null)
+        {
+            var doorRefs = record.GetReferences("doors");
+            for (int i = 0; i < doorRefs.Count; i++)
+            {
+                var door = db.Find(doorRefs[i].TargetStringId);
+                string id = $"{b.InstanceId}#{i.ToString(CultureInfo.InvariantCulture)}";
+                list.Add(new Fixture
+                {
+                    Id = id, Building = b.InstanceId, Kind = FixtureKind.Door, RecordId = doorRefs[i].TargetStringId, Site = site, Owner = owner,
+                    Position = b.Position, Yaw = b.Yaw, DoorIndex = i, WantsLock = door?.GetBool("always locks") ?? false,
+                    Lock = new LockState { Level = RollLevel(world.Seed, id, faction, IntOf(door, "lock level bonus"), door: true), Hardness = FloatOf(record, "hardness") },
+                });
+            }
+            if (Lockable(db, record) is { } own) list.Add(Make(world, db, own, b.InstanceId, b.InstanceId, record, site, owner, faction, b.Position, b.Yaw));
+        }
+        foreach (var f in b.Fixtures)
+            if (db.Find(f.RecordId) is { } item && Lockable(db, item) is { } kind)
+                list.Add(Make(world, db, kind, f.Id, b.InstanceId, item, site, owner, faction, f.Position, f.Yaw));
+        int bed = 0;
+        foreach (var spot in b.Spots)
+        {
+            if (spot.Kind != HomeSpotKind.Bed) continue;
+            list.Add(new Fixture
+            {
+                Id = $"{b.InstanceId}@bed{bed.ToString(CultureInfo.InvariantCulture)}", Building = b.InstanceId, Kind = FixtureKind.Bed, Site = site, Owner = owner,
+                Position = spot.Position, Yaw = spot.Yaw, UseRange = 15,
+            });
+            bed++;
+        }
+        if (list.Count == 0) return;
+        byBuilding[b.InstanceId] = list;
+        buildings.Add(b.InstanceId);
+        foreach (var f in list) { all.Add(f); byId[f.Id] = f; }
+        if (Saved?.GetValueOrDefault(b.InstanceId) is { } state) Restore(state, b.InstanceId, list);
+        SyncDoors(b.InstanceId);
+    }
+
+    FixtureKind? Lockable(GameDatabase db, GameRecord record)
+    {
+        if (TownBuildings.FunctionOf(db, record, functions)?.GetInt("function") == TownBuildings.CageFunction) return FixtureKind.Cage;
+        return record.GetBool("has lock") ? FixtureKind.Container : null;
+    }
+
+    Fixture Make(World world, GameDatabase db, FixtureKind kind, string id, string building, GameRecord record, int site, int owner, FactionData? faction, Vector3 at, float yaw)
+    {
+        var functionality = TownBuildings.FunctionOf(db, record, functions);
+        return new Fixture
+        {
+            Id = id, Building = building, Kind = kind, RecordId = record.StringId, Site = site, Owner = owner, Position = at, Yaw = yaw,
+            Restrains = functionality?.GetBool("restrains movement") ?? false, UseRange = functionality is null ? 25 : FloatOf(functionality, "use range", 25),
+            Lock = new LockState { Level = RollLevel(world.Seed, id, faction, IntOf(record, "lock level bonus"), door: false), Hardness = FloatOf(record, "hardness") },
+        };
+    }
+
+    /// <summary>The lock level at creation (docs/game/locks.md "Lock object", <b>Verified</b> formula; the roll is Meitou's seeded stream).</summary>
+    public static int RollLevel(ulong seed, string id, FactionData? faction, int bonus, bool door)
+    {
+        int r = Math.Max(0, faction?.LockLevelRandom ?? 10);
+        int delta = r > 0 ? Rng.Int(Rng.Hash(seed, Rng.StableHash(id), RngPurpose.Lock, 0), 2 * r + 1) - r : 0;
+        int level = (faction?.DoorsLockLevel ?? 40) + delta + bonus;
+        level = door ? (level < 2 ? 1 : level) : Math.Max(level, 0);
+        return Math.Min(level, 100);
+    }
+
+    static int IntOf(GameRecord? r, string key) =>
+        r is null ? 0 : r.Ints.TryGetValue(key, out int v) ? v : r.Floats.TryGetValue(key, out float f) ? (int)MathF.Round(f) : 0;
+
+    static float FloatOf(GameRecord? r, string key, float fallback = 0) =>
+        r is null ? fallback : r.Floats.TryGetValue(key, out float v) ? v : r.Ints.TryGetValue(key, out int n) ? n : fallback;
+
+    /// <summary>Binds held characters to the fixtures their <see cref="CharacterCold.InWhat"/> names (a loaded prisoner whose cage registers later).</summary>
+    internal void Bind(World world)
+    {
+        var table = world.Characters;
+        var next = table.Next;
+        for (int s = 0; s < table.HighWater; s++)
+            if (next[s].Alive && table.Cold(s) is { InSomething: not HeldState.None, InWhat: { } what } && byId.TryGetValue(what, out var f) && IsFree(table, f))
+                f.Occupant = new CharacterId(s, next[s].Generation);
+    }
+
+    // ------------------------------------------------------------------ doors
+
+    /// <summary>
+    /// Applies a squad template's <c>initial door state</c> to the doors of its home (docs/game/locks.md "Doors", <b>Verified</b>): 0 CLOSED unlocked and whole, 1 OPEN, 2 LOCKED
+    /// and closed, 3 BROKEN (lock and door). Once per building (the first squad's), and not to doors restored from a save.
+    /// </summary>
+    public void ApplyInitialDoorState(string buildingInstance, int state)
+    {
+        if (!byBuilding.TryGetValue(buildingInstance, out var list) || !initialApplied.Add(buildingInstance)) return;
+        foreach (var d in list)
+        {
+            if (d.Kind != FixtureKind.Door || d.Restored || d.Lock is not { } l) continue;
+            switch (state)
+            {
+                case 1: l.Locked = false; l.Broken = false; d.DoorBroken = false; d.Motion = DoorMotion.Open; d.OpenAmount = 1; break;
+                case 2: l.Locked = true; l.Broken = false; d.DoorBroken = false; d.Motion = DoorMotion.Closed; d.OpenAmount = 0; break;
+                case 3: l.Broken = true; d.DoorBroken = true; break;
+                default: l.Locked = false; l.Broken = false; d.DoorBroken = false; d.Motion = DoorMotion.Closed; d.OpenAmount = 0; break;
+            }
+        }
+        SyncDoors(buildingInstance);
+    }
+
+    /// <summary>Locks or unlocks a fixture outright (the owner's 3.3 s lock and unlock tasks end here; the timing is the caller's).</summary>
+    public void SetLocked(Fixture fixture, bool locked)
+    {
+        if (fixture.Lock is not { } l) return;
+        l.Locked = locked;
+        l.PickTime = 0;
+        l.NextRoll = LockState.FirstRoll;
+        Touch(fixture);
+    }
+
+    /// <summary>Tells navigation after a door's lock changed (a pick, a break, an unlock).</summary>
+    public void Touch(Fixture fixture)
+    {
+        if (fixture.Kind == FixtureKind.Door) SyncDoors(fixture.Building);
+    }
+
+    void SyncDoors(string building)
+    {
+        if (doors is null || !byBuilding.TryGetValue(building, out var list)) return;
+        bool any = false, blocked = true;
+        foreach (var d in list)
+        {
+            if (d.Kind != FixtureKind.Door) continue;
+            any = true;
+            if (d.DoorBroken || d.Lock is not { EffectivelyLocked: true }) blocked = false;
+        }
+        if (any) doors.SetDoorsBlocked(building, blocked);
+    }
+
+    /// <summary>The building is shut for paths: it has doors, every one effectively locked and none broken (the test <see cref="Doors"/> is told).</summary>
+    public bool IsShut(string building)
+    {
+        if (!byBuilding.TryGetValue(building, out var list)) return false;
+        bool any = false;
+        foreach (var d in list)
+        {
+            if (d.Kind != FixtureKind.Door) continue;
+            any = true;
+            if (d.DoorBroken || d.Lock is not { EffectivelyLocked: true }) return false;
+        }
+        return any;
+    }
+
+    /// <summary>The building has doors and all of them are locked (effectively or not; a broken one counts as open). Night rounds test this, not <see cref="IsShut"/>.</summary>
+    public bool AllDoorsLocked(string building)
+    {
+        if (!byBuilding.TryGetValue(building, out var list)) return false;
+        bool any = false;
+        foreach (var d in list)
+        {
+            if (d.Kind != FixtureKind.Door) continue;
+            any = true;
+            if (d.DoorBroken || d.Lock is not { Locked: true, Broken: false }) return false;
+        }
+        return any;
+    }
+
+    /// <summary>The faction that owns a building's doors (-1: no doors).</summary>
+    public int DoorOwner(string building)
+    {
+        if (byBuilding.TryGetValue(building, out var list))
+            foreach (var d in list) if (d.Kind == FixtureKind.Door) return d.Owner;
+        return -1;
+    }
+
+    /// <summary>
+    /// Locks or unlocks every door of a building at once (the end of the owner's lock/unlock tasks; their 3.3 s are the caller's); locking closes an open door first
+    /// (docs/game/locks.md "Doors"). False when the building has no doors.
+    /// </summary>
+    public bool SetDoorsLocked(string building, bool locked)
+    {
+        if (!byBuilding.TryGetValue(building, out var list)) return false;
+        bool any = false;
+        foreach (var d in list)
+        {
+            if (d.Kind != FixtureKind.Door || d.Lock is not { } l) continue;
+            any = true;
+            if (locked) { d.Motion = DoorMotion.Closed; d.OpenAmount = 0; }
+            l.Locked = locked;
+            l.PickTime = 0;
+            l.NextRoll = LockState.FirstRoll;
+        }
+        if (any) SyncDoors(building);
+        return any;
+    }
+
+    // ------------------------------------------------------------------ cages and beds
+
+    /// <summary>Whether nobody is in it: no occupant, or one that is gone or no longer held there.</summary>
+    public static bool IsFree(CharacterTable table, Fixture f) =>
+        f.Occupant.IsNone || !table.TryResolveNext(f.Occupant, out int s) || table.Cold(s)!.InWhat != f.Id || table.Cold(s)!.InSomething == HeldState.None;
+
+    /// <summary>
+    /// The cage a carrier of <paramref name="faction"/> at <paramref name="at"/> puts a captive in (the original's finder, economy.md 11.7, <b>Observed</b>): every free cage weighs
+    /// clamp(1 - d^2 / 4608^2, 1e-5, 1), x100 when of the carrier's faction, x100 when in <paramref name="home"/> (a building instance id); the highest wins, the first registered on a
+    /// tie. The usability and police tests of the original are not modelled; <paramref name="skip"/> leaves out reserved cages, and <see cref="Reachable"/> the ones the carrier
+    /// cannot get to. Null when none is free.
+    /// </summary>
+    public Fixture? FindCage(World world, Vector3 at, int faction, string? home = null, Func<Fixture, bool>? skip = null)
+    {
+        Fixture? best = null;
+        float bestWeight = 0;
+        foreach (var f in all)
+        {
+            if (f.Kind != FixtureKind.Cage || !IsFree(world.Characters, f) || !Reachable(world, f, faction) || skip?.Invoke(f) == true) continue;
+            float d2 = Vector2.DistanceSquared(new Vector2(at.X, at.Z), new Vector2(f.Position.X, f.Position.Z));
+            float w = Math.Clamp(1 - d2 / (CageSearchScale * CageSearchScale), 1e-5f, 1);
+            if (faction >= 0 && f.Owner == faction) w *= 100;
+            if (home is not null && f.Building == home) w *= 100;
+            if (w > bestWeight) (best, bestWeight) = (f, w);
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// Whether a carrier of <paramref name="faction"/> can get to a fixture (<b>engine choice</b>; the original's finder tests are not decoded): not when its building is shut
+    /// (<see cref="IsShut"/>) and its doors are another faction's (an owner may unlock its own on the way), and not while a walk of that faction there is known to fail
+    /// (<see cref="MarkUnreachable"/>: no path query may run inside a tick, so a failed walk stands in for one).
+    /// </summary>
+    public bool Reachable(World world, Fixture f, int faction)
+    {
+        if (IsShut(f.Building) && DoorOwner(f.Building) != faction) return false;
+        return unreachable.Count == 0 || !unreachable.TryGetValue((f.Id, faction), out double until) || until <= world.GameHours;
+    }
+
+    /// <summary>Walks of <paramref name="faction"/> to the fixture keep failing: <see cref="Reachable"/> is false for <paramref name="hours"/> game hours (engine choice). Serial phases only.</summary>
+    public void MarkUnreachable(World world, Fixture f, int faction, double hours = 24)
+    {
+        List<(string, int)>? expired = null;
+        foreach (var (key, until) in unreachable) if (until <= world.GameHours) (expired ??= []).Add(key);
+        if (expired is not null) foreach (var key in expired) unreachable.Remove(key);
+        unreachable[(f.Id, faction)] = world.GameHours + hours;
+    }
+
+    /// <summary>The nearest free bed within <paramref name="range"/> of a building owned by <paramref name="faction"/> (any owner when negative). <b>Engine choice</b>: the original's bed search is Unknown.</summary>
+    public Fixture? FindBed(World world, Vector3 at, int faction, float range)
+    {
+        Fixture? best = null;
+        float bestD = range * range;
+        foreach (var f in all)
+        {
+            if (f.Kind != FixtureKind.Bed || (faction >= 0 && f.Owner != faction) || !IsFree(world.Characters, f)) continue;
+            float d2 = Vector3.DistanceSquared(at, f.Position);
+            if (d2 <= bestD) (best, bestD) = (f, d2);
+        }
+        return best;
+    }
+
+    /// <summary>The sentence in game hours a bounty earns (economy.md 11.5, <b>Observed</b>): trunc(bounty x 0.02 x <c>prison time</c>), 999999 above 25000.</summary>
+    public static float SentenceHours(int bounty, float prisonTime) =>
+        bounty > LifeBounty ? LifeSentence : (float)Math.Truncate(bounty * 0.02 * prisonTime);
+
+    /// <summary>The sentence is served (start + length not after <paramref name="nowHours"/>; one without a sentence always is).</summary>
+    public static bool SentenceServed(CharacterCold c, double nowHours) => c.SentenceLength <= 0 || c.SentenceStart + c.SentenceLength <= nowHours;
+
+    /// <summary>
+    /// Puts a character in a free cage (the original's enter, locks.md "Cages and beds"): imprisoned state, held at the cage's position and facing, orders and path dropped, the cage
+    /// locked. A captive with a bounty for the cage owner's faction gets a sentence from now (<see cref="SentenceHours"/>); one without gets none (served at once, the engine reading of
+    /// economy.md 11.5). The caller lets go of a carried captive first and names it as <paramref name="carrier"/> (None: put in by the system). False when the cage is taken or the
+    /// character is held, carried or carrying. Every caging is kept for its tick (<see cref="CagingsOf"/>) and raised as <see cref="Caged"/>: the hook of the bounty claim.
+    /// </summary>
+    public bool Imprison(World world, CharacterId prisoner, Fixture cage, float prisonTime = 1, CharacterId? carrier = null)
+    {
+        var table = world.Characters;
+        if (cage.Kind != FixtureKind.Cage || !IsFree(table, cage) || !table.TryResolveNext(prisoner, out int s)) return false;
+        var c = table.Cold(s)!;
+        if (c.InSomething != HeldState.None || !c.CarriedBy.IsNone || !c.Carrying.IsNone) return false;
+        c.InSomething = HeldState.Imprisoned;
+        c.InWhat = cage.Id;
+        c.Escaped = false;
+        cage.Occupant = prisoner;
+        if (cage.Lock is { } l) { l.Locked = true; l.PickTime = 0; l.NextRoll = LockState.FirstRoll; }
+        Hold(table, s, c, cage);
+        if (c.Bounties?.Of(cage.Owner) is { Amount: > 0 } entry)
+        {
+            c.SentenceStart = world.GameHours;
+            c.SentenceLength = SentenceHours(entry.Amount, prisonTime);
+        }
+        else
+        {
+            c.SentenceStart = 0;
+            c.SentenceLength = 0;
+        }
+        if (cagingsTick != world.Tick) { cagings.Clear(); cagingsTick = world.Tick; }
+        var caging = new Imprisonment(world.Tick, carrier ?? CharacterId.None, prisoner, cage);
+        cagings.Add(caging);
+        Caged?.Invoke(world, caging);
+        return true;
+    }
+
+    /// <summary>The cagings of tick <paramref name="tick"/> (only the latest tick's are kept: a system placed after the caging one reads them in the same tick, as <see cref="CrimeSystem.BookingsOf"/>).</summary>
+    public IReadOnlyList<Imprisonment> CagingsOf(long tick) => cagingsTick == tick ? cagings : [];
+
+    /// <summary>Raised (serially) by every <see cref="Imprison"/> once the captive is held and its sentence set: where a captive's bounty is claimed (economy.md 11.4).</summary>
+    public event Action<World, Imprisonment>? Caged;
+
+    /// <summary>
+    /// The occupant of an unlocked cage is lifted out by the character in <paramref name="lifter"/> (locks.md "Cages and beds", <c>FUN_14034fbe0</c>, <b>Observed</b>): it is no longer held
+    /// (the carry link is the caller's). Out of the cage of another faction than the lifter's, the lifter gets a pending code 7 against the cage owner and the freed one a pending
+    /// Escaping Prison and the escaped flag. False when it is not imprisoned or its cage is effectively locked.
+    /// </summary>
+    public bool LiftOut(World world, CharacterId prisoner, int lifter, CrimeSystem? crimes = null)
+    {
+        var table = world.Characters;
+        if (!table.TryResolveNext(prisoner, out int s) || table.Cold(s) is not { IsImprisoned: true } c || table.Cold(lifter) is not { } lc) return false;
+        var cage = c.InWhat is { } id ? Find(id) : null;
+        if (cage?.Lock is { EffectivelyLocked: true }) return false;
+        bool foreign = cage is { Owner: >= 0 } && cage.Owner != lc.Faction;
+        if (foreign && crimes is not null)
+        {
+            crimes.SetPending(world, lifter, CrimeCode.Terrorism, cage!.Owner, prisoner, CrimeSystem.MinTimer);
+            crimes.SetPending(world, s, CrimeCode.EscapingPrison, cage.Owner, CharacterId.None, CrimeSystem.MinTimer);
+        }
+        if (cage is not null && cage.Occupant == prisoner) cage.Occupant = CharacterId.None;
+        Clear(c);
+        c.Escaped = foreign;
+        return true;
+    }
+
+    static void Hold(CharacterTable table, int slot, CharacterCold c, Fixture f)
+    {
+        table.Place(slot, f.Position, f.Yaw);
+        c.Path = [];
+        c.OrderQueue.Clear();
+    }
+
+    /// <summary>
+    /// Frees a prisoner (Task_ReleasePrisoner, economy.md 11.5, <b>Observed</b>): the cage is unlocked and emptied, the state and sentence cleared; when the releaser's faction books
+    /// bounties its entry and the jail's (the cage owner's) are erased. A player-faction prisoner gets "{1} has been released from prison.". The prisoner stays where it stands
+    /// (getting out of the cage is the caller's walk). False when the character is not imprisoned.
+    /// </summary>
+    public bool Release(World world, CharacterId prisoner, int releaserFaction = -1, CrimeSystem? crimes = null)
+    {
+        var table = world.Characters;
+        if (!table.TryResolveNext(prisoner, out int s) || table.Cold(s) is not { IsImprisoned: true } c) return false;
+        var cage = c.InWhat is { } id ? Find(id) : null;
+        if (cage is not null)
+        {
+            if (cage.Lock is { } l) l.Locked = false;
+            if (cage.Occupant == prisoner) cage.Occupant = CharacterId.None;
+        }
+        if (releaserFaction >= 0 && crimes is not null && crimes.Factions.Books(releaserFaction) && c.Bounties is { } ledger)
+        {
+            if (ledger.Of(releaserFaction) is { } a) ledger.Remove(a);
+            if (cage is not null && ledger.Of(cage.Owner) is { } b) ledger.Remove(b);
+            if (ledger.Count == 0) c.Bounties = null;
+        }
+        Clear(c);
+        c.Escaped = false;
+        if (c.IsPlayer) world.Post($"{c.Name} has been released from prison.");
+        return true;
+    }
+
+    /// <summary>
+    /// The prisoner leaves its cage by itself (Task_GetOutOfCage, locks.md "Cages and beds"): refused while the cage is effectively locked; an escape (a pending Escaping Prison
+    /// against the cage owner, and the escaped flag <see cref="CharacterCold.Escaped"/>) unless the sentence is served; the flag is forced for a cage of a lawless owner. True when it got out.
+    /// </summary>
+    public bool GetOut(World world, CharacterId prisoner, CrimeSystem? crimes = null)
+    {
+        var table = world.Characters;
+        if (!table.TryResolveNext(prisoner, out int s) || table.Cold(s) is not { IsImprisoned: true } c) return false;
+        var cage = c.InWhat is { } id ? Find(id) : null;
+        if (cage?.Lock is { EffectivelyLocked: true }) return false;
+        bool escape = cage is not null && !SentenceServed(c, world.GameHours);
+        if (escape) crimes?.SetPending(world, s, CrimeCode.EscapingPrison, cage!.Owner, CharacterId.None, CrimeSystem.MinTimer);
+        bool escaped = escape || cage is not null && crimes is not null && crimes.Factions.Lawless(cage.Owner);
+        if (cage is not null && cage.Occupant == prisoner) cage.Occupant = CharacterId.None;
+        Clear(c);
+        c.Escaped = escaped;
+        return true;
+    }
+
+    /// <summary>Lies a character down in a free bed (state 1, held at the bed's spot; beds have no lock). False when the bed is taken or the character is held, carried or carrying.</summary>
+    public bool EnterBed(World world, CharacterId sleeper, Fixture bed)
+    {
+        var table = world.Characters;
+        if (bed.Kind != FixtureKind.Bed || !IsFree(table, bed) || !table.TryResolveNext(sleeper, out int s)) return false;
+        var c = table.Cold(s)!;
+        if (c.InSomething != HeldState.None || !c.CarriedBy.IsNone || !c.Carrying.IsNone) return false;
+        c.InSomething = HeldState.Bed;
+        c.InWhat = bed.Id;
+        bed.Occupant = sleeper;
+        Hold(table, s, c, bed);
+        return true;
+    }
+
+    /// <summary>Gets a character out of its bed.</summary>
+    public bool LeaveBed(World world, CharacterId sleeper)
+    {
+        var table = world.Characters;
+        if (!table.TryResolveNext(sleeper, out int s) || table.Cold(s) is not { InSomething: HeldState.Bed } c) return false;
+        if (c.InWhat is { } id && Find(id) is { } bed && bed.Occupant == sleeper) bed.Occupant = CharacterId.None;
+        Clear(c);
+        return true;
+    }
+
+    static void Clear(CharacterCold c)
+    {
+        c.InSomething = HeldState.None;
+        c.InWhat = null;
+        c.SentenceStart = 0;
+        c.SentenceLength = 0;
+    }
+
+    // ------------------------------------------------------------------ saves
+
+    /// <summary>
+    /// Takes a building's lock and door state from its saved GAMESTATE_BUILDING (docs/game/locks.md "Save keys"): <c>hardness</c> and <c>broken</c> always, level and
+    /// <c>locked</c> only when the saved <c>lock lvl</c> is above 0; doors by suffix i: <c>state</c>, <c>doa</c>, <c>broken</c>, <c>gatecode</c>, <c>wants lock</c>, <c>lock lvl</c>,
+    /// <c>locked</c>, <c>hardness</c>. Interior fixtures (whose save ids are not mapped) keep their rolls but count as restored, apart from Meitou's own <c>meitou lock</c> key (see <see cref="InteriorKey"/>).
+    /// </summary>
+    static void Restore(FcsRecord state, string building, List<Fixture> list)
+    {
+        foreach (var f in list)
+        {
+            f.Restored = true;
+            if (f.Kind == FixtureKind.Door)
+            {
+                string i = f.DoorIndex.ToString(CultureInfo.InvariantCulture);
+                ReadLock(state, f.Lock!, i, broken: false);
+                if (state.Ints.TryGetValue("state" + i, out int motion)) f.Motion = (DoorMotion)Math.Clamp(motion, 0, 3);
+                if (state.Floats.TryGetValue("doa" + i, out float doa)) f.OpenAmount = doa;
+                if (state.Bools.TryGetValue("broken" + i, out bool b)) f.DoorBroken = b;
+                if (state.Ints.TryGetValue("gatecode" + i, out int g)) f.GateCode = g;
+                if (state.Bools.TryGetValue("wants lock" + i, out bool w)) f.WantsLock = w;
+            }
+            else if (f.Id == building && f.Lock is { } l) ReadLock(state, l, "", broken: true);
+            else if (InteriorKey(f, building) is { } key && f.Lock is { } il && state.Ints.TryGetValue(key, out int packed))
+            {
+                il.Locked = (packed & 1) != 0;
+                il.Broken = (packed & 2) != 0;
+                il.Level = Math.Clamp(packed >> 2, 0, 100);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Meitou's save key for the lock of an interior cage or container, whose save ids are not mapped (the original's keys name a placed building's own lock and doors only):
+    /// <c>meitou lock &lt;layout index&gt;</c>, an int of level x 4 + broken x 2 + locked, present only while the lock is locked or broken. Null for any other fixture.
+    /// </summary>
+    static string? InteriorKey(Fixture f, string building) =>
+        f.Kind is FixtureKind.Cage or FixtureKind.Container && f.Id.Length > building.Length + 1 && f.Id[building.Length] == '/' && f.Id.StartsWith(building, StringComparison.Ordinal)
+            ? "meitou lock " + f.Id[(building.Length + 1)..] : null;
+
+    static void ReadLock(FcsRecord state, LockState l, string suffix, bool broken)
+    {
+        if (state.Floats.TryGetValue("hardness" + suffix, out float h)) l.Hardness = h;
+        if (broken && state.Bools.TryGetValue("broken" + suffix, out bool b)) l.Broken = b;
+        if (state.Ints.TryGetValue("lock lvl" + suffix, out int level) && level > 0)
+        {
+            l.Level = Math.Min(level, 100);
+            l.Locked = state.Bools.GetValueOrDefault("locked" + suffix);
+        }
+    }
+
+    /// <summary>Writes a registered building's lock and door state into its saved state record (the keys of <see cref="Restore"/>; <c>locked</c> true only when effectively locked). False when the building is not registered.</summary>
+    public bool WriteBuilding(string buildingInstance, FcsRecord state)
+    {
+        if (!byBuilding.TryGetValue(buildingInstance, out var list)) return false;
+        foreach (var f in list)
+        {
+            if (f.Lock is not { } l) continue;
+            if (f.Kind == FixtureKind.Door)
+            {
+                string i = f.DoorIndex.ToString(CultureInfo.InvariantCulture);
+                state.Ints["state" + i] = (int)f.Motion;
+                state.Floats["doa" + i] = f.OpenAmount;
+                state.Bools["broken" + i] = f.DoorBroken;
+                state.Ints["gatecode" + i] = f.GateCode;
+                state.Bools["wants lock" + i] = f.WantsLock;
+                state.Bools.TryAdd("pause" + i, false);   // the original writes it with every door (Observed, 614 of 614)
+                state.Ints["lock lvl" + i] = l.Level;
+                state.Bools["locked" + i] = l.EffectivelyLocked;
+                state.Floats["hardness" + i] = l.Hardness;
+            }
+            else if (f.Id == buildingInstance)
+            {
+                state.Ints["lock lvl"] = l.Level;
+                state.Bools["locked"] = l.EffectivelyLocked;
+                state.Bools["broken"] = l.Broken;
+                state.Floats["hardness"] = l.Hardness;
+            }
+            else if (InteriorKey(f, buildingInstance) is { } key)
+            {
+                if (l.Locked || l.Broken) state.Ints[key] = l.Level << 2 | (l.Broken ? 2 : 0) | (l.Locked ? 1 : 0);
+                else state.Ints.Remove(key);
+            }
+        }
+        return true;
+    }
+
+    /// <summary>The registered buildings, in registration order.</summary>
+    public IReadOnlyList<string> Buildings => buildings;
+
+    internal void Hash(ref StateHasher h)
+    {
+        h.Add(0x4C6F636B);
+        h.Add(all.Count);
+        foreach (var f in all) f.Hash(ref h);
+        h.Add(initialApplied.Count);
+        if (unreachable.Count == 0) return;   // only once a walk failed, so worlds without one hash as before
+        h.Add(unreachable.Count);
+        foreach (var ((cage, faction), until) in unreachable) { h.Add(Rng.StableHash(cage)); h.Add(faction); h.Add(until); }
+    }
+}
+
+/// <summary>One caging (<see cref="FixtureRegistry.Imprison"/>): who put whom in which cage, in which tick (<see cref="Carrier"/> None: the system did, or a caller that named nobody).</summary>
+public readonly record struct Imprisonment(long Tick, CharacterId Carrier, CharacterId Captive, Fixture Cage);

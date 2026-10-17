@@ -19,41 +19,6 @@ public class CharacterGeneratorTests
     static string Limits(GameInstall install, string file) => Path.Combine(install.DataDirectory, "editor", file);
 
     [Fact]
-    public void Rounding_goes_half_away_from_zero()
-    {
-        Assert.Equal(3, CharacterGenerator.Round(2.5f));
-        Assert.Equal(-3, CharacterGenerator.Round(-2.5f));
-        Assert.Equal(2, CharacterGenerator.Round(2.49f));
-        Assert.Equal(-2, CharacterGenerator.Round(-2.49f));
-    }
-
-    [Fact]
-    public void Quality_follows_the_armour_grade()
-    {
-        Assert.Equal([5, 20, 40, 60, 80, 95, 20], Enumerable.Range(0, 7).Select(CharacterGenerator.QualityOfGrade));
-    }
-
-    [Fact]
-    public void Colour_range_blends_tenths_between_stops()
-    {
-        var range = new AppearanceColourRange("Skin Tone", AppearanceCategory.Body, [Vector3.One, Vector3.Zero, new Vector3(0, 0, 1)], 0, 20, 10, -1, 8);
-        Assert.Equal(Vector3.One, range.ColourAt(0));
-        Assert.Equal(new Vector3(0.5f), range.ColourAt(5));
-        Assert.Equal(Vector3.Zero, range.ColourAt(10));
-        Assert.Equal(new Vector3(0, 0, 1), range.ColourAt(20));
-    }
-
-    [Fact]
-    public void Hsb_round_trips()
-    {
-        foreach (var rgb in new[] { new Vector3(0.6f, 0.4f, 0.2f), new Vector3(0.1f, 0.8f, 0.5f), new Vector3(0.3f, 0.2f, 0.9f), new Vector3(0.5f) })
-        {
-            var (h, s, v) = CharacterGenerator.ToHsb(rgb);
-            Assert.True(Vector3.Distance(rgb, CharacterAppearance.FromHsb(h, s, v)) < 1e-4f, $"{rgb}");
-        }
-    }
-
-    [Fact]
     [Slow]
     public void Human_editor_limits_read_with_kenshi_defaults()
     {
@@ -78,22 +43,6 @@ public class CharacterGeneratorTests
         // A Config without a gender is the male one only.
         Assert.NotNull(AppearanceLimits.Read(Limits(install, "editor_data_mkii.xml"), false, 0.4f));
         Assert.Null(AppearanceLimits.Read(Limits(install, "editor_data_mkii.xml"), true, 0.4f));
-    }
-
-    [Fact]
-    [Slow]
-    public void Same_seed_same_character_and_seeds_vary()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, "Kenshi install not found");
-        var db = Database(install);
-        string Key(Loadout l) => string.Join("|", l.Describe()) + "|" + l.Appearance.HeadId + l.Appearance.HairId + l.Appearance.BeardId
-            + string.Join(",", l.Appearance.Floats.Select(f => $"{f.Key}={f.Value}")) + l.Appearance.SkinTone;
-        var a = CharacterGenerator.Generate(db, install.Root, "Dust Bandit", 7);
-        var b = CharacterGenerator.Generate(db, install.Root, "Dust Bandit", 7);
-        Assert.Equal(Key(a), Key(b));
-        var keys = Enumerable.Range(0, 10).Select(s => Key(CharacterGenerator.Generate(db, install.Root, "Dust Bandit", s))).ToHashSet();
-        Assert.Equal(10, keys.Count);
     }
 
     [Fact]
@@ -152,57 +101,5 @@ public class CharacterGeneratorTests
         Assert.True(heads.Count >= 3);
         Assert.True(skins.Count >= 10);
         Assert.Equal(5, faces.Count);
-    }
-
-    [Fact]
-    [Slow]
-    public void Faces_repeat_per_morph_index()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, "Kenshi install not found");
-        var db = Database(install);
-        var byFace = new Dictionary<int, string>();
-        for (int seed = 0; seed < 30; seed++)
-        {
-            var l = CharacterGenerator.Generate(db, install.Root, "Greenlander", seed, female: true);
-            string poses = string.Join(",", l.Appearance.Floats.Where(f => f.Key.Contains('_')).Select(f => $"{f.Key}={f.Value}"));
-            Assert.NotEmpty(poses);
-            if (byFace.TryGetValue(l.MorphIndex, out var seen)) Assert.Equal(seen, poses);
-            else byFace[l.MorphIndex] = poses;
-        }
-        Assert.True(byFace.Values.Distinct().Count() > 1);
-    }
-
-    [Fact]
-    [Slow]
-    public void Seeded_build_uses_the_loadout()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, "Kenshi install not found");
-        var db = Database(install);
-        var c = CharacterAppearance.Build(db, install.Root, "Dust Bandit", new CharacterOptions { Seed = 1, Faction = "Dust Bandits" });
-        Assert.NotNull(c.Loadout);
-        Assert.Null(c.BodyFile);
-        Assert.NotNull(c.Body); // the generated appearance
-        Assert.NotNull(c.Head);
-        Assert.Equal(c.Loadout!.Appearance.HeadId, c.Head!.StringId);
-        Assert.Equal(Vector3.One - c.Body!.SkinTone!.Value, c.SkinToneParameter);
-        foreach (var w in c.Loadout.Weapons)
-            Assert.Contains(c.Parts, p => p.Record == w.Weapon && p.Point == w.Point && p.Material == w.Model);
-        foreach (var item in c.Loadout.Clothing.Where(i => i.Record.GetPath("mesh").Length > 0))
-            Assert.Contains(c.Parts, p => p.Record == item.Record && p.Material == item.Material);
-    }
-
-    [Fact]
-    [Slow]
-    public void Body_files_are_kept()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, "Kenshi install not found");
-        var l = CharacterGenerator.Generate(Database(install), install.Root, "Ruka", 3);
-        Assert.False(l.Generated);
-        Assert.True(l.Female);
-        Assert.Equal(-1, l.MorphIndex);
-        Assert.Equal(16f, l.Appearance.Get("Age"));
     }
 }

@@ -14,6 +14,12 @@ static class AtmosphereShaders
     static string F(float v) => v.ToString("0.#########", CultureInfo.InvariantCulture) + (v == MathF.Floor(v) ? ".0" : "");
     static string V3(System.Numerics.Vector3 v) => $"vec3({F(v.X)}, {F(v.Y)}, {F(v.Z)})";
 
+    /// <summary>The water and shafts share the fade before the rendered water's far clip.</summary>
+    internal const string WaterHorizonFunctions = """
+
+        float atmoWaterWeight(float dist, float farClip) { return 1.0 - smoothstep(0.5, 0.9, dist / max(farClip, 1.0)); }
+        """;
+
     /// <summary>What every world shader includes (fragment stage, or the grass's vertex stage).</summary>
     public static readonly string Functions = $$"""
 
@@ -31,13 +37,45 @@ static class AtmosphereShaders
         uniform vec4 uAtmoHazeCloud;  // Kenshi haze: horizonClouds, rgb the cloud colour (a stand-in), a how far the haze is pulled to it
         uniform vec4 uAtmoAltitude;   // viewer: x the physical haze's share (0 the game's haze, 1 the physical), y haze strength (1 the game's), z how far the eye is above the game's camera heights (0 within them, 1 high above)
         uniform vec4 uAtmoMaps;       // x irradiance cube, y specular cube, z ambient map present; w half the world's width
+        uniform vec4 uAtmoNight;      // Meitou night air (docs/formats/sky.md "Night air"): rgb its colour at full night at the horizon, a its weight (0: Faithful, or by day)
         uniform samplerCube uAtmoIrradiance, uAtmoSpecular;
         uniform sampler2D uAtmoAmbientMap;
+        uniform vec4 uAtmoCloud;      // x strength, y legacy density offset or volume coverage, z base height, w 1 volume transmission map
+        uniform vec4 uAtmoCloudWind;  // legacy: xy wind shift; volume: xy map origin, z map span
+        uniform sampler2D uAtmoClouds, uAtmoCloudsTile;
+        // The sun light that gets past the cloud layer to a world point: the sun's ray from the point hits the world-anchored plane, where the sky pass's
+        // overhead alpha (the game's second lookup and tile, the horizon band at 1, no fake volume) is read. textureLod only: the grass's vertex stage includes this.
+        float atmoCloudShadow(vec3 world)
+        {
+            if (uAtmoCloud.x <= 0.0) return 1.0;
+            if (uAtmoCloud.w > 0.5)
+            {
+                vec2 hit = world.xz + uAtmoSun.xz * (uAtmoCloud.z - world.y) / max(uAtmoSun.y, 0.03);
+                vec2 uv = (hit - uAtmoCloudWind.xy) / uAtmoCloudWind.z;
+                float transmission = 1.0;
+                if (world.y < uAtmoCloud.z)
+                {
+                    transmission = 1.0 - uAtmoCloud.y;
+                    if (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0))))
+                        transmission = textureLod(uAtmoClouds, uv, 0.0).r;
+                }
+                return 1.0 - uAtmoCloud.x * (1.0 - transmission);
+            }
+            vec3 l = uAtmoSun.xyz;
+            float h = uAtmoCloud.z;
+            vec2 uv = (world.xz + l.xz * (max(h - world.y, 0.0) / max(l.y, 1e-3))) * (0.1 / h);
+            float o = uAtmoCloud.y;
+            float cloud = textureLod(uAtmoClouds, uv + uAtmoCloudWind.xy + vec2({{F(CloudLayer.SecondLookupShift.X)}}, {{F(CloudLayer.SecondLookupShift.Y)}}), {{F(MeitouClouds.ShadowLod)}}).r;
+            float tile = textureLod(uAtmoCloudsTile, uv - uAtmoCloudWind.xy, {{F(MeitouClouds.ShadowLod)}}).r;
+            float density = (cloud + o) * {{F(CloudLayer.DensityMultiplier)}} + tile * {{F(CloudLayer.TileWeight)}} + 1.0;
+            float alpha = clamp(density * clamp(1.0 - tile + o, 0.0, 1.0), 0.0, 1.0);
+            return 1.0 - uAtmoCloud.x * alpha;
+        }
         uniform vec4 uWeatherWet;     // the weather's shared surface values (WeatherSurfaces): x wetness, y rainAmount = saturate(rain / 50), z gameTime (hours)
         uniform vec4 uWeatherDust;    // xyz: dustAmount (current, inside, slope; docs/formats/weather.md "Dust")
         uniform sampler2D uWeatherDustNoise;   // the dust noise (Turbulent.dds), sampled at world.xz * 0.002
         uniform sampler2D uWeatherGround;      // the terrain's whole-world ground colour map: the dust colour (the BIOMES `ground colour` where the object is)
-        uniform vec4 uGiParams;       // Meitou probe GI (docs/render-gi.md): x 1 while the probes light the world, y their strength, z 1 with the post resolve, w their hysteresis
+        uniform vec4 uGiParams;       // Meitou probe GI: x on, y strength, z post resolve, w indoor surface gain (0 bypasses indoor GI; compute has its own params)
         uniform vec4 uGiGrid[4];      // per cascade: the grid's place and spacing (Gi.GiShaders.ProbeSampling)
         uniform sampler2D uGiIrradiance, uGiDistance, uGiBase;
         {{Gi.GiShaders.ProbeSampling}}
@@ -117,6 +155,19 @@ static class AtmosphereShaders
             const float g2 = SKYX_G * SKYX_G;
             return 1.5 * ((1.0 - g2) / (2.0 + g2)) * (1.0 + c * c) / pow(1.0 + g2 - 2.0 * SKYX_G * c, 1.5);
         }
+        // Meitou's night air (NightAir in Meitou.Data): the glow of the air towards a unit direction, its colour times the twilight weight and the falloff with the
+        // direction's height (exp(-y / height), 1 at and below the horizon). The sky adds it to its colour and the haze to the colour it fades the land into, the
+        // same function of the direction, so fully hazed land and the sky above it meet. Zero (Faithful, or by day) adds exactly nothing.
+        vec3 atmoNightAir(vec3 dir)
+        {
+            return uAtmoNight.rgb * (uAtmoNight.a * exp(-max(dir.y, 0.0) * {{F(1 / NightAir.FalloffHeight)}}));
+        }
+        // The share of a distant body's light (a planet) the night air in front of it hides: the haze's own strength at the horizon, thinning with the height as the glow does
+        // (NightAir.PlanetVeil). Zero in Faithful and by day, so the body is drawn as the game draws it.
+        float atmoNightVeil(vec3 dir)
+        {
+            return clamp(uAtmoNight.a * uAtmoAltitude.y * exp(-max(dir.y, 0.0) * {{F(1 / NightAir.VeilHeight)}}), 0.0, 1.0);
+        }
         // The skydome's HDR colour (SkyX_Skydome.hlsl, HDR branch); night: SkyX's night factor (where the glow and the stars show).
         vec3 atmoSky(vec3 dir, out float night)
         {
@@ -129,7 +180,8 @@ static class AtmosphereShaders
             float c = -dot(uAtmoSun.xyz, ray);   // SkyX: the cosine towards the eye
             vec3 colour = SKYX_EXPOSURE * (skyxRayleighPhase(c) * SKYX_RAYLEIGH * sum + skyxMiePhase(c) * SKYX_MIE * sum);
             night = clamp(1.0 - max(colour.r, max(colour.g, colour.b)) * 10.0, 0.0, 1.0) * (1.0 - clamp(thickness * SKYX_KR4PI, 0.0, 1.0));
-            colour += night * pow(vec3(0.05, 0.05, 0.1) * (2.0 - 0.75 * clamp(-uAtmoSun.y, 0.0, 1.0)) * pow(1.0 - d.y, 3.0), vec3(2.2));
+            // SkyX's night glow gives way to the night air as it comes in (uAtmoNight.a 1: the night air alone; 0: the game's glow, exactly).
+            colour += night * pow(vec3(0.05, 0.05, 0.1) * (2.0 - 0.75 * clamp(-uAtmoSun.y, 0.0, 1.0)) * pow(1.0 - d.y, 3.0), vec3(2.2)) * (1.0 - uAtmoNight.a) + atmoNightAir(d);
             return colour * uAtmoTint;
         }
         vec3 atmoSky(vec3 dir) { float n; return atmoSky(dir, n); }
@@ -155,14 +207,15 @@ static class AtmosphereShaders
             return clamp(a0 + 0.04 * (t.w - a0), 0.0, 1.0);
         }
         // What a lit fragment writes to the GI resolve's surface target (GiResolveShaders.WithAlbedo; RGBA16UI, 0: no probes here), set by kenshiLight:
-        // x, y the shading normal's octahedral position (16 bits each), z sqrt(albedo) red | green << 8, w blue | 1 << 8.
+        // x, y the shading normal's octahedral position (16 bits each), z sqrt(albedo) red | green << 8, w blue | 1 << 8 | interior << 9.
         uvec4 giAlbedoOut = uvec4(0u);
+        bool giInterior = false;
         // A dielectric surface lit as Kenshi's main lighting pass lights it: HDR colour. v: towards the eye.
         vec3 kenshiLight(vec3 albedo, vec3 n, vec3 v, float gloss, vec3 world)
         {
             vec4 am = atmoAmbientMapAt(world);
             vec3 l = uAtmoLight.xyz;
-            vec3 sun = uAtmoSunLight * am.a * 2.0 * kenshiShadow(world, n);   // the sun shadow term (deferred.hlsl: lightColor * shadow)
+            vec3 sun = uAtmoSunLight * am.a * 2.0 * atmoCloudShadow(world) * kenshiShadow(world, n);   // the sun shadow term (deferred.hlsl: lightColor * shadow)
             gloss = clamp(gloss, 0.0, 1.0);
             float roughness = 1.0 - gloss * 0.99, a = roughness * roughness, a2 = a * a;
             float nl = clamp(dot(n, l), 0.0, 1.0);
@@ -179,19 +232,21 @@ static class AtmosphereShaders
             // Meitou probe GI: the probes' irradiance (sky seen past the geometry, light bounced off it) in place of the sky's, and the sky's
             // reflection dimmed as much as the probes dim the sky (an occluded corner reflects no sky).
             float specularOcclusion = 1.0;
+            bool useGi = uGiParams.x > 0.5 && (!giInterior || uGiParams.w > 0.5);
             #ifndef GI_IN_SHADER
             // The GI resolve (uGiParams.z, docs/render-gi.md "Resolve"): the sky's ambient here, the albedo out for the post pass that swaps in the probes.
-            if (uGiParams.x > 0.5 && uGiParams.z > 0.5)
+            if (useGi && uGiParams.z > 0.5)
             {
                 uvec2 o = uvec2((giOct(n) * 0.5 + 0.5) * 65535.0 + 0.5);
                 uvec3 c = uvec3(sqrt(clamp(albedo, 0.0, 1.0)) * 255.0 + 0.5);
-                giAlbedoOut = uvec4(o, c.r | (c.g << 8), c.b | 256u);
+                giAlbedoOut = uvec4(o, c.r | (c.g << 8), c.b | 256u | (giInterior ? 512u : 0u));
             }
             else
             #endif
-            if (uGiParams.x > 0.5)
+            if (useGi)
             {
                 vec4 gi = giIrradiance(world, n, v);
+                gi.rgb = giSurfaceIrradiance(gi.rgb, envDiffuse, giInterior);
                 gi.a *= uGiParams.y;
                 float sky = dot(envDiffuse, vec3(0.2126, 0.7152, 0.0722));
                 specularOcclusion = mix(1.0, clamp(dot(gi.rgb, vec3(0.2126, 0.7152, 0.0722)) / max(sky, 1e-4), 0.0, 1.0), gi.a);
@@ -215,6 +270,10 @@ static class AtmosphereShaders
             }
             return lit;
         }
+
+        // The distant water fades out before its far clip, revealing the sky already behind it.
+        // The shafts use the same weight for their water correction, so it cannot leave a horizon band.
+        {{WaterHorizonFunctions}}
 
         // ---- haze ----
         // Integral of exp(-altitude / scale) along a ray: altitude a0 + slope * s, s in 0..len (scale heights).
@@ -242,6 +301,13 @@ static class AtmosphereShaders
             return SKYX_EXPOSURE * phase * SKYX_RAYLEIGH * skyxInScatter(r, min(len, 1.0), uAtmoSun.xyz, thickness);
         }
 
+        // What the haze fades a point into: the game's in-scattered colour plus the Meitou night air towards the point's direction (zero in Faithful and by day,
+        // so exactly the game's). `offset` is the point minus the eye, any length.
+        vec3 hazeTarget(vec3 offset)
+        {
+            return hazeColour(offset) + atmoNightAir(offset * inversesqrt(max(dot(offset, offset), 1e-12)));
+        }
+
         // The game's haze: AtmosphereFogMaterial (post/fog.hlsl), the in-scattered colour blended in by a linear ramp between 0.06 D
         // and 0.6 D; the weather's fog (colour, density) by an ease-in-out curve over it. uAtmoAltitude.y (the viewer's haze strength,
         // 1 = the game's) scales the ramp.
@@ -249,7 +315,7 @@ static class AtmosphereShaders
         {
             float level = clamp((dist - uAtmoHaze.y) / max(uAtmoHaze.z - uAtmoHaze.y, 1.0), 0.0, 1.0);
             level = min(level * uAtmoAltitude.y, 1.0);
-            vec3 rgb = mix(hazeColour(ray), uAtmoHazeCloud.rgb, uAtmoHazeCloud.a);
+            vec3 rgb = mix(hazeTarget(ray), uAtmoHazeCloud.rgb, uAtmoHazeCloud.a);
             float alpha = level;
             if (uAtmoFog.z > 0.0)
             {

@@ -36,6 +36,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
 
     /// <summary>Characters farther than this from the eye are neither posed nor drawn.</summary>
     public float DrawDistance { get; set; } = 6000;
+    /// <summary>A presentation fill light (linear colour, 0 in play): added ambient, three times as strong at the silhouette, so a backlit figure reads.</summary>
+    public Vector3 Fill { get; set; }
     /// <summary>Assets built per <see cref="Update"/> (0: all of them, for stills).</summary>
     public int LoadBudget { get; set; } = 4;
     /// <summary>Ogre's camera LOD bias as a distance factor (above 1: coarser levels sooner).</summary>
@@ -56,6 +58,12 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     public double LastPoseMs { get; private set; }
     public double LastDrawCpuMs { get; private set; }
     public int Assets => assets.Count(a => a.Value is not null);
+    /// <summary>Current appearances still being prepared/uploaded, or textures still being loaded. Failed assets count as finished.</summary>
+    public bool ContentPending => Draws.Items.Any(c => !assets.ContainsKey(c.Appearance)) || content.Textures.PendingCount > 0 || content.Textures.UnresidentUsedCount > 0;
+    /// <summary>The appearance was uploaded or failed with a diagnostic; either completes its loading request.</summary>
+    public bool IsPrepared(CharacterAppearance appearance) => assets.ContainsKey(appearance);
+    /// <summary>Start preparing a scene's essential characters ahead of the world streaming queue (render thread).</summary>
+    public void Prefetch(CharacterAppearance appearance) => content.Fetched(appearance, urgent: true);
     public List<string> Messages => content.Messages;
 
     /// <summary>One character in range this frame.</summary>
@@ -67,7 +75,12 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public float Radius;
         public int BoneBase, AttachBase, LayerStart, LayerCount;
         public CharState State;
-        public bool Repose;
+        public bool Repose, WeaponDrawn;
+        /// <summary>The ragdoll's bones over the animation (null: none).</summary>
+        public BonePose? Bones;
+        public long Key;
+        /// <summary>Beyond <see cref="DrawDistance"/> (or <see cref="CharacterInstance.Hidden"/>) but posed for its portrait (<see cref="PortraitRequests"/>): not drawn in the world.</summary>
+        public bool PortraitOnly;
     }
 
     /// <summary>What the renderer keeps of a character between frames (by <see cref="CharacterInstance.Key"/>): its last posed palette and the one before.</summary>
@@ -77,11 +90,18 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         public Matrix4x4 World, PreviousWorld;
         public bool HasWorld;
         public long Posed = -1, Seen;
+        /// <summary>What the last update drew it with, for picking (<see cref="RayHit"/>): its asset, weapon, bounding sphere, and whether it is drawn in the world.</summary>
+        public CharacterAsset? Asset;
+        public bool WeaponDrawn, InWorld;
+        public Vector3 Centre;
+        public float Radius;
     }
 
     readonly Dictionary<long, CharState> states = [];
     /// <summary>Characters farther than these distances are posed every 2nd, 4th and 8th frame (a still holds the last palette); 0: every frame.</summary>
     public float[] PoseRangeSteps { get; set; } = [120, 300, 600];
+    /// <summary>The culling radius of a person (<see cref="CharacterAsset.Radius"/>): a bigger body (an animal) takes the pose-rate distances that many times farther, as it fills as much of the screen there.</summary>
+    const float HumanRadius = 16;
 
     int PoseInterval(float distance)
     {
@@ -106,6 +126,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     public void SetView(int width, int height, float fieldOfView)
     {
         content.Textures.Mips.SetView(width, height, fieldOfView, Gpu.LodBias);
+        content.LodPixelsPerRadian = Meitou.Data.World.TerrainLod.ProjectionScale(height, fieldOfView);   // the generated levels are placed by their deviation in rendered pixels
         viewKnown = true;
     }
 
@@ -115,19 +136,25 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
     float textureBias;
     uint textureStandIn;
 
-    public CharacterRenderer(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assetLocator)
+    public CharacterRenderer(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assetLocator, CharacterRigs? rigs = null)
     {
         Gpu = gpu;
         nativeFrame = new NativeFrame(gpu, extraStorage: 4);
         colourProg = new ReflectedProgram(gpu, nativeFrame, CharacterShaders.Vertex(), Gi.GiResolveShaders.WithAlbedo(CharacterShaders.Fragment(), inShader: true), "characters", CharacterShaders.InstanceLocation);
         depthProg = new ReflectedProgram(gpu, nativeFrame, CharacterShaders.DepthVertex(), CharacterShaders.DepthFragment(), "characters depth", CharacterShaders.InstanceLocation);
         motionProg = new ReflectedProgram(gpu, nativeFrame, CharacterShaders.MotionVertex(), CharacterShaders.MotionFragment(), "characters motion", CharacterShaders.InstanceLocation);
-        content = new CharacterContent(gpu, install, db, assetLocator);
+        content = new CharacterContent(gpu, install, db, assetLocator, rigs);
         colourTimer = new PassTimer(gpu);
         depthTimer = new PassTimer(gpu);
     }
 
     public VramGuard? Guard { get => content.Textures.Guard; set => content.Textures.Guard = value; }
+
+    /// <summary>The skeleton rigs and pose setups the characters are drawn with; the simulation's ragdolls pose from the same ones.</summary>
+    public CharacterRigs Rigs => content.Rigs;
+
+    /// <summary>Rigs that find files as the renderer does, to share with the simulation (<see cref="CharacterRenderer(GpuContext, GameInstall, GameDatabase, AssetLocator, CharacterRigs?)"/>).</summary>
+    public static CharacterRigs CreateRigs(GameDatabase db, AssetLocator assets) => CharacterContent.CreateRigs(db, assets);
 
     // ------------------------------------------------------------------ per frame
 
@@ -151,6 +178,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         var watch = Stopwatch.StartNew();
         Draws.Clear();
         Source?.Invoke(Draws);
+        GatherPortraitKeys();
         content.Textures.Pump(wait: LoadBudget == 0, max: 8, budgetMs: 1.0);
         textureBias = Gpu.LodBias;
         textureStandIn = Gpu.StandIn2D;
@@ -165,20 +193,27 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             var inst = items[i];
             if (!assets.TryGetValue(inst.Appearance, out var asset))
             {
-                if (LoadBudget > 0 && built >= LoadBudget) continue;
+                // Interactive: the files are read and the meshes prepared on a worker first (CharacterContent.Fetched), then a few a frame are uploaded.
+                if (LoadBudget > 0 && (!content.Fetched(inst.Appearance) || built >= LoadBudget)) continue;
                 asset = content.Build(inst.Appearance);
                 assets[inst.Appearance] = asset;
                 built++;
             }
             if (asset is null) continue;
-            var centre = inst.Position + new Vector3(0, asset.Height * 0.5f, 0);
-            if (Vector3.Distance(eye, centre) - asset.Radius > DrawDistance) continue;
+            float scale = inst.Scale > 0 ? inst.Scale : 1;
+            var centre = inst.Position + new Vector3(0, asset.Height * 0.5f * scale, 0);
+            bool far = inst.Hidden || Vector3.Distance(eye, centre) - asset.Radius * scale > DrawDistance;
+            if (far && !portraitKeys.Contains(inst.Key)) continue;
             if (liveCount == live.Length) Array.Resize(ref live, liveCount * 2);
             ref var l = ref live[liveCount++];
             l.Asset = asset;
-            l.World = Matrix4x4.CreateRotationY(inst.Yaw) * Matrix4x4.CreateTranslation(inst.Position);
+            (l.Key, l.PortraitOnly) = (inst.Key, far);
+            // Lowered by the body shape's lift, so a short body's feet stay on the ground (CharacterAsset.GroundOffset); an animal scaled by its size (its node's scale).
+            l.World = Matrix4x4.CreateRotationY(inst.Yaw) * Matrix4x4.CreateTranslation(inst.Position - new Vector3(0, asset.GroundOffset, 0));
+            if (scale != 1) l.World = Matrix4x4.CreateScale(scale) * l.World;
+            l.WeaponDrawn = inst.WeaponDrawn;
             l.Centre = centre;
-            l.Radius = asset.Radius;
+            l.Radius = asset.Radius * scale;
             l.BoneBase = boneTotal;
             boneTotal += asset.Rig.BoneCount;
             l.AttachBase = attachCount;
@@ -186,20 +221,24 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             if (!states.TryGetValue(inst.Key, out var state)) states[inst.Key] = state = new CharState();
             state.Seen = updateStamp;
             l.State = state;
+            (state.Asset, state.WeaponDrawn, state.InWorld, state.Centre, state.Radius) = (asset, inst.WeaponDrawn, !far, centre, l.Radius);
             state.PreviousWorld = state.HasWorld ? state.World : l.World;
             (state.World, state.HasWorld) = (l.World, true);
-            l.Repose = state.Posed < 0 || state.Bones.Length != asset.Rig.BoneCount || (updateStamp + inst.Key) % PoseInterval(Vector3.Distance(eye, centre)) == 0;
+            l.Bones = inst.Bones;
+            // A ragdoll is posed every frame: its bones move by physics, not by a clip the distance rule could thin out.
+            l.Repose = inst.FullRateAnimation || inst.Bones is not null || state.Posed < 0 || state.Bones.Length != asset.Rig.BoneCount || (updateStamp + inst.Key) % PoseInterval(Vector3.Distance(eye, centre) / MathF.Max(1, l.Radius / HumanRadius)) == 0;
             l.LayerStart = layerCount;
             var rig = asset.Rig;
             if (inst.Poses is { } poses)
                 for (int p = 0; p < poses.Count; p++)
-                    if (rig.Layer(content.Database, poses[p].Animation) is { } def) AddLayer(new ActiveLayer(def, poses[p].Time, poses[p].Weight));
+                    if (rig.Layer(content.Database, poses[p].Animation, asset.Animal) is { } def) AddLayer(new ActiveLayer(def, poses[p].Time, poses[p].Weight));
             foreach (var (def, time) in asset.Fixed) AddLayer(new ActiveLayer(def, time, 1));
             l.LayerCount = layerCount - l.LayerStart;
         }
         Posed = 0;
         for (int i = 0; i < liveCount; i++) if (live[i].Repose) Posed++;
         if (updateStamp % 120 == 0) EvictStates();
+        GatherIcons(eye, ref attachCount);
         if (attach.Length < attachCount) attach = new Matrix4x4[Math.Max(attachCount, attach.Length * 2)];
 
         // 2. The bone palettes, posed in parallel straight into the frame's memory.
@@ -219,15 +258,16 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             {
                 ref var l = ref liveArray[i];
                 var asset = l.Asset;
+                if (asset.IsIcon) return;
                 var rig = asset.Rig;
                 var state = l.State;
                 if (l.Repose)
                 {
-                    if (state.Bones.Length != rig.BoneCount) { state.Bones = new Matrix4x4[rig.BoneCount]; state.Previous = new Matrix4x4[rig.BoneCount]; state.Attach = new Matrix4x4[asset.AttachCount]; state.PreviousAttach = new Matrix4x4[asset.AttachCount]; state.Posed = -1; }
+                    if (state.Bones.Length != rig.BoneCount || state.Attach.Length != asset.AttachCount) { state.Bones = new Matrix4x4[rig.BoneCount]; state.Previous = new Matrix4x4[rig.BoneCount]; state.Attach = new Matrix4x4[asset.AttachCount]; state.PreviousAttach = new Matrix4x4[asset.AttachCount]; state.Posed = -1; }
                     (state.Bones, state.Previous) = (state.Previous, state.Bones);
                     state.Attach.CopyTo(state.PreviousAttach, 0);
                     var scratch = rig.Rent();
-                    scratch.Pose(asset.Shape, layerArray.AsSpan(l.LayerStart, l.LayerCount), state.Bones);
+                    scratch.Pose(asset.Shape, layerArray.AsSpan(l.LayerStart, l.LayerCount), state.Bones, l.Bones);
                     foreach (var part in asset.Parts)
                         if (part.AttachIndex >= 0) state.Attach[part.AttachIndex] = part.Offset * scratch.BoneTransform(part.Bone);
                     rig.Return(scratch);
@@ -244,6 +284,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                 }
             });
         LastPoseMs = poseWatch.Elapsed.TotalMilliseconds;
+        PoseIcons();
 
         // 3. The materials of the parts in range.
         slotParts.Clear();
@@ -252,6 +293,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
             float distance = Vector3.Distance(eye, live[i].Centre);
             foreach (var part in live[i].Asset.Parts)
             {
+                if (!part.ShowsWith(live[i].WeaponDrawn)) continue;
                 if (part.MaterialFrame != updateStamp)
                 {
                     part.MaterialFrame = updateStamp;
@@ -371,5 +413,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         motionProg.Dispose();
         nativeFrame.Dispose();
         content.Dispose();
+        DisposePortraits();
+        DisposeHover();
+        DisposeIcons();
     }
 }

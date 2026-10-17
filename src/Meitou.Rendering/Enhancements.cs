@@ -27,8 +27,12 @@ public static class Enhancements
 {
     public const float MeitouHazeStrength = 0.93f;
 
-    /// <summary>The Meitou <c>night</c> switch's share of the haze left at night (<see cref="SkyRenderer.NightHazeFactor"/>): the far land stays visible, a little darker.</summary>
-    public const float MeitouNightHazeFloor = 0.25f;
+    /// <summary>
+    /// The Meitou <c>planetshine</c> switch's strength: a multiple of the physical value (<see cref="Meitou.Data.World.Planetshine"/>; the Tab slider moves it).
+    /// The physical light is a hundredth of a percent to a fifth of a percent of the game's noon sun, against a game night ambient that is a quarter of
+    /// the noon sun's: 60 brings the planet's light on a face turned to it to about the ambient's level at the brightest part of the night (docs/formats/sky.md).
+    /// </summary>
+    public const float MeitouPlanetshineStrength = 60f;
 
     /// <summary>The Meitou <c>heathaze</c> switch's scale on the heat haze (Faithful: 1, the game's): far objects shimmer but stay readable.</summary>
     public const float MeitouHeatHazeStrength = 0.5f;
@@ -48,7 +52,9 @@ public static class Enhancements
     public static IReadOnlyList<Enhancement> Create(PostOptions post, Func<float> hazeStrength, Action<float> setHazeStrength, Func<bool> meitouShadows, Action<bool> setMeitouShadows,
         Func<bool> meitouRange, Action<bool> setMeitouRange, Func<bool> impostors, Action<bool> setImpostors, Func<bool> meitouReach, Action<bool> setMeitouReach,
         Func<bool> meitouWater, Action<bool> setMeitouWater, Func<bool> foliageLod, Action<bool> setFoliageLod, Func<bool>? gi = null, Action<bool>? setGi = null,
-        Func<bool>? nightHaze = null, Action<bool>? setNightHaze = null) =>
+        Func<bool>? nightHaze = null, Action<bool>? setNightHaze = null, Func<bool>? planetshine = null, Action<bool>? setPlanetshine = null,
+        Func<bool>? stars = null, Action<bool>? setStars = null, Func<bool>? clouds = null, Action<bool>? setClouds = null, Func<bool>? cloudShadows = null, Action<bool>? setCloudShadows = null,
+        Func<bool>? interiorGi = null, Action<bool>? setInteriorGi = null) =>
     [
         new("ao", "Ambient occlusion", "off", "SSAO",
             () => post.Ssao, v => post.Ssao = v, "the game ships SSAO but has it disabled"),
@@ -93,9 +99,27 @@ public static class Enhancements
         new("heathaze", "Heat haze", "strength 1", $"strength {MeitouHeatHazeStrength}",
             () => MathF.Abs(post.HeatHazeStrength - 1) > 1e-3f, v => post.HeatHazeStrength = v ? MeitouHeatHazeStrength : 1,
             "the game's heat haze shifts distant objects by several pixels in hot weather, which reads as blur; Meitou halves it (the Tab slider sets any strength)"),
-        new("night", "Night haze", "black", "thinned",
+        new("night", "Night air", "black haze", "airglow",
             nightHaze ?? (() => false), setNightHaze ?? (_ => { }),
-            $"the game's haze takes the sky's sunlit colour, which is black at night, so everything a few thousand units away fades to black and only the land round the camera stays lit; Meitou thins the haze to {MeitouNightHazeFloor:0.##} of its strength once the sun is down, so the far land stays visible, a little darker"),
+            "the game's haze takes the sky's sunlit colour, which is black at night, so everything a few thousand units away fades to black against a black sky and only the land round the camera stays lit; Meitou gives the air a faint glow of its own (airglow, and the planet's light scattered by the air, darker when the planet is a crescent): the far land fades into it, and the sky shows the same glow above the horizon, falling off with height, so ridges stand against it and the stars keep their contrast (docs/formats/sky.md, \"Night air\")"),
+        new("planetshine", "Planetshine", "flat night", "planet light",
+            planetshine ?? (() => false), setPlanetshine ?? (_ => { }),
+            "the game lights the night land with a flat, directionless ambient; Meitou lets the big planet light it, as a sunlit sphere would (its phase, colour and size decide how much; the Tab slider scales it), from its fixed direction, with the shadows, the water's glint and the probes' light following (docs/formats/sky.md \"Planetshine\")"),
+        new("stars", "Night sky", "starfield texture", "procedural",
+            stars ?? (() => false), setStars ?? (_ => { }),
+            "the game lays one 4096 pixel starfield texture over the dome (blobby purple stars, a smeared brown nebula, blurred when it is magnified); Meitou draws point stars (a few thousand naked-eye ones and a faint background, colours from blackbody temperatures, one or two pixels wide at any resolution), turning about the sun's axis once a game day, dimming and reddening towards the horizon, the low ones twinkling (docs/formats/sky.md, \"Meitou night sky\")"),
+        new("nightgrade", "Night grading", "none", "scotopic blue",
+            () => post.NightGradeStrength > 0, v => post.NightGradeStrength = v ? Meitou.Data.World.NightGrade.MeitouStrength : 0,
+            "the game has no grading, so night is the day's saturated browns and oranges, darkened; Meitou shifts dim colour towards the rods' blue-grey as the scene's adapted luminance falls (the Purkinje shift), keeping lamps, fires and the moon in colour (the Tab slider sets the strength)"),
+        new("clouds", "Clouds", "flat", "volumetric",
+            clouds ?? (() => false), setClouds ?? (_ => { }),
+            "the game uses a flat cloud texture; Meitou ray marches a procedural cloud volume with rounded shapes, light absorption, sunlit edges and shaded interiors, lit by the sun and by the planet at night; coverage and wind follow the existing weather, with separate temporal histories for the sky and water reflections (docs/render-clouds.md)"),
+        new("cloudshadows", "Cloud shadows", "none", "on the land",
+            cloudShadows ?? (() => false), setCloudShadows ?? (_ => { }),
+            "the game's clouds cast no shadows; Meitou anchors the cloud layer to the world (1.2 km up, so the clouds also drift past as the camera moves) and dims the sun on the land and the water under it, the shadows sweeping over the ground with the wind (docs/formats/clouds.md, \"Meitou cloud shadows\")"),
+        new("interiorgi", "Indoor GI", "original ambient", "bounced light",
+            interiorGi ?? (() => false), setInteriorGi ?? (_ => { }),
+            "with Indirect light enabled, use bounced light indoors; turn this off to keep the original ambient on room surfaces, furniture and indoor characters while outdoor GI stays enabled"),
     ];
 
     /// <summary><c>--meitou</c> / <c>--faithful &lt;all|id,id...&gt;</c>: turns those switches to Meitou or to Faithful.</summary>
@@ -133,5 +157,31 @@ public sealed class MeitouToggle(IReadOnlyList<Enhancement> switches)
             for (int i = 0; i < switches.Count; i++) switches[i].IsMeitou = before?[i] ?? true;
         }
         return On ? $"meitou    on: {string.Join(", ", switches.Where(e => e.IsMeitou).Select(e => e.Id))}" : "meitou    off, every switch Faithful (the game as it ships)";
+    }
+
+    /// <summary>The sweep's next switch (-1: no sweep) and when it flips (<see cref="System.Diagnostics.Stopwatch"/> ticks).</summary>
+    int sweep = -1;
+    long sweepNext;
+
+    /// <summary>Starts (or stops) a sweep: every switch flips in turn (Meitou to Faithful and back the other way), one a second (the viewer's Ctrl+F1).</summary>
+    public string Sweep()
+    {
+        if (sweep >= 0) { sweep = -1; return "meitou    sweep stopped"; }
+        if (switches.Count == 0) return "meitou    no switches to sweep";
+        (sweep, sweepNext) = (0, System.Diagnostics.Stopwatch.GetTimestamp());
+        return $"meitou    sweep: {switches.Count} switches flip in turn, 1 s apart (Ctrl+F1 stops)";
+    }
+
+    /// <summary>Flips the sweep's next switch when its second has come; the console line, or null.</summary>
+    public string? TickSweep()
+    {
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (sweep < 0 || now < sweepNext) return null;
+        var e = switches[sweep];
+        e.IsMeitou = !e.IsMeitou;
+        string line = $"meitou    sweep {sweep + 1}/{switches.Count}: {e.Id} {(e.IsMeitou ? "Meitou" : "Faithful")}";
+        sweepNext = now + System.Diagnostics.Stopwatch.Frequency;
+        if (++sweep == switches.Count) sweep = -1;
+        return line;
     }
 }

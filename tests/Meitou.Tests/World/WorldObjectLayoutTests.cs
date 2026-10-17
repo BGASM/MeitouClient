@@ -1,4 +1,3 @@
-using System.Numerics;
 using Meitou.Content;
 using Meitou.Data;
 using Meitou.Data.Fcs;
@@ -9,20 +8,6 @@ namespace Meitou.Tests.World;
 public class WorldObjectLayoutTests
 {
     static GameReference Part(string id, int group, int chance) => new(id, new ReferenceValues(group, chance, 0));
-
-    [Fact]
-    public void Instance_transform_scales_then_rotates_then_moves()
-    {
-        // A quarter turn about +Y (right-handed, Y up as in Ogre) takes +X to -Z.
-        var q = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 2);
-        var m = WorldObjectLayout.InstanceTransform(new Vector3(100, 5, -20), q, new Vector3(2));
-        var p = Vector3.Transform(new Vector3(1, 0, 0), m);
-        Assert.Equal(100, p.X, 3);
-        Assert.Equal(5, p.Y, 3);
-        Assert.Equal(-22, p.Z, 3);
-        // A zero quaternion (unused rotation) acts as identity.
-        Assert.Equal(new Vector3(1, 2, 3), Vector3.Transform(new Vector3(1, 2, 3), WorldObjectLayout.InstanceTransform(Vector3.Zero, default, Vector3.One)));
-    }
 
     [Fact]
     public void Random_is_the_msvc_rand_sequence()
@@ -40,18 +25,6 @@ public class WorldObjectLayoutTests
         }
         var c = new BuildingRandom(7);
         for (int i = 0; i < 2000; i++) Assert.InRange(c.NextFloat(0, 3), 0, 2.99999f);
-    }
-
-    [Fact]
-    public void Seed_truncates_world_x_and_z_toward_zero()
-    {
-        Assert.Equal(BuildingRandom.Seed(1, 5), BuildingRandom.Seed(1.9f, 5.99f));
-        Assert.Equal(BuildingRandom.Seed(-1, -5), BuildingRandom.Seed(-1.9f, -5.5f));
-        Assert.NotEqual(BuildingRandom.Seed(-1, 0), BuildingRandom.Seed(-2, 0));
-        Assert.NotEqual(BuildingRandom.Seed(3, 4), BuildingRandom.Seed(4, 3));
-        // hash_combine(a, b) with a = x ^ 0xDEADBEEF, b = z ^ 0xDEADBEEF.
-        uint x = 0xDEADBEEF, z = 0xDEADBEEF;
-        Assert.Equal(unchecked(((x >> 2) + 0x9E3779B9u + x * 64 + z) ^ x), BuildingRandom.Seed(0, 0));
     }
 
     [Fact]
@@ -130,108 +103,51 @@ public class WorldObjectLayoutTests
     }
 
     [Fact]
-    [Slow]
-    public void Town_handles_and_town_materials()
+    public void Interior_volume_is_the_hull_footprint_and_height()
     {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, $"No Kenshi install configured ({GameInstall.EnvironmentVariable}).");
-        var db = GameDatabase.Load(LoadOrder.BaseGame(install!));
-        var world = WorldLevelData.Load(install!);
-        var towns = new BuildingTowns(db, world);
-        // Buildings whose town handle matches a town state lie close to that town (Observed: median 707 units over 2,320).
-        // The nearest town (the game's fallback by position) agrees for nearly all of them (Observed: 2,305 of 2,320).
-        var distances = new List<float>();
-        int agree = 0;
-        foreach (var b in world.Buildings())
-        {
-            if (b.StateId is null || world.Zones[b.Zone].Find(b.StateId) is not { } state) continue;
-            if (towns.TownByHandle(state) is not { } town) continue;
-            distances.Add(Vector2.Distance(new(town.Position.X, town.Position.Z), new(b.Position.X, b.Position.Z)));
-            if (towns.NearestTown(b.Position) is { } nearest && nearest.TownId == town.TownId) agree++;
-        }
-        distances.Sort();
-        Assert.True(distances.Count > 2000, $"{distances.Count} handles matched");
-        Assert.True(distances[distances.Count / 2] < 2000, $"median {distances[distances.Count / 2]}");
-        Assert.True(agree > distances.Count * 0.95, $"nearest town agrees for {agree} of {distances.Count}");
-
-        // A town without a material uses moor1-main; Brink's material is a collection, resolved to one of its entries.
-        var hub = world.Towns().First(t => db.Find(t.TownId)?.Name == "The Hub");
-        Assert.Equal(WorldObjectLayout.DefaultTownMaterial, towns.MaterialOf(hub)!.StringId);
-        var brink = world.Towns().First(t => t.TownId == "962-gamedata.base");
-        var collection = db.Find(db.Find(brink.TownId)!.GetReferences("material")[0].TargetStringId)!;
-        Assert.Contains(towns.MaterialOf(brink)!.StringId, collection.GetReferences("material").Select(r => r.TargetStringId));
+        // A square hull given as scattered points (inner points too): the footprint is the convex outline, the test widens by the margin.
+        var v = new InteriorVolume("b", InteriorVolume.ConvexHull2([new(0, 0), new(10, 0), new(10, 10), new(0, 10), new(5, 5), new(2, 8)]), 0, 20);
+        Assert.Equal(4, v.Footprint.Length);
+        Assert.True(v.Contains(new System.Numerics.Vector3(5, 1, 5)));
+        Assert.False(v.Contains(new System.Numerics.Vector3(11, 1, 5)));
+        Assert.True(v.Contains(new System.Numerics.Vector3(11, 1, 5), margin: 2));
+        Assert.False(v.Contains(new System.Numerics.Vector3(5, 21, 5)));
+        Assert.False(v.Contains(new System.Numerics.Vector3(5, -1, 5)));
     }
 
     [Fact]
     [Slow]
-    public void Destroyed_buildings_swap_meshes_and_lose_upper_floors_and_doors()
+    public void Hub_bar_shows_its_interior_on_floor_0()
     {
-        var install = GameInstall.Locate();
+        var install = InstallData.Install;
         Assert.SkipWhen(install is null, $"No Kenshi install configured ({GameInstall.EnvironmentVariable}).");
-        var db = GameDatabase.Load(LoadOrder.BaseGame(install!));
-        var world = WorldLevelData.Load(install!);
-        int checkedBuildings = 0;
-        foreach (var b in world.Buildings())
-        {
-            if (b.StateId is null || world.Zones[b.Zone].Find(b.StateId) is not { } state || !state.GetBool("destroyed")) continue;
-            if (db.Find(b.BuildingId) is not { } record) continue;
-            var intact = WorldObjectLayout.Building(db, record, b.InstanceId, b.Position, b.Rotation, new BuildingState(false));
-            var ruined = WorldObjectLayout.Building(db, record, b.InstanceId, b.Position, b.Rotation, new BuildingState(true));
-            Assert.All(ruined, m => Assert.Equal(record, m.Owner)); // no doors
-            foreach (var m in ruined)
-            {
-                var destroyedMesh = m.Source.GetPath("destroyed mesh");
-                Assert.Equal(destroyedMesh.Length > 0 ? destroyedMesh : m.Source.GetPath("phs or mesh"), m.MeshPath);
-                if (destroyedMesh.Length == 0) Assert.Equal(0, m.Source.GetInt("building floor"));
-            }
-            Assert.True(intact.Count >= ruined.Count);
-            checkedBuildings++;
-        }
-        Assert.True(checkedBuildings > 200);
-    }
+        var db = InstallData.FullLoadOrder!;
+        var levels = WorldLevelData.Load(install!, includeInteriors: true);
+        // The Hub's bar: a Storm House with the "Bar" interior layout (docs/formats/zones.md "Interior view").
+        var b = levels.Buildings().Single(x => x.InstanceId == "4933-Newwworld-INGAME" && Math.Abs(x.Position.X + 51181) < 5);
+        var record = db.Find(b.BuildingId)!;
+        var position = new System.Numerics.Vector3(b.Position.X, b.WorldY!.Value, b.Position.Z);
 
-    [Fact]
-    public void Layout_items_are_placed_in_the_buildings_frame()
-    {
-        // A quarter turn about +Y: the item's local +X offset ends up along world -Z, and its own rotation follows the building's.
-        var turn = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 2);
-        var item = new LayoutItem("0", null!, new Vector3(10, 4, 0), turn);
-        var (at, rotation) = BuildingLayouts.Place(new Vector3(100, 50, 200), turn, item);
-        Assert.Equal(100, at.X, 3);
-        Assert.Equal(54, at.Y, 3);
-        Assert.Equal(190, at.Z, 3);
-        var half = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI);
-        Assert.Equal(1, MathF.Abs(Quaternion.Dot(rotation, half)), 3);
-    }
+        var parts = WorldObjectLayout.Building(db, record, b.InstanceId, position, b.Rotation, new BuildingState { WithInterior = true });
+        Assert.Contains(parts, p => p.Source.Name == "Storm_House_01_Exterior_ROOF" && p.Floor == 1 && !p.Interior);
+        Assert.Contains(parts, p => p.Source.Name == "Storm_House_01_Interior" && p.Floor == 0 && p.Interior);
+        // Without the interior view the parts are the outside alone, chosen by the same rolls.
+        var outside = WorldObjectLayout.Building(db, record, b.InstanceId, position, b.Rotation);
+        Assert.Equal(parts.Where(p => !p.Interior).Select(p => p.Source.StringId), outside.Select(p => p.Source.StringId));
 
-    [Fact]
-    [Slow]
-    public void Exterior_layout_names_resolve_to_interiors_level_layouts()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, $"No Kenshi install configured ({GameInstall.EnvironmentVariable}).");
-        var db = GameDatabase.Load(LoadOrder.BaseGame(install!));
-        var world = WorldLevelData.Load(install!, includeInteriors: true);
-        var layouts = new BuildingLayouts(db, world.Interiors);
-        int named = 0, resolved = 0, items = 0;
-        foreach (var b in world.Buildings())
-        {
-            if (b.StateId is null || world.Zones[b.Zone].Find(b.StateId) is not { } state) continue;
-            var name = state.GetString("exterior layout name");
-            if (name.Length == 0 || db.Find(b.BuildingId) is not { } record) continue;
-            named++;
-            if (layouts.Find(record, name) is not { } layout) continue;
-            resolved++;
-            Assert.True(layout.GetBool("is exterior"));
-            var list = layouts.Items(layout).ToList();
-            if (list.Count == 0) { Assert.Empty(layout.Instances); continue; } // two layouts (EXT-727-...-Armor Sign, EXT-3384-...-No Entry) are empty
-            items += list.Count;
-            // Signs sit on the building: at most 500 units from its origin in the base game.
-            Assert.All(list, i => Assert.InRange(i.Position.Length(), 0, 600));
-        }
-        // Counts of 2026-10 (docs/formats/zones.md, "Building layouts"): 325 named, 312 found (262 by the exact EXT id).
-        Assert.Equal(325, named);
-        Assert.Equal(312, resolved);
-        Assert.True(items >= resolved);
+        // A character standing in the bar is inside its trigger hull; one in the street outside is not.
+        var volume = InteriorVolume.For(db, record, b.InstanceId, position, b.Rotation, new InteriorCollisions(install!));
+        Assert.NotNull(volume);
+        Assert.True(volume.Contains(new System.Numerics.Vector3(-51189, 1581, 2642), 2));
+        Assert.False(volume.Contains(new System.Numerics.Vector3(-51189, 1581, 2800), 2));
+        // The floor under a character: the bar room is floor 0, the roof terrace (where the beds stand) floor 1.
+        Assert.Equal(0, volume.FloorAt(new System.Numerics.Vector3(-51189, position.Y + 4, 2642)));
+        Assert.Equal(1, volume.FloorAt(new System.Numerics.Vector3(-51210, position.Y + 71, 2619)));
+
+        // The bar's furniture: the beds stand on floor 1 (hidden at floor 0), the counter on floor 0.
+        var layout = new BuildingLayouts(db, levels.Interiors).Find(record, "Bar", exterior: false)!;
+        var items = new BuildingLayouts(db, levels.Interiors).Items(layout).ToList();
+        Assert.All(items.Where(i => i.Building.Name == "Bed"), i => Assert.Equal(1, i.Floor));
+        Assert.Equal(0, items.First(i => i.Building.Name == "Shop Counter").Floor);
     }
 }

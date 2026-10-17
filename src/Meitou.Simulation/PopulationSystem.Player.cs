@@ -17,8 +17,8 @@ public sealed partial class PopulationSystem
     /// start-off's <c>squad</c> list (a SQUAD_TEMPLATE is planned by the squad factory, a CHARACTER is one member) as one squad of the
     /// player's faction, standing idle, selected for them. Where: <see cref="NewGameStart.ForceStartPos"/> gives the place itself,
     /// otherwise the first listed town that is placed in the world (the new-game map's own choice of start town is not modelled), at a
-    /// seeded spot within a third of its radius. Faction relation overrides, research and <c>force race</c> are not applied yet (the first
-    /// two are <b>Unknown</b> in the original, docs/game/factions-squads-towns.md 3.2). The characters' items are what the generator rolls
+    /// seeded spot within a third of its radius. The start research is applied (<see cref="Meitou.Data.Gameplay.Construction.ResearchGate.StartResearch"/>); faction relation overrides and <c>force race</c> are not applied yet (the first
+    /// is <b>Unknown</b> in the original, docs/game/factions-squads-towns.md 3.2). The characters' items are what the generator rolls
     /// for their look; their inventory is built like everybody's (<see cref="CharacterAssembly"/>).
     /// </summary>
     public Squad StartPlayer(World world, NewGameStart start)
@@ -58,7 +58,7 @@ public sealed partial class PopulationSystem
             {
                 var t = SquadTemplate.From(record);
                 template ??= t;
-                first.AddRange(SquadFactory.Plan(data.Db, t, settings.SquadSizeMultiplier, world.Seed, Rng.Mix(key ^ (uint)first.Count), data.States).Members);
+                first.AddRange(SquadFactory.Plan(data.Db, t, settings.SquadSizeMultiplier, world.Seed, Rng.Mix(key ^ (uint)first.Count), States).Members);
             }
             else
             {
@@ -73,7 +73,7 @@ public sealed partial class PopulationSystem
         foreach (var m in first)
         {
             CharacterAppearance? look = null;
-            if (!m.IsAnimal && data.Appearances is { } source)
+            if (data.Appearances is { } source)   // an animal gets its species' shared look (GeneratedAppearances)
                 look = source.Create(m.RecordId, factionId, (int)(Rng.Hash(world.Seed, key, RngPurpose.Spawn, SeedSalts.PlayerLook + (ulong)m.Index) & 0x7FFFFFFF));
             members.Add(new BuiltMember(m, look));
         }
@@ -82,8 +82,12 @@ public sealed partial class PopulationSystem
         var squad = SpawnSquad(world, built, null, radius, player: true);
         world.Player.Faction = data.PlayerFaction;
         world.Player.Money = start.Money;
+        world.Research.Set(data.Db, Meitou.Data.Gameplay.Construction.ResearchGate.StartResearch(data.Db, start));
         world.Player.Squad = squad.Id;
+        world.Player.CreationRaces = [.. start.ForceRace.Select(r => r.Id)];
+        world.Player.InCreation = true;   // the character editor may remake them until it is confirmed (docs/characters.md "Character editor")
         world.Player.Selection.Clear();
+        if (squad.Members.Count > 0) world.Player.Selection.Add(squad.Members[0]);
         return squad;
     }
 }

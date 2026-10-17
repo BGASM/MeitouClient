@@ -1,36 +1,114 @@
 # Combat
 
-How Kenshi resolves a fight: which attack gets chosen, whether it is blocked or dodged, how much damage the
-weapon and the wielder produce, how armour and toughness reduce it, how the damage lands on a body part, and
-what makes a character fall, black out, lose a limb or die. Also the XP a fight gives. Character records,
-stats and weapon choice are in [characters.md](../characters.md); animation playback (which the block and
-dodge outcome depends on) is in [animation.md](../animation.md). FCS record formats are in
-[fcs-mod.md](../formats/fcs-mod.md).
-The stat numbers, healing, hunger and the effective-stat multipliers that feed these formulas are in [character-stats.md](character-stats.md); the clock and the scaled `dt` are in
-[game-loop.md](game-loop.md#the-three-time-values); the saved body-part state is in [../formats/save.md](../formats/save.md#platoon-files-squads-and-their-characters); the AI that picks attacks is in
-[ai.md](ai.md) and [ai-tasks.md](ai-tasks.md); item prices of weapons and armour are in [economy.md](economy.md#4-item-base-value-itemvalue-fun_140896e20); relations that decide who fights
-are in [factions-squads-towns.md](factions-squads-towns.md#3-relations).
+Original research: CharStats/CombatClass/MedicalSystem/ranged controller, FCS records and binary
+constants. Tables/formulas/evidence scopes retained below; [stats](character-stats.md) owns medical
+state/XP, [animation](../animation.md) owns layers/root motion. Implementation: Gameplay.Combat,
+Simulation.Combat and Animation; approximate engine scheduling is not original parity.
 
-Sources: decompilation of `kenshi_x64.exe` (Ghidra) and of the editor `forgotten construction set.exe`
-(ILSpy, for enum names only), plus the base game's `gamedata.base` read through a probe. Addresses are in
-`kenshi_x64.exe`. Field names are FCS field names. Labels: **Verified** (checked against the game data, or
-two independent places in the binary, as stated), **Observed** (one function read, not cross-checked),
-**Unknown**. Nothing here has been compared with in-game behaviour. Formulas are written as maths, not
-transcribed; `lerp(t, a, b) = a + (b - a)·t` (`140015b63`; [character-stats.md](character-stats.md#effective-stats-injuries-and-hunger) writes the same function as `lerp(a, b, t)`, the game's function takes `t` first).
+## Weapons and damage
 
-## Overview of a hit
+**Observed** condition-adjusted weapon skill/strength/dexterity, stat scale m:
+cut=lerp((skill+dex*m)*cutMult/200,cutBase,cut99);
+blunt=lerp((0.5*skill+1.5*str*m)*bluntMult/200,bluntBase,blunt99), interpolation unclamped;
+pierce=0.78*(skill+dex*m)*pierceMult+10*pierceMult. Stored cut/blunt endpoints13/52;
+blunt-dominant cutBase=0.4*blunt1; other bluntBase not decoded. Packet cut/blunt/pierce/stun0,
+bleed and penetration then receives target-kind/race/general multipliers. Manufacturer/quality,
+weight/strength and skill speed chains are separate from this packet.
 
-1. The attacker's AI picks a combat technique (`COMBAT_TECHNIQUE`) by weapon type, skill and distance
-   (**Unknown**: the attacker-side choice was not read; `140887970` below is the defender's reaction chooser).
-2. When the blow arrives, the defender's *current animation* decides the outcome: blocking in the right
-   direction (and past half its animation), or mid-dodge, means no hit. The skill roll happens earlier, when
-   the defender picks its reaction technique (**Observed**).
-3. A hit builds a damage packet (cut, blunt, pierce, stun, bleed, armour penetration) from the weapon, the
-   wielder's stats and the target type.
-4. The medical system picks a body part, applies armour and toughness, then moves flesh, stun and blood.
-5. Knockdown, KO, dismemberment and death follow from part and blood state; XP is awarded to both sides.
+Unarmed category5: martial fraction lerp(skill/100,0.25,1); damage combines toughness/strength/+10,
+min1; blunt fraction lerp(skill/100,1,0.4), remainder cut, no pierce. Exact term shapes uncertain.
+**Verified** unarmed CONST0.8 binding. Stumble threshold toughness*m*0.52 plus state eligibility.
 
-## Class map
+## Techniques, block and dodge
+
+Technique direction/category/weapon/state/reach/animation flags gate selection; attack versus
+defence/dodge skill includes injuries/equipment. **Observed** outcome: block5 if matching block
+past50% animation; dodge0 within progress0.1..0.98; otherwise hit2. Skill roll r1*A<r2*B,
+A=1+0.05*max(0,s2-s1), B=1+0.05*max(0,s1-s2). Derived chance with k=B/A is1-1/(2k) ifk>=1,
+elsek/2. General skill blend0.01*(0.6*stat+0.4*dexterity*m) feeds dodge/reload, with stat/gear
+and injury variants. Technique power/max-encumbrance and some length/selection details unknown.
+
+## Hit reactions
+
+**Verified** (`FUN_1404391f0` from `FUN_1404394f0` on a hit): damage = cut+blunt+pierce+stun against the
+stumble threshold. A stumble clip is picked unless the hit is light and one is already playing; it is big
+only when heavy and none was playing; front/rear by a dot test (`FUN_140435600`). Humanoids only. "Heavy_Hit"
+/ "Light_Hit" are only the Wwise "Impacts" switch (Heavy = a big clip). A picked clip cancels the defender's
+own technique (its blow never lands) and holds it in the stumble state until the clip ends (`FUN_140665490`,
+`FUN_14060cf60`, `FUN_140435570`); with no clip the technique is still cancelled. Every 1.2 s of the stumble
+(`+0x124`) it may break into a block against a swing at 10–99% progress (block-chance roll `FUN_140885d80`).
+Knockback is the clips' root motion only (**Observed**: no impulse in these functions; [animation](../animation.md); ragdolls: [ragdolls](ragdolls.md)).
+A blocked blow neither staggers nor pushes (`FUN_140665540`). **Observed**: a shackled defender skips 25%.
+
+## Pacing
+
+**Verified**: after an attack (clip ≥98% done) the fighter waits 0.6 s after a hit, 0.3 s blocked, 0.2 s dodged
+(`FUN_14060a2f0`, `FUN_14060d6a0`; flat, no stats). Before swinging, an attacker in reach asks its target
+(`FUN_14060c670` → `FUN_140666a30`): target swinging at it → the attacker blocks; target stumbling or blocking →
+attack; otherwise an initiative roll on both attack skills (`FUN_140665370`, the skill roll above): the winner swings
+and the loser blocks (or circles 1.5–4.5 s at ±25 when the target does not face it, **Observed**). No free attack
+slot (`max num attack slots` + race extra, `FUN_140666310`) → circling. `max simultaneous hits` caps the targets of
+one swing; `power N` multiplies hit N's packet; `limb N` picks the punch/kick sound.
+
+**Observed** (decompiled, not measured in game), with several attackers: a target answering a request is asked by
+anyone, not only its own target, and the winner of the roll turns to attack the asker (`FUN_140666a30`). Deciding
+(`FUN_14060c8b0`) tries attacking first and defends only when that fails; a waiting fighter that is attacked goes
+to deciding. During its own swing a fighter aborts to defend only while under 50% of it with an incoming blow past
+50% (`FUN_14060a970` → `FUN_1406083d0(0.5, 0.5)`); while anyone attacks it the swing ends at the current blow's stop
+frame (`FUN_14060a590`). The defence covers the most advanced incoming blow from anyone; a failed defence roll means
+no defence for 1.2 s (+0x14c). A dodge plays its whole clip at its own speed, then decides at once; a block that
+ends leaves 0.2 s.
+
+
+## Armour and medical hit
+
+Coverage rolls, slot order, armour class/material quality and cut/blunt resist/efficiency affect
+packet before a weighted body-part hit. Armour absorption/penetration and cut-to-blunt conversion
+are distinct; never collapse protection into one damage multiplier. Apply blunt/cut, wound,
+stun, bleed and reaction through MedicalSystem, then XP. Health, bandage, stun, blood and
+KO/coma/death thresholds use [character-stats](character-stats.md). Never tick medicine twice.
+
+## Ranged and turrets
+
+Controller phases reload → steady aim → fire; target motion/range, skill/injury, equipment and
+line of sight determine timing/spread. Bolts retain launch/direction/velocity/impact/friendly-hit
+state and consume ammo charges; do not model hitscan. Turret objects and mounted ammo/reload
+branches differ from carried crossbows. Player/NPC targeting and friendly-fire training have
+separate eligibility. The retained field/constant tables and expression list specify decoded
+values; trajectory, aim timing and obstruction uncertainties remain labelled.
+
+## Stealth knock-out
+
+Order 228 "Stealth KO" (verb list `FUN_14079b2d0`), `Task_StealthKO` (vtable slots `FUN_140345eb0` start,
+`FUN_14034cd80` update). **Verified** literals, flow **Observed**:
+
+- The attacker walks to the target's position minus a vector of the target (+0xd0 of its body object, **Unknown**);
+  within 14 of it the swing starts and it turns to face the target. The task ends at once when the target senses the
+  attacker (`FUN_140855830`).
+- Swing: clip `knockout` at x1.2 (record `knockout`, anim `stealthKO` in rebirth.mod); at 0.5 of it the roll, at 0.85
+  the end.
+- Chance (`FUN_1408852f0`): X = attacker assassination x injury mult minus the target's max of assassination, 0.5 x
+  thievery, 0.5 x stealth term x 100, 0.5 x melee defence, toughness (each x its injury mult); chance =
+  100 x (X + K) / 2K, K = 30 for X >= 0 else 15 (disassembly: the hidden third argument is +K). Unclamped. 0 when the
+  target's sense entry of the attacker has its +0x38 flag (it sees the attacker); x0.5 with +0x39 (**Unknown**).
+- Roll uniform 0..100; lands when chance > roll. Hit: floating "*Thunk*", target KO time `FUN_140644980` with
+  assassination x 0.01 (the put-down KO formula, [carry-loot](carry-loot.md)). Miss: "Failed!", the target turns on
+  the attacker. Assassination XP via the generic entry, dt 1: 100 x f on a hit, 300 x f on a miss; f = 0.5 for a
+  sleeping target (+0x2f8 == 1), 0.07 for +0x2f8 == 2, else 1; " (No XP)" under an **Unknown** test.
+
+Meitou: the point is 8 behind the target's facing; "senses" = the target's spot meter on the attacker is full or it
+is fighting; the +0x39 halving, the 0.07 case and No XP are not modelled; a swing is reported as an Assault (the
+original's crime call is not traced). The verb shows the chance; a quick right click on an NPC while sneaking gives it.
+Order 229 "Stealth Kill" shares the task; not modelled.
+
+## Validation
+
+Game record/enumeration/constant checks are scoped separately from hand-decoded runtime formulas.
+Synthetic determinism tests verify our implementation/order, not original-game equivalence.
+Use researched endpoint/coverage/KO/ranged cases and preserve unknown terms rather than assigning
+unverified constants. [Simulation](../simulation.md#combat) describes current wiring.
+
+### Class map
 
 | Class (RTTI) | Role |
 |---|---|
@@ -43,25 +121,7 @@ transcribed; `lerp(t, a, b) = a + (b - a)·t` (`140015b63`; [character-stats.md]
 | `GunClassPersonal`, `GunClassTurret`, `TurretBuilding` | ranged weapons |
 | `Task_MeleeAttack`, `Task_FocusedMeleeAttack`, `Task_RangedAttack`, `Task_UseTurret`, `Task_EquipBestWeapon`, `Task_SheatheWeapon`, `Task_StripWeapons`, `Task_CuffTarget`, `Task_MakeTargetStandStill` | AI tasks ([ai-tasks.md](ai-tasks.md#tasktype-to-task-class), [ai.md](ai.md)) |
 
-## Enums (from the editor's decompile; facts)
-
-- StatsEnumerated (full table with `CharStats` offsets in [character-stats.md](character-stats.md#the-stat-list)): 1 STRENGTH, 2 MELEE_ATTACK, 9 MEDIC, 11 TURRETS, 16 STEALTH, 17 ATHLETICS, 18 DEXTERITY,
-  19 MELEE_DEFENCE, 20 WEAPONS, 21 TOUGHNESS, 22 ASSASSINATION, 24 PERCEPTION, 25 KATANAS, 26 SABRES,
-  28 HEAVYWEAPONS, 29 BLUNT, 30 MARTIALARTS, 31 MASSCOMBAT, 32 DODGE, 34 POLEARMS, 35 CROSSBOWS,
-  36 FRIENDLY_FIRE, 38 SMITHING_BOW; 39 END. (Other values are non-combat skills.) Derived stats follow
-  the real ones: `_PrimaryWeaponDamage`, `_DamageResistance`, `_KnockoutTime`, `_ToughnessKnockoutPoint`,
-  `_WoundDeteriorationSpeed`, `_combatSpeed`.
-- WeaponCategory: 0 SKILL_KATANAS, 1 SKILL_SABRES, 2 SKILL_BLUNT, 3 SKILL_HEAVY, 4 SKILL_HACKERS,
-  5 SKILL_UNARMED, 6 SKILL_BOW, 7 SKILL_TURRET, 8 ATTACK_POLEARMS, 9-20 creature attacks (ELEPHANT, DOG,
-  BULL, ROBOTSPIDER, SPIDER, CAGEBEAST, DUCK, GORILLA, GAR, FROG, GOAT, GIRAFFE), 21 ATTACK_NULL.
-- ArmourClass: 0 GEAR_CLOTH, 1 LIGHT, 2 MEDIUM, 3 HEAVY. ArmourType: 0 CLOTH, 1 LEATHER, 2 CHAIN,
-  3 METAL_PLATE. ArmourRarity: 0 PROTOTYPE .. 5 MASTER (grade to quality in characters.md).
-- CutDirection: 0 DEFAULT, 1 DOWNWARD, 2 LEFT, 3 RIGHT, 4 THRUST, 5 UPWARDS, 6 PIERCED, 7-9 REAR_*.
-  HitMaterialType: 0 MISSED, 1 METAL, 2 FLESH, 3 SAND, 4 WOOD, 5 SWORD, 6 CHAIN.
-  BodyPartType: 0 TORSO, 1 LEG, 2 ARM, 3 HEAD. RagdollPart bit flags: WHOLE 1, RIGHT_ARM 2, LEFT_ARM 4,
-  HEAD 8, RIGHT_LEG 16, LEFT_LEG 32. ProneState: NORMAL, STAYING_LOW, CRIPPLED, PLAYING_DEAD, KO.
-
-## Global tuning: the CONSTANTS record
+### Global tuning: the CONSTANTS record
 
 Loaded by `14086b2b0` (from "Initialising GameData", `140870ae0`) into one struct at `142133dd0`, field n at
 `+4n`. **Verified** (field names read by the loader against the CONSTANTS record dumped from `gamedata.base`
@@ -75,7 +135,7 @@ below is what the engine uses.
 | blunt damage 1 / 99 | 20 / 80 | blunt base at skill 1 and 99 |
 | cut damage 1 / 99 | 20 / 80 | cut base likewise |
 | pierce damage multiplier | 1.2 | |
-| bow damage 1 / 99 | 1.1 / 1.3 | stored unscaled at fields 8 and 9; data xrefs show `14043c180` (crossbow gun data) reads both, but the decompile does not show how (**Observed**) |
+| bow damage 1 / 99 | 1.1 / 1.3 | stored unscaled at fields 8 and 9; `14043c180` scales a crossbow's level-0 pierce ends by `bow damage 1` and its level-1 ends by `bow damage 99` before the quality lerp ([Ranged and turrets](#ranged-and-turrets), **Observed** in the disassembly) |
 | stumble damage max | 80 | stumble threshold |
 | unarmed damage mult | 0.8 | |
 | attack chance factor | 0.05 | hit roll skew |
@@ -99,290 +159,36 @@ below is what the engine uses.
 | XP rate medic 1 / 99 | 15 / 150 | |
 | weight strength diff 1x / max, min strength xp mult | 20 / 1, 0.1 | strength XP from carrying |
 
-A second struct, set by the difficulty dialog ("Advanced options": built by `1409151d0`, copied into the globals
-by `140912f80`, nine floats from `142133578`), holds `142133580`, the global damage multiplier, used in the hit
-pipeline (`1406508d0`), fist injury (`140666780`), crossbow damage (`14043c180`) and XP scaling; and
-`142133578`, which scales wound deterioration and blood loss (`14064f5c0`, `140646140`). **Verified**: the
-dialog builder `1409151d0` binds the "Global damage multiplier" slider to `142133580` and the "Chance of death"
-slider (range 0.5-4) to `142133578`, and the tooltip says it "directly affects rates of wound degeneration and
-blood loss"; the same dialog binds Hunger time to `142133594`, Production speed to `142133590`, Research
-speed to `14213358c`, Building speed to `142133584` and Number of nests to `142133588`.
-`settings.cfg` "Dismemberment" (`142133504`; [character-stats.md](character-stats.md#damage-into-a-part)): 0 none; 1 rare, a limb is lost only when a hit drives its flesh
-below the negative maximum; 2 frequent, lost whenever flesh is below it (**Observed**, `14064f5c0`/`14064f300`).
+### Objects
 
-## Weapons
+| Object | What | Where |
+|---|---|---|
+| `GunClass` | the firing data of any gun (29 virtual slots); base of the next two | loader `FUN_14043baa0` |
+| `GunClassPersonal` | a crossbow's gun, owned by the `Crossbow` item | loader `FUN_14043c180`, made by the item constructor `FUN_140898c90` |
+| `GunClassTurret` | a turret building's gun (GUN_DATA; source file `rangedCombat.cpp`) | `FUN_14043cdb0` |
+| ranged controller | one per character (`Character +0x2f0`): skill, target, aim point, reload timer, fire flags | tick `FUN_140438c70`, fire gate `FUN_14043aee0`, reload `FUN_140437ce0`, target choice `FUN_140437f40` / `FUN_1404374d0` |
+| `Harpoon` | one bolt or harpoon in flight or stuck: a plain struct, pooled by `HarpoonManager` | spawn `FUN_14043a2f0`, per-frame update `FUN_14043afe0`, flight `FUN_1404380e0`, hit `FUN_140439c90`, landed `FUN_14043acf0`, recycle `FUN_140436c10` |
 
-### Stats of a weapon item
+### Record fields
 
-Computed once per weapon by `140889cd0` from the WEAPON record, the item's quality fraction q (0..1), the
-WEAPON_MANUFACTURER and the MATERIAL_SPECS_WEAPON record. **Observed**.
+**Base-game data** (**Verified** by reading `gamedata.base`, `Newwworld.mod`, `Dialogue.mod` and `rebirth.mod`; the counts agree with "Data facts" below): 7 CROSSBOW,
+6 GUN_DATA. Every crossbow has `num shots` 1, `aim speed` 1 and the three target multipliers 1.
 
-- cut multiplier = lerp(q, 0.3, 2.0) · `cut damage multiplier` · manufacturer `cut damage mod`.
-- blunt multiplier = lerp(q, 0, 2.0) · `blunt damage multiplier` · manufacturer `blunt damage mod`.
-- min cut = `min cut damage mult` · manufacturer `min cut damage`.
-- weight (item field `+0x120`) = the larger of `weight kg` · manufacturer `weight mod` and 40 · blunt multiplier
-  · `weight mult` (WEAPON field) · the global weapon weight multiplier, which is the CONSTANTS field `weapon
-  inventory weight mult` (`142133ee8` = struct field `0x46`, value 0.5); the kg term is not scaled by those
-  two. A second copy at `+0x230` is the larger of the kg term and 40 · blunt multiplier, unscaled.
-- `defence mod`, `attack mod`, `indoors mod` (ints) come from the WEAPON record, with the material's
-  `attack mod` / `defence mod` added. `bleed mult`, `length`, `armour penetration`, `pierce damage multiplier`
-  and the damage multipliers against robots, humans and animals (and per-race `race damage`, ×0.01) are
-  copied to the wielder's stats when the weapon is equipped (`140897f30`, which also stores the weapon's cut
-  and blunt multipliers). **Observed**. (The FCS field is `pierce damage multiplier`; `pierce multiplier` was
-  a shorthand.)
-- Weapon category (above) picks which skill applies: category 0 katanas, 1 sabres, 4 hackers, 2 blunt, 3 heavy
-  weapons, 6 bow, 7 turret, 8 polearms, 5 unarmed/default (`140897f30` maps the category to the skill slot of
-  CharStats). **Observed**.
+| Crossbow | pierce min 0/1 | pierce max 0/1 | range 0/1 | reload min 0/1 | reload max 0/1 | deviation 0/1 | perfect skill | shot speed 0/1 | ammo (charges) |
+|---|---|---|---|---|---|---|---|---|---|
+| Ranger | 20/30 | 30/45 | 600/800 | 3/2 | 4.5/4 | 5/3 | 60 | 400/500 | Bolts [Regulars] (30) |
+| Eagle's Cross | 50/60 | 70/100 | 1500/1900 | 5/4 | 10/8 | 2.5/1.5 | 80 | 700/800 | Bolts [Longs] (10) |
+| Tooth Pick | 10/15 | 20/25 | 375/500 | 2/1.25 | 3/3 | 11/6 | 90 | 350/450 | Bolts [Toothpicks] (40) |
+| Junkbow | 10/15 | 20/24 | 300/400 | 3/2 | 4/3 | 12/6 | 90 | 350/450 | Bolts [Toothpicks] (40) |
+| Oldworld Bow MkI | 20/35 | 35/50 | 800/1100 | 3.5/2.5 | 4.5/4 | 4/2.5 | 70 | 500/600 | Bolts [Regulars] (30) |
+| Oldworld Bow MkII | 35/45 | 45/60 | 800/1200 | 4/2.2 | 8/6.5 | 4/2.2 | 80 | 500/600 | Bolts [Regulars] (30) |
+| Spring Bat | 30/50 | 40/80 | 400/550 | 4.5/3.5 | 6/8 | 8/4 | 70 | 500/600 | Bolts [Heavies] (20) |
 
-The base game has 48 WEAPON records, 7 CROSSBOW, 6 GUN_DATA, 44 COMBAT_TECHNIQUE, 9 LOCATIONAL_DAMAGE
-(dumped from `gamedata.base` with a probe, re-counted: **Verified**). WEAPON `pierce damage multiplier` is
-non-zero on exactly 11 of the 48 records, all creature or robot-creature weapons (bull weak 0.4, garru 0.4,
-dog 0.5, duck 0.5, bull, elephant, giraffe, robot spider, skimmer, spider, small spider 1); all swords, clubs,
-polearms, cleavers and fists are 0 (**Verified**, counted). `armour penetration` is negative on katanas and
-other thin blades (katana and guardless katana -0.3, nodachi -0.2, longsword -0.15, ...), positive on clubs
-and cleavers (0.1-0.3) and 0 on creature weapons (**Observed** from the same dump).
+### Unknowns of the ranged path
 
-### Damage per blow
-
-S is the wielder's CharStats, `skill` its weapon-category skill, `str`, `dex` strength and dexterity (each
-multiplied by the condition factor of `1406457e0` ([character-stats.md](character-stats.md#effective-stats-injuries-and-hunger)), which lowers a stat as the relevant limbs are hurt and by
-the stat multiplier `+0x34`). All **Observed** (`140883ba0`, `140883c60`, `140883d10`).
-
-- cut = lerp( (skill + dex·m)·cutMult / 200, cutBase, cut99 ), with cut99 the stored `cut damage 99` (0.65·80
-  = 52) and cutBase the stored global `cut damage 1` (0.65·20 = 13) - not a weapon field. Blunt-dominant
-  weapons (cut multiplier strictly below blunt multiplier) instead use 0.4 · the stored `blunt damage 1` as
-  cutBase (`140897f30`).
-- blunt = lerp( (0.5·skill + 1.5·str·m)·bluntMult / 200, bluntBase, blunt99 ), parameter not clamped; blunt99 =
-  stored `blunt damage 99` (52). The bluntBase of non-blunt-dominant weapons is not decoded (the blunt-dominant
-  case sets it to the stored `blunt damage 1`, 13).
-- pierce = 0.78·(skill + dex·m)·pierceMult + 10·pierceMult, where 0.78 = the stored `pierce damage multiplier`
-  (0.65·1.2).
-- The packet (`1408868b0`) is {cut, blunt, pierce, stun 0, bleed multiplier, armour penetration}, then scaled
-  by the weapon's multiplier for the target kind (robot, human, animal), the per-race damage map and a
-  general multiplier. The armour penetration slot is only filled when a target is passed in.
-- Unarmed (category 5): martial arts skill f = lerp(martial·0.01, 0.25, 1); total = f · (toughness term ·
-  0.8 + strength term + 10), min 1; split blunt = g·total, cut = (1-g)·total, g = lerp(martial·0.01, 1, 0.4);
-  pierce 0 and the stun 0. Armour `unarmed` bonuses and RACE `fists
-  lv1/lv100` feed this. The 0.8 is the CONSTANTS `unarmed damage mult` (**Verified** by its offset). Exact term
-  shapes: **Observed**.
-- Stumble threshold (`140884020`) = toughness·mult·0.01 · (0.65·stumble max) = toughness·m·0.52. A hit whose
-  damage sum (cut + blunt + pierce + stun, as passed to the reaction) exceeds it, and a further condition on the
-  target's current state holds, plays "Heavy_Hit" instead of "Light_Hit" (`1404391f0`). **Observed**.
-
-## Technique choice, block and dodge
-
-COMBAT_TECHNIQUE records (loader `1406684c0`; the field names the loader reads match the 44 data rows
-through a probe: **Verified** for the names, **Observed** for field-to-offset): flags is-block, is-dodge,
-stumble-dodge, gains-ground, prone, low strike; floats hesitate point, attack distance, min distance vs static,
-acceptable end time; min/max skill, max encumbrance, `chance` (selection weight), max simultaneous hits;
-validity flags per weapon type (1 handed, blunt, hackers, heavy weapons, katanas, polearm, sabre, unarmed);
-also per-technique `attack direction 1/2`, `limb 1/2`, `power 1/2`, `anim blocked frame 1/2`, `anim stop frame
-1/2`, `num techniques`, `anim name`, `anim speed mult`, `events`, `animal`, and in the data `use L arm` /
-`use R arm` / `disabled`.
-
-Selector `140887970` (**Observed**) is the *defender's* reaction chooser (the incoming attack's direction and
-the attacker's skill are its inputs): the candidates are the techniques whose weapon-type validity flag
-matches the defender's current weapon category and whose prone flag matches its posture. A block roll runs
-first (block chance below against a uniform roll); when it succeeds, block techniques whose direction equals
-the incoming one are the candidates; when it fails, block techniques of a *different direction* (of the same
-direction class) are picked so the hit passes. Dodge techniques are chosen by a weighted random pick on
-`chance`, only if the defender is in the dodge-capable state (for unarmed fighters this state is granted by an
-extra roll against the variant chance `140885d80`). Whether the min/max skill and max encumbrance fields are
-tested here was **not** seen in this function.
-
-Block chance (`1408862d0`, **Observed**). With D the defender's defence and d = D - attacker skill:
-D = melee defence integer + the weapon's `defence mod` (for armed fighters; the weapon term is dropped when
-the weapon cannot block) + a float equipment bonus, +20 when the defender is in a guarding state (whether this is the state the HUD's Block stance sets is **Unknown**; its tooltip also says +20 melee defence, [ui-screens.md](ui-screens.md#4-hud-mainbargui)); unarmed
-fighters use the martial-arts-based value of `140884ee0`.
-
-- p = 70 + 1.2·d when d > 0, else 70 + 1.5·d; above 90, p = 90 + 0.2·(p - 90); clamped to [5, 95]. The
-  constants 70 / 1.5 / 1.2 are the stored `base block chance`, `block chance reduction per 10 levels` and
-  `increase per 10 levels` (struct offsets `+0x44`, `+0x48`, `+0x4c`, matched to the loader's stores).
-- The variant `140885d80` (the dodge-style roll for unarmed fighters) uses the "effective defence" of
-  `140885190` instead and clamps to [0, 95]. That effective defence is the stat minus (1 - e)·stat minus
-  (1 - l)·stat plus a multiplier term, with e the encumbrance factor clamped to [0.4, 1], l a leg-health
-  factor (the worse leg's health fraction ·1.8, clamped to [0, 1] by `140884970` (**Verified** by reading it; [character-stats.md](character-stats.md#derived-values-pointers-only) says the same) and then to [0.5, 1] inside `140885190`), and +20 added in the
-  guarding state for unarmed fighters. **Observed**.
-
-Hit outcome (`140665fa0`, **Observed**): blocked (code 5) if the defender's technique is a block, its
-direction matches and its animation is past 50%; dodged (code 0) if the technique is a dodge and progress is
-within [0.1, 0.98]; otherwise a hit (code 2). `1404394f0` then runs the medical pipeline and awards XP.
-
-Skill-vs-skill roll (`140665370`): with F = 0.05 (`attack chance factor`, struct `+0x40`), A = 1 + F·max(0,
-s2 - s1), B = 1 + F·max(0, s1 - s2); true when r1·A < r2·B for two uniform randoms. P = 0.5 at equal skill;
-with k = B/A, P = 1 - 1/(2k) for k ≥ 1, else k/2 (the closed form is derived by hand from the comparison).
-**Observed**. Dodge skill (`140885ce0`) = 0.01·(0.6·equipment dodge + 0.4·dexterity·m).
-
-## Animation speed
-
-**Verified** (decompilation; constants from rdata). A technique's clip plays at `anim speed mult` × a rate:
-
-- **Attacks** (`@ 1402b4570` → `@ 1405b7800`): A (CharStats +0x188, built by `@ 1408866b0` / `@ 140883a80`) = min(1.2,
-  lerp(t, 0.8, 1.2) × G), t = 0.01 × (0.6 × dexterity × the gear's dexterity mult × dexterity injury mult + 0.4 × (melee attack
-  + the weapon's attack mod − a medical penalty)); martial arts instead for fists. In deep water A is ×0.8.
-- **Blocks** (`@ 140609290`, CombatClass slot 12): D = min(4, lerp(t′, 0.6, 4.0) × G), t′ with melee defence and its bonuses (+20
-  guarding) in place of attack. **Dodges** play at 1 while held; a released block runs back at −0.3 (`@ 140609200`).
-- G (CharStats +0x180, `@ 1408839a0`) = (0.5 + 0.5 × min(1, u + 0.5) × (1 − f)) × the gear's `combat speed mult` product, with
-  f = clamp(`min strength xp mult` + clamp((weapon weight − strength × injury) / `weight strength diff 1x`, 0, `weight strength diff
-  max`), 0, 1) (the strength XP's factor; the CONSTANTS fields matched by offset, **Observed**) and u the encumbrance factor
-  (`carry weight mult`, `encumbrance base`, by offset, **Observed**).
-- A typical fighter (dexterity and attack 10, a light weapon, no armour penalty): A = 0.84 × 0.95 ≈ 0.80; at 50 it is 0.95, at 100
-  1.14. The attack lasts clip length / (`anim speed mult` × A).
-
-## Armour
-
-Per piece (loader `140898e90`, **Observed**; class and material tables from the constructor `1408a8f90`,
-decoded from constants plus disassembly; the price columns of the same tables are in [economy.md](economy.md#42-armour-and-clothing-type-3)). With t = quality fraction + level bonus·0.01:
-
-- cut defence = clamp( lerp(t, matMin.cut, matMax.cut) · classCut + lerp(t, 0, `cut def bonus`), 0, 0.9 ).
-- blunt defence = clamp( lerp(t, matMin.blunt, matMax.blunt) · classBlunt + lerp(t, 0, `blunt def bonus`), 0, 0.8 ).
-- flat pierce defence = lerp(t, matMin.pierce, matMax.pierce) · `pierce def mult`.
-- cut-into-stun fraction = clamp(field, 0, 1).
-- athletics, combat speed and stealth factors = lerp over class and material tables times the item's mults
-  (athletics 1.0 for body, shirt and hat slots; combat speed 1.0 for hats).
-
-Class table (cut, blunt factors at lowest to highest grade): CLOTH 0.4 / 0.1; LIGHT 0.8 / 0.7; MEDIUM 0.9 / 0.9;
-HEAVY 1 / 1. Material table, (cut, blunt, flat pierce) at lowest -> highest grade: CLOTH (0, 0, 0) -> (0.1,
-0.3, 0); LEATHER (0, 0, 0) -> (0.55, 0.4, 35); CHAIN (0.05, 0, 0) -> (0.65, 0.3, 60); METAL_PLATE (0.1, 0, 0)
--> (0.85, 0.6, 90). The class table's last three columns (assumed athletics, combat speed, stealth) run from
-lowest to highest grade: CLOTH and LIGHT 1 / 1 / 1; MEDIUM 0.85 -> 1, 1 -> 1, 0.9 -> 0.9; HEAVY 0.8 -> 0.95,
-0.9 -> 1, 0 -> 0.4. The column roles are an inference (not cross-checked). **Observed**.
-Per-slot adjustments in the loader (**Observed**, `140898e90`, applied when the item has `part coverage`
-entries): the item's weight is `total coverage`·0.05 times a material weight factor, and by `slot` value 3 (hat)
-x1.25 weight and x0.6 on a further coverage-derived factor, 6 (legs) x0.6·0.75 on that factor, 8 (shirt) x0.5
-weight, x3 on that factor, x0.8 cut and blunt defence, x0.5 flat pierce defence, 9 (boots) x0.5 on that
-factor (slot names inferred from which ARMOUR records use each number). The remaining
-table fields that look like weight or price and the meaning of the further factor are not decoded.
-
-Coverage: each ARMOUR record's `part coverage` maps a body part to a percentage; at hit time a random roll
-above it means the piece does not cover (`14065d620`); a missing entry never covers. **Observed**.
-
-Worn-gear totals (`140887030`) sum attack, defence, perception and unarmed bonuses and multiply dexterity,
-dodge, damage-output, fist-injury, ranged and stealth multipliers. **Observed**.
-
-## The hit pipeline (MedicalSystem)
-
-`1406508d0`, **Observed**, everything below. The per-part state, degeneration, healing and the KO and coma rules that follow a hit are in [character-stats.md](character-stats.md#body-parts-and-injuries).
-
-1. Choose a part among those not yet destroyed (flesh above minus its maximum), weighted by the part's `hit`
-   weight (RACE `combat anatomy`) times its hit multiplier `hitmult` (the weight alone for hit direction 6).
-   A low strike excludes arms and head. The chosen part's `hitmult` is then raised by 1 per hit (to at most 4;
-   a part whose health fraction is negative is held to about 2, a destroyed part is set to 0), and it decays
-   by 0.01·dt per update towards 1 while the part's flesh is non-negative (`14064f5c0`; reset to 1 once the
-   flesh is negative). New parts start at 1. **Observed**.
-2. Each covering armour piece in turn raises the cut reduction cutRed to cutRed + cutDef·(1 - cutRed), the blunt reduction bluntRed to bluntRed + bluntDef·(1 - bluntRed), adds pierceDef to the flat pierce defence pierceFlat, and adds cutDef·cutIntoStun·(1 - previous cutRed) to the stun fraction stunFrac. When the weapon's armour
-   penetration pen is non-zero, both reductions are multiplied by (1 - pen) and then capped at 0.9 (the cap
-   is applied only in that case); a negative pen (katanas, -0.3) therefore *raises* the reduction.
-3. cut' = cut·(1 - cutRed); blunt' = blunt·(1 - bluntRed); pierce' = max(0, pierce - pierceFlat); stun is the
-   cut times stunFrac plus the same fraction of the pierce that armour absorbed.
-4. Toughness resistance r = lerp(clamp(toughness·m·0.01, 0, 1), -0.65, 0.65); cut, blunt, pierce and stun are
-   each multiplied by (1 - r); cut and blunt are floored at 0; then all four are multiplied by the global
-   damage multiplier. (r is -0.65 at toughness 0, so an untrained target takes 1.65 times the damage and a
-   toughness-100 target 0.35 times.)
-5. Apply to the part (`14064f300`, `140644a70`): the flesh falls by cut + pierce + (blunt permanent fraction, 0)·blunt, and the stun rises by (1 - permanent)·blunt plus the packet's stun; so with the base value of 0 blunt only stuns, and stun recovers.
-   The blood falls by (cut + pierce)·0.2·bleed multiplier·race blood factor. Robots (and parts whose `+0x28` link is
-   set, role unknown) additionally gain wear (+0.04·(cut+pierce+blunt)·robot wear rate), which lowers the part's maximum.
-   Also here: blood at or below 0 (or below -25 once the second unconscious flag `+0x163` is set) knocks the
-   character out.
-
-HealthPartStatus (per part, [character-stats.md](character-stats.md#per-part-state-medicalsystemhealthpartstatus); save keys `hit`, `hitmult`, `flesh`, `stun`, `bandage`, `rig`, `wear` plus the
-part name; **Verified**: the save writer `14064d390` and the loader `14064d600` use the same offsets, the key
-strings were read from the executable, and the constructor `14064d0e0` initialises the same fields from
-a LOCATIONAL_DAMAGE record): `hit` weight at `+0x38`, `hitmult` `+0x3c`, flesh at `+0x40`, stun `+0x44`,
-bandage `+0x48`, rig `+0x4c`, wear `+0x50`, base HP `+0x54` (RACE `combat anatomy` second value, 100 if
-under 1), HP multipliers `+0x58`/`+0x5c`, health fraction `+0x60`; collapses flag `+0x31`, death flag `+0x32`,
-KO mult `+0x34`. Max flesh = base·multipliers - wear; health fraction = (flesh - stun + rig) / max
-(`14064f300`).
-
-LOCATIONAL_DAMAGE (9 base records, **Verified** from the data: two of them, Left and Right Foreleg, are the
-animal arms): head, chest, stomach have `death` set; arms and legs do not. `severance` is set on head, stomach,
-arms, legs and forelegs, not on chest; KO multiplier 2 (head), 1 (chest, stomach), 0.5 (limbs); the head's
-skill effect is 0.6, the left arm 0.25, the right arm 1; the stomach slows movement by 0.3. Collapse parts:
-head 1 (whole), left arm 4, right arm 2, left leg 32, right leg 16 (forelegs 4 and 2, `collapses` false).
-
-## KO, bleeding and death
-
-All **Observed** unless noted.
-
-- A part whose (flesh - stun + rig) falls below zero collapses (`140649870`: the part's `collapse part` bits
-  force the matching limbs down). If it carries the death flag the character is knocked out (`14064f300`,
-  `1406447d0`), with an unconscious flag (`+0x161`) and a KO timer (`+0xa0`). Blood below 0 also knocks out
-  (see the pipeline above).
-- KO time (`1406447d0`) = knockout time base (20) + per death-flag part (max - flesh - stun)·0.25·T/max·100 +
-  per part with negative (flesh - stun) |flesh - stun|·T·KOmult/max·100 + |max blood - blood|·T·50/max
-  blood, with T = lerp(toughness·m·0.01, 3, 0.75) (CONSTANTS `knockout mult 1/99`). KO point =
-  -lerp(toughness fraction, 10, 85) (`140643ae0`): the flesh level at which the part gives out falls with
-  toughness; where this is consumed was not found. **Observed**.
-- Wound deterioration scales by lerp(toughness, 1.7, 0.03) (`140643c70`) times the bodypart degeneration rate
-  and the "chance of death" setting. Bleeding drains blood, clotting and bandages slow it, blood recovers at
-  the recovery rate when not bleeding.
-- Death (`140652000`): blood at or below -max blood (`1406440a0`: min blood + (max blood - min blood) scaled by
-  a CharStats value and race factors, RACE `max blood`/`min blood`, default 150/75 per the earlier reading),
-  the medical system's `+0x60` value (the hunger level, 3 at full, running down while the `+0x64` stomach buffer is empty: [character-stats.md](character-stats.md#hunger-and-starvation), **Observed**) at or below zero, or a death-flag part with (flesh - stun) below -max
-  (`14064f5c0`, which returns "dead").
-- Limb loss follows the Dismemberment setting for parts flagged `severance` (above); limb state enum:
-  ORIGINAL, STUMP, REPLACED, CRUSHED.
-- Fist injury (`140666780`, **Observed**): only for an unarmed (category 5) non-robot attacker. Striking SWORD
-  material damages the attacker's hand part (cut 5, blunt 1), METAL (cut 2, blunt 2), CHAIN (cut 1, blunt 1);
-  scaled by 1 - 0.5·(martial/100 + toughness·m/100), the global damage multiplier and the armour fist injury
-  mult, then applied as a hit to the hand (`140644a70`) with toughness XP awarded. Robot targets count as METAL.
-
-## Ranged and turrets
-
-Mostly **Unknown**. Loaders: GUN_DATA (`14043baa0`: accuracy deviation at 0 skill, accuracy perfect skill, aim
-speed, shots, range, reload min/max, shot speed, positioning) and CROSSBOW (`14043c180`). **Observed** for the
-crossbow: pierce damage min and max, range, reload min/max, accuracy deviation and shot speed are each the
-lerp between the record's level-0 and level-1 values, by the item's quality; the two pierce damages are
-multiplied by the global damage multiplier and truncated to ints; barrel position comes from the model's
-`barrel pos Y`/`Z` fields. Crossbows use weapon category 6 (bow skill). The turret path (`14043cdb0`,
-`rangedCombat.cpp`, TURRETS skill 11) was not read. The constants `bow damage 1/99` are consumed there but
-their exact use is **Unknown**.
-
-## Experience
-
-**Observed** (`1408c5df0`, `1408c5fa0`, `1408c6980` and neighbours; the full XP table and the stat numbers are in [character-stats.md](character-stats.md#levelling-xp)). Base unit 0.075: the stored `exp gain
-multiplier` (3·0.25 = 0.75, held as a double) times 0.1. Every award is also multiplied by the difficulty
-dialog's global damage multiplier (`142133580`).
-
-- A skill with level L rises by amount·((101 - L)/101)^2 (diminishing returns); nothing happens unless the
-  amount is in (0, 20].
-- Difference factor = 1 + (opponent - own)/10 when the opponent is as good or better (so 2 at +10), or
-  1 + (opponent - own)/25 when worse (0 at -25).
-- Events (`1408c6980`, event code in its second argument): 0 hit dealt (attack or martial skill, weapon-category
-  skill, dexterity, strength at about 0.55); 1 the same with the attack skill at 0.5 and the weapon skill at 0.4
-  (apparently a blocked or glancing blow); 2 block (defence at 0.25, weapon skill 0.1); 4 hit taken (defence
-  2, toughness at `xp rate toughness`, strength about 0.1). Each is scaled by the race XP multiplier map (the
-  character race's per-stat entries) and the global damage multiplier. Mass combat, medic, dodge and
-  athletics have their own functions (`1408c5e80`, `1408c6130`, `1408c6360`, `1408c6660`).
-
-## Data facts from the install (stage 8)
-
-Read through the typed views of `Meitou.Data.Gameplay.Combat` and checked by `CombatInstallTests` / `RealDuelTests` (base load order, which includes the Rebirth records the base game ships). **Verified** unless marked.
-
-- **Counts.** 48 WEAPON, 44 COMBAT_TECHNIQUE, 142 ARMOUR, 9 LOCATIONAL_DAMAGE, 7 CROSSBOW, 6 GUN_DATA. Every `part coverage` entry names a LOCATIONAL_DAMAGE record, with a percentage in 0 to 100. Every `weapon models` entry of a
-  manufacturer names a MATERIAL_SPECS_WEAPON record (a model such as "Mk V" or "Edge Type 1", whose only combat fields are `attack mod` and `defence mod`).
-- **CONSTANTS.** The combat rows of the table above, rescaled as the loader does, are the numbers the typed view assumes when a field is missing: stored cut and blunt 13 and 52, pierce 0.78, stumble 52, block 70 / 1.2 / 1.5.
-  `damage multiplier` is 0.65 in the file; the editor's default (8) is not what the game uses.
-- **Technique frames.** `anim blocked frame`, `anim stop frame` and `acceptable end time` are fractions of the animation when `num frames` is 1 (every sword, block, dodge and creature row), and **frame numbers when
-  `num frames` is larger** (the martial-arts rows: "ma Double strike" blocks at frames 18 and 31 of 57). The second value of a one-blow technique is a leftover default (0.8, 0.792) and is not used. The strike of blow k
-  is at `anim blocked frame k`; "Downward combo" (`num techniques` 2) strikes at 0.509 and 0.792 of its animation and stops at 0.527 / 0.846 (**Observed**: the stop frame of the first blow is where a blocked first blow ends the swing; what the original
-  does after a hit is **Unknown**).
-- **Distance fields.** The rows with `attack distance` -999 (the "static" rows) or `attack distance min vs static` -10 ("Cut left") have a negative value in the case they are not meant for: "Cut left static" for a standing
-  target (99), "Cut left" for a moving one (0). **Observed**: this reading fits all human sword rows; the original's use of the two fields is **Unknown**.
-- **Flags.** 4 rows are `disabled` ("Downward cut", "Downward cut static", "ma headbutt", "ma Double punch high"). "heavy downcut" has no weapon-type flag at all, so no weapon matches it. The four "Dodge back" rows (plain, fall, fly, the stumble
-  copy) are flagged **both** `is block` and `is dodge`; "fly" and the copy are `is stumble dodge`. The block rows carry the flags katanas, sabre, blunt, hackers, heavy weapons, polearm and 1 handed; the dodge rows add unarmed. The
-  martial-arts attack rows carry only the unarmed flag, and the plain block rows do not carry it, so a fist fighter fights with the dodge rows. `1 handed` is on every sword row and absent from "heavy swing" and "heavy downcut v2"
-  (**Observed**: probably the one- against two-handed split; how it is tested is **Unknown**).
-- **Weapons.** The katana (`476-gamedata.base`): cut multiplier 1, blunt 0, armour penetration -0.3, bleed 1.2, human 1.1, robot 0.6, attack mod +4, defence mod -4, length 21, 2 kg, can block. Pierce is non-zero on exactly 11 weapons, all creature attacks
-  (skill category 9 or more).
-- **Armour material.** The defence tables are indexed by the ARMOUR's own `class` (0 to 3) and `material type` (0 to 3; 50 / 38 / 17 / 37 of the 142 pieces are cloth / leather / chain / plate). The 150 MATERIAL_SPECS_CLOTHING records that an ARMOUR's `material` list names have
-  only a `material type` (0 for 144, 1 and 2 for three each; role **Unknown**, probably the hit material), two paint factors and a specular multiplier: no combat numbers, so no view is read for them.
-- **Quality.** A weapon's quality fraction is its model's level x 0.01 (`weapon models` value 0, docs/characters.md); an armour piece's is the grade's 5, 20, 40, 60, 80, 95 per cent plus `level bonus` x 0.01.
-
-## As built (stage 8)
-
-Items 1 to 5 of the outline exist: [simulation.md "Combat"](../simulation.md#combat) lists what the engine does and where it chose (attack choice, timing, the reaction's alignment to the blow, the stagger, XP for blocks and dodges, the reach
-test). The attacker-side technique choice is no longer a gap of the code but is still **Unknown** in the original. Ranged combat, turrets and the AI's targeting are not built.
+The ranged-or-melee switch; what sets the trigger flag (the time between the decision and the shot); the reload animation against the timer; a character's hit shape
+(capsule or ragdoll) and whether downed bodies stop bolts; whether the crossbow's bleed and target multipliers and the armour's `ranged skill mult` do anything; turret
+aiming and states; how NPC crossbowmen get their bolts.
 
 ## Unknowns
 
@@ -390,21 +196,18 @@ test). The attacker-side technique choice is no longer a gap of the code but is 
 - Attacker-side technique choice (which technique an attacker starts, using min/max skill, encumbrance, distance); whether `140887970` tests min/max skill. Attack-slot AI (`14060a9e0` and neighbours), aggression,
   stance and target selection. The bluntBase of non-blunt-dominant weapons; the stat that scales max blood; the part `+0x28` link.
 - The role of the class-table columns 4-6 (athletics, combat speed, stealth is an inference) and of the slot-adjusted factor (armour item field index 0x5d) in `140898e90`.
-- Turrets; bow accuracy and range maths and the use of `bow damage 1/99`; the meaning of the weight/price-like armour table fields; the remaining difficulty floats beyond the dialog bindings listed above (their consumers).
+- Turrets (aiming and states; see [Ranged and turrets](#ranged-and-turrets) for what is known and its own unknowns); the meaning of the weight/price-like armour table fields; the remaining difficulty floats beyond the dialog bindings listed above (their consumers).
 - Whether the +20 guarding state of the block chance is the state the HUD's Block stance sets ([ui-screens.md](ui-screens.md#4-hud-mainbargui)).
-- What the technique fields `power 1/2`, `limb 1/2`, `anim hesitate point`, `max encumbrance` and `max simultaneous hits` do; where `min cut damage mult` x the manufacturer's `min cut damage` is applied (the engine floors the cut at it); the term shapes of the fist damage (the engine takes half the stat each); how a "Heavy_Hit" works (the engine: 0.5 s helpless for a damage sum above the stumble threshold). The engine's answers are in [simulation.md](../simulation.md#combat).
+- What `anim hesitate point` (stored as a frame fraction, no reader found) and `max encumbrance` do; what reads the stumble's `+0x128` = 0.85; where `min cut damage mult` x the manufacturer's `min cut damage` is applied (the engine floors the cut at it); the term shapes of the fist damage (the engine takes half the stat each). The engine's answers are in [simulation.md](../simulation.md#combat).
 - Whether the decompiled maths matches in-game numbers: nothing has been compared in play.
 
-## Implementation outline
+## Expression reference
 
-1. (Done, stage 8.) Read CONSTANTS, WEAPON, WEAPON_MANUFACTURER, MATERIAL_SPECS_WEAPON/CLOTHING, ARMOUR, LOCATIONAL_DAMAGE,
-   COMBAT_TECHNIQUE, CROSSBOW and GUN_DATA through the existing record layer, with the stored (rescaled)
-   constants exposed once.
-2. (Done.) Pure functions: weapon stats (q, record, manufacturer), damage packet, block chance, skill roll,
-   armour stacking, toughness resistance, part damage. Unit-test each against the formulas above, using the
-   game install behind `Assert.SkipWhen`.
-3. (Done by track E in `MedicalState`; saving is stage 10.) A `BodyPartState` per part (`hit`, `hitmult`, flesh, stun, bandage, rig, wear) plus blood, KO timer and flags, saved ([../formats/save.md](../formats/save.md#platoon-files-squads-and-their-characters)) with the
-   same key names as the original.
-4. (Done.) Defender reaction choice (block roll, wrong-direction block on a failed roll, weighted dodge) and outcome selection from animation state: block direction and progress above 0.5, dodge window 0.1..0.98; the per-part `hitmult` rise and decay.
-5. (Done.) XP distribution after each resolved blow.
-6. Defer ranged, turrets and AI target choice until the Unknowns are read.
+- Combat: `lerp(t, a, b) = a + (b - a)·t`
+
+## Evidence index
+
+Evidence scopes below apply only to their named sources/checks.
+
+- Turrets (secondary; **Observed** from `GunClassTurret` and the tooltip `FUN_14030d620`)
+- AI (**Observed**)

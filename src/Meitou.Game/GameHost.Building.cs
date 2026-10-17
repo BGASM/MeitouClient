@@ -1,0 +1,143 @@
+using Meitou.Data.Gameplay.Construction;
+using Meitou.Data.World;
+using Meitou.Simulation;
+using Meitou.Simulation.Construction;
+
+namespace Meitou.Game;
+
+/// <summary>
+/// The host's side of player construction (docs/simulation.md "Buildings", "Host seam: snapshot diff"): the snapshot's <see cref="WorldSnapshot.Buildings"/> are diffed by id
+/// whenever <see cref="WorldSnapshot.BuildingsRevision"/> changes. A new site goes into the renderer's runtime placements and, when it qualifies, the navmesh overlay; a removed
+/// one leaves both; a completed one enters the navmesh. The scaffold of a site that is not finished is read from <c>Progress / Target</c> every frame.
+/// </summary>
+sealed partial class GameHost
+{
+    World? buildingsWorld;
+    long buildingsRevision = -1;
+    // What the overlays were last told, by instance id.
+    readonly Dictionary<string, BuildingSnapshot> shownBuildings = new(StringComparer.Ordinal);
+    readonly HashSet<string> navBuildings = new(StringComparer.Ordinal);
+    readonly Dictionary<string, float> constructionLook = new(StringComparer.Ordinal);
+    Dictionary<string, BuildingBuildData>? buildData;
+
+    /// <summary>The build fields of every BUILDING, by id (read once from the game database).</summary>
+    Dictionary<string, BuildingBuildData> BuildData() =>
+        buildData ??= scene.Database is { } db ? BuildingBuildData.LoadAll(db).GroupBy(b => b.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal) : [];
+
+    /// <summary>Once a frame, before the world is drawn.</summary>
+    void UpdateBuildings()
+    {
+        if (!ReferenceEquals(buildingsWorld, session.World))
+        {
+            // A new world (a loaded save, a new game): the old world's sites go, the new one's first snapshot carries all of its own.
+            ForgetBuildings();
+            buildingsWorld = session.World;
+        }
+        var snapshot = session.CurrentSnapshot;
+        if (snapshot.BuildingsRevision != buildingsRevision)
+        {
+            DiffBuildings(snapshot);
+            buildingsRevision = snapshot.BuildingsRevision;
+        }
+        if (gpu.Objects is not { } objects) return;
+        constructionLook.Clear();
+        foreach (var site in snapshot.Buildings)
+            if (!site.Complete) constructionLook[site.Id] = ConstructionLook(site);
+        objects.Construction = constructionLook.Count == 0 ? null : constructionLook;
+    }
+
+    /// <summary>
+    /// The look's <c>f</c> (docs/game/buildings-production.md "Construction look"): (min(progress / target, 1) - threshold) / (1 - threshold), threshold = clamp(build threshold / 100, 0, 0.95).
+    /// Below 0 the whole building is scaffold, so it is held at 0.
+    /// </summary>
+    internal float ConstructionLook(BuildingSnapshot site)
+    {
+        float threshold = BuildData().TryGetValue(site.Record, out var data) ? Math.Clamp(data.BuildThreshold / 100, 0, 0.95f) : 0;
+        float done = site.Target > 0 ? Math.Min(site.Progress / site.Target, 1) : 1;
+        return Math.Clamp((done - threshold) / (1 - threshold), 0, 1);
+    }
+
+    void DiffBuildings(WorldSnapshot snapshot)
+    {
+        var current = new Dictionary<string, BuildingSnapshot>(StringComparer.Ordinal);
+        foreach (var site in snapshot.Buildings) current[site.Id] = site;
+        foreach (string id in shownBuildings.Keys.Where(id => !current.ContainsKey(id)).ToArray())
+        {
+            gpu.Objects?.RemoveRuntime(id);
+            if (navBuildings.Remove(id)) nav?.RemoveRuntimeBuilding(id);
+            shownBuildings.Remove(id);
+        }
+        foreach (var site in current.Values)
+        {
+            var placement = Placement(site);
+            if (shownBuildings.TryGetValue(site.Id, out var shown) && shown.Record == site.Record && shown.Position == site.Position && shown.Rotation == site.Rotation)
+            {
+                if (site.Complete && !shown.Complete) AddToNavmesh(site, placement);   // newly complete
+                shownBuildings[site.Id] = site;
+                continue;
+            }
+            if (shown is not null && navBuildings.Remove(site.Id)) nav?.RemoveRuntimeBuilding(site.Id);   // moved or changed: out, then in again
+            gpu.Objects?.AddRuntime(placement);
+            AddToNavmesh(site, placement);
+            shownBuildings[site.Id] = site;
+        }
+    }
+
+    /// <summary>The render and navigation overlay type of a site (<c>StateId</c> null, <c>WorldY</c> the absolute height, the zone of its position).</summary>
+    static BuildingPlacement Placement(BuildingSnapshot site) =>
+        new(WorldLayout.ZoneOf(site.Position.X, site.Position.Z), site.Id, site.Record, site.Position, site.Rotation, null, site.Position.Y);
+
+    /// <summary>Navmesh membership (engine reading of the Observed rebuild on placing): <c>path mode</c> not 0 and the building complete or without a <c>build threshold</c>.</summary>
+    void AddToNavmesh(BuildingSnapshot site, BuildingPlacement placement)
+    {
+        if (nav is null || navBuildings.Contains(site.Id) || !BuildData().TryGetValue(site.Record, out var data)) return;
+        if (data.PathMode == 0 || !site.Complete && data.BuildThreshold != 0) return;
+        navBuildings.Add(site.Id);
+        nav.AddRuntimeBuilding(placement);   // the zones loaded are built again; UpdateNav sends the RepathCommand when one is ready
+    }
+
+    void ForgetBuildings()
+    {
+        gpu?.Objects?.ClearRuntime();
+        foreach (string id in navBuildings) nav?.RemoveRuntimeBuilding(id);
+        navBuildings.Clear();
+        shownBuildings.Clear();
+        constructionLook.Clear();
+        buildingsRevision = -1;
+        if (gpu?.Objects is { } objects) objects.Construction = null;
+    }
+
+    /// <summary>
+    /// What the player's build mode needs (docs/simulation.md "Buildings", PlayerInterface.Build.cs): the catalog of BUILDINGs, their texts and parts, the placement services
+    /// (terrain, collision footprints) and the ghost drawing. Null without a game database.
+    /// </summary>
+    Building.BuildServices? MakeBuildServices(Meitou.Data.World.GroundHeights heights)
+    {
+        if (scene.Database is not { } db) return null;
+        var footprints = new Meitou.Navigation.BuildingFootprints(install, db, IsSandbox || IsDuel ? null : scene.Objects?.Levels);
+        var parts = new Dictionary<string, IReadOnlyList<Meitou.Data.World.PlacedMesh>>(StringComparer.Ordinal);
+        IReadOnlyList<Meitou.Data.Gameplay.Construction.PlacementTown>? towns = null;
+        return new Building.BuildServices
+        {
+            Menu = new Building.BuildMenu([.. BuildData().Values]),
+            ItemName = id => db.Find(id)?.Name ?? id,
+            Description = id => db.Find(id)?.GetString("description") ?? "",
+            Parts = id =>
+            {
+                if (parts.TryGetValue(id, out var cached)) return cached;
+                return parts[id] = db.Find(id) is { } record
+                    ? Meitou.Data.World.WorldObjectLayout.Building(db, record, "ghost:" + id, System.Numerics.Vector3.Zero, System.Numerics.Quaternion.Identity, new Meitou.Data.World.BuildingState())
+                    : [];
+            },
+            Placement = new Building.PlacementServices
+            {
+                Ground = heights.HeightAt,
+                Footprint = footprints.Of,
+                StaticAround = footprints.StaticAround,
+            },
+            Towns = () => towns ??= popData is { } d ? [.. d.Sites.Select(s => new Meitou.Data.Gameplay.Construction.PlacementTown(s.Town, new(s.Position.X, s.Position.Z)))] : [],
+            PlayerFactionId = () => popData is { } d && d.PlayerFaction is >= 0 and var mine && mine < d.Factions.Count ? d.Factions[mine].Id : "",
+            DrawGhosts = draws => gpu.Objects?.SetGhosts(draws),
+        };
+    }
+}

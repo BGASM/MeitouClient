@@ -6,4 +6,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Meitou.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="BepuPhysics" Version="2.4.0" />
+  </ItemGroup>
 </Project>

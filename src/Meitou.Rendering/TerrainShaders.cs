@@ -418,8 +418,8 @@ static partial class TerrainShaders
                 float minor = 1.0 - clamp(min(m10.x, m10.y), 0.0, 1.0);
                 float major = 1.0 - clamp(min(m100.x, m100.y) - 0.5, 0.0, 1.0);
                 vec2 axis = 1.0 - clamp(abs(vWorld.xz) / w - 0.5, 0.0, 1.0);
-                colourOut = mix(colourOut, vec3(0.1, 0.12, 0.2), 0.3 * minor);
-                colourOut = mix(colourOut, vec3(0.05, 0.07, 0.15), 0.75 * major);
+                colourOut = mix(colourOut, vec3(0.15), 0.35 * minor);
+                colourOut = mix(colourOut, vec3(0.1), 0.75 * major);
                 colourOut = mix(colourOut, vec3(1.0, 0.45, 0.4), 0.8 * axis.y);   // the X axis (z = 0) red
                 colourOut = mix(colourOut, vec3(0.45, 0.6, 1.0), 0.8 * axis.x);   // the Z axis (x = 0) blue
             }

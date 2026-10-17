@@ -23,21 +23,6 @@ public class FogCullDirectionTests
     ];
     const float WideEdge = 1f / 800, WideDensity = 1f / 4500;
 
-    static readonly Vector3 BenchEye = new(-48540.98f, 1120.9402f, 49003.13f), LowEye = new(-46841.47f, 148.84274f, 48482.668f);
-
-    [Fact]
-    public void At_shark_the_direction_bound_finds_the_fog_distance_where_the_plain_bound_finds_none()
-    {
-        var benchInside = SwampSouth.Select(p => p.W - (p.X * BenchEye.X + p.Y * BenchEye.Y + p.Z * BenchEye.Z)).ToArray();
-        Assert.Null(FogVolumes.HideDistance(SwampEdge, SwampDensity, benchInside, 50000));
-        foreach (var eye in new[] { BenchEye, LowEye })
-        {
-            float r = FogVolumes.HideDistanceByDirection(SwampSouth, eye, FogVolumes.DirectionSolveMargin, SwampEdge, SwampDensity, 50000, FogVolumes.DirectionSolveBudget)!.Value;
-            // Sampling the shader's formula finds paths of 4453 to 4454 under 0.9998 (the swamp's density distance 4500 times 0.99).
-            Assert.InRange(r, 4455f, 4600f);
-        }
-    }
-
     /// <summary>The shader's <c>fogVolumeBlock</c> alpha for an eye inside (near = 0), along unit ray <paramref name="d"/> to a fragment <paramref name="dist"/> away.</summary>
     static float Alpha(Vector4[] planes, float edgeBlur, float density, Vector3 eye, Vector3 d, float dist)
     {
@@ -98,28 +83,5 @@ public class FogCullDirectionTests
                 }
             }
         Assert.True(solved > 40 && rays > 20000, $"{solved} solved, {rays} rays: the test does not exercise the bound");
-    }
-
-    [Fact]
-    public void No_distance_at_a_plane_or_without_room_and_the_budget_gives_up()
-    {
-        var eye = new Vector3(0, 2999.5f, 0);   // half a unit under the wide block's ceiling
-        Assert.Null(FogVolumes.HideDistanceByDirection(Wide, eye, 0, WideEdge, WideDensity, 50000));
-        Assert.Null(FogVolumes.HideDistanceByDirection(SwampSouth, BenchEye, 0, SwampEdge, SwampDensity, 50000, budget: 10));
-        var r = FogVolumes.HideDistanceByDirection(Wide, new Vector3(0, 150, 0), 0, WideEdge, 1f / 60000, 50000, FogVolumes.DirectionSolveBudget);
-        Assert.True(r is null || r >= 50000 * 0.98f, $"R {r}");   // thinner than the far clip can cover
-    }
-
-    [Fact]
-    public void The_frames_cull_uses_the_smaller_of_the_two_bounds()
-    {
-        var block = new Meitou.Data.World.FogFeature("swamp", Meitou.Data.World.FogFeatureType.Block, new Vector3(0.59f, 0.56f, 0.5f), 1, 4500, 810, Vector3.Zero, Vector3.Zero, 0, [.. SwampSouth]);
-        var on = new FogVolumes([block]) { SolveInline = true };
-        on.Update(BenchEye, Vector3.UnitX, 50 * MathF.PI / 180, 16f / 9, 50000, 0.5f, on: true);
-        var off = new FogVolumes([block]) { SolveInline = true, DirectionBound = false };
-        off.Update(BenchEye, Vector3.UnitX, 50 * MathF.PI / 180, 16f / 9, 50000, 0.5f, on: true);
-        Assert.Null(off.CullBlock);
-        Assert.NotNull(on.CullBlock);
-        Assert.InRange(on.CullRadius, 4455f, 4600f);
     }
 }

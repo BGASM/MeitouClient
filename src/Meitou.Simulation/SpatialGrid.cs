@@ -48,14 +48,23 @@ public sealed class SpatialGrid
     {
         int x0 = (int)MathF.Floor((x - radius) / cellSize), x1 = (int)MathF.Floor((x + radius) / cellSize);
         int z0 = (int)MathF.Floor((z - radius) / cellSize), z1 = (int)MathF.Floor((z + radius) / cellSize);
+        // The cells of one column (cx) with cz ascending are adjacent in the sorted entries, so one search per run finds the first and a scan to
+        // the last visits them in the same order as a search per cell would. The packed cz is unsigned, so negative rows sort after the others:
+        // a column crossing cz = 0 is two runs, the negative one first.
         for (int cx = x0; cx <= x1; cx++)
         {
-            for (int cz = z0; cz <= z1; cz++)
+            if (z0 < 0 && z1 >= 0)
             {
-                long key = Pack(cx, cz);
-                for (int i = FirstOf(key); i < count && entries[i].Cell == key; i++) visit(entries[i].Slot, ref state);
+                Run(Pack(cx, z0), Pack(cx, -1), ref state, visit);
+                Run(Pack(cx, 0), Pack(cx, z1), ref state, visit);
             }
+            else Run(Pack(cx, z0), Pack(cx, z1), ref state, visit);
         }
+    }
+
+    void Run<TState>(long first, long last, ref TState state, QueryVisitor<TState> visit)
+    {
+        for (int i = FirstOf(first); i < count && entries[i].Cell <= last; i++) visit(entries[i].Slot, ref state);
     }
 
     public delegate void QueryVisitor<TState>(int slot, ref TState state);

@@ -1,147 +1,95 @@
 # Game data overview
 
-Examined 2026-10-04 on the Steam install of Kenshi.
-
 ## Install layout
 
-| Path | Contents |
-| --- | --- |
-| `kenshi_x64.exe` | The engine (Ogre 3D, MyGUI, PhysX 2.x, Havok, Wwise, OIS, Steamworks) |
-| `fcs.def`, `fcs_enums.def`, `fcs_layout.def`, `fcs_theme.def` | Schema of the game-data records, used by the editor |
-| `forgotten construction set.exe` | The official mod editor ("FCS") |
-| `resources.cfg` | Ogre resource search folders |
-| `Plugins_x64.cfg` | Ogre plugins: D3D11 render system, ParticleUniverse, Terrain |
-| `data/` | All base-game content |
-| `mods/` | Mods, one folder per mod |
-| `save/` | Legacy save location (`settings.cfg` `User save location=0`); by default saves live in `%LOCALAPPDATA%\kenshi\save\` ([save.md](save.md)) |
-
-## Three layers of content
-
-1. **Game records**: `data/*.base`, `data/*.mod`. Every item, character, faction, dialogue line,
-   building, AI package, research entry... One binary format, see [fcs-mod.md](fcs-mod.md).
-2. **Art assets**: meshes, skeletons, textures, materials, shaders, GUI, particles, audio. Found by
-   file name through Ogre's resource folders.
-3. **World data**: terrain maps, zones, navmesh, global pathing. Mostly not analyzed yet.
+**Observed:** Steam Kenshi install, 2026-10-04. `data/` contains records, art and world data;
+`mods/` contains local mods. `fcs.def`, `fcs_enums.def`, `fcs_layout.def`, `fcs_theme.def`
+define editor schemas. `resources.cfg` supplies Ogre search folders; `Plugins_x64.cfg` loads
+D3D11, ParticleUniverse and Terrain. Engine stack: Ogre, MyGUI, PhysX 2.x, Havok, Wwise, OIS,
+Steamworks. Saves use `%LOCALAPPDATA%\kenshi\save\` unless `User save location=0` selects legacy
+`save/`; see [save.md](save.md).
 
 ## Load order
 
-| File | Format | Records | Dependencies |
-| --- | --- | ---: | --- |
-| `gamedata.base` | 16 | 9,399 | none (references `Newwworld.mod`) |
-| `Newwworld.mod` | 16 | 2,511 | `gamedata.base` |
-| `Dialogue.mod` | 17 | 39,077 | `gamedata.base,Newwworld.mod` (references `rebirth.mod`) |
-| `rebirth.mod` | 17 | 8,571 | `gamedata.base,Newwworld.mod,Dialogue.mod` |
+**Verified:** headers and decompiled Kenshi loader (`FUN_14086ab20`, `FUN_1408693a0`,
+`FUN_140870ae0`), except observations explicitly marked below.
 
-The table is Verified from the file headers. Base content and mods use the same format, so a mod is
-just another layer on top; how layers merge is in [fcs-mod.md](fcs-mod.md#merging). The order below
-is the **game's** (Verified by decompiling `kenshi_x64.exe`; addresses are functions in the current
-Steam build). The editor differs: FCS `InheritFiles` uses the fixed list `gamedata.base,
-Newwworld.mod, Dialogue.mod, coltontown.mod, Nizu.mod, Mohamad.mod, rebirth.mod` and also looks for a
-`mods.cfg` entry as `data/<name>`; the game does neither.
+1. Core files, exactly `data/gamedata.base`, `data/Newwworld.mod`, `data/Dialogue.mod`,
+   `data/rebirth.mod`. Types 16,16,17,17; record counts 9,399/2,511/39,077/8,571. Each header
+   depends on preceding files; base references Newwworld, Dialogue references rebirth.
+   No scan; failed core logs an error and continues. Core list is initialized only if
+   `data/mods.cfg` exists or can be created (missing file is created empty).
+2. Core language `.translation`, same record format.
+3. Mods in `data/mods.cfg` order, then all mod translations (`<folder>/locale/...`). Header
+   dependencies do not affect runtime order. Unopenable/invalid mods are skipped and collected
+   in one ignored-files dialog, workshop entries marked `(*)`.
 
-1. **Core files**, a fixed list (`FUN_14086ab20`): `data/gamedata.base`, `data/Newwworld.mod`,
-   `data/Dialogue.mod`, `data/rebirth.mod`, in that order. No directory scan, no `*.base` search.
-   A core file that fails to load shows "Failed to load the core '<file>' file" and loading goes on.
-   (Quirk: the list is only set up if `data/mods.cfg` exists or can be created; the game creates it
-   empty when missing.)
-2. **Core translation**: a `.translation` file for the chosen language (same format; see
-   [fcs-mod.md](fcs-mod.md#game-loader)).
-3. **Mods, in `data/mods.cfg` order** (read by `FUN_1408693a0`, applied by `FUN_140870ae0`):
-   - Text file, one entry per line (CRLF fine: opened in text mode; lines up to 999 chars; empty lines
-     skipped; **no trimming**, so trailing spaces break an entry).
-   - Lines starting with `#`, `/` or `;` are comments.
-   - The part after the last `.` must be exactly `mod` (case-sensitive), else the line is ignored.
-     The rest is the mod's name, e.g. `MyMod.mod` → `MyMod`.
-   - Names `Newwworld`, `Dialogue`, `rebirth` are ignored (already loaded as core files);
-     `gamedata.base` is ignored by the extension rule.
-   - The name is looked up, **case-sensitively**, among the mods found on disk (next list). Not found:
-     logs `[Mods] Mod '<name>' not found.` and skips it. A name listed twice loads once, at its first
-     position.
-   - Dependencies in the mod headers are **not** checked or used for ordering at load time.
-4. **Mod translations** (`<mod folder>/locale/...`), after all mods.
+`mods.cfg`: text-mode lines up to 999 characters, CRLF accepted, empty lines skipped, **no
+trimming**. First character `#`, `/`, `;` means comment. Suffix after last dot must equal
+case-sensitive `mod`; preceding text is the name. Ignore Newwworld/Dialogue/rebirth; `.base`
+fails extension check. Names resolve case-sensitively; missing names log and skip, duplicates
+load once at their first position. Merge rules: [fcs-mod.md](fcs-mod.md#merging).
 
-**Where mods are found** (`FUN_14086f7a0`, run when the launcher window opens, `FUN_140127890`), into
-one table keyed by name:
+Discovery (`FUN_14086f7a0`, launcher `FUN_140127890`) uses one name-keyed table:
 
-- **Steam workshop** first (only when Steam is running): for each subscribed item, Steam's install
-  folder for it (`ISteamUGC` subscribed items + install info; Observed in this install:
-  `steamapps/workshop/content/233860/<item id>/`). The mod is the first file with extension exactly
-  `.mod` in the folder listing (sorted; files like `X.mod.bak v1` don't count); its name is the file
-  name without `.mod`, so the folder name (the item id) doesn't matter.
-- **`mods/` folder** second: each subfolder `D` (sorted) that contains `mods/D/D.mod` is mod `D`. A
-  local mod **replaces** a workshop mod with the same name.
-- Nothing else: a `.mod` in `data/` other than the core files is never loaded.
+- Steam running: subscribed items via `ISteamUGC` install info; first sorted file ending exactly
+  `.mod` supplies its filename stem as name. **Observed** location:
+  `steamapps/workshop/content/233860/<item id>/`; item folder name is irrelevant.
+- Local sorted subfolders D containing `mods/D/D.mod`, replacing workshop entries of the same
+  name. Other `.mod` files in `data/` are not discovered.
 
-`Meitou.Data.LoadOrder` follows these rules, except that it can't ask Steam for the subscribed items:
-it takes every downloaded item in `steamapps/workshop/content/233860/` of the install's Steam library
-(`GameInstall.WorkshopDirectory`), in folder-name order.
+**Meitou difference:** `LoadOrder` cannot query subscriptions; it scans every downloaded item
+in `GameInstall.WorkshopDirectory`, in folder-name order. Each loaded mod retains its folder
+for art, translations and leveldata.
 
-Each mod remembers its folder (used for its translation, its art and its `leveldata/`). A mod that
-can't be opened or has an invalid file type is skipped and listed in one "Mod error(s) (Ignored
-files)" dialog (workshop mods are marked `(*)`); the rest still load.
+**Verified** launcher (`FUN_140125df0`, save `FUN_140120bd0`): active entries first in cfg order,
+remaining mods dependency-sorted; unknown dependency names dropped, cycles omitted (saving
+therefore drops them). Only type-17 headers are read for display (`FUN_1406be050`); missing
+references/dependencies warn without blocking. `data/__mods.list` remembers names without
+extensions; newly found names start enabled. Rewritten with visible names; without Steam old
+missing names remain. **Observed:** beyond 1000 entries it restarts. Save writes enabled
+`<name>.mod` in displayed order.
 
-**The launcher** (Mods tab, `FUN_140125df0`; saving in `FUN_140120bd0`) is what writes `mods.cfg`:
-- It shows all found mods: those active in `mods.cfg` first in that order, then the rest sorted so
-  that a mod comes after the mods it depends on (header dependencies whose names aren't found are
-  dropped from the sort; mods in a dependency cycle are left out of the list, so saving drops them
-  from `mods.cfg`). It reads the mod
-  headers for display (`FUN_1406be050`; only for type-17 files) and marks dependencies or references
-  that aren't found as "Missing mod!". That is a warning only.
-- `data/__mods.list` (launcher-only): every mod name the launcher has seen, one per line, no
-  extension. A found mod **not** in it is new and starts **enabled**. The launcher rewrites it with
-  the names it sees (without Steam it also keeps old names it no longer finds; Observed quirk: past
-  1000 entries it starts over).
-- On save, `mods.cfg` gets `<name>.mod` for each enabled mod, in the displayed order.
+FCS differs: `InheritFiles` fixes gamedata.base, Newwworld.mod, Dialogue.mod, coltontown.mod,
+Nizu.mod, Mohamad.mod, rebirth.mod and also searches cfg entries under `data/`.
 
-`.info` files (XML `ModData`: id, mod name, tags, visibility, lastUpdate; e.g. `data/_rebirth.info`,
-`_<name>.info` next to workshop mods) hold workshop metadata. The game never opens them (Observed:
-no defined `.info` string in the executable); the resource scan skips files starting with `_`.
+**Observed:** `.info` XML `ModData` stores id/name/tags/visibility/lastUpdate; no defined `.info`
+string in the engine. Resource scan skips `_`-prefixed files.
 
 ## Resource lookup and art overrides (Observed)
 
-`resources.cfg` lists ~100 `FileSystem=./data/...` folders in one `[General]` group. Ogre finds
-resources by **file name only** across all of them, so names must be unique. Per `mods/readme.txt`,
-a mod replaces any art file by shipping a file with the same name under
-`mods/<name>/<same relative path>`. Exact precedence (relative path vs. bare name, several mods
-overriding the same file) is **Unknown** and needs testing.
+`resources.cfg` lists about 100 FileSystem folders in General. Ogre resolves bare filenames
+across folders; names must be unique. `mods/readme.txt` describes art replacement under
+`mods/<name>/<same relative path>`. **Unknown:** exact relative-path/bare-name precedence and
+multiple overrides; needs tests.
 
-Verified (decompiled, `FUN_140816d90`, briefly; resources are covered in more depth elsewhere): after
-the `resources.cfg` folders, the game walks the folder of every mod active in `mods.cfg`, in
-`mods.cfg` order, and adds each subfolder that holds files as another `FileSystem` location, in the
-resource group of the matching base folder (default `General`). Skipped: `leveldata`,
-`newland/leveldata`, `locale` and translation folders. The mod's own folder is added only if it holds
-files other than the `.mod`, `.translation` and `_`-prefixed files (`_<name>.info`, `_<name>.img`).
+**Verified** `FUN_140816d90`: after base folders, walk active mods in cfg order; add subfolders
+holding files to matching base resource group, default General. Skip `leveldata`,
+`newland/leveldata`, `locale`, translation folders. Add mod root only for files other than
+`.mod`, `.translation`, `_`-prefixed metadata/images.
 
 ## Format inventory
 
-Counts are files under `data/`.
+**Observed** counts under `data/`; confidence and detailed verification live in each reference.
 
-| Format | Count | Origin | Status |
-| --- | ---: | --- | --- |
-| `.base`, `.mod` | 4 | FCS game data | **Verified** layout, see [fcs-mod.md](fcs-mod.md) |
-| `.mesh` | 3277 | Ogre 2.0 (v1 meshes) | **Verified**: all parse; versions 1.100 / 1.8 / 1.41. See [ogre-mesh.md](ogre-mesh.md) |
-| `.skeleton` | 365 | Ogre | **Verified**: 364 parse (v1.80 / v1.10), one is empty. See [ogre-skeleton.md](ogre-skeleton.md) |
-| `.hkt` | 3995 | Havok | Header **Verified**: binary tagfile, magic `1E0DB0CA CEFA11D0`, SDK `hk_2014.2.0-r1`, root `hkRootLevelContainer`. Animations and navmesh tiles (`newland/land/navtiles/tile*.hkt`) |
-| `.material`, `.program` | 181 | Ogre scripts | **Verified**: all 181 compile. See [ogre-material.md](ogre-material.md) |
-| `.compositor`, `.hlsl`, `.vert`, `.frag` | ~90 | Ogre compositors / shaders | Not analyzed |
-| `.dds`, `.png`, `.tga` | ~3900 | Textures | Standard formats |
-| `.zone` | 701 | World cells, `leveldata/zone.X.Y.zone` | **Verified**: FCS records, file types 15/16 (legacy 10/13 in `data/leveldata/`) plus an optional trailer. See [zones.md](zones.md) |
-| `.level` | 14 | Level data | FCS records, file type 15 (no header): first bytes Observed, and the game loads `newland/leveldata/[<core file>/]leveldata.level` with the same loader (Verified, `FUN_140870ae0`). Towns, roads: see [zones.md](zones.md) |
-| `.path` | 1 | `globalPathing.path`, world pathfinding grid | Not analyzed |
-| `.raw` | 256 | Legacy heightmap tiles (`land/grasssplits`) | **Verified**: 257² uint16 tiles of an older 4097² world, not the current one. See [terrain.md](terrain.md) |
-| `.tif` | 1 | `newland/land/fullmap.tif`, the heightmap | **Verified**: 16385² uint16, height = raw × 9800 / 65535. See [terrain.md](terrain.md) |
-| `.dat` | 3 | `features.dat` (map-feature placements), `fogfeatures.dat`, `blendinfo.dat` | `features.dat` **Verified**, see [zones.md](zones.md); others not decoded |
-| `.xml` | 1158 | GUI, config, and 1,125 PhysX NxuStream2 collision files | Collision **Verified**: see [collision.md](collision.md); GUI not analyzed |
-| `.bin` | 862 | Binary NxuStream collision (the game's conversion of a collision `.xml`, scale baked in) | Header **Verified**, see [collision.md](collision.md) |
-| `.layout` | 53 | MyGUI | Not analyzed |
-| `.pu` | 93 | ParticleUniverse scripts | Not analyzed |
-| `.bnk` | 24 | Wwise sound banks: all audio, embedded (no loose `.wem`) | Sections, ids and the version 112 hierarchy **Verified**, see [wwise-bnk.md](wwise-bnk.md); Wwise Vorbis audio decoded (codebooks read from the exe) |
-| `.phs`, `.bod2`, `.body`, `.PxProj` | ~200 | Physics / ragdoll; `.PxProj` = 3ds Max PhysX plug-in projects (not loaded) | `.phs` see [phs.md](phs.md); `.PxProj` see [collision.md](collision.md); rest not analyzed |
+| Files | Reference / known boundary |
+|---|---|
+| 4 `.base`/`.mod` | [FCS records](fcs-mod.md) |
+| 3277 `.mesh`, 365 `.skeleton` (one empty) | [Mesh](ogre-mesh.md), [skeleton](ogre-skeleton.md) |
+| 3995 `.hkt` | **Verified** tagfile magic `1E0DB0CA CEFA11D0`, SDK `hk_2014.2.0-r1`, root `hkRootLevelContainer`; animations and [navtiles](../game/pathfinding.md) |
+| 181 `.material`/`.program`, ~90 shader/compositor files | [Materials](ogre-material.md), [runtime](runtime-materials.md), [post](post-processing.md) |
+| ~3900 `.dds`/`.png`/`.tga` | [DDS](dds.md); standard images |
+| 701 `.zone`, 14 `.level` | [Zones](zones.md); `.level` type15/headerless; native level paths `newland/leveldata/[<core file>/]leveldata.level` (**Verified** FUN_140870ae0) |
+| 1 `globalPathing.path` | Unknown layout |
+| 256 `.raw`, 1 `fullmap.tif` | [Terrain](terrain.md); legacy257² uint16/4097² world; current16385², height=raw*9800/65535 |
+| 3 `.dat` | [Features](zones.md), [fogfeatures](fogfeatures.md), [blendinfo](terrain.md) |
+| 1158 `.xml` (1125 collisions), 862 `.bin` | [Collision](collision.md), [MyGUI](mygui.md) |
+| 53 `.layout`, 93 `.pu`, 24 `.bnk` | [MyGUI](mygui.md), [particles](particle-universe.md), [Wwise banks](wwise-bnk.md) (**Verified** v112 hierarchy; Vorbis decoded) |
+| ~200 `.phs`/`.bod2`/`.body`/`.PxProj` | [PHS](phs.md), [bodies](../characters.md); `.PxProj` are Max projects, not loaded |
 
 ## World data (Observed, folder names only)
 
-- `newland/land/`: `fullmap.tif`, `biomemap.png`, `blendmap.png`, `areasmap.tga`, `blendinfo.dat`,
-  `features.dat`, `fogfeatures.dat`, `navtiles/`, `overlaymaps/`, `textures/`.
-- `newland/leveldata.level`, `newland/Assets/` (rocks, things, buildings, textures).
-- `data/leveldata/*.zone` grid cells, `data/leveldata/platoon/`.
-- `data/land/` (`grasssplits`, `navtiles`, `overlaymaps`, `textures`): older or shared world data.
+`newland/land/`: fullmap.tif, biomemap.png, blendmap.png, areasmap.tga, blendinfo.dat,
+features.dat, fogfeatures.dat, navtiles/, overlaymaps/, textures/. Also newland/leveldata.level,
+newland/Assets/, data/leveldata/*.zone and platoon/. `data/land/` grasssplits/navtiles/overlaymaps/
+textures hold older or shared world data.

@@ -34,8 +34,8 @@ public sealed class GameClock
         DaysPerYear = daysPerYear;
     }
 
-    public double StartHour { get; }
-    public long StartDay { get; }
+    public double StartHour { get; private set; }
+    public long StartDay { get; private set; }
     public double Sunrise { get; }
     public double Sunset { get; }
     public int DaysPerYear { get; }
@@ -97,6 +97,21 @@ public sealed class GameClock
         double rise = (hour - Sunrise) / RampHours, set = (Sunset - hour) / RampHours;
         return Math.Clamp(Math.Min(rise, set), 0, 1);
     }
+
+    /// <summary>
+    /// Starts the clock again at a day and a time of day (a loaded save: the day, hour and minute its CAMERA record holds): the new start, game seconds and
+    /// <see cref="HoursSinceStart"/> back at 0 (they count the session, not the game). The time lands a hair after the minute (3.6 ms of game time),
+    /// so <see cref="Minute"/> reads back what was set and not the minute before.
+    /// </summary>
+    public void SetTime(long day, double hourOfDay)
+    {
+        StartDay = day;
+        StartHour = ((hourOfDay % 24) + 24) % 24 + 1e-6;
+        GameSeconds = 0;
+    }
+
+    /// <summary>Keeps the time of day at <paramref name="hour"/> while game time runs on (<see cref="HoursSinceStart"/> and what animates by it): the trailer duel's still sun.</summary>
+    public void HoldHourOfDay(double hour) => StartHour = ((hour % 24) + 24) % 24 - HoursSinceStart;
 
     /// <summary>Sets the time of day, keeping the day count.</summary>
     public void SetHourOfDay(double hour)

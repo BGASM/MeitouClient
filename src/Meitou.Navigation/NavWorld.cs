@@ -131,6 +131,31 @@ public sealed class NavWorld
         return meshes[slot].TryHighestAt(x, z, out height);
     }
 
+    /// <summary>The walkable collision surface of the zone at (x, z) nearest to <paramref name="y"/> within <paramref name="range"/> (<see cref="NavSurfaces"/>).</summary>
+    public bool TrySurfaceNear(float x, float z, float y, float range, out float height)
+    {
+        height = y;
+        return slots.TryGetValue(WorldLayout.ZoneOf(x, z), out int slot) && meshes[slot].Surfaces is { } s && s.TryNear(x, z, y, range, out height);
+    }
+
+    /// <summary>The terrain height at (x, z) from the zone's own heightmap samples (<see cref="ZoneNavMesh.Terrain"/>); false where the zone has none.</summary>
+    public bool TryTerrain(float x, float z, out float height)
+    {
+        height = 0;
+        return slots.TryGetValue(WorldLayout.ZoneOf(x, z), out int slot) && meshes[slot].Terrain is { } t && t.TryHeightAt(x, z, out height);
+    }
+
+    /// <summary>Appends the mesh heights of every walkable surface at (x, z) (<see cref="ZoneNavMesh.HeightsAt"/>).</summary>
+    /// <param name="nearY">Off the mesh but within <paramref name="edge"/> of a polygon (a walker brushing a corner of its path), that polygon's height at
+    /// its nearest point counts, picked by this height.</param>
+    public void HeightsAt(float x, float z, List<float> heights, float nearY = 0, float edge = 0)
+    {
+        if (!slots.TryGetValue(WorldLayout.ZoneOf(x, z), out int slot)) return;
+        var m = meshes[slot];
+        m.HeightsAt(x, z, heights);
+        if (heights.Count == 0 && edge > 0 && m.Nearest(x, nearY, z, edge, out _) is var p and >= 0) heights.Add(ClosestPoint(m, p, new Vector3(x, nearY, z)).Y);
+    }
+
     /// <summary>The polygon under or nearest to the point (nearest within <paramref name="maxDistance"/> on the XZ plane, height as the tie-break).</summary>
     public bool TryFindPolygon(Vector3 p, float maxDistance, out NavRef polygon, out Vector3 snapped)
     {

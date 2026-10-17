@@ -41,7 +41,7 @@ sealed class PassMeter : IDisposable
     readonly VulkanDisplay display;
     readonly GpuContext ctx;
     readonly int skip;
-    readonly string tag;
+    const string tag = "run";
     readonly Dictionary<string, Row> rows = [];
     readonly List<Row> order = [];
 
@@ -73,7 +73,6 @@ sealed class PassMeter : IDisposable
         this.display = display;
         ctx = display.Context;
         skip = int.TryParse(Environment.GetEnvironmentVariable("MEITOU_PASS_STATS_SKIP"), out int s) ? s : 60;
-        tag = Environment.GetEnvironmentVariable("MEITOU_PASS_TAG") ?? "run";
         StageClock.OnStart = OnStart;
         StageClock.OnClose = OnClose;
     }
@@ -304,38 +303,6 @@ sealed class PassMeter : IDisposable
         foreach (var r in order) Csv(r);
         if (between.Cpu > 0) Csv(between);
         output.WriteLine($"PASSFRAME|{tag}|{measuredFrames}|{frameCpu.Average():0.####}|{sorted[sorted.Count / 2]:0.####}|{sorted[Math.Min((int)(sorted.Count * 0.95), sorted.Count - 1)]:0.####}|{gpuFrame:0.####}");
-    }
-
-    /// <summary>
-    /// <c>MEITOU_VK_MICRO=1</c>: what one <c>vkCmd*</c> call costs the render thread, from a loop of 100 000 recorded into a native segment of the
-    /// open frame (outside a rendering: state-setting commands only): through Silk.NET's wrapper and straight through the driver's function
-    /// pointer, against an empty loop. The difference is Silk.NET's dispatch; the raw call is the driver's recording cost.
-    /// </summary>
-    public static unsafe void VkCallMicro(GpuContext ctx, TextWriter output)
-    {
-        var vk = ctx.Device.Vk;
-        var dev = ctx.Device.Device;
-        const int n = 100_000;
-        var list = ctx.BeginNative("vkCmd micro");
-        var cb = list.Handle;
-        var rect = new Silk.NET.Vulkan.Rect2D(new Silk.NET.Vulkan.Offset2D(0, 0), new Silk.NET.Vulkan.Extent2D(800, 600));
-        var scissor = (delegate* unmanaged[Cdecl]<Silk.NET.Vulkan.CommandBuffer, uint, uint, Silk.NET.Vulkan.Rect2D*, void>)vk.GetDeviceProcAddr(dev, "vkCmdSetScissor").Handle;
-        var cull = (delegate* unmanaged[Cdecl]<Silk.NET.Vulkan.CommandBuffer, Silk.NET.Vulkan.CullModeFlags, void>)vk.GetDeviceProcAddr(dev, "vkCmdSetCullMode").Handle;
-        double Ns(long ticks) => ticks * TickMs * 1e6 / n;
-        var r = rect;
-        long t0, empty = 0, silkScissor = 0, rawScissor = 0, silkCull = 0, rawCull = 0;
-        for (int pass = 0; pass < 2; pass++)   // the second pass is the one kept (warm)
-        {
-            t0 = Stopwatch.GetTimestamp(); for (int i = 0; i < n; i++) GC.KeepAlive(null); empty = Stopwatch.GetTimestamp() - t0;
-            t0 = Stopwatch.GetTimestamp(); for (int i = 0; i < n; i++) vk.CmdSetScissor(cb, 0, 1, &r); silkScissor = Stopwatch.GetTimestamp() - t0;
-            t0 = Stopwatch.GetTimestamp(); for (int i = 0; i < n; i++) scissor(cb, 0, 1, &r); rawScissor = Stopwatch.GetTimestamp() - t0;
-            t0 = Stopwatch.GetTimestamp(); for (int i = 0; i < n; i++) vk.CmdSetCullMode(cb, Silk.NET.Vulkan.CullModeFlags.BackBit); silkCull = Stopwatch.GetTimestamp() - t0;
-            t0 = Stopwatch.GetTimestamp(); for (int i = 0; i < n; i++) cull(cb, Silk.NET.Vulkan.CullModeFlags.BackBit); rawCull = Stopwatch.GetTimestamp() - t0;
-        }
-        list.Invalidate();   // the segment's own state tracking knows nothing of the raw calls
-        ctx.EndNative(list);
-        output.WriteLine($"micro     vkCmd call, ns each over {n} calls (empty loop {Ns(empty):0.0}): vkCmdSetScissor Silk.NET {Ns(silkScissor):0.0}, raw pointer {Ns(rawScissor):0.0}; vkCmdSetCullMode Silk.NET {Ns(silkCull):0.0}, raw {Ns(rawCull):0.0}");
-        output.WriteLine($"MICROCSV|{Ns(empty):0.0}|{Ns(silkScissor):0.0}|{Ns(rawScissor):0.0}|{Ns(silkCull):0.0}|{Ns(rawCull):0.0}");
     }
 
     public void Dispose() { StageClock.OnStart = null; StageClock.OnClose = null; }

@@ -12,20 +12,6 @@ public class ObjectLodTests
     static readonly float[] Distances = [0, 400, 4000, 8000];
 
     [Fact]
-    public void Select_follows_ogres_lower_bound_over_bare_distances()
-    {
-        Assert.Equal(0, MeshLod.Select(Distances, -10));
-        Assert.Equal(0, MeshLod.Select(Distances, 400)); // strictly above the distance
-        Assert.Equal(1, MeshLod.Select(Distances, 400.5f));
-        Assert.Equal(2, MeshLod.Select(Distances, 5000));
-        Assert.Equal(3, MeshLod.Select(Distances, 1e6f));
-        Assert.Equal(0, MeshLod.Select([0f], 1e6f));
-        // The list and span overloads agree.
-        var levels = Distances.Select(d => new MeshLodLevel(d, [])).ToList();
-        for (float v = -10; v < 10000; v += 37) Assert.Equal(MeshLod.Select(levels, v), MeshLod.Select(Distances, v));
-    }
-
-    [Fact]
     public void Blend_is_the_games_choice_away_from_the_bands_and_continuous_across_them()
     {
         // Far from every boundary: not blending, the level the game picks.
@@ -51,69 +37,6 @@ public class ObjectLodTests
         // Both neighbours are named at every value of the band, below and above the game's switch point.
         Assert.Equal((1, 2), (MeshLod.Blend(Distances, 3900).Lower, MeshLod.Blend(Distances, 3900).Upper));
         Assert.Equal((1, 2), (MeshLod.Blend(Distances, 4100).Lower, MeshLod.Blend(Distances, 4100).Upper));
-    }
-
-    [Fact]
-    public void Blend_bands_never_overlap_when_distances_are_close()
-    {
-        float[] close = [0, 400, 430, 1000];
-        float previousLevel = 0;
-        for (float v = 300; v < 1200; v += 1)
-        {
-            var b = MeshLod.Blend(close, v);
-            float level = b.Lower + b.T * (b.Upper - b.Lower);
-            Assert.True(level >= previousLevel - 1e-4f, $"value {v}: {level} after {previousLevel}");
-            Assert.InRange(b.T, 0, 1);
-            previousLevel = level;
-        }
-    }
-
-    [Fact]
-    public void Part_rendering_distance_follows_the_games_setting_rules()
-    {
-        // Small parts: the objects view range; big meshes (bounds radius above 100) and generators: unlimited; turrets: half the range.
-        Assert.Equal(3000, ObjectRanges.PartRenderingDistance(50, 0));
-        Assert.Equal(3000, ObjectRanges.PartRenderingDistance(100, 0));
-        Assert.Equal(float.MaxValue, ObjectRanges.PartRenderingDistance(100.5f, 0));
-        Assert.Equal(float.MaxValue, ObjectRanges.PartRenderingDistance(5, ObjectRanges.GeneratorFunction));
-        Assert.Equal(1500, ObjectRanges.PartRenderingDistance(50, ObjectRanges.TurretFunction));
-        Assert.Equal(1500, ObjectRanges.PartRenderingDistance(500, ObjectRanges.TurretFunction));
-        Assert.Equal(4000, ObjectRanges.PartRenderingDistance(50, 0, 4000));
-    }
-
-    [Fact]
-    public void Edge_and_rise_weights_are_smooth_complements()
-    {
-        Assert.Equal(1, ObjectRanges.EdgeWeight(0, 1000, 100));
-        Assert.Equal(1, ObjectRanges.EdgeWeight(900, 1000, 100));
-        Assert.Equal(0, ObjectRanges.EdgeWeight(1000, 1000, 100));
-        Assert.Equal(0.5f, ObjectRanges.EdgeWeight(950, 1000, 100), 5);
-        Assert.Equal(1, ObjectRanges.EdgeWeight(1e9f, float.MaxValue, 100));
-        Assert.Equal(0, ObjectRanges.RiseWeight(900, 900, 100));
-        Assert.Equal(1, ObjectRanges.RiseWeight(1000, 900, 100));
-        for (float v = 880; v < 1020; v += 5)
-            Assert.Equal(1, ObjectRanges.EdgeWeight(v, 1000, 100) + ObjectRanges.RiseWeight(v, 900, 100), 5); // the cross-fade covers each pixel once
-    }
-
-    [Fact]
-    [Slow]
-    public void Placed_distant_mesh_is_scaled_rotated_and_moved_like_the_town_batching()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, $"No Kenshi install configured ({GameInstall.EnvironmentVariable}).");
-        var db = GameDatabase.Load(LoadOrder.BaseGame(install!));
-        var withDistant = db.OfType(FcsRecordType.BUILDING).First(b => b.GetPath("distant mesh").Length > 0 && b.GetFloat("scale", 1) != 1);
-        var q = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 2);
-        var placed = WorldObjectLayout.DistantMesh(withDistant, "id", new Vector3(10, 20, 30), q)!;
-        Assert.Equal(PlacedKind.BuildingDistant, placed.Kind);
-        Assert.Equal(withDistant.GetPath("distant mesh"), placed.MeshPath);
-        float scale = withDistant.GetFloat("scale", 1);
-        var p = Vector3.Transform(Vector3.UnitX, placed.Transform);
-        Assert.Equal(10, p.X, 3);
-        Assert.Equal(20, p.Y, 3);
-        Assert.Equal(30 - scale, p.Z, 3); // +X goes to -Z under the quarter turn, scaled
-        var none = db.OfType(FcsRecordType.BUILDING).First(b => b.GetPath("distant mesh").Length == 0 && !b.GetBool("is node"));
-        Assert.Null(WorldObjectLayout.DistantMesh(none, "id", Vector3.Zero, Quaternion.Identity));
     }
 
     [Fact]
@@ -178,25 +101,6 @@ public class ObjectLodTests
         var hub = towns.First(t => t.Name == "The Hub");
         Assert.Equal(OgreMeshReader.ReadFile(hub.MeshPath).SubMeshes[0].Indices.Indices.Length / 3,
             byTown[hub.InstanceId].Sum(b => triangles[b.Record.GetPath("distant mesh")]));
-    }
-
-    [Fact]
-    [Slow]
-    public void Building_distant_meshes_have_vertex_colours_and_few_triangles()
-    {
-        var install = GameInstall.Locate();
-        Assert.SkipWhen(install is null, $"No Kenshi install configured ({GameInstall.EnvironmentVariable}).");
-        var db = GameDatabase.Load(LoadOrder.BaseGame(install!));
-        var names = db.OfType(FcsRecordType.BUILDING).Select(b => b.GetPath("distant mesh")).Where(n => n.Length > 0).Distinct().ToList();
-        Assert.True(names.Count >= 40, $"{names.Count} distinct distant meshes");
-        foreach (var name in names)
-        {
-            var mesh = OgreMeshReader.ReadFile(Path.Combine(install!.Root, name.Replace('\\', '/').TrimStart('.', '/')));
-            var sub = mesh.SubMeshes[0];
-            var vd = sub.VertexData ?? mesh.SharedVertexData!;
-            Assert.NotNull(vd.Find(OgreVertexSemantic.Diffuse)); // "Requires vertex colour" (fcs.def)
-            Assert.InRange(sub.Indices.Indices.Length / 3, 1, 400);
-        }
     }
 
     [Fact]

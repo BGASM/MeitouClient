@@ -49,6 +49,8 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
         /// <summary>Unresolved parts beyond their part distance, out of <see cref="Unresolved"/> until the eye comes near (<see cref="Scan"/>), and the largest of their distances.</summary>
         public List<Instance> Parked { get; } = [];
         public float ParkedLimit;
+        /// <summary>The indoor volumes of the zone's buildings (<see cref="ZoneObjects.Interiors"/>).</summary>
+        public IReadOnlyList<InteriorVolume> Interiors = [];
     }
 
     /// <summary>Zones laid out at once.</summary>
@@ -66,6 +68,33 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
     /// <summary>No zone is laid out until the landmarks are collected (<see cref="SetLandmarks"/>), or a zone laid out before would hold them too.</summary>
     public bool WaitForLandmarks { get; set; }
 
+    /// <summary>
+    /// Presentation-only placements added to the zones they stand in (the Meitou title's staging). Setting or clearing it lays those zones out again;
+    /// null, the world as the game places it, in play.
+    /// </summary>
+    public IReadOnlyList<PlacedMesh>? Staged
+    {
+        get => staged;
+        set
+        {
+            var touched = (staged ?? []).Concat(value ?? []).Select(ZoneOf).Distinct().ToList();
+            staged = value;
+            foreach (var coordinate in touched)
+            {
+                zones.Remove(coordinate);
+                jobs.Remove(coordinate);
+                if (!populated.Any(p => p.Coordinate == coordinate))
+                {
+                    var (x, z) = WorldLayout.ZoneOrigin(coordinate);
+                    populated.Add((coordinate, x, z));
+                }
+            }
+        }
+    }
+    IReadOnlyList<PlacedMesh>? staged;
+
+    static ZoneCoordinate ZoneOf(PlacedMesh p) => WorldLayout.ZoneOf(p.Transform.M41, p.Transform.M43);
+
     /// <summary>Makes the landmark pseudo-zone from the collected placements (the render thread, once) and lets the zones be laid out without them.</summary>
     public void SetLandmarks(List<(PlacedMesh Placed, float Radius)> placements)
     {
@@ -79,6 +108,74 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
             zone.Real.Add(inst);
         }
         LandmarkZone = zone;
+    }
+
+    // ---- runtime buildings (WorldObjects.AddRuntime / RemoveRuntime; docs/simulation.md "Buildings", host seam) ----
+
+    readonly List<(ZoneCoordinate Zone, string Id, Task<ZoneObjects> Job)> runtimeJobs = [];
+
+    /// <summary>
+    /// A runtime placement was added to <see cref="WorldObjects"/>: a zone laid out later includes it; a zone already laid out gets only its instances (laid
+    /// out on a worker, taken in by <see cref="Update"/>), so the rest of the zone does not flicker. A zone still being laid out is laid out again.
+    /// </summary>
+    public void AddRuntime(BuildingPlacement placement)
+    {
+        var zone = placement.Zone;
+        EnsurePopulated(zone);
+        if (!zones.ContainsKey(zone) && !jobs.ContainsKey(zone)) return;
+        if (jobs.ContainsKey(zone) || fills.Any(f => f.Zone.Coordinate == zone)) { Invalidate(zone); return; }
+        runtimeJobs.Add((zone, placement.InstanceId, BackgroundWork.Run(() => objects.BuildRuntime(placement))));
+    }
+
+    /// <summary>A runtime placement was removed from <see cref="WorldObjects"/>: its instances and indoor volume leave the zone.</summary>
+    public void RemoveRuntime(string instanceId, ZoneCoordinate zone)
+    {
+        runtimeJobs.RemoveAll(j => j.Id == instanceId);
+        if (jobs.ContainsKey(zone) || fills.Any(f => f.Zone.Coordinate == zone)) { Invalidate(zone); return; }
+        if (!zones.TryGetValue(zone, out var z)) return;
+        bool Match(Instance i) => i.Placed.PlacementId == instanceId || i.Placed.ParentPlacementId == instanceId;
+        z.Real.RemoveAll(Match);
+        z.Stand.RemoveAll(Match);
+        z.Unresolved.RemoveAll(Match);
+        z.Parked.RemoveAll(Match);
+        z.Interiors = [.. z.Interiors.Where(v => v.PlacementId != instanceId)];
+    }
+
+    void EnsurePopulated(ZoneCoordinate zone)
+    {
+        if (!zone.IsInsideGrid || populated.Any(p => p.Coordinate == zone)) return;
+        var (x, z) = WorldLayout.ZoneOrigin(zone);
+        populated.Add((zone, x, z));
+    }
+
+    void Invalidate(ZoneCoordinate zone)
+    {
+        zones.Remove(zone);
+        jobs.Remove(zone);
+        runtimeJobs.RemoveAll(j => j.Zone == zone);
+        EnsurePopulated(zone);
+    }
+
+    /// <summary>Reloads every zone in <paramref name="coordinates"/> (the placements of a replaced world are gone).</summary>
+    public void Reload(IEnumerable<ZoneCoordinate> coordinates)
+    {
+        foreach (var zone in coordinates) Invalidate(zone);
+    }
+
+    void TakeRuntime()
+    {
+        for (int i = runtimeJobs.Count - 1; i >= 0; i--)
+        {
+            var (zone, id, job) = runtimeJobs[i];
+            if (!job.IsCompleted) continue;
+            runtimeJobs.RemoveAt(i);
+            if (!job.IsCompletedSuccessfully || !objects.HasRuntime(id) || !zones.TryGetValue(zone, out var z)) continue;
+            var laid = job.Result;
+            if (z.Real.Any(inst => inst.Placed.PlacementId == id)) continue;   // the zone's own layout already had it
+            foreach (var item in laid.Items) z.Real.Add(Make(item, stand: false, z));
+            foreach (var item in laid.Stand) z.Stand.Add(Make(item, stand: true, z));
+            if (laid.Interiors.Count > 0) z.Interiors = [.. z.Interiors, .. laid.Interiors];
+        }
     }
 
     readonly Dictionary<ZoneCoordinate, Zone> zones = [];
@@ -106,6 +203,7 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
     /// <summary>Starts laying out the zones within <paramref name="range"/> (nearest first), takes finished ones in, drops far ones.</summary>
     public void Update(Vector3 eye, float range, int maxNew)
     {
+        TakeRuntime();
         int taken = 0;
         foreach (var (coordinate, task) in jobs.ToArray())
         {
@@ -126,10 +224,12 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
         {
             if (jobs.Count >= MaxJobs || Paused || WaitForLandmarks) break;
             var landmarkClass = Landmarks;
+            var extra = staged;
             jobs[coordinate] = BackgroundWork.Run(() =>
             {
                 var laid = objects.BuildZone(coordinate);
                 if (landmarkClass is not null) laid.Items.RemoveAll(landmarkClass.IsLandmark);   // they live in LandmarkZone
+                if (extra is not null) laid.Items.AddRange(extra.Where(p => ZoneOf(p) == coordinate));
                 return laid;
             });
         }
@@ -152,7 +252,7 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
     void Add(ZoneObjects laid)
     {
         var (x0, z0) = WorldLayout.ZoneOrigin(laid.Zone);
-        var zone = new Zone { Coordinate = laid.Zone, X0 = x0, Z0 = z0 };
+        var zone = new Zone { Coordinate = laid.Zone, X0 = x0, Z0 = z0, Interiors = laid.Interiors };
         zones[laid.Zone] = zone;
         fills.Enqueue(new Fill { Zone = zone, Laid = laid });
     }
@@ -178,7 +278,8 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
 
     Instance Make(PlacedMesh p, bool stand, Zone zone)
     {
-        bool terrainMode = p.Kind == PlacedKind.MapFeature && p.Source.GetInt("texture mode") == 2;
+        // A map feature names its texturing "texture mode", a foliage mesh (staged by the Meitou title) "material type"; 2 is TERRAIN in both.
+        bool terrainMode = p.Kind == PlacedKind.MapFeature && p.Source.GetInt(p.Source.Type == Meitou.Data.Fcs.FcsRecordType.FOLIAGE_MESH ? "material type" : "texture mode") == 2;
         var mesh = meshes.Get(p.MeshPath, distant: stand);
         if (terrainMode) mesh.KeepLevelIndices = true;
         var inst = new Instance { Placed = p, Mesh = mesh, Transform = p.Transform, Centre = p.Transform.Translation, TerrainMode = terrainMode, Stand = stand };
@@ -262,9 +363,40 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
     /// distance, as in <see cref="Scan"/>). A landmark's radius is known, so its mesh is asked for once its bounds could be in range, however big it is.
     /// There are a few hundred: the whole list is walked every frame. Returns how many are waiting for a mesh.
     /// </summary>
-    public int ScanLandmarks(Vector3 eye, float reach, Func<Instance, bool> resolve, int maxResolve = int.MaxValue)
+    public int ScanLandmarks(Vector3 eye, float reach, Func<Instance, bool> resolve, int maxResolve = int.MaxValue) =>
+        LandmarkZone is { } zone ? ScanLoose(zone, eye, reach, resolve, maxResolve) : 0;
+
+    /// <summary>
+    /// The pseudo-zone of instances that belong to no zone (the placement ghost): kept for good, never streamed out, scanned every frame by
+    /// <see cref="ScanLoose"/> like the landmarks.
+    /// </summary>
+    public Zone Loose { get; } = new() { Coordinate = new ZoneCoordinate(-2, -2) };
+
+    /// <summary>A new instance in <see cref="Loose"/> (resolved by <see cref="ScanLoose"/> once its mesh is resident).</summary>
+    public Instance MakeLoose(PlacedMesh placed)
     {
-        if (LandmarkZone is not { } zone) return 0;
+        var inst = Make(placed, stand: false, Loose);
+        Loose.Real.Add(inst);
+        return inst;
+    }
+
+    /// <summary>Forgets every loose instance.</summary>
+    public void ClearLoose()
+    {
+        Loose.Real.Clear();
+        Loose.Unresolved.Clear();
+    }
+
+    /// <summary>Forgets one loose instance.</summary>
+    public void DropLoose(Instance inst)
+    {
+        Loose.Real.Remove(inst);
+        Loose.Unresolved.Remove(inst);
+    }
+
+    /// <summary>The scan of <see cref="ScanLandmarks"/> over one pseudo-zone's unresolved instances.</summary>
+    public int ScanLoose(Zone zone, Vector3 eye, float reach, Func<Instance, bool> resolve, int maxResolve = int.MaxValue)
+    {
         int waiting = 0, resolved = 0;
         var list = zone.Unresolved;
         for (int i = list.Count - 1; i >= 0; i--)

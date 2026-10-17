@@ -40,6 +40,13 @@ public sealed class FixedStepClock
     /// <summary>Position between the previous tick (0) and the next one (1, exclusive), for interpolation.</summary>
     public float Alpha { get; private set; }
 
+    /// <summary>Drops the time owed towards the next tick, so the next tick is a whole tick away (a restarted scene that must replay frame for frame).</summary>
+    public void ResetPhase()
+    {
+        accumulated = 0;
+        Alpha = 0;
+    }
+
     /// <summary>Adds real seconds and returns how many ticks to run now.</summary>
     public int Advance(double realSeconds) => Advance(realSeconds, MaxCatchUp);
 

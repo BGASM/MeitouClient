@@ -78,8 +78,8 @@ static partial class GiResolveShaders
     /// <summary>
     /// One texel of the low target per <c>uDiv</c> × <c>uDiv</c> block: the first pixel of the block that takes the probes (its surface flag set),
     /// its position from the depth, its shading normal as the lit fragment wrote it, the probes' irradiance there and the sky's ambient as the
-    /// fragment had it. Out: rgb = (probes − sky) × the GI share × the strength × the haze's transmittance, a = the pixel's view depth (−1:
-    /// nothing in the block takes the probes).
+    /// fragment had it. Out: rgb = (probes − sky) × the GI share × the strength × the haze's transmittance, a = signed view depth (negative:
+    /// interior, positive: exterior, 0: nothing in the block takes the probes).
     /// </summary>
     public static readonly string Resolve = "#version 330 core\n" + AtmosphereShaders.Functions + Reconstruct + $$"""
         in vec2 vUv;
@@ -99,16 +99,18 @@ static partial class GiResolveShaders
                 if ((s.w & 256u) != 0u) { px = q; surface = s; }
             }
             float z = px.x < 0 ? 0.0 : depthAt(px);
-            if (z <= 0.0) { fragColour = vec4(0.0, 0.0, 0.0, -1.0); return; }
+            if (z <= 0.0) { fragColour = vec4(0.0); return; }
             vec3 p = positionAt(px, z);
             vec3 n = giOctDir(vec2(surface.xy) / 65535.0 * 2.0 - 1.0);
             vec3 v = normalize(uGiEye - p);
             vec4 gi = giIrradiance(p, n, v);
             float share = gi.a * uGiParams.y;
             vec3 sky = atmoIrradiance(n) * {{F(1 - KenshiLighting.DielectricSpecular)}} * atmoAmbientMapAt(p).rgb * uAtmoLight.w;
+            bool interior = (surface.w & 512u) != 0u;
+            gi.rgb = giSurfaceIrradiance(gi.rgb, sky, interior);
             // The haze is linear in the colour (colour · T + in-scattering): T from two evaluations, so the added light is hazed as the fragment's was.
             vec3 transmittance = atmoApply(vec3(1.0), uGiEye, p) - atmoApply(vec3(0.0), uGiEye, p);
-            fragColour = vec4((gi.rgb - sky) * share * transmittance, z);
+            fragColour = vec4((gi.rgb - sky) * share * transmittance, interior ? -z : z);
         }
         """;
 
@@ -142,8 +144,8 @@ static partial class GiResolveShaders
             {
                 ivec2 o = ivec2(k & 1, k >> 1);
                 vec4 t = texelFetch(uLow, clamp(i0 + o, ivec2(0), ivec2(uLowSize) - 1), 0);
-                if (t.a <= 0.0) continue;
-                float rel = abs(t.a - z) / z;
+                if (t.a == 0.0 || (t.a < 0.0) != ((surface.w & 512u) != 0u)) continue;
+                float rel = abs(abs(t.a) - z) / z;
                 float weight = (o.x == 1 ? w.x : 1.0 - w.x) * (o.y == 1 ? w.y : 1.0 - w.y) / (rel + 0.01);
                 sum += t.rgb * weight;
                 total += weight;

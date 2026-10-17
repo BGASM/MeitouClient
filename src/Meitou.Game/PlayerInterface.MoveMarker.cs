@@ -1,0 +1,34 @@
+using System.Numerics;
+using Meitou.Rendering;
+
+namespace Meitou.Game;
+
+/// <summary>
+/// The movement marker (docs/game/ui-input.md "Movement marker"): put down where a right click on the ground sends the selection and faded out over
+/// one second of game time. The world renderer draws it (<see cref="MoveMarkerRenderer"/>); this keeps its place and strength.
+/// </summary>
+sealed partial class PlayerInterface
+{
+    /// <summary>The marker's renderer (null: no marker).</summary>
+    public MoveMarkerRenderer? MoveMarker { get; set; }
+    long markerFrame;
+
+    /// <summary>Shows the marker at <paramref name="at"/> at full strength (each move order given on the ground).</summary>
+    void PlaceMarker(Vector3 at)
+    {
+        if (MoveMarker is not { } marker) return;
+        marker.At = at;
+        marker.Strength = 1;
+    }
+
+    /// <summary>Lowers the marker's strength by this frame's game time (0.01 a frame at speed 0, as the original's scaled frame time).</summary>
+    void FadeMarker()
+    {
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+        float frame = markerFrame == 0 ? 0 : (float)System.Diagnostics.Stopwatch.GetElapsedTime(markerFrame, now).TotalSeconds;
+        markerFrame = now;
+        if (MoveMarker is not { Strength: > 0 } marker) return;
+        double speed = session.Simulation.Speed;
+        marker.Strength = MathF.Max(0, marker.Strength - (speed > 0 ? frame * (float)speed : 0.01f));
+    }
+}

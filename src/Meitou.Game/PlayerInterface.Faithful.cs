@@ -1,0 +1,266 @@
+using System.Globalization;
+using System.Numerics;
+using Meitou.Data.Gameplay.Bodies;
+using Meitou.Data.Ui;
+using Meitou.Engine.Input;
+using Meitou.Simulation;
+using Meitou.Ui;
+
+namespace Meitou.Game;
+
+sealed partial class PlayerInterface
+{
+    string selectedStat = ((int)StatsEnumerated.Katanas).ToString(CultureInfo.InvariantCulture);
+    public bool UiCapturesPointer => UiVisible && (faithfulScreens.CapturesPointer || mapDrag is not null || inventoryDrag is not null || tradeDrag is not null || scrollDrag is not null);
+    /// <summary>Keys the host keeps for itself (the sandbox's letters), so the faithful window shortcuts leave them alone.</summary>
+    public HashSet<Key> ReservedKeys { get; } = [];
+    void UpdateMenuPause() => session.Simulation.RequestedPause = settingsOpen || faithfulScreens.HasModal;
+    public bool UiKey(Key key, bool ctrl = false, bool shift = false)
+    {
+        if (!UiVisible) return false;
+        if (key == Meitou.Engine.Input.Key.Escape && CancelInventoryDrag()) return true;
+        if (key == Meitou.Engine.Input.Key.Escape && CloseContextMenu()) return true;
+        if (key == Meitou.Engine.Input.Key.Escape)
+        {
+            if (faithfulScreens.IsOpen("title") && faithfulScreens.OpenScreens.Count == 1) return true;
+            if (EditorOpen && faithfulScreens.OpenScreens[^1] == "editor") { EditorEscape(); UpdateMenuPause(); return true; }
+            // Esc presses the last button of the top message box (Return the first, docs/game/ui-input.md section 5).
+            if (faithfulScreens.IsOpen("message")) HandleFrontendAction(new("message", CancelButton, CancelButton));
+            else if (!faithfulScreens.Escape()) faithfulScreens.Open("menu");
+            UpdateMenuPause();
+            return true;
+        }
+        if (faithfulScreens.HasKeyboardFocus)
+        {
+            UiEditKey? editing = key switch { Meitou.Engine.Input.Key.Left => UiEditKey.Left, Meitou.Engine.Input.Key.Right => UiEditKey.Right,
+                Meitou.Engine.Input.Key.Home => UiEditKey.Home, Meitou.Engine.Input.Key.End => UiEditKey.End, Meitou.Engine.Input.Key.Backspace => UiEditKey.Backspace,
+                Meitou.Engine.Input.Key.Delete => UiEditKey.Delete, Meitou.Engine.Input.Key.A when ctrl => UiEditKey.SelectAll, _ => null };
+            if (editing is { } editKey) faithfulScreens.EditKey(editKey, shift);
+            if (key == Meitou.Engine.Input.Key.Tab) faithfulScreens.FocusNext(shift);
+            if (key == Meitou.Engine.Input.Key.Enter) faithfulScreens.Submit();
+            return true;
+        }
+        if (key == Meitou.Engine.Input.Key.Tab && faithfulScreens.FocusNext(shift)) return true;
+        if (key == Meitou.Engine.Input.Key.Enter && faithfulScreens.Submit()) return true;
+        if (DialogueKey(key)) return true;
+        if (faithfulScreens.HasModal) return true;
+        if (ReservedKeys.Contains(key)) return false;
+        if (key is Meitou.Engine.Input.Key.I or Meitou.Engine.Input.Key.C) { ExecuteUiAction(key == Meitou.Engine.Input.Key.I ? "inventory" : "stats", ""); return true; }
+        // toggle_map / toggle_research / toggle_crafting (M / T / Y) ask for overview tabs 0 / 2 / 3 (docs/game/ui-input.md section 6); toggle_faction (tab 1) is unbound.
+        // Pressing the key of the tab already showing closes the window (engine choice: the original's toggle rule is not traced).
+        int? tab = key switch { Meitou.Engine.Input.Key.M => 0, Meitou.Engine.Input.Key.T => 2, Meitou.Engine.Input.Key.Y => 3, _ => null };
+        if (tab is { } t)
+        {
+            if (faithfulScreens.IsOpen("overview") && faithfulScreens.GetTab("overview", "TabsMain") == t) faithfulScreens.Close("overview");
+            else { faithfulScreens.Open("overview"); faithfulScreens.SetTab("overview", "TabsMain", t); }
+            return true;
+        }
+        return false;
+    }
+    public void UiText(char value) { if (UiVisible) faithfulScreens.TextInput(value); }
+    public bool UiScroll(Vector2 p, float steps)
+    {
+        if (!UiVisible) return false;
+        ArrangeUi();
+        if (InventoryWheel(p, steps)) return true;
+        if (MapWheel(p, steps)) return true;
+        return faithfulScreens.Wheel(p, steps);
+    }
+    void FaithfulAction(MyGuiEvent e)
+    {
+        if (e.Action.StartsWith("inventory-scroll:", StringComparison.Ordinal))
+        { ScrollInventory(e.Screen, float.Parse(e.Action[17..], CultureInfo.InvariantCulture)); return; }
+        if (e.Action.StartsWith("inventory-scroll-page:", StringComparison.Ordinal))
+        { ScrollInventoryPage(e.Screen, float.Parse(e.Action[22..], CultureInfo.InvariantCulture)); return; }
+        if (e.Screen == "editor") EditorAction(e);
+        else if (HandleFrontendAction(e)) UpdateMenuPause();
+        else if (e.Screen == "stats" && e.Action == "select") selectedStat = e.Text;
+        else if (e.Screen == "stats" && e.Action.StartsWith("stat:", StringComparison.Ordinal)) selectedStat = e.Action[5..];
+        else if (e.Screen == "build") BuildAction(e);
+        else if (e.Screen == "dialogue") DialogueAction(e);
+        else if (e.Screen == "overview") MapAction(e.Widget);
+        else if (e.Screen == "trader" && e.Widget == "ArrangeButton") Say(new Meitou.Simulation.Trading.ArrangeStock { Tick = session.World.Tick });
+        else if (e.Screen is "inventory" or "bag")
+        {
+            if (e.Widget == "OpenBagButton") { faithfulScreens.Open("bag"); if (shownTrader.IsNone) PlaceBagWindow(); else PlaceTradeWindows(); }
+            else if (e.Widget == "LimbsButton") faithfulScreens.Open("limbs");
+            else if (e.Widget == "ArrangeButton" && Selected().FirstOrDefault() is { } lead) Say(new Meitou.Simulation.Items.ArrangeInventory(lead.Id) { Tick = session.World.Tick });
+        }
+    }
+    UiBindings BindFaithfulScreen(string id)
+    {
+        var b = new UiBindings();
+        var layout = faithfulScreens.Layout(id);
+        var lead = Selected().FirstOrDefault();
+        foreach (var button in layout.Widgets.Where(w => w.Type == "Button" && !w.Properties.ContainsKey("TemplateEvent"))) b.Disabled.Add(button.Name);
+        if (BindFrontend(id, b)) return b;
+        if (id == "editor") { BindEditor(b); return b; }
+        else if (id == "trader") BindTraderScreen(b);
+        else if (id == "dialogue") BindDialogueScreen(b);
+        else if (id == "build") BindBuildScreen(b);
+        else if (id is "inventory" or "stats" or "bag" or "limbs")
+        {
+            b.Text["Root"] = id == "stats" ? lead?.Name.ToUpperInvariant() ?? "CHARACTER STATS"
+                : id == "bag" ? lead?.ItemGrid?.Items.FirstOrDefault(i => i.Section == "backpack_attach")?.Name.ToUpperInvariant() ?? "BACKPACK"
+                : id == "limbs" ? "LIMBS" : lead?.Name.ToUpperInvariant() ?? "INVENTORY";
+            if (id is "inventory" or "bag" or "limbs")
+            {
+                // Each window binds only what its own layout has: the character window the data panel and the limbs button, the generic (bag) window
+                // the capacity box; the limb window has neither.
+                if (id == "inventory")
+                {
+                    b.Properties["datapanel"] = new Dictionary<string, string> { ["SkipCaption"] = "true" };
+                    if (lead?.ItemGrid is { BagWidth: > 0, BagHeight: > 0 }) { b.Disabled.Remove("OpenBagButton"); b.Actions["OpenBagButton"] = "OpenBagButton"; }
+                }
+                if (id == "bag")
+                {
+                    b.Hidden.Add("CapacityText"); b.Hidden.Add("TypeText");
+                }
+                if (id != "limbs")
+                    foreach (string name in id == "inventory" ? new[] { "ArrangeButton", "LimbsButton" } : ["ArrangeButton"])
+                    { b.Disabled.Remove(name); b.Actions[name] = name; if (lead is null) b.Disabled.Add(name); }
+            }
+            else
+            {
+                BindStatsGeometry(layout, b);
+            }
+        }
+        else if (id == "overview")
+        {
+            b.Text["Root"] = "OVERVIEW";
+            foreach (string name in new[] { "MapCenterButton", "MapZoomInButton", "MapZoomOutButton" }) { b.Disabled.Remove(name); b.Actions[name] = name; }
+            foreach (var tab in layout.Widgets.Where(w => w.Type == "TabItem")) b.Properties[tab.Name] = new Dictionary<string, string> { ["Visible"] = "true" };
+            b.Text["FactionNameText"] = "Player";
+            b.Disabled.Add("FactionNameText");
+            b.Text["FactionSizeText"] = PlayerCharacters().Count.ToString(CultureInfo.InvariantCulture);
+            b.Text["MessagesTextBox"] = string.Join('\n', uiMessages);
+            b.Properties["MessagesTextBox"] = new Dictionary<string, string> { ["Static"] = "true", ["WordWrap"] = "true", ["TextAlign"] = "Left Top" };
+            b.Lists["SquadsPanel"] = session.CurrentSnapshot.Characters.Where(c => c.IsPlayer).Select(c => new UiListItem(c.Id.ToString(), c.Name)).ToArray();
+            // Editor preview markers are unrelated to the current camera and orders.
+            b.Hidden.Add("CameraMarker"); b.Hidden.Add("MovemementMarker");
+        }
+        if (id is "inventory" or "bag" or "limbs" or "trader") BindInventoryGeometry(id, b);
+        return b;
+    }
+    /// <summary>
+    /// The attributes and four skill columns, ordered as observed in the supplied original-game screenshot.
+    /// </summary>
+    internal static readonly StatsEnumerated[][] StatPanels =
+    [
+        [StatsEnumerated.Strength, StatsEnumerated.Toughness, StatsEnumerated.Dexterity, StatsEnumerated.Perception],
+        [StatsEnumerated.Katanas, StatsEnumerated.Sabres, StatsEnumerated.Hackers, StatsEnumerated.HeavyWeapons, StatsEnumerated.Blunt, StatsEnumerated.Polearms],
+        [StatsEnumerated.MeleeAttack, StatsEnumerated.MeleeDefence, StatsEnumerated.Dodge, StatsEnumerated.MartialArts,
+            StatsEnumerated.Turrets, StatsEnumerated.Crossbows, StatsEnumerated.FriendlyFire],
+        [StatsEnumerated.Stealth, StatsEnumerated.Lockpicking, StatsEnumerated.Thieving, StatsEnumerated.Assassination, StatsEnumerated.Athletics, StatsEnumerated.Swimming],
+        [StatsEnumerated.Medic, StatsEnumerated.Engineering, StatsEnumerated.Robotics, StatsEnumerated.Science,
+            StatsEnumerated.SmithingWeapon, StatsEnumerated.SmithingArmour, StatsEnumerated.SmithingBow, StatsEnumerated.Labouring, StatsEnumerated.Farming, StatsEnumerated.Cooking],
+    ];
+
+    static string StatLabel(StatsEnumerated stat) => stat switch
+    {
+        StatsEnumerated.Thieving => "Thievery", StatsEnumerated.HeavyWeapons => "Heavy weapons",
+        StatsEnumerated.MeleeAttack => "Melee attack", StatsEnumerated.MeleeDefence => "Melee defence",
+        StatsEnumerated.SmithingWeapon => "Weapon smith", StatsEnumerated.SmithingArmour => "Armour smith",
+        StatsEnumerated.SmithingBow => "Crossbow smith", StatsEnumerated.FriendlyFire => "Precision shooting",
+        StatsEnumerated.MartialArts => "Martial arts",
+        StatsEnumerated.Medic => "Field medic", StatsEnumerated.Engineering => "Engineer", _ => stat.ToString(),
+    };
+    void AddFaithfulContent(string id, List<UiControl> controls)
+    {
+        if (id == "title" && UiMode == UiMode.Meitou) { MeitouTitleMenu(controls); return; }
+        if (id == "stats") { AddStatsContent(controls); return; }
+        if (id == "editor") { AddEditorContent(controls); return; }
+        if (id == "build") { AddBuildContent(controls); return; }
+        if (id == "dialogue") { AddDialogueChoices(controls); return; }
+        AddMapContent(id, controls);
+        if (id == "trader") { ArrangeTraderWindow(controls); AddTraderContent(controls); return; }
+        if (id is not ("inventory" or "bag" or "limbs") || Selected().FirstOrDefault() is not { ItemGrid: { } grid } lead) return;
+        string gridSection = id == "bag" ? "backpack_content" : "main";
+        int columns = id == "bag" ? grid.BagWidth : grid.Width, rows = id == "bag" ? grid.BagHeight : grid.Height;
+        if (id == "bag") ArrangeContainerGrid(id, controls, columns, rows);
+        else ArrangeEquipmentGrid(controls, grid);
+        if (id == "inventory") AddInventorySummary(controls, lead);
+        foreach (var item in grid.Items.Where(i => id == "bag" ? i.Section == "backpack_content" : id == "limbs" ? i.Section.EndsWith("_replace", StringComparison.Ordinal) : i.Section != "backpack_content"))
+        {
+            if (inventoryDrag is { } drag && drag.Character == lead.Id && drag.Item.Index == item.Index) continue;
+            if (controls.FirstOrDefault(c => c.Name == item.Section) is not { } slot) continue;
+            var area = slot.Bounds;
+            if (item.Section == gridSection && columns > 0 && rows > 0) area = new(area.X + item.X * area.Width / columns, area.Y + item.Y * area.Height / rows, item.Width * area.Width / columns, item.Height * area.Height / rows);
+            else area = new(area.X + item.X * InventoryCell, area.Y + item.Y * InventoryCell, item.Width * InventoryCell, item.Height * InventoryCell);
+            AddItemCell(controls, $"inventory-item-{item.Index}", area, item.Record, item.Material, item.Name, item.Quantity, JoinCaptions(SellCaption(lead.Id, item.Index) ?? $"Weight\t{item.Weight.ToString("0.#", CultureInfo.InvariantCulture)} kg", MapItemCaption(item.Record)), "InventoryItem", item.Index, slot.Bounds.Intersect(slot.Clip ?? slot.Bounds));
+        }
+    }
+    readonly List<string> uiMessages = [];
+    /// <summary>
+    /// The orders panel's toggles by the words in their widget names (the layout names only <c>OrdersChaseButton</c>, <c>OrdersMedicButton</c> and <c>OrdersRescueButton</c>
+    /// for certain, docs/game/ui-screens.md section 4; the rest are matched by the button's word, so a differently spelt name still binds). Prospect has no backend.
+    /// </summary>
+    static readonly (string Word, CharacterOrders Order)[] OrderWords =
+    [
+        ("Block", CharacterOrders.Block), ("Hold", CharacterOrders.Hold), ("Chase", CharacterOrders.Jobs), ("Passive", CharacterOrders.Passive),
+        ("Ranged", CharacterOrders.Ranged), ("Taunt", CharacterOrders.Taunt), ("Sneak", CharacterOrders.Sneak), ("Stealth", CharacterOrders.Sneak),
+        ("Jobs", CharacterOrders.Jobs),
+    ];
+
+    /// <summary>Binds the order toggles (checked while the lead selected character has the order) and the speed arrows of the HUD.</summary>
+    void BindOrders(UiBindings b, Meitou.Simulation.CharacterSnapshot? lead)
+    {
+        foreach (var w in faithfulHud.Widgets)
+        {
+            if (w.Type != "Button" || !w.Name.StartsWith("Orders", StringComparison.Ordinal)) continue;
+            foreach (var (word, order) in OrderWords)
+            {
+                if (!w.Name.Contains(word, StringComparison.Ordinal)) continue;
+                b.Actions[w.Name] = $"meitou:order.{order}";
+                if (lead is null) b.Disabled.Add(w.Name);
+                if (lead is not null && (lead.Orders & order) != 0) b.Properties[w.Name] = new Dictionary<string, string> { ["Checked"] = "true" };
+                break;
+            }
+        }
+        b.Actions["SpeedArrowLeft"] = "meitou:runspeed.-1";
+        b.Actions["SpeedArrowRight"] = "meitou:runspeed.1";
+        // The icon shows the lead's mode (docs/game/ui-screens.md); with nobody selected it keeps the layout's.
+        if (lead is not null) b.Properties["SpeedPanel"] = new Dictionary<string, string> { ["ImageName"] = RunSpeedIcons[Math.Min((int)lead.RunSpeed, RunSpeedIcons.Length - 1)] };
+    }
+
+    /// <summary>
+    /// The jobs list (<c>JobsPanel</c>, docs/game/ui-screens.md section 4): the lead's jobs, one row each with an X that removes it from that character; with none, the
+    /// layout's hint. Meitou's jobs are the medic and rescue jobs, named as their buttons, in that order (the original's row text and order are <b>Unknown</b>).
+    /// </summary>
+    void BindJobs(UiBindings b, Meitou.Simulation.CharacterSnapshot? lead)
+    {
+        var jobs = new List<UiListItem>();
+        if (lead?.Body is { MedicJob: true }) jobs.Add(new("medic", "Medic"));
+        if (lead?.Body is { RescueJob: true }) jobs.Add(new("rescue", "Rescue"));
+        b.Lists["JobsPanel"] = jobs;
+        // A few rows never overflow the box, and MyGUI shows an ItemBox's scroll bars only on overflow.
+        foreach (var bar in faithfulHud.Find("JobsPanel")?.Children.Where(w => w.Type == "ScrollBar") ?? []) b.HiddenWidgets.Add(bar);
+        if (jobs.Count > 0) b.Hidden.Add("JobsPanelInfo");
+        else b.Text["JobsPanelInfo"] = "[No jobs assigned]\n[To add jobs, hold shift key when giving an order]";
+    }
+
+    /// <summary>The X at the right end of each jobs row (the original's remove button, its tutorial: "remove a job at any time by pressing the X button").</summary>
+    static void AddJobRemoveButtons(List<UiControl> controls)
+    {
+        foreach (var row in controls.Where(c => c.Properties.GetValueOrDefault("ListOwner") == "JobsPanel").ToArray())
+        {
+            float size = row.Bounds.Height - 4;
+            controls.Add(new($"{row.Name}-remove", "Button", new(row.Bounds.X + row.Bounds.Width - size - 2, row.Bounds.Y + 2, size, size), "", "meitou:job-remove",
+                "Kenshi_CloseButtonSkin", true, new Dictionary<string, string>(), Vector4.Zero, Argument: row.Argument, Clip: row.Clip));
+        }
+    }
+
+    /// <summary>Takes a job (the jobs list's row id) off the lead whose list shows it.</summary>
+    void RemoveJob(string job)
+    {
+        if (Lead() is not { IsPlayer: true } lead) return;
+        if (job == "medic") Say(new Meitou.Simulation.FirstAid.MedicJobCommand([lead.Id], false) { Tick = session.World.Tick });
+        else if (job == "rescue") Say(new Meitou.Simulation.Carrying.RescueJobCommand([lead.Id], false) { Tick = session.World.Tick });
+    }
+
+    /// <summary>The speed icon per mode: the <c>Kenshi_CharacterSpeedSet</c> image names, in mode order.</summary>
+    static readonly string[] RunSpeedIcons = ["Walk", "Jog", "Run", "Group"];
+
+    /// <summary>The move speed modes' names in the notice (the icons' names).</summary>
+    static string RunSpeedName(byte mode) => RunSpeedIcons[Math.Min((int)mode, RunSpeedIcons.Length - 1)].ToLowerInvariant();
+}

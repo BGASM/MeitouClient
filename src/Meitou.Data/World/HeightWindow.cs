@@ -33,6 +33,19 @@ public sealed class HeightWindow
     public float Height(int i, int j) =>
         WorldLayout.RawToHeight(Raw[Math.Clamp(j, 0, Rows - 1) * Columns + Math.Clamp(i, 0, Columns - 1)]);
 
+    /// <summary>The height at world X/Z interpolated bilinearly between the window's points; false outside the window.</summary>
+    public bool TryHeightAt(double x, double z, out float height)
+    {
+        var (col, row) = WorldLayout.ToSample(x, z);
+        double u = (col - Column0) / Step, v = (row - Row0) / Step;
+        height = 0;
+        if (u < 0 || v < 0 || u > Columns - 1 || v > Rows - 1) return false;
+        int i = Math.Min((int)u, Columns - 2), j = Math.Min((int)v, Rows - 2);
+        double fu = u - i, fv = v - j;
+        height = (float)(Height(i, j) * (1 - fu) * (1 - fv) + Height(i + 1, j) * fu * (1 - fv) + Height(i, j + 1) * (1 - fu) * fv + Height(i + 1, j + 1) * fu * fv);
+        return true;
+    }
+
     /// <summary>World X/Z of window point (i, j).</summary>
     public (double X, double Z) WorldOf(int i, int j) => WorldLayout.FromSample(Column0 + (double)i * Step, Row0 + (double)j * Step);
 

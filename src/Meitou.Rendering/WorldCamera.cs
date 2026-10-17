@@ -30,7 +30,9 @@ public sealed class WorldCamera
 
     public Matrix4x4 View => Matrix4x4.CreateLookAt(Eye, Target, Vector3.UnitY);
 
-    public float Near => Math.Clamp(Math.Min(EyeClearance, Distance) * 0.25f, 0.5f, 200f);
+    public float Near => Math.Clamp(Math.Min(EyeClearance, Distance) * 0.25f, 0.5f, MaxNear);
+    /// <summary>The farthest the near plane may sit (200; the Meitou title lowers it to draw its wanderer close in front of a high eye).</summary>
+    public float MaxNear { get; set; } = 200;
 
     public Matrix4x4 Projection(float aspect, float near, float far) =>
         Matrix4x4.CreatePerspectiveFieldOfView(FieldOfView, aspect, near, far);

@@ -1,0 +1,265 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Numerics;
+using Meitou.Data;
+using Meitou.Data.Save;
+using Meitou.Simulation;
+using Meitou.Simulation.Saving;
+
+namespace Meitou.Game;
+
+/// <summary>
+/// Quicksave (F5) and quickload (F9), docs/simulation.md "Saves". The key only sets a request (a control tick runs inside <c>WorldSession.Advance</c>); the frame loop takes
+/// the request right after <c>Advance</c> returns, when no world tick is in flight. A save captures the world there, on the thread that ticks it (a few milliseconds), and writes
+/// the files on a worker; a load reads the files on a worker and swaps in a new world there. The slot is Meitou's own <c>%LOCALAPPDATA%\Meitou\save\quicksave</c>
+/// (<see cref="QuickSave"/>), never a folder of the original game.
+/// </summary>
+sealed partial class GameHost
+{
+    bool quickSaveRequested, quickLoadRequested;
+    string? saveRequestedFolder, loadRequestedFolder, readingFolder;
+    Task? saveWrite;
+
+    // What the world was loaded from: the next capture carries the save's records the world does not model through (null for a world that started new).
+    LoadedSave? loadedSave;
+    // Counts the worlds the host has had: part of a character's key in the draw list, so a new world's characters never take over the renderer's per-character state of the old one's.
+    int worldEpoch;
+    // Results of the write worker, shown on the next frame (the HUD is drawn by the main thread only).
+    readonly ConcurrentQueue<(string Text, bool Error)> saveNotices = [];
+    IReadOnlyList<string>? saveDataFiles;
+    // The save a capture starts from (a copy of the loaded one, or a new one from the data) costs tens of milliseconds and holds nothing of the world: it is made ahead on a worker,
+    // so the capture at the tick boundary only reads the squad (a few ms). Stale (for another loaded save) after a load.
+    Task<SaveBuilder>? preparedBase;
+    LoadedSave? preparedFor;
+    int captures;
+
+    SaveCaptureOptions CaptureOptions()
+    {
+        saveDataFiles ??= [.. LoadOrder.FromInstall(install).Entries.Select(e => e.Name)];
+        return new SaveCaptureOptions { DataFiles = saveDataFiles, Placements = townPlacements, Levels = saveLevels, Seed = session.World.Seed ^ (ulong)++captures << 20 };
+    }
+
+    /// <summary>The system list and its order are <see cref="StandardSystems"/>' (docs/simulation.md "Threading"); built again for each world.</summary>
+    Meitou.Simulation.StandardSystemSet BuildSystems(bool interactive) =>
+        Meitou.Simulation.StandardSystems.Build(popData!, simWalkability!, new Meitou.Simulation.StandardSystemOptions
+        {
+            // The sandbox compares motion with the original on characters standing still: a hostile foe there must not start a fight by itself. The duel scripts its fight.
+            Parts = IsSandbox || IsDuel ? Meitou.Simulation.StandardParts.All & ~Meitou.Simulation.StandardParts.Aggro : Meitou.Simulation.StandardParts.All,
+            Aggro = new Meitou.Simulation.AggroSettings { RecordLog = true },
+            Population = new Meitou.Simulation.PopulationSettings
+            {
+                Background = interactive && !IsDuel, KeepRoamers = config.KeepRoamers, OffscreenFights = config.OffscreenFights, OffscreenHealing = config.OffscreenHealing,
+                CampaignAncestorsOnce = config.CampaignAncestorsOnce, KeepWild = config.KeepWild,
+            },
+            // The duel replays exactly: its paths are answered inside the tick, never on a thread whose timing differs from lap to lap.
+            SynchronousPaths = !interactive || IsDuel,
+            // The duel prints what its measured lap holds (MeasureLap).
+            Combat = new Meitou.Simulation.Combat.CombatOptions { SelfApproach = false, TickMedical = false, RecordLog = IsDuel, AttackSlots = Math.Clamp(config.AttackSlots, 1, 5), LateDefences = config.LateDefences },
+            AnimationLengths = animationLengths,
+            AnimationLibrary = animationLibrary,
+            AnimationBlendRate = popData!.Bodies.Constants.AnimationBlendRate,
+            Ragdolls = characterRigs,
+            RagdollEnvironment = ragdollGeometry,
+        });
+
+    /// <summary>Once per frame, between ticks: the notices of the write worker, the requests of the keys, a finished read.</summary>
+    void HandleSaves()
+    {
+        while (saveNotices.TryDequeue(out var notice)) player.Notice(notice.Text, notice.Error);
+        PrintSavedLog();
+        if (quickSaveRequested) { quickSaveRequested = false; QuickSaveNow(); }
+        if (quickLoadRequested) { quickLoadRequested = false; BeginQuickLoad(); }
+        if (saveRequestedFolder is { } to) { saveRequestedFolder = null; QuickSaveNow(to); }
+        if (loadRequestedFolder is { } sourceFolder) { loadRequestedFolder = null; BeginQuickLoad(sourceFolder); }
+
+        if (preparedBase is null && SavesAvailable(out _) && session.World.Player.Exists)
+        {
+            var (data, from, options) = (popData!, loadedSave, CaptureOptions());
+            (preparedBase, preparedFor) = (Task.Run(() => SaveCapture.PrepareBase(data, from, options)), from);
+        }
+    }
+
+    /// <summary>Whether this run has a game to save and load: the population (so not <c>--no-population</c> or the sandbox).</summary>
+    bool SavesAvailable(out string reason)
+    {
+        reason = popData is null || population is null || IsSandbox ? "No game to save or load here (needs the town population)" : "";
+        return reason.Length == 0;
+    }
+
+    bool Busy() => saveWrite is { IsCompleted: false } || Covered;
+
+    void QuickSaveNow(string? destination = null)
+    {
+        if (!SavesAvailable(out string reason)) { player.Notice(reason, true); return; }
+        var world = session.World;
+        if (!world.Player.Exists) { player.Notice("Nothing to save: no player squad (start a new game)", true); return; }
+        if (Busy()) { player.Notice("Save or load still in progress", true); return; }
+        var watch = Stopwatch.StartNew();
+        SaveGame game;
+        bool ahead = preparedBase is { IsCompletedSuccessfully: true } && ReferenceEquals(preparedFor, loadedSave);
+        try
+        {
+            var clock = session.Clock;
+            var prepared = ahead ? preparedBase!.Result : null;
+            preparedBase = null;   // used, or stale
+            game = SaveCapture.Capture(world, popData!, new SaveClock((int)clock.Day, clock.Hour, clock.Minute), loadedSave, CaptureOptions(), prepared);
+            WriteWeather(game, (int)clock.Day, clock.HourOfDay);
+        }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine($"save      capture failed: {e}");
+            player.Notice($"Save failed: {e.Message}", true);
+            return;
+        }
+        double captureMs = watch.Elapsed.TotalMilliseconds;
+        string folder = destination ?? QuickSave.Folder();
+        saveWrite = Task.Run(() =>
+        {
+            try
+            {
+                var written = Stopwatch.StartNew();
+                game.Write(folder);
+                Console.WriteLine($"save      {folder}: captured in {captureMs:0.0} ms{(ahead ? "" : " (the base made on the spot)")}, written in {written.ElapsedMilliseconds} ms");
+                saveNotices.Enqueue(("Saved", false));
+            }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine($"save      write failed: {e}");
+                saveNotices.Enqueue(($"Save failed: {e.Message}", true));
+            }
+        });
+    }
+
+    /// <summary>The save's NPC platoons made since the last call (one line each), to the log.</summary>
+    void PrintSavedLog()
+    {
+        if (session.World.Saved is { } saved)
+            foreach (var line in saved.TakeLog()) Console.WriteLine($"saved     {line}");
+    }
+
+    /// <summary>
+    /// The regions' weather into the save's BIOMES record, and the CAMERA's sky transition as finished at the current sky (docs/formats/save.md "BIOMES", "CAMERA"):
+    /// the loader snaps the sky to the camera region's weather, so a transition in progress is not carried.
+    /// </summary>
+    void WriteWeather(SaveGame game, int day, double hour)
+    {
+        if (gpu.Weather is not { } weather || game.Biomes is not { } biomes || weather.World.ForcedWeather is not null) return;
+        SaveWeather.Write(biomes, weather.World.Snapshot(), new Meitou.Data.World.WeatherTime(day, hour), popData?.Db);
+        var camera = game.Camera;
+        var state = weather.State;
+        camera.SkyUpdating = false;
+        camera.SkyUpdateTotalTime = Meitou.Data.World.WeatherWorld.SkyTransitionSeconds;
+        camera.SkyUpdateCurrentTime = Meitou.Data.World.WeatherWorld.SkyTransitionSeconds;
+        camera.SkyAmbientColorMult = state.SkyColourMultiplier;
+        camera.SkyCloudsDensity = state.CloudDensity;
+    }
+
+    /// <summary>Starts loading a save under the loading screen (GameHost.Transition.cs): the files are read on a worker, the new world is made, the navmesh round the player waits.</summary>
+    void BeginQuickLoad(string? source = null)
+    {
+        if (!SavesAvailable(out string reason)) { player.Notice(reason, true); return; }
+        if (Busy()) { player.Notice("Save or load still in progress", true); return; }
+        string folder = source ?? QuickSave.Folder();
+        if (!File.Exists(Path.Combine(folder, SaveFolder.QuickSaveName))) { player.Notice(source is null ? "No quicksave yet (F5 saves)" : "Save is no longer available", true); return; }
+        readingFolder = folder;
+        Task<SaveGame>? read = null;
+        string summary = "";
+        StartSceneLoad(player.TitleOpen,
+            Stage("read", () => read = Task.Run(() => SaveGame.Load(folder))),
+            Stage("build", () => SwapInSave(read!, interactive: true, out summary)),
+            Stage("finishing", () => { SettleNewWorld(); FinishLoadNotice(summary); return null; }));
+    }
+
+    /// <summary>
+    /// Swaps in a world made from the save (at a tick boundary, the frame loop's) and hooks the host to it: the game clock, the camera on the player's squad. Returns the
+    /// navmesh of the zones round the player to wait for before the first tick (<see cref="SettleNewWorld"/>); throws <see cref="SceneLoadFailed"/> when the save does
+    /// not load (the old world stays).
+    /// </summary>
+    Task SwapInSave(Task<SaveGame> read, bool interactive, out string summary)
+    {
+        if (read.IsFaulted || read.IsCanceled)
+        {
+            Console.Error.WriteLine($"load      read failed: {read.Exception?.GetBaseException()}");
+            throw new SceneLoadFailed($"Load failed: {read.Exception?.GetBaseException().Message ?? "cancelled"}");
+        }
+        var watch = Stopwatch.StartNew();
+        LoadedSave? loaded = null;
+        StandardSystemSet built;
+        try
+        {
+            built = BuildSystems(interactive);
+            var data = popData!;
+            // A world that fails to load leaves the old one running (ReplaceWorld drops the half-made one).
+            session.ReplaceWorld(built.Systems, world =>
+            {
+                loaded = SaveLoader.Load(world, read.Result, data, new SaveLoadOptions { Appearances = data.Appearances });
+                if (world.Squads.Find(world.Player.Squad) is { Members.Count: > 0 } squad)
+                {
+                    world.Player.Selection.Clear();
+                    world.Player.Selection.Add(squad.Members[0]);
+                }
+            });
+        }
+        catch (Exception e) when (e is not SceneLoadFailed)
+        {
+            Console.Error.WriteLine($"load      failed: {e}");
+            throw new SceneLoadFailed($"Load failed: {e.Message}");
+        }
+        population = built.Population;
+        aggro = built.Aggro;
+        if (nav is not null) population!.ZoneGate = zone => nav.Walkability.World.Contains(zone);
+        loadedSave = loaded;
+        preparedBase = null;
+        worldEpoch++;
+        var world = session.World;
+        session.Clock.SetTime(loaded!.Clock.Day, loaded.Clock.HourOfDay);
+        // The regions' weather the save holds (docs/formats/save.md "BIOMES"); a save without (an old Meitou one) keeps the schedule rolled from day 0.
+        if (gpu.Weather is { } weather && read.Result.Biomes is { } biomes && SaveWeather.Read(biomes) is { Count: > 0 } regions)
+        {
+            weather.Restore(regions, loaded.Clock.Day, loaded.Clock.HourOfDay);
+            Console.WriteLine($"load      weather of {regions.Count} region(s) from the save");
+        }
+        playerSquad = world.Squads.Find(world.Player.Squad);
+        foreach (var note in loaded.Notes) Console.WriteLine($"load      {note}");
+
+        // The camera on the leader, keeping the view's heading, pitch and boom; the zones round it get their navmesh before the first tick (like a new game's start).
+        Task navmesh = Task.CompletedTask;
+        if (playerSquad is { } squad && !squad.Leader.IsNone)
+        {
+            var at = world.Characters.Previous[squad.Leader.Slot].Position;
+            var view = session.Camera.Current;
+            session.Camera.Place(new Vector2(at.X, at.Z), view.Yaw, view.Pitch, view.Distance);
+            navmesh = NavmeshAround(at);
+        }
+        summary = $"{readingFolder}: {loaded.PlayerPlatoons.Sum(p => p.Squad.Members.Count)} player character(s), {loaded.RoamingPlatoons.Count} roaming, {loaded.TownBoundPlatoons} town and {loaded.WildPlatoons} wild platoon(s) kept as saved, day {loaded.Clock.Day} {loaded.Clock.Hour:00}:{loaded.Clock.Minute:00}, made in {watch.ElapsedMilliseconds} ms";
+        return navmesh;
+    }
+
+    void FinishLoadNotice(string summary)
+    {
+        Console.WriteLine($"load      {summary}");
+        var missing = loadedSave?.MissingMods ?? [];
+        player.Notice(missing.Count == 0 ? "Loaded" : $"Loaded; the save was made with mods not loaded now: {string.Join(", ", missing)}", missing.Count > 0);
+    }
+
+    /// <summary>
+    /// The navmesh of the zones round <paramref name="at"/> (the ones already loaded cost nothing): done when they are, or after 15 s (loading goes on without them).
+    /// </summary>
+    Task NavmeshAround(Vector3 at)
+    {
+        if (nav is null) return Task.CompletedTask;
+        long now = Stopwatch.GetTimestamp();
+        var pending = new List<Task>();
+        foreach (var z in ZoneActivation.ZonesAround(at, 0))
+        {
+            if (!navZones.ContainsKey(z)) pending.Add(nav.LoadZone(z));
+            navZones[z] = now;
+        }
+        if (pending.Count == 0) return Task.CompletedTask;
+        var all = Task.WhenAll(pending);
+        return Task.WhenAny(all, Task.Delay(TimeSpan.FromSeconds(15))).ContinueWith(t =>
+        {
+            if (t.Result != all) Console.Error.WriteLine("load      the navmesh round the player was not ready after 15 s; loading goes on");
+        }, TaskScheduler.Default);
+    }
+}

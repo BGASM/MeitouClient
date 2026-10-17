@@ -64,7 +64,8 @@ public sealed class WorldWeather
             var t = WeatherTime.FromHours(m / 60);
             foreach (var region in World.Regions) region.Update(t);
         }
-        if (now.Minutes - from > 60) { World.Snap(); times = default; }
+        // The clock moved back (the viewer's time slider or its camera keys set the hour, not the day): nothing to replay, the sky and fog snap as for a long jump.
+        if (now.Minutes - from > 60 || (last is not null && now.Minutes < from)) { World.Snap(); times = default; }
         last = now;
         var state = World.Update(eye, now, times, sunHeight);
         LogChange(state);
@@ -72,24 +73,48 @@ public sealed class WorldWeather
     }
 
     /// <summary>
-    /// The Tab panel's "Reroll weather": the camera region starts a different weather of its season now (a forced weather is released first), and the sky,
-    /// fog and ramps snap to it. Returns the line the panel shows.
+    /// Continues the regions of a save (docs/formats/save.md "BIOMES") at the game <paramref name="day"/> and <paramref name="hour"/>: the schedules first run up to
+    /// that time (so a region the save lacks has its own weather there), then the saved ones take over and the sky snaps to them. The next frame does not replay.
     /// </summary>
-    public string Reroll()
+    public void Restore(IReadOnlyList<WeatherRegionSnapshot> regions, int day, double hour)
     {
-        World.ForceWeather((WeatherDef?)null, snap: true);
-        if ((World.CameraRegion ?? (eye is { } e ? World.RegionAt(e.X, e.Z) : null)) is not { } region) return "No weather region at the camera yet.";
-        string before = region.Weather.Name;
-        if (!region.Reroll(World.Time)) return $"{region.Def.Name} ({region.Season.Season.Name}) has no other weather than {before}.";
-        World.Snap();
-        Console.WriteLine($"weather   rerolled {region.Def.Name}: {before} -> {region.Weather.Name}");
-        return $"{region.Def.Name}: {before} -> {region.Weather.Name}, strength {region.Strength:0.00}, for {FormatMinutes(region.WeatherEndMinute - World.Time.Minutes)}.";
+        Day = day;
+        var now = new WeatherTime(day, hour);
+        double from = last?.Minutes ?? 0;
+        for (double m = Math.Floor(from) + 1; m <= now.Minutes; m++)
+        {
+            var t = WeatherTime.FromHours(m / 60);
+            foreach (var region in World.Regions) region.Update(t);
+        }
+        World.Restore(regions, now);
+        last = now;
     }
 
-    /// <summary>The question the panel asks before <see cref="Reroll"/>.</summary>
-    public string RerollQuestion() => (World.CameraRegion ?? (eye is { } e ? World.RegionAt(e.X, e.Z) : null)) is { } region
-        ? World.ForcedWeather is { } f ? $"Release the forced {f.Name} and reroll the weather of {region.Def.Name}?" : $"Reroll the weather of {region.Def.Name} (now {region.Weather.Name})?"
-        : "Reroll the weather?";
+    WeatherRegion? Here => World.CameraRegion ?? (eye is { } e ? World.RegionAt(e.X, e.Z) : null);
+
+    /// <summary>The Tab panel's weather list: the weathers of the camera region's season, in its order (empty before the first frame).</summary>
+    public IReadOnlyList<string> Choices() => Here is { } r ? [.. r.Season.Season.Weathers.Select(w => w.Weather.Name)] : [];
+
+    /// <summary>The list's current entry (-1: a forced weather or no region).</summary>
+    public int Current() => World.ForcedWeather is null && Here is { } r ? r.WeatherEntryIndex : -1;
+
+    /// <summary>The list's button: the region and its weather.</summary>
+    public string ChoiceLabel() => World.ForcedWeather is { } f ? $"Weather: {f.Name} (forced)" : Here is { } r ? $"Weather: {r.Weather.Name}" : "Weather";
+
+    /// <summary>
+    /// The Tab panel's weather list: the camera region starts the season's weather <paramref name="entry"/> now (a forced weather is released first), and the
+    /// sky, fog and ramps snap to it. Returns the line the panel shows.
+    /// </summary>
+    public string Choose(int entry)
+    {
+        World.ForceWeather((WeatherDef?)null, snap: true);
+        if (Here is not { } region) return "No weather region at the camera yet.";
+        string before = region.Weather.Name;
+        region.Pick(World.Time, entry);
+        World.Snap();
+        Console.WriteLine($"weather   chose {region.Def.Name}: {before} -> {region.Weather.Name}");
+        return $"{region.Def.Name}: {before} -> {region.Weather.Name}, strength {region.Strength:0.00}, for {FormatMinutes(region.WeatherEndMinute - World.Time.Minutes)}.";
+    }
 
     /// <summary>Maps the state onto the sky renderer's weather inputs.</summary>
     public void Apply(SkyRenderer sky)

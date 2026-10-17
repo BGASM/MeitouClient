@@ -1,0 +1,43 @@
+using Meitou.Data.Fcs;
+
+namespace Meitou.Data.Gameplay.Construction;
+
+/// <summary>
+/// The research gate of the build menu (docs/game/buildings-production.md "Build menu"): the completed RESEARCH records and the BUILDINGs their <c>enable buildings</c> lists unlock.
+/// Pure over the database; the world keeps the completed set (<c>Meitou.Simulation.Construction.ResearchState</c>).
+/// </summary>
+public static class ResearchGate
+{
+    /// <summary>
+    /// <c>_Default Start</c> (level 0), the research every new game finishes besides its start-off's <c>research</c> list: the string is a constant of the executable
+    /// (<b>Verified</b>: the exe holds both <c>5359-gamedata.base</c> and <c>_Default Start</c>) and the five sample saves list it as their only <c>finished0</c> (<b>Observed</b>).
+    /// </summary>
+    public const string DefaultStartId = "5359-gamedata.base";
+
+    /// <summary>The RESEARCH ids a new game starts with: the default start research when the database has it, then the start-off's own, without repeats.</summary>
+    public static List<string> StartResearch(GameDatabase db, NewGameStart? start)
+    {
+        var ids = new List<string>();
+        void Add(string id)
+        {
+            if (db.Find(id) is { Type: FcsRecordType.RESEARCH } && !ids.Contains(id, StringComparer.Ordinal)) ids.Add(id);
+        }
+        Add(DefaultStartId);
+        if (start is not null)
+            foreach (var link in start.Research) Add(link.Id);
+        return ids;
+    }
+
+    /// <summary>The BUILDING ids the completed research unlocks: the union of each RESEARCH's <c>enable buildings</c> (ids of other records or unknown research are ignored).</summary>
+    public static HashSet<string> Unlocked(GameDatabase db, IEnumerable<string> completed)
+    {
+        var unlocked = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var id in completed)
+        {
+            if (db.Find(id) is not { Type: FcsRecordType.RESEARCH } research) continue;
+            foreach (var building in research.GetReferences("enable buildings"))
+                if (db.Find(building.TargetStringId) is { Type: FcsRecordType.BUILDING }) unlocked.Add(building.TargetStringId);
+        }
+        return unlocked;
+    }
+}

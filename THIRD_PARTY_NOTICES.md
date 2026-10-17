@@ -132,3 +132,10 @@ freely, subject to the following restrictions:
    misrepresented as being the original software.
 3. This notice may not be removed or altered from any source distribution.
 ```
+
+## Kenshi logo
+
+`assets/branding/kenshi-logo.png` (shown on the Meitou title screen) is the Kenshi logo, artwork
+and trademark of Lo-Fi Games. It is not covered by this project's GPL license and is included
+only to identify the game this engine runs. MeitouClient is not affiliated with or endorsed by
+Lo-Fi Games.

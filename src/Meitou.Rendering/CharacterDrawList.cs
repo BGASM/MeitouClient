@@ -11,7 +11,19 @@ public readonly record struct CharacterPose(string Animation, float Time, float 
 /// the renderer can keep its GPU resources and last frame's bones (motion vectors) by it; <see cref="Appearance"/> is compared by
 /// reference to find the meshes and materials.
 /// </summary>
-public readonly record struct CharacterInstance(long Key, CharacterAppearance Appearance, Vector3 Position, float Yaw, IReadOnlyList<CharacterPose> Poses);
+public readonly record struct CharacterInstance(long Key, CharacterAppearance Appearance, Vector3 Position, float Yaw, IReadOnlyList<CharacterPose> Poses)
+{
+    /// <summary>Show the weapon in hand (the parts tagged <see cref="WeaponShown.Drawn"/>) instead of sheathed.</summary>
+    public bool WeaponDrawn { get; init; }
+    /// <summary>Uniform size the body is drawn at (an animal's age-dependent size; 1 for people).</summary>
+    public float Scale { get; init; } = 1;
+    /// <summary>Not drawn in the world (still posed for its portrait): on a floor of a building that the interior view hides (docs/formats/zones.md "Interior view").</summary>
+    public bool Hidden { get; init; }
+    /// <summary>Pose every frame regardless of distance, for presentation actors whose animation must stay smooth.</summary>
+    public bool FullRateAnimation { get; init; }
+    /// <summary>The ragdoll's bones in model space, set over the animation (null: none); the host interpolates them between ticks.</summary>
+    public BonePose? Bones { get; init; }
+}
 
 /// <summary>
 /// The characters of one frame. The renderers know nothing of the simulation (docs/engine.md): the host fills this list from the

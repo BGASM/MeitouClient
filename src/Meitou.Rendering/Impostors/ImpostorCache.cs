@@ -33,17 +33,13 @@ public sealed class ImpostorCache
     {
         Root = root ?? Environment.GetEnvironmentVariable("MEITOU_IMPOSTOR_CACHE")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Meitou", "impostors");
-        MaxBytes = maxBytes ?? FromEnvironment();
+        MaxBytes = maxBytes ?? DefaultMaxBytes;
     }
 
     public string Root { get; }
 
-    /// <summary>The most the files may total, in bytes; 0 or less is no cap. <c>MEITOU_IMPOSTOR_CACHE_MB</c> or the constructor; <see cref="FoliageRenderer.ImpostorCacheMb"/> in the viewer.</summary>
+    /// <summary>The most the files may total, in bytes; 0 or less is no cap. The constructor sets it; <see cref="FoliageRenderer.ImpostorCacheMb"/> in the viewer.</summary>
     public long MaxBytes { get; set; }
-
-    static long FromEnvironment() =>
-        double.TryParse(Environment.GetEnvironmentVariable("MEITOU_IMPOSTOR_CACHE_MB"), NumberStyles.Float, CultureInfo.InvariantCulture, out double mb)
-            ? (long)(mb * 1048576) : DefaultMaxBytes;
 
     public string PathFor(ImpostorSource source)
     {

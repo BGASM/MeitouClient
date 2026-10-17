@@ -3,8 +3,10 @@
   <!-- The game executable: boots into the world with the Kenshi camera (docs/engine.md). -->
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <!-- Windowed: no console window opens with the game; a terminal that starts it still gets its output (GameConsole). -->
+    <OutputType>WinExe</OutputType>
     <AssemblyName>meitou</AssemblyName>
+    <ApplicationIcon>../../assets/branding/meitou.ico</ApplicationIcon>
     <RootNamespace>Meitou.Game</RootNamespace>
     <!-- Tiered PGO re-JITs hot render code for minutes; each install suspends the runtime and stalled frames 10-20 ms (DECISIONS 11). -->
     <TieredPGO>false</TieredPGO>
@@ -22,6 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Meitou.Core\Meitou.Core.csproj" />
     <ProjectReference Include="..\Meitou.Data\Meitou.Data.csproj" />
+    <ProjectReference Include="../Meitou.Ui/Meitou.Ui.csproj" />
     <ProjectReference Include="..\Meitou.Engine\Meitou.Engine.csproj" />
     <ProjectReference Include="../Meitou.Navigation/Meitou.Navigation.csproj" />
     <ProjectReference Include="..\Meitou.Rendering\Meitou.Rendering.csproj" />
@@ -30,6 +33,39 @@
 
   <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.GC.HeapCount" Value="4" />
+    <!-- The Meitou title's wordmark (TitleLogo). -->
+    <EmbeddedResource Include="../../assets/branding/kenshi-logo.png" LogicalName="kenshi-logo.png" />
   </ItemGroup>
+
+  <Target Name="ReadBuildRevision" BeforeTargets="GetAssemblyAttributes">
+    <Exec Command="git rev-parse --short HEAD" WorkingDirectory="$(MSBuildProjectDirectory)"
+          ConsoleToMSBuild="true" IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true"
+          StandardOutputImportance="Low" StandardErrorImportance="Low" Condition="'$(BuildGitCommit)' == ''">
+      <Output TaskParameter="ConsoleOutput" ItemName="_BuildGitCommit" />
+      <Output TaskParameter="ExitCode" PropertyName="_BuildGitCommitExit" />
+    </Exec>
+    <Exec Command="git describe --tags --abbrev=0" WorkingDirectory="$(MSBuildProjectDirectory)"
+          ConsoleToMSBuild="true" IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true"
+          StandardOutputImportance="Low" StandardErrorImportance="Low" Condition="'$(BuildGitTag)' == ''">
+      <Output TaskParameter="ConsoleOutput" ItemName="_BuildGitTag" />
+      <Output TaskParameter="ExitCode" PropertyName="_BuildGitTagExit" />
+    </Exec>
+    <PropertyGroup>
+      <BuildGitCommit Condition="'$(BuildGitCommit)' == '' and '$(_BuildGitCommitExit)' == '0'">@(_BuildGitCommit)</BuildGitCommit>
+      <BuildGitTag Condition="'$(BuildGitTag)' == '' and '$(_BuildGitTagExit)' == '0'">@(_BuildGitTag)</BuildGitTag>
+      <BuildGitCommit Condition="'$(BuildGitCommit)' == ''">unknown commit</BuildGitCommit>
+      <BuildGitTag Condition="'$(BuildGitTag)' == ''">untagged</BuildGitTag>
+    </PropertyGroup>
+    <ItemGroup>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>GitCommit</_Parameter1>
+        <_Parameter2>$(BuildGitCommit)</_Parameter2>
+      </AssemblyAttribute>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>GitTag</_Parameter1>
+        <_Parameter2>$(BuildGitTag)</_Parameter2>
+      </AssemblyAttribute>
+    </ItemGroup>
+  </Target>
 
 </Project>

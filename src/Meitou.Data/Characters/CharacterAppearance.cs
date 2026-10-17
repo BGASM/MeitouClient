@@ -32,7 +32,12 @@ public sealed record CharacterPart
     public string? Point { get; init; }
     /// <summary>The material the item was made with, if chosen (MATERIAL_SPECS_CLOTHING of clothing, MATERIAL_SPECS_WEAPON model of a weapon).</summary>
     public GameRecord? Material { get; init; }
+    /// <summary>When the part shows: always, or only while the weapon in hand is sheathed or drawn (the first weapon's meshes).</summary>
+    public WeaponShown Shown { get; init; }
 }
+
+/// <summary>When a <see cref="CharacterPart"/> shows: the first weapon has its sheathed <c>mesh</c> and its drawn <c>bare sword</c> and <c>sheath</c> in one appearance.</summary>
+public enum WeaponShown : byte { Always, Sheathed, Drawn }
 
 /// <summary>A clothing texture layered onto the body (ARMOUR <c>vest texture</c>; character.hlsl "vest").</summary>
 public sealed record BodyLayer(GameRecord Record, string Diffuse, string? Normal, string? ColourMap);
@@ -66,6 +71,8 @@ public sealed record CharacterOptions
 public sealed class CharacterAppearance
 {
     public GameRecord? Character { get; private init; }
+    /// <summary>The ANIMAL_CHARACTER this animal was built from (<see cref="BuildAnimal"/>); null for people.</summary>
+    public GameRecord? Animal { get; private init; }
     public required GameRecord Race { get; init; }
     public bool Female { get; private init; }
     public AppearanceFile? Body { get; private init; }
@@ -81,6 +88,8 @@ public sealed class CharacterAppearance
     public string? PartMap { get; private init; }
     public GameRecord? Head { get; private init; }
     public GameRecord? Hair { get; private set; }
+    /// <summary>A fixed body shape for a staged character (the Meitou title's wanderer), used instead of <see cref="CharacterShape.InputFor"/>; null in play.</summary>
+    public CharacterShapeInput? Shape { get; set; }
     public GameRecord? Beard { get; private set; }
 
     /// <summary>Linear RGB multiplier the body shader gets as <c>skintone</c>: 1 − <c>Skin Tone</c> (white = no change).</summary>
@@ -113,8 +122,9 @@ public sealed class CharacterAppearance
     public static CharacterAppearance Build(GameDatabase db, string installRoot, string nameOrId, CharacterOptions? options = null)
     {
         options ??= new CharacterOptions();
-        var record = Find(db, nameOrId, FcsRecordType.CHARACTER, FcsRecordType.RACE)
-            ?? throw new KeyNotFoundException($"No CHARACTER or RACE record '{nameOrId}'.");
+        var record = Find(db, nameOrId, FcsRecordType.CHARACTER, FcsRecordType.RACE, FcsRecordType.ANIMAL_CHARACTER)
+            ?? throw new KeyNotFoundException($"No CHARACTER, RACE or ANIMAL_CHARACTER record '{nameOrId}'.");
+        if (record.Type == FcsRecordType.ANIMAL_CHARACTER) return BuildAnimal(db, installRoot, record);
         // With a seed the generator rolls everything (docs/characters.md, "Generating a character").
         var faction = options.Faction is { } factionName ? Find(db, factionName, FcsRecordType.FACTION) : null;
         var loadout = options.Loadout ?? (options.Seed is { } seed ? CharacterGenerator.Generate(db, installRoot, record, seed, options.Female, faction) : null);
@@ -249,8 +259,33 @@ public sealed class CharacterAppearance
             weapons.Add((extra, point, null));
         }
         result.LoadAttachmentPoints(installRoot, race);
+        // The weapon a fight draws is the first WEAPON (hip, then back: CharacterAssembly.MakeFighter); it gets its sheathed and drawn meshes, the renderer shows one set.
+        int inHand = weapons.FindIndex(w => w.Weapon.Type == FcsRecordType.WEAPON);
         for (int i = 0; i < weapons.Count; i++)
-            result.AddWeapon(weapons[i].Weapon, female, weapons[i].Point, drawn: options.WeaponDrawn && i == 0, backCount: 0, weapons[i].Model);
+            result.AddWeapon(weapons[i].Weapon, female, weapons[i].Point, drawn: options.WeaponDrawn && i == 0, backCount: 0, weapons[i].Model, both: !options.WeaponDrawn && i == inHand);
+        return result;
+    }
+
+    /// <summary>
+    /// An animal's look (docs/game/animals.md "Appearance", <b>Verified</b> against the records): the ANIMAL_CHARACTER names no mesh or texture; its race does, as a
+    /// person's: <c>male mesh</c> (every animal race names the same file for both genders, so the male one is used), <c>body texture male</c>, <c>nm male</c>, and the fur
+    /// as its <c>hairs</c> ATTACHMENT (a mesh on the body's skeleton, coloured by the race's <c>hair colors</c>). No head, no body file, no clothing, no visible weapon (the
+    /// natural weapon has no mesh). Nothing is rolled: every animal of a record looks the same, so callers can share one instance.
+    /// </summary>
+    public static CharacterAppearance BuildAnimal(GameDatabase db, string installRoot, GameRecord animal)
+    {
+        var race = animal.GetReferences("race").Where(r => r.Values.Value0 > 0).Select(r => db.Find(r.TargetStringId))
+            .FirstOrDefault(r => r is { Type: FcsRecordType.RACE }) ?? throw new KeyNotFoundException($"'{animal.Name}' has no race.");
+        var result = new CharacterAppearance
+        {
+            Animal = animal, Race = race, Female = false,
+            BodyMesh = race.GetPath("male mesh"),
+            BodyTexture = FilePath(race, "body texture male"), BodyNormal = FilePath(race, "nm male"),
+            HairColour = HairColourOf(db, race, null, null),
+        };
+        result.Hair = PickHair(db, race, AttachSlot.Hair, null);
+        if (result.Hair is not null) result.AddWorn(result.Hair, false, []);
+        result.LoadAttachmentPoints(installRoot, race);
         return result;
     }
 
@@ -282,21 +317,25 @@ public sealed class CharacterAppearance
         Parts.Add(new CharacterPart { Record = item, Mesh = mesh, Field = field, Mode = AttachMode.SharedSkeleton, Slot = slot, Material = material });
     }
 
-    void AddWeapon(GameRecord weapon, bool female, string slot, bool drawn, int backCount, GameRecord? model = null)
+    /// <param name="both">Both sets: the sheathed mesh tagged <see cref="WeaponShown.Sheathed"/>, the drawn ones <see cref="WeaponShown.Drawn"/> (a renderer that follows the fight).</param>
+    void AddWeapon(GameRecord weapon, bool female, string slot, bool drawn, int backCount, GameRecord? model = null, bool both = false)
     {
         if (slot == "back" && backCount > 0) slot = "back2";
         string Field(string f) => f == "mesh" && female && weapon.GetPath("mesh female").Length > 0 ? "mesh female" : f;
-        if (drawn && weapon.GetPath("bare sword").Length > 0)
+        bool bare = weapon.GetPath("bare sword").Length > 0;
+        if ((drawn || both) && bare)
         {
-            Parts.Add(new CharacterPart { Record = weapon, Mesh = weapon.GetPath("bare sword"), Field = "bare sword", Mode = AttachMode.Bone, Slot = AttachSlot.Weapon, Point = "hands", Material = model });
+            var shown = both ? WeaponShown.Drawn : WeaponShown.Always;
+            Parts.Add(new CharacterPart { Record = weapon, Mesh = weapon.GetPath("bare sword"), Field = "bare sword", Mode = AttachMode.Bone, Slot = AttachSlot.Weapon, Point = "hands", Material = model, Shown = shown });
             if (weapon.GetPath("sheath") is { Length: > 0 } sheath)
-                Parts.Add(new CharacterPart { Record = weapon, Mesh = sheath, Field = "sheath", Mode = AttachMode.Bone, Slot = AttachSlot.Weapon, Point = slot });
-            return;
+                Parts.Add(new CharacterPart { Record = weapon, Mesh = sheath, Field = "sheath", Mode = AttachMode.Bone, Slot = AttachSlot.Weapon, Point = slot, Shown = shown });
+            if (!both) return;
         }
         // Mode-0 items fall back from "mesh female" to "mesh" (ogre-skeleton.md).
         string field = Field("mesh");
         if (weapon.GetPath(field) is not { Length: > 0 } mesh) { Notes.Add($"'{weapon.Name}' has no mesh"); return; }
-        Parts.Add(new CharacterPart { Record = weapon, Mesh = mesh, Field = field, Mode = AttachMode.Bone, Slot = AttachSlot.Weapon, Point = slot, Material = model });
+        Parts.Add(new CharacterPart { Record = weapon, Mesh = mesh, Field = field, Mode = AttachMode.Bone, Slot = AttachSlot.Weapon, Point = slot, Material = model,
+            Shown = both && bare ? WeaponShown.Sheathed : WeaponShown.Always });
     }
 
     void LoadAttachmentPoints(string installRoot, GameRecord race)

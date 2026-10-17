@@ -45,10 +45,28 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
         this.options = options;
         this.lengths = lengths;
         Settings = settings ?? new CombatOptions();
+        AttackSlots = Math.Max(1, Settings.AttackSlots ?? combat.MaxNumAttackSlots);
+        LateDefences = Settings.LateDefences;
         xp = new XpService(constants, options);
     }
 
     public CombatOptions Settings { get; }
+
+    /// <summary>How many enemies may melee one target at once, before the target race's <c>extra attack slots</c>: CONSTANTS <c>max num attack slots</c> (1, Faithful) unless a setting changes it.</summary>
+    public int AttackSlots { get; set; }
+
+    /// <summary>A late but successfully rolled dodge or block still counts (<see cref="CombatOptions.LateDefences"/>); off is the game's rule.</summary>
+    public bool LateDefences { get; set; }
+
+    /// <summary>The live relation table the player's assaults and killings change (<c>PopulationData.Relations</c>); null: nothing changes (hand-built test worlds).</summary>
+    public FactionRelations? Relations { get; set; }
+    /// <summary>The crime system the player's assaults, killings and hits on the police are reported to (null: no crimes).</summary>
+    public Crime.CrimeSystem? Crimes { get; set; }
+    /// <summary>
+    /// Picks the hit reaction clip of a hit (set by the animation system, which owns the clips): the defender, the hit part's LOCATIONAL_DAMAGE id, big stumble, the side
+    /// (0 front, 1 rear) and a roll in [0, 1); returns the clip (an animation library index) and its length in seconds, or null when none fits. Null: hits play no clip.
+    /// </summary>
+    public Func<CharacterCold, string, bool, int, float, (int Clip, float Seconds)?>? StumbleChooser { get; set; }
     public IReadOnlyList<CombatTechnique> Techniques => techniques;
 
     /// <summary>The resolved blows so far (when <see cref="CombatOptions.RecordLog"/> is on).</summary>
@@ -92,6 +110,7 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
         hasher.Add(read.Length);
         for (int i = 0; i < read.Length; i++) read[i].Hash(ref hasher);
         hasher.Add(log.Count);
+        HashRanged(ref hasher);
     }
 
     // ------------------------------------------------------------------ inputs
@@ -106,8 +125,22 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
             switch (command)
             {
                 case AttackOrder order:
-                    foreach (var id in order.Attackers) Engage(world, table, id, order.Target, now);
+                {
+                    // The player's squad picking a fight with a character of another faction is an assault on that faction (engine choice of the
+                    // event kind, docs/simulation.md "Combat"): once per victim, when no player character is fighting it already.
+                    bool deed = Relations is not null && !order.Defensive && !PlayerFights(table, order.Target);
+                    bool byPlayer = false;
+                    foreach (var id in order.Attackers)
+                        if (Engage(world, table, id, order.Target, now) && table.Cold(id.Slot)!.IsPlayer)
+                        {
+                            byPlayer = true;
+                            // An attack that is not self-defence is an assault (before the relation event below, which could make the victim's faction hostile).
+                            if (!order.Defensive && Crimes is { } crimes && table.TryResolveNext(order.Target, out int victimSlot)) crimes.Assault(world, id.Slot, victimSlot);
+                        }
+                    if (deed && byPlayer && table.Cold(order.Target.Slot) is { IsPlayer: false } victim)
+                        PlayerRelations.Event(world, Relations!, victim.Faction, RelationEventKind.Assault);
                     break;
+                }
                 case StopCommand stop:
                     foreach (var id in stop.Characters) Disengage(table, id);
                     break;
@@ -115,19 +148,31 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
         }
     }
 
-    void Engage(World world, CharacterTable table, CharacterId attacker, CharacterId target, int now)
+    /// <summary>Whether a player character is fighting <paramref name="target"/> (the combat state as of the inputs).</summary>
+    bool PlayerFights(CharacterTable table, CharacterId target)
     {
-        if (!table.TryResolveNext(attacker, out int a) || !table.TryResolveNext(target, out int t) || a == t) return;
+        if (!table.TryResolveNext(target, out int t)) return false;
+        var next = table.Next;
+        for (int i = 0; i < table.HighWater; i++)
+            if (read[i].TargetSlot == t && read[i].TargetGeneration == target.Generation && next[i].Alive && next[i].Task == (byte)CharacterTask.Attack && table.Cold(i)!.IsPlayer) return true;
+        return false;
+    }
+
+    bool Engage(World world, CharacterTable table, CharacterId attacker, CharacterId target, int now)
+    {
+        if (!table.TryResolveNext(attacker, out int a) || !table.TryResolveNext(target, out int t) || a == t) return false;
         var cold = table.Cold(a)!;
         var tc = table.Cold(t)!;
-        if (cold.Fighter is null || cold.Stats is null || cold.Medical is null || cold.Race is null || tc.Medical is null || cold.Medical.Incapacitated || tc.Medical.Incapacitated) return;
+        if (cold.Fighter is null || cold.Stats is null || cold.Medical is null || cold.Race is null || tc.Medical is null || cold.Medical.Incapacitated || tc.Medical.Incapacitated) return false;
+        if (cold.IsImprisoned) return false;   // a prisoner does not fight (it may still be attacked: engine choice)
         ref var s = ref read[a];
         s.TargetSlot = t;
         s.TargetGeneration = target.Generation;
         s.ReadyTick = now + PauseTicks(world, a, 0);
         table.Next[a].Task = (byte)CharacterTask.Attack;
         cold.InCombat = true;
-        cold.DrawnWeapon = cold.Fighter.Weapon is { } w && !cold.Fighter.Unarmed ? HandHold.OfCategory(w.Data.SkillCategory).Weapon : WeaponKinds.None;
+        cold.DrawnWeapon = s.Ranged ? HandHold.OfCategory((int)WeaponCategory.Bow).Weapon : MeleeDrawn(cold.Fighter);
+        return true;
     }
 
     void Disengage(CharacterTable table, CharacterId id)
@@ -154,6 +199,7 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
     {
         Sync(world.Characters);
         Array.Copy(read, write, world.Characters.HighWater);
+        FlyProjectiles(world);
     }
 
     public void Move(World world, Partition part)
@@ -179,7 +225,9 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
             ref var n = ref next[i];
             n.Yaw = MathF.Atan2(dir.X, dir.Y);
             if (!Settings.SelfApproach) continue;
-            bool busy = s.Down || s.AttackTech >= 0 || s.ReactTech >= 0 || now < s.StunUntil;
+            // A crossbowman stands while it aims or reloads and walks up only while closing in.
+            bool shooting = s.Ranged && s.RangedState != (byte)RangedStates.Closing;
+            bool busy = s.Down || s.AttackTech >= 0 || s.ReactTech >= 0 || now < s.StunUntil || shooting;
             float gap = distance - CombatTuning.Footprint(cold) - CombatTuning.Footprint(table.Cold(t));
             if (busy || gap <= CombatTuning.CloseInGap)
             {
@@ -189,9 +237,9 @@ public sealed partial class CombatSystem : ITickSystem, IStateHashed
             float speed = n.MaxSpeed > 0 ? n.MaxSpeed : Settings.ApproachSpeed;
             float step = MathF.Min(speed * dt, gap - CombatTuning.CloseInGap);
             float x = prev[i].Position.X + dir.X * step, z = prev[i].Position.Z + dir.Y * step;
-            if (world.Walkability.IsWalkable(x, z))
+            if (world.Walkability.IsWalkable(x, z, prev[i].Position.Y))
             {
-                n.Position = new Vector3(x, world.Walkability.GroundHeight(x, z), z);
+                n.Position = new Vector3(x, world.Walkability.GroundHeight(x, z, prev[i].Position.Y), z);
                 n.Velocity = new Vector3(dir.X * step / dt, 0, dir.Y * step / dt);
             }
             else n.Velocity = default;

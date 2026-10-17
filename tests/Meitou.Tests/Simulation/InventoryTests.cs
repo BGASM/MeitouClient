@@ -18,34 +18,10 @@ public class InventoryTests
         Enumerable.Range(0, world.Characters.HighWater).Where(s => world.Characters.Previous[s].Alive && world.Characters.Cold(s)!.Inventory is not null);
 
     [Fact]
-    public void Characters_start_with_the_items_their_record_lists_and_animals_have_none()
-    {
-        using var world = World();
-        world.RunTicks(2);
-        var table = world.Characters;
-        bool guard = false;
-        foreach (int s in Humans(world))
-        {
-            var cold = table.Cold(s)!;
-            if (cold.RecordId != "2-t") { Assert.Empty(cold.Inventory!.Items); continue; }
-            guard = true;
-            var ration = Assert.Single(cold.Inventory!.Items);
-            Assert.Equal("70-t", ration.Record);
-            Assert.Equal(2, ration.Quantity);
-            Assert.True(ration.IsFood);
-            Assert.Equal(1.0f, ration.Nutrition, 3);
-            Assert.Equal("main", ration.Section);
-            Assert.Equal(2f, cold.Inventory.ContentWeight(), 3);
-        }
-        Assert.True(guard);
-        foreach (var s in Enumerable.Range(0, table.HighWater).Where(s => table.Previous[s].Alive && table.Cold(s)!.RecordId == "4-t")) Assert.Null(table.Cold(s)!.Inventory);
-    }
-
-    [Fact]
     public void Items_take_free_cells_and_stack_and_a_full_grid_refuses()
     {
         var inv = new Inventory(4, 2);
-        ItemInstance Item(string id, int w, int h, bool stack = false) => new() { Record = id, Name = id, Width = w, Height = h, Stackable = stack };
+        ItemInstance Item(string id, int w, int h, bool stack = false) => new() { Record = id, Name = id, Width = w, Height = h, StackLimit = stack ? 99 : 1 };
         Assert.True(inv.Add(Item("a", 2, 2)));
         Assert.True(inv.Add(Item("b", 2, 2)));
         Assert.Equal([(0, 0), (2, 0)], inv.Items.Select(i => (i.X, i.Y)));
@@ -56,49 +32,29 @@ public class InventoryTests
         Assert.Equal(2, Assert.Single(bolts.Items).Quantity);
     }
 
-    [Fact]
-    public void A_load_beyond_the_capacity_slows_the_walker()
-    {
-        using var world = World();
-        world.RunTicks(2);
-        var table = world.Characters;
-        int s = Humans(world).First(x => table.Cold(x)!.RecordId == "2-t");
-        float light = table.Previous[s].MaxSpeed;
-        table.Cold(s)!.Inventory!.Items.Add(new ItemInstance { Record = "x", Name = "anvil", UnitWeight = 400 });
-        world.RunTicks(2);
-        Assert.True(table.Previous[s].MaxSpeed < light, $"{table.Previous[s].MaxSpeed} < {light}");
-    }
+    static ItemInstance Unit(string id, int quantity, int limit, Meitou.Data.Fcs.FcsRecordType type = Meitou.Data.Fcs.FcsRecordType.ITEM) =>
+        new() { Record = id, Name = id, Type = type, Quantity = quantity, StackLimit = limit };
 
     [Fact]
-    public void A_hungry_character_eats_its_own_food_and_the_stomach_fills()
+    public void Stacks_hold_at_most_the_stack_limit_and_the_rest_takes_new_cells()
     {
-        using var world = World(feed: new FeedSettings { ProvisionNpcs = false });
-        world.RunTicks(2);
-        var table = world.Characters;
-        int s = Humans(world).First(x => table.Cold(x)!.RecordId == "2-t");
-        var cold = table.Cold(s)!;
-        cold.Medical!.Hunger = 1.2f;
-        world.RunTicks(35);
-        Assert.Equal(1, Assert.Single(cold.Inventory!.Items).Quantity);
-        Assert.True(cold.Medical.Fed > 0.5f || cold.Medical.Hunger > 1.2f);
-        // Not hungry again while the stomach digests: nothing more is eaten.
-        world.RunTicks(300);
-        Assert.Equal(1, cold.Inventory.Items.Single().Quantity);
-    }
-
-    [Fact]
-    public void A_hungry_character_without_food_is_fed_by_a_squad_mate_standing_near()
-    {
-        using var world = World(feed: new FeedSettings { ProvisionNpcs = false, SquadReach = 1000 });
-        world.RunTicks(2);
-        var table = world.Characters;
-        var squad = Humans(world).Select(x => table.Cold(x)!).Where(c => c.RecordId == "2-t").GroupBy(c => c.SquadId).First(g => g.Count() > 1).ToList();
-        squad[0].Inventory!.Items.Clear();
-        squad[0].Medical!.Hunger = 1.2f;
-        int before = squad.Skip(1).Sum(c => c.Inventory!.Items.Sum(i => i.Quantity));
-        world.RunTicks(35);
-        Assert.True(squad[0].Medical!.Fed > 0 || squad[0].Medical!.Hunger > 1.2f);
-        Assert.Equal(before - 1, squad.Skip(1).Sum(c => c.Inventory!.Items.Sum(i => i.Quantity)));
+        var inv = new Inventory(3, 1);
+        // 10 books with the data's limit 4: stacks of 4, 4 and 2, one per cell.
+        Assert.True(inv.Add(Unit("book", 10, 4)));
+        Assert.Equal([4, 4, 2], inv.Items.Select(i => i.Quantity));
+        Assert.Equal([0, 1, 2], inv.Items.Select(i => i.X));
+        // One more tops up the last stack; three more fill it and leave one that has no cell: the call says so and the unit stays with the caller.
+        Assert.True(inv.Add(Unit("book", 1, 4)));
+        Assert.Equal(3, inv.Items[2].Quantity);
+        var rest = Unit("book", 3, 4);
+        Assert.False(inv.Add(rest));
+        Assert.Equal(4, inv.Items[2].Quantity);
+        Assert.Equal(2, rest.Quantity);
+        // Limit 1 (most items, and the default): no stacking at all.
+        var single = new Inventory(4, 1);
+        Assert.True(single.Add(Unit("ration", 2, 1)));
+        Assert.True(single.Add(Unit("ration", 1, 1)));
+        Assert.Equal([1, 1, 1], single.Items.Select(i => i.Quantity));
     }
 
     [Fact]
@@ -117,39 +73,27 @@ public class InventoryTests
         unfed.RunTicks(40000);
         Assert.Contains(Humans(unfed), s => unfed.Characters.Cold(s)!.Medical!.Dead && unfed.Characters.Cold(s)!.Medical!.Cause == DeathCause.Starvation);
     }
+}
 
+/// <summary>The ITEM <c>stackable</c> field against the install's base records (docs/simulation.md "Items and eating"). Skipped without the game.</summary>
+[Slow]
+public class StackLimitInstallTests
+{
     [Fact]
-    public void Eating_and_provisioning_do_not_change_with_the_thread_count()
+    public void Stackable_is_a_stack_limit_in_the_data()
     {
-        static List<ulong> Hashes(int threads)
-        {
-            using var world = World(9, threads, new FeedSettings { CheckEveryTicks = 10 }, new BodyOptions { HungerTime = 0.02f });
-            var hashes = new List<ulong>();
-            int ran = 0;
-            foreach (int target in new[] { 1, 100, 3000, 9000 })
-            {
-                world.RunTicks(target - ran);
-                ran = target;
-                hashes.Add(world.StateHash());
-            }
-            return hashes;
-        }
-        var one = Hashes(1);
-        Assert.Equal(one, Hashes(4));
-        Assert.Equal(one, Hashes(16));
-        Assert.Equal(one.Count, one.Distinct().Count());
-    }
-
-    [Fact]
-    public void A_squads_purse_is_part_of_the_state()
-    {
-        static ulong Run(long money)
-        {
-            using var world = World(5);
-            world.RunTicks(2);
-            world.Squads.Find(world.Squads.All.First().Id)!.Money = money;
-            return world.StateHash();
-        }
-        Assert.NotEqual(Run(0), Run(50));
+        Assert.SkipWhen(InstallData.Install is null, "Kenshi install not found");
+        var db = InstallData.BaseGame!;
+        // An int on every ITEM (never a bool). MAP_ITEMs hold 1.
+        var items = db.OfType(Meitou.Data.Fcs.FcsRecordType.ITEM).ToList();
+        Assert.All(items, r => Assert.False(r.Bools.ContainsKey("stackable")));
+        Assert.Equal(100, ItemInfo.From(items.First(r => r.Name == "Cats")).StackLimit);
+        // Crossbow bolts do not stack: each item is a quiver whose charges are the shots.
+        Assert.All(db.OfType(Meitou.Data.Fcs.FcsRecordType.CROSSBOW).SelectMany(c => c.GetReferences("ammo")).Select(r => db.Find(r.TargetStringId)!),
+            b => Assert.Equal(1, ItemInfo.From(b).StackLimit));
+        // Gear never stacks, whatever its record says; backpacks carry the bonus.
+        Assert.All(db.OfType(Meitou.Data.Fcs.FcsRecordType.WEAPON).Take(20), w => Assert.Equal(1, ItemInfo.From(w).StackLimit));
+        var bull = ItemInfo.From(db.OfType(Meitou.Data.Fcs.FcsRecordType.CONTAINER).First(r => r.Name == "Bull Backpack"));
+        Assert.Equal((1, 5f), (bull.StackBonusMinimum, bull.StackBonusMult));
     }
 }

@@ -1,13 +1,15 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 
 using Meitou.Rendering.Gpu;
+using Vk = Silk.NET.Vulkan;
 
 namespace Meitou.Rendering;
 
 /// <summary>
 /// The Meitou light shafts (the <c>shafts</c> switch; <see cref="LightShaftShaders"/>, docs/render-shafts.md): after the scene and the GI resolve, before the
-/// fog volumes, three full-screen passes darken the haze where the sun is shadowed along the view ray: a froxel grid's shadow samples into an atlas,
-/// their sums front to back, and the apply pass over the scene colour.
+/// fog volumes, a froxel grid's shadow samples go into an atlas (a full-screen pass), their sums front to back (and the air layer's scatter) into two more (one compute
+/// kernel, <see cref="LightShaftShaders.Scan"/>, or two fragment passes), and the apply pass darkens the haze over the scene colour.
 /// </summary>
 public sealed unsafe partial class PostProcess
 {
@@ -55,6 +57,76 @@ public sealed unsafe partial class PostProcess
         public ShaftScatterPass(GpuContext gpu) : base(gpu, LightShaftShaders.Scatter, "post shafts scatter") => (Injected, Air) = (P.Sampler("uShaftInjected"), P.Uniform("uShaftAir"));
     }
 
+
+    /// <summary>
+    /// The integrate and scatter passes as one compute kernel walking each cell column's slices once (<see cref="LightShaftShaders.Scan"/>; <c>--ab shafts-scan</c>).
+    /// Off, or where the device cannot write the atlases as storage images, the two fragment passes run.
+    /// </summary>
+    public bool ShaftScan { get; set; } = true;
+    /// <summary>Whether the device can write the atlases as storage images (the scan kernel can run).</summary>
+    public bool ShaftScanSupported => SupportsStorage(Vk.Format.R32Sfloat) && SupportsStorage(Vk.Format.R16G16B16A16Sfloat);
+
+    /// <summary>The scan kernel's uniform block (std140: every member takes a 16-byte slot).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    struct ShaftScanParams
+    {
+        public Vector4 Grid, Range, Eye, Right, Up, Back, Tan, Air, AtmoParams, AtmoSimple, AtmoHaze, AtmoAltitude, AtmoFog, AtmoSun, SunLight, AtmoMaps;
+    }
+
+    ShaderProgram? shaftScanProgram;
+    ComputePipeline? shaftScanPipeline;
+
+    static T ReadGlobal<T>(FrameGlobals g, string name) where T : unmanaged
+    {
+        T value = default;
+        g.UniformValue(name)?.TryRead(MemoryMarshal.AsBytes(new Span<T>(ref value)));
+        return value;
+    }
+
+    /// <summary>Integrate and scatter in one dispatch: the light atlas and, with the air layer on, the scatter atlas, from the injected atlas.</summary>
+    void ShaftScanRun(Vector4 grid, Vector4 range, float tanX, float tanY, Vector4 air, bool withAir)
+    {
+        if (shaftScanProgram is null)
+        {
+            shaftScanProgram = Gpu.Shaders.Compute(LightShaftShaders.Scan, "post shafts scan");
+            shaftScanPipeline = Gpu.Pipelines.Get(new ComputePipelineDesc(shaftScanProgram, "post shafts scan"));
+        }
+        var g = Gpu.Globals;
+        var r = viewRotation;
+        var sunLight = ReadGlobal<Vector3>(g, "uAtmoSunLight");
+        var p = new ShaftScanParams
+        {
+            Grid = grid, Range = range, Eye = new Vector4(eyeNow, 0), Right = new Vector4(r.M11, r.M21, r.M31, 0), Up = new Vector4(r.M12, r.M22, r.M32, 0),
+            Back = new Vector4(r.M13, r.M23, r.M33, 0), Tan = new Vector4(tanX, tanY, 0, 0), Air = withAir ? air : default,
+            AtmoParams = ReadGlobal<Vector4>(g, "uAtmoParams"), AtmoSimple = ReadGlobal<Vector4>(g, "uAtmoSimple"), AtmoHaze = ReadGlobal<Vector4>(g, "uAtmoHaze"),
+            AtmoAltitude = ReadGlobal<Vector4>(g, "uAtmoAltitude"), AtmoFog = ReadGlobal<Vector4>(g, "uAtmoFog"), AtmoSun = ReadGlobal<Vector4>(g, "uAtmoSun"),
+            SunLight = new Vector4(sunLight, ReadGlobal<Vector4>(g, "uAtmoLight").W), AtmoMaps = ReadGlobal<Vector4>(g, "uAtmoMaps"),
+        };
+        var data = Gpu.Frame.Constants.Write(new ReadOnlySpan<ShaftScanParams>(in p), 256);
+        var cube = g.Texture("uAtmoIrradiance")?.Invoke() ?? default;
+        if (cube.IsNull) cube = Gpu.Dummy(FrameGlobals.Sampler2D("uAtmoIrradiance", cube: true));
+        var cmd = Segment();
+        var infos = stackalloc Vk.DescriptorImageInfo[4];
+        infos[0] = new Vk.DescriptorImageInfo(Point(), shaftInjected!.Texture.View(), Vk.ImageLayout.General);
+        infos[1] = new Vk.DescriptorImageInfo(default, shaftLight!.Texture.View(), Vk.ImageLayout.General);
+        infos[2] = new Vk.DescriptorImageInfo(default, shaftScatter!.Texture.View(), Vk.ImageLayout.General);
+        infos[3] = new Vk.DescriptorImageInfo(cube.Sampler, cube.View, Vk.ImageLayout.General);
+        var buffer = new Vk.DescriptorBufferInfo(data.Handle, data.Offset, (ulong)sizeof(ShaftScanParams));
+        var writes = stackalloc Vk.WriteDescriptorSet[5];
+        for (int i = 0; i < 4; i++)
+            writes[i] = new Vk.WriteDescriptorSet
+            {
+                SType = Vk.StructureType.WriteDescriptorSet, DstBinding = (uint)i, DescriptorCount = 1, PImageInfo = &infos[i],
+                DescriptorType = i is 1 or 2 ? Vk.DescriptorType.StorageImage : Vk.DescriptorType.CombinedImageSampler,
+            };
+        writes[4] = new Vk.WriteDescriptorSet { SType = Vk.StructureType.WriteDescriptorSet, DstBinding = 4, DescriptorCount = 1, DescriptorType = Vk.DescriptorType.UniformBuffer, PBufferInfo = &buffer };
+        cmd.Barrier(BarrierBatch.Full);
+        cmd.BindPipeline(shaftScanPipeline!);
+        cmd.PushDescriptors(shaftScanProgram.Layout, 0, new ReadOnlySpan<Vk.WriteDescriptorSet>(writes, 5), Vk.PipelineBindPoint.Compute);
+        cmd.Dispatch((uint)(((int)grid.X + 7) / 8), (uint)(((int)grid.Y + 7) / 8));
+        cmd.Barrier(BarrierBatch.Full);
+    }
+    static readonly bool ShaftStamps = Environment.GetEnvironmentVariable("MEITOU_SHAFT_STAMPS") == "1";
     ShaftInjectPass? shaftInject;
     ShaftIntegratePass? shaftIntegrate;
     ShaftScatterPass? shaftScatterPass;
@@ -70,8 +142,7 @@ public sealed unsafe partial class PostProcess
     /// <summary>The grid's cells across, down (from the render size's aspect) and slices this frame, and the atlas's size.</summary>
     (int Across, int Down, int Slices, int AtlasWidth, int AtlasHeight) ShaftLayout()
     {
-        var o = Options;
-        int across = Math.Clamp(o.ShaftCells, 8, 1024), slices = Math.Clamp(o.ShaftSlices, 8, 256);
+        int across = Math.Clamp(PostOptions.ShaftCells, 8, 1024), slices = Math.Clamp(PostOptions.ShaftSlices, 8, 256);
         int down = Math.Max(1, (int)MathF.Round(across * height / (float)Math.Max(width, 1)));
         int columns = LightShaftShaders.AtlasColumns, rows = (slices + columns - 1) / columns;
         return (across, down, slices, across * columns, down * rows);
@@ -89,7 +160,7 @@ public sealed unsafe partial class PostProcess
         ShaftsDescribe = !o.LightShafts ? "off" : $"darkening {darkening:0.###} (none: no passes)";
         if (!o.LightShafts || darkening <= 0 || sceneColour is null || !haveNearSlice) return;
         var (across, down, slices, aw, ah) = ShaftLayout();
-        ShaftsDescribe = $"darkening {darkening:0.###}, grid {across} x {down} x {slices} ({o.ShaftSamples} samples), {o.ShaftNear:0} to {far:0} units, air {(o.ShaftAir > 0 ? $"x{o.ShaftAir:0.##} x{airByTime:0.##} by the hour from {groundY:0} (scale height {o.ShaftAirHeight:0}, g {o.ShaftAirPhase:0.##})" : "off")}";
+        ShaftsDescribe = $"darkening {darkening:0.###}, grid {across} x {down} x {slices} ({PostOptions.ShaftSamples} samples), {PostOptions.ShaftNear:0} to {far:0} units, air {(o.ShaftAir > 0 ? $"x{o.ShaftAir:0.##} x{airByTime:0.##} by the hour from {groundY:0} (scale height {PostOptions.ShaftAirHeight:0}, g {PostOptions.ShaftAirPhase:0.##})" : "off")}";
         if (shaftInjected is null || shaftInjected.Width != aw || shaftInjected.Height != ah)
         {
             foreach (var t in new[] { shaftInjected, shaftLight, shaftScatter }.OfType<Target2D>()) t.Texture.Dispose();   // released after the frames in flight
@@ -104,9 +175,9 @@ public sealed unsafe partial class PostProcess
         shaftApply ??= new ShaftApplyPass(Gpu);
         shaftScatterPass ??= new ShaftScatterPass(Gpu);
         // The air layer: density at the ground under the eye, its scale height, the phase's anisotropy (0 density: no layer, no pass).
-        var air = new Vector4(MathF.Max(o.ShaftAir, 0) * MathF.Max(airByTime, 0) * PostOptions.ShaftAirDensity, groundY, MathF.Max(o.ShaftAirHeight, 1), Math.Clamp(o.ShaftAirPhase, 0, 0.95f));
+        var air = new Vector4(MathF.Max(o.ShaftAir, 0) * MathF.Max(airByTime, 0) * PostOptions.ShaftAirDensity, groundY, MathF.Max(PostOptions.ShaftAirHeight, 1), Math.Clamp(PostOptions.ShaftAirPhase, 0, 0.95f));
 
-        float near = Math.Clamp(o.ShaftNear, 1, far * 0.5f);
+        float near = Math.Clamp(PostOptions.ShaftNear, 1, far * 0.5f);
         var grid = new Vector4(across, down, slices, LightShaftShaders.AtlasColumns);
         // The jitter moves every frame only for a temporal upscaler to average; without one it stays put (a still pattern, not a shimmer).
         var range = new Vector4(near, far, MathF.Log(far / near), Temporal ? Gpu.Frame.Number % 4096 : 0);
@@ -125,25 +196,46 @@ public sealed unsafe partial class PostProcess
 
         var i = shaftInject;
         Common(i);
-        i.P.Set(i.Samples, Math.Clamp(o.ShaftSamples, 1, 16));
+        i.P.Set(i.Samples, Math.Clamp(PostOptions.ShaftSamples, 1, 16));
         i.P.ApplyGlobals();   // the atmosphere's uniforms and the shadow receivers, through the frame globals
         Draw(i.P, shaftInjected!);
+        if (ShaftStamps) Stamp("shafts-inject");
 
-        var g = shaftIntegrate;
-        Common(g);
-        Bind(g.P, g.Injected, shaftInjected);
-        Draw(g.P, shaftLight!);
-
-        if (air.X > 0)
+        if (ShaftScan && ShaftScanSupported)
         {
-            var sc = shaftScatterPass;
-            Common(sc);
-            Bind(sc.P, sc.Injected, shaftInjected);
-            sc.P.Set(sc.Air, air);
-            sc.P.ApplyGlobals();   // the sun and the sky's ambient
-            Draw(sc.P, shaftScatter!);
+            ShaftScanRun(grid, range, tanY * aspectNow, tanY, air, air.X > 0);
+            if (ShaftStamps) Stamp("shafts-scan");
+        }
+        else
+        {
+            var g = shaftIntegrate;
+            Common(g);
+            Bind(g.P, g.Injected, shaftInjected);
+            Draw(g.P, shaftLight!);
+            if (ShaftStamps) Stamp("shafts-integrate");
+
+            if (air.X > 0)
+            {
+                var sc = shaftScatterPass;
+                Common(sc);
+                Bind(sc.P, sc.Injected, shaftInjected);
+                sc.P.Set(sc.Air, air);
+                sc.P.ApplyGlobals();   // the sun and the sky's ambient
+                Draw(sc.P, shaftScatter!);
+                if (ShaftStamps) Stamp("shafts-scatter");
+            }
         }
 
+        var parameters = new Vector4(Math.Clamp(darkening, 0, 1), PostOptions.ShaftSky, 0, 0);
+        shaftFrame = (grid, range, new Vector2(tanY * aspectNow, tanY), Math.Clamp(darkening, 0, 1));
+        if (MergeLayers)
+        {
+            // The apply is the merged pass's (ApplySsao).
+            (shaftsPending, shaftArgs) = (true, (air, parameters));
+            Stamp("shafts");
+            CloseSegment();
+            return;
+        }
         var a = shaftApply;
         Common(a);
         Bind(a.P, a.NearDepth, sceneDepth);
@@ -156,12 +248,11 @@ public sealed unsafe partial class PostProcess
         a.P.Set(a.WaterY, WaterHeight ?? float.MinValue);
         a.P.Set(a.HasFar, farSliceDrawn ? 1 : 0);
         a.P.Set(a.Atlas, aw, ah);
-        a.P.Set(a.Params, Math.Clamp(darkening, 0, 1), o.ShaftSky, o.ShaftDebug ? 1 : 0, 0);
+        a.P.Set(a.Params, parameters);
         a.P.ApplyGlobals();
         Draw(a.P, sceneColour!.Attachment, sceneColour.Format, width, height, width, height, FogState);
         Stamp("shafts");
         CloseSegment();
-        shaftFrame = (grid, range, new Vector2(tanY * aspectNow, tanY), Math.Clamp(darkening, 0, 1));
     }
 
     void DisposeShafts()
@@ -169,6 +260,7 @@ public sealed unsafe partial class PostProcess
         shaftInject?.P.Dispose();
         shaftIntegrate?.P.Dispose();
         shaftApply?.P.Dispose();
+        shaftScanProgram?.Dispose();
         shaftScatterPass?.P.Dispose();
     }
 }

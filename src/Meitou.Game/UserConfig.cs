@@ -3,9 +3,12 @@ using System.Text.Json.Serialization;
 
 namespace Meitou.Game;
 
+/// <summary>The unit the run speed is shown in.</summary>
+enum SpeedUnit { Mph, Kmh }
+
 /// <summary>
 /// The player's settings, kept in <c>meitou.user.json</c> (git-ignored) in the working directory, else next to the executable:
-/// the frame limit, vsync, the simulation tick rate, the graphics sliders of the Tab panel (by label) and key bindings
+/// the frame limit, vsync, full screen, the simulation tick rate, the graphics sliders of the Tab panel (by label) and key bindings
 /// (action name to comma-separated keys, as <see cref="Engine.Input.InputBindings.Apply"/> reads them). Written back on exit.
 /// </summary>
 sealed class UserConfig
@@ -15,7 +18,36 @@ sealed class UserConfig
     /// <summary>Frames per second when vsync is off; 0 = unlimited. Engine default 240.</summary>
     public int FpsLimit { get; set; } = 240;
     public bool VSync { get; set; }
+    public Meitou.Data.Ui.UiMode UiMode { get; set; } = Meitou.Data.Ui.UiMode.Faithful;
+    /// <summary>The unit of the run speed in the information panel (Interface settings): mph as the game, or km/h.</summary>
+    public SpeedUnit SpeedUnit { get; set; } = SpeedUnit.Mph;
+    /// <summary>The damage floaters (Interface settings): the original's <c>floaters</c> option, Simple by default; Meitou also floats a green "+N" over a player character that heals.</summary>
+    public FloaterMode Floaters { get; set; } = FloaterMode.Simple;
+    public bool MainMenuTransitions { get; set; } = true;
+    public bool InGameTransitions { get; set; } = true;
+    public float MainMenuTransitionSpeed { get; set; } = 1;
+    public float InGameTransitionSpeed { get; set; } = 1;
+    /// <summary>Borderless full screen (the Tab panel, Alt+Enter); <c>--windowed</c> starts in a window for one run.</summary>
+    public bool FullScreen { get; set; } = true;
     public int TickRate { get; set; } = 30;
+    /// <summary>How many enemies may melee one target at once (Advanced settings, 1-5): Faithful 1 (the game's CONSTANTS), Meitou 3.</summary>
+    public int AttackSlots { get; set; } = MeitouAttackSlots;
+    public const int FaithfulAttackSlots = 1, MeitouAttackSlots = 3;
+    /// <summary>A late but successfully rolled dodge or block still counts (Advanced settings; Faithful off, Meitou on): a balance change for fights against several enemies.</summary>
+    public bool LateDefences { get; set; } = true;
+    /// <summary>The off-screen switches (Advanced settings; Faithful off, Meitou on; docs/simulation.md "Off-screen tier"): roaming squads keep their characters off screen,
+    /// hostile squads that meet off screen fight it out, a squad coming back has healed for the time away.</summary>
+    public bool KeepRoamers { get; set; } = true;
+    public bool OffscreenFights { get; set; } = true;
+    public bool OffscreenHealing { get; set; } = true;
+    /// <summary>Campaign data counts each <c>inherits from</c> ancestor once (Advanced settings; Faithful off: twice, as the game does, doubling inherited squad weights and follow-up chances).</summary>
+    public bool CampaignAncestorsOnce { get; set; } = true;
+    /// <summary>Wild animals and homeless squads keep their characters while their area is unloaded (Advanced settings; Faithful off: removed and made anew, as the game does).</summary>
+    public bool KeepWild { get; set; } = true;
+    /// <summary>The Windows cursor instead of the game's drawn pointer (the original's <c>hardware_mouse</c>, default off; Interface settings).</summary>
+    public bool HardwareMouse { get; set; }
+    /// <summary>Outline and tint the character under the cursor (Advanced settings; Meitou only, the game has none).</summary>
+    public bool HoverOutline { get; set; } = true;
     /// <summary>Worker threads of the simulation; null = half the cores.</summary>
     public int? SimThreads { get; set; }
     public Dictionary<string, float> Graphics { get; set; } = [];

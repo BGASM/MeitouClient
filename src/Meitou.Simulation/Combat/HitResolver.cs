@@ -47,15 +47,27 @@ public static class HitResolver
     public static (int Part, HitDamage Damage) Land<TCover>(MedicalState medical, in MedicalContext ctx, in DamagePacket packet, ReadOnlySpan<ArmourPiece> armour,
         TCover coverRoll, float toughness, bool lowStrike, bool directionSix, CombatConstants c, List<MedicalEvent>? events) where TCover : struct, ICoverRoll
     {
+        var (part, damage, _) = LandDetailed(medical, ctx, packet, armour, coverRoll, toughness, lowStrike, directionSix, c, events);
+        return (part, damage);
+    }
+
+    /// <summary>What the armour alone stopped of a packet (before toughness and the difficulty multiplier, as the damage floaters show it).</summary>
+    public static ArmourAbsorbed Absorbed(in DamagePacket packet, in ArmourEffect armour) =>
+        new(packet.Cut * armour.CutReduction, packet.Blunt * armour.BluntReduction, MathF.Min(packet.Pierce, armour.PierceFlat));
+
+    /// <summary><see cref="Land{TCover}"/> that also reports what the armour stopped.</summary>
+    public static (int Part, HitDamage Damage, ArmourAbsorbed Absorbed) LandDetailed<TCover>(MedicalState medical, in MedicalContext ctx, in DamagePacket packet, ReadOnlySpan<ArmourPiece> armour,
+        TCover coverRoll, float toughness, bool lowStrike, bool directionSix, CombatConstants c, List<MedicalEvent>? events) where TCover : struct, ICoverRoll
+    {
         int part = medical.ChoosePart(ctx, lowStrike, directionSix);
-        if (part < 0) return (-1, default);
+        if (part < 0) return (-1, default, default);
         string partId = medical.Parts[part].Template.StringId;
         Span<bool> covering = armour.Length <= 32 ? stackalloc bool[armour.Length] : new bool[armour.Length];
         for (int i = 0; i < armour.Length; i++) covering[i] = ArmourStack.Covers(armour[i].Data, partId, coverRoll.Roll(i));
         var effect = ArmourStack.Stack(armour, covering, packet.ArmourPenetration);
         var damage = Resolve(packet, effect, toughness, ctx.Options.GlobalDamageMultiplier, c);
         medical.ApplyHit(part, damage, ctx, events);
-        return (part, damage);
+        return (part, damage, Absorbed(packet, effect));
     }
 
     readonly struct FuncCover(Func<int, float> roll) : ICoverRoll
@@ -63,6 +75,9 @@ public static class HitResolver
         public float Roll(int piece) => roll(piece);
     }
 }
+
+/// <summary>The cut, blunt and flat pierce damage worn armour stopped.</summary>
+public readonly record struct ArmourAbsorbed(float Cut, float Blunt, float Pierce);
 
 /// <summary>Whether the armour piece at an index covers the part a blow hit: a roll in [0, 1).</summary>
 public interface ICoverRoll

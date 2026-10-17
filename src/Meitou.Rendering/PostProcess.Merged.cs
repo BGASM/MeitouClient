@@ -14,16 +14,16 @@ namespace Meitou.Rendering;
 /// </summary>
 public sealed unsafe partial class PostProcess
 {
-    /// <summary>The merged velocity and exposure kernels (Meitou default); off runs the separate full-screen passes. <c>MEITOU_POST_MERGE=0</c> starts with them off.</summary>
+    /// <summary>The merged velocity and exposure kernels (Meitou default); off runs the separate full-screen passes (<c>--ab post-merge</c>).</summary>
     public bool MergePasses
     {
         get => MergeVelocity && MergeExposure;
         set => MergeVelocity = MergeExposure = value;
     }
-    /// <summary>The velocity kernel alone (<c>MEITOU_POST_MERGE=velocity</c> or <c>=0</c> starts with it off).</summary>
-    public bool MergeVelocity { get; set; } = Environment.GetEnvironmentVariable("MEITOU_POST_MERGE") is not ("0" or "exposure");
+    /// <summary>The velocity kernel alone.</summary>
+    public bool MergeVelocity { get; set; } = true;
     /// <summary>The exposure kernel alone.</summary>
-    public bool MergeExposure { get; set; } = Environment.GetEnvironmentVariable("MEITOU_POST_MERGE") is not ("0" or "velocity");
+    public bool MergeExposure { get; set; } = true;
 
     ShaderProgram? velocityProgram, exposureProgram;
     ComputePipeline? velocityPipeline, exposurePipeline;
@@ -47,6 +47,8 @@ public sealed unsafe partial class PostProcess
         public Vector4 Right;      // xyz, the water's reactivity
         public Vector4 Up;         // xyz, 1 when a far slice was drawn
         public Vector4 Back;       // xyz, the outputs: bit 0 the upscalers' depth, bit 1 the reactivity
+        public Vector4 Sun;        // the direction to the sun, cos of the angle within which the sky takes all of its motion (PostProcess.SunMotion.cs)
+        public Vector4 SunMotion;  // the sun's motion in the motion target's units, cos of the angle past which none, 1 when on
     }
 
     /// <summary>
@@ -71,6 +73,7 @@ public sealed unsafe partial class PostProcess
             Right = new Vector4(r.M11, r.M21, r.M31, WaterReactive),
             Up = new Vector4(r.M12, r.M22, r.M32, farSliceDrawn ? 1 : 0),
             Back = new Vector4(r.M13, r.M23, r.M33, (depthOut is not null ? 1 : 0) | (reactiveOut is not null ? 2 : 0)),
+            Sun = sunMotion.Sun, SunMotion = sunMotion.Motion,
         };
         var data = Gpu.Frame.Constants.Write(new ReadOnlySpan<VelocityParams>(in p), 256);
         var cmd = Segment();
@@ -170,7 +173,7 @@ static class MergedShaders
         layout(std430, set = 0, binding = 5) readonly buffer Params
         {
             mat4 nearToPrev; mat4 farToPrev;
-            vec4 planes; vec4 full; vec4 tanEye; vec4 right; vec4 up; vec4 back;
+            vec4 planes; vec4 full; vec4 tanEye; vec4 right; vec4 up; vec4 back; vec4 sun; vec4 sunMotion;
         } p;
         layout(push_constant) uniform Push { vec2 size; } pc;
 
@@ -198,6 +201,9 @@ static class MergedShaders
             float reactive = p.tanEye.z > p.tanEye.w && p.tanEye.z + offset.y < p.tanEye.w ? p.right.w : 0.0;
             vec4 prev = toPrev * vec4(ndc, 2.0 * d - 1.0, 1.0);
             vec2 motion = ((ndc - p.full.zw) - prev.xy / prev.w) * 0.5;
+            // The sky round the sun moves with the sun (PostProcess.SunMotion.cs).
+            if (p.sunMotion.w != 0.0 && d >= 1.0)
+                motion += p.sunMotion.xy * smoothstep(p.sunMotion.z, p.sun.w, dot(normalize(offset), p.sun.xyz));
             imageStore(uMotion, px, vec4(motion, depth, reactive));
             int outputs = int(p.back.w);
             if ((outputs & 1) != 0) imageStore(uUpscaleDepth, px, vec4(depth, 0.0, 0.0, 1.0));
@@ -268,7 +274,8 @@ static class MergedShaders
                 st.counter = 0u;
                 float last = imageLoad(uLast, ivec2(0)).r;
                 float adapted = mix(last, total, pc.blend);
-                imageStore(uAdapted, ivec2(0), vec4(clamp(adapted, pc.bandMin, max(pc.bandMin, pc.bandMax)), total, 0.0, 1.0));
+                float smoothMean = mix(imageLoad(uLast, ivec2(0)).g, total, pc.blend);   // the mean smoothed without the band (the night grading reads it)
+                imageStore(uAdapted, ivec2(0), vec4(clamp(adapted, pc.bandMin, max(pc.bandMin, pc.bandMax)), smoothMean, 0.0, 1.0));
             }
         }
         """;

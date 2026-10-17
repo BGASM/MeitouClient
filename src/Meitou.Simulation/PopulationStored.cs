@@ -1,0 +1,156 @@
+using System.Numerics;
+using Meitou.Simulation.Bodies;
+
+namespace Meitou.Simulation;
+
+/// <summary>
+/// Town squads kept as their characters (docs/simulation.md "Population"): when a town unloads, each squad it made becomes a pinned <see cref="Platoon"/> holding a
+/// <see cref="StoredSquad"/>, and when the town loads again the platoon is made of those same characters (name, look, body, kit, bounties, place), never rolled anew.
+/// </summary>
+public sealed partial class PopulationSystem
+{
+    /// <summary>
+    /// Takes the squad's characters out of the world into <paramref name="stored"/> (serial phase): each living member's cold state, cleared of what referred to the
+    /// world, with its place; the dead are left out. Returns where the leader (else the first member) stood.
+    /// </summary>
+    static Vector2 Store(World world, Squad squad, StoredSquad stored)
+    {
+        var table = world.Characters;
+        var at = new Vector2(squad.Position.X, squad.Position.Z);
+        bool placed = false;
+        stored.Members.Clear();
+        foreach (var id in squad.Members)
+        {
+            if (!table.TryResolveNext(id, out int slot) || table.Cold(slot) is not { } cold) continue;
+            var hot = table.Previous[slot];
+            if (cold.DiedTick < 0 && hot.Alive)
+            {
+                Detach(cold);
+                bool leads = id == squad.Leader;
+                stored.Members.Add(new StoredMember(cold, hot.Position, hot.Yaw, leads));
+                if (leads || !placed) at = new Vector2(hot.Position.X, hot.Position.Z);
+                placed |= leads;
+            }
+            world.Uniques.Left(id);
+            table.Remove(id);
+        }
+        stored.Anchor = at;
+        stored.StoredTick = world.Tick;
+        return at;
+    }
+
+    /// <summary>Clears what a character's cold state holds only while it is in the world: paths, AI, carrying, treatment, combat and stealth state, a pending crime, jobs.</summary>
+    static void Detach(CharacterCold c)
+    {
+        c.Path = [];
+        c.PathExact = int.MaxValue;
+        c.PathRequest = 0;
+        c.PathApplied = 0;
+        c.OrderQueue.Clear();
+        c.GoalHeight = float.NaN;
+        c.Animation = null;
+        c.DrawnWeapon = default;
+        c.ModeOverride = null;
+        c.SpeedOverride = 0;
+        c.InCombat = false;
+        c.Fleeing = false;
+        c.Engaged = false;
+        c.Watchers = null;
+        c.StealthExposure = default;
+        c.StealthExposureTick = long.MinValue;
+        c.TreatTarget = CharacterId.None;
+        c.TreatSplint = false;
+        c.MedicJob = false;
+        c.Carrying = CharacterId.None;
+        c.CarriedBy = CharacterId.None;
+        c.CarryTarget = CharacterId.None;
+        c.LiftTime = -1;
+        c.RescueJob = false;
+        c.Pending = null;
+        c.Ai = null;
+        c.PickingLock = null;
+        c.BuildSite = null;
+        c.BuildBar = 0;
+        c.SquadId = -1;
+    }
+
+    /// <summary>
+    /// The stored characters into the world as the squad of <paramref name="p"/> (serial phase), each where it stood, the leader wandering round the town and the rest
+    /// following it (a roaming one waits for its orders), moved along with a stand-in that travelled; the stored list is emptied (the characters are the world's again). Null when no one is left.
+    /// </summary>
+    Squad? SpawnStored(World world, Platoon p, StoredSquad stored)
+    {
+        if (stored.Members.Count == 0) return null;
+        var site = data.Sites[p.Origin];
+        float radius = site.Town.SizeRadius * site.Town.TownRadiusMult;
+        return SpawnKept(world, stored, p.TemplateId, p.Faction, p.Origin, p.Id, p.Position, new Vector2(site.Position.X, site.Position.Z), Math.Max(radius * 0.8f, 40), p.Size);
+    }
+
+    /// <summary>Stored characters into the world as a squad of <paramref name="town"/> (-1: a wild one) homed at the given circle, moved along when <paramref name="position"/> is not where they were stored.</summary>
+    Squad? SpawnKept(World world, StoredSquad stored, string templateId, int faction, int town, int platoonId, Vector2 position, Vector2 homeCentre, float homeRadius, int size)
+    {
+        if (stored.Members.Count == 0) return null;
+        var table = world.Characters;
+        var squad = new Squad
+        {
+            Id = world.Squads.NextId(),
+            TemplateId = templateId,
+            Name = stored.Name,
+            Faction = faction,
+            Town = town,
+            PlatoonId = platoonId,
+            Pinned = stored.Pinned && town >= 0,
+            Position = new Vector3(position.X, world.Walkability.GroundHeight(position.X, position.Y), position.Y),
+            HomeCentre = homeCentre,
+            HomeRadius = homeRadius,
+            HomeBuilding = stored.HomeBuilding,
+            Shop = stored.Shop,
+        };
+        // A stand-in that travelled since takes its members along, each on walkable ground (else at the stand-in).
+        var walk = world.Walkability;
+        var delta = position - stored.Anchor;
+        bool moved = delta.LengthSquared() > 1;
+        bool hasLeader = stored.Members.Any(m => m.Leader);
+        foreach (var m in stored.Members)
+        {
+            var cold = m.Cold;
+            bool leads = m.Leader || !hasLeader && squad.Members.Count == 0;
+            cold.SquadId = squad.Id;
+            var at = m.Position;
+            if (moved)
+            {
+                float x = at.X + delta.X, z = at.Z + delta.Y;
+                if (!walk.IsWalkable(x, z)) (x, z) = WalkableSpots.Nearest(walk, new Vector2(x, z), out var near, 32) ? (near.X, near.Y) : (position.X, position.Y);
+                at = new Vector3(x, walk.GroundHeight(x, z), z);
+            }
+            var hot = new CharacterHot
+            {
+                Position = at,
+                Yaw = m.Yaw,
+                Health = 100,
+                Task = (byte)(leads ? (stored.Pinned ? CharacterTask.Wander : CharacterTask.Idle) : CharacterTask.Follow),
+                Mode = SpeedMode.Walk,
+                MaxSpeed = cold.Race is { } race && cold.Stats is { } stats && cold.Medical is { } medical ? Speed.Run(race, stats, medical, 1) : CharacterAssembly.StandInMaxSpeed,
+                WalkSpeed = cold.Race?.WalkSpeed ?? 15,
+                TaskTime = 0.5f + Rng.Float(Rng.Hash(world.Seed, (ulong)squad.Id << 8 | (uint)squad.Members.Count, RngPurpose.Think)) * 3,
+            };
+            var id = table.Spawn(hot, cold, world.Tick);
+            if (UniqueCharacters.IsUnique(data.Db.Find(cold.RecordId))) world.Uniques.Bind(cold.RecordId, id);
+            squad.Members.Add(id);
+            if (leads && squad.Leader.IsNone) squad.Leader = id;
+        }
+        squad.SpawnSize = Math.Max(size, squad.Members.Count);
+        stored.Members.Clear();
+        if (squad.Leader.IsNone) squad.Leader = squad.Members[0];
+        var lead = table.Next[squad.Leader.Slot].Position;
+        foreach (var id in squad.Members)
+        {
+            var at = table.Next[id.Slot].Position;
+            table.Cold(id.Slot)!.FormationOffset = new Vector2(at.X - lead.X, at.Z - lead.Z);
+        }
+        world.Squads.Add(squad);
+        // A resident in its bed takes it again.
+        world.Fixtures.Bind(world);
+        return squad;
+    }
+}

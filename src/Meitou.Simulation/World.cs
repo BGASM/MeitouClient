@@ -52,6 +52,8 @@ public sealed record WorldSettings
     public int PartitionsPerThread { get; init; } = 2;
     /// <summary>Fewest slots in a partition (small worlds are not cut into crumbs).</summary>
     public int MinPartitionSize { get; init; } = 16;
+    /// <summary>The game hours at tick 0 (day x 24 + hour; the default is day 1 at 13:00, the host's new game): <see cref="World.GameHours"/> starts there.</summary>
+    public double StartHours { get; init; } = 37;
 }
 
 /// <summary>
@@ -68,17 +70,28 @@ public sealed partial class World : IDisposable
     Partition[] partitions = [];
     // Per system, built once when it is added: which parallel phases it implements and the delegates that run them (no closure per tick).
     readonly List<SystemPhases> phases = [];
+    readonly List<SimCommand> deferred = [];
+    readonly List<string> messages = [];
     IAnimationSource? animations;
+    IProjectileSource? projectiles;
+    Trading.ITradeSource? trades;
+    Dialogue.IDialogueSource? dialogues;
+    Ragdolls.IRagdollSource? ragdolls;
 
     public World(WorldSettings settings, IWalkability walkability, IEnumerable<ITickSystem>? systems = null, CharacterTable? characters = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(walkability);
         Settings = settings;
+        GameHours = settings.StartHours;
         Walkability = walkability;
         this.systems = [.. systems ?? []];
         for (int k = 0; k < this.systems.Count; k++) phases.Add(new SystemPhases(this, this.systems[k], k));
         animations = this.systems.OfType<IAnimationSource>().FirstOrDefault();
+        projectiles = this.systems.OfType<IProjectileSource>().FirstOrDefault();
+        trades = this.systems.OfType<Trading.ITradeSource>().FirstOrDefault();
+        dialogues = this.systems.OfType<Dialogue.IDialogueSource>().FirstOrDefault();
+        ragdolls = this.systems.OfType<Ragdolls.IRagdollSource>().FirstOrDefault();
         Characters = characters ?? new CharacterTable();
         Grid = new SpatialGrid(settings.GridCellSize);
         pool = new WorkerPool(settings.Threads);
@@ -86,8 +99,15 @@ public sealed partial class World : IDisposable
         for (int i = 0; i < buffers.Length; i++) buffers[i] = new EffectBuffer();
     }
 
-    public WorldSettings Settings { get; }
+    public WorldSettings Settings { get; private set; }
     public ulong Seed => Settings.Seed;
+
+    /// <summary>A loaded save's world seed (docs/formats/save.md CAMERA <c>meitou seed</c>), so its seeded layout rolls as before the save; only before the first tick.</summary>
+    internal void RestoreSeed(ulong seed)
+    {
+        if (Tick != 0) throw new InvalidOperationException("The seed is restored before the world's first tick.");
+        Settings = Settings with { Seed = seed };
+    }
     public IWalkability Walkability { get; }
     public CharacterTable Characters { get; }
     /// <summary>The neighbour grid of the last tick's positions (valid from the Schedule step of a tick on).</summary>
@@ -98,11 +118,41 @@ public sealed partial class World : IDisposable
     public SquadRegistry Squads { get; } = new();
     /// <summary>Roaming squads that persist across the loading of zones (<see cref="PopulationSystem"/>).</summary>
     public PlatoonRegistry Platoons { get; } = new();
+    /// <summary>The NPC platoons of the save this world was loaded from, made when their zones load (null: a world that started new). Not hashed: the platoons carry what matters.</summary>
+    public Saving.SavedPopulation? Saved { get; set; }
     /// <summary>The player: faction, money, selection.</summary>
     public PlayerState Player { get; } = new();
+    /// <summary>Doors, lockable containers, cages and beds of the registered towns, with their occupants (docs/simulation.md "Cages, beds and locks").</summary>
+    public Locks.FixtureRegistry Fixtures { get; } = new();
+    /// <summary>The unique (story) characters made, dead or captured (docs/game/factions-squads-towns.md "Unique characters").</summary>
+    public UniqueCharacters Uniques { get; } = new();
+    /// <summary>The player-built buildings and construction sites, in creation order (docs/simulation.md "Buildings").</summary>
+    public Construction.BuildingRegistry Buildings { get; } = new();
+    /// <summary>
+    /// Every zone the population has had active in this world (docs/formats/save.md "Zone files": the original writes a file for each zone it loaded): a save writes a zone file for
+    /// each that its loaded save has none of. Only read by saves, so not hashed.
+    /// </summary>
+    public HashSet<Meitou.Data.World.ZoneCoordinate> VisitedZones { get; } = [];
+    /// <summary>The player's completed research and the buildings it unlocks; static this milestone, so not hashed.</summary>
+    public Construction.ResearchState Research { get; } = new();
     public IReadOnlyList<ITickSystem> Systems => systems;
     /// <summary>The number of ticks run; during a tick, the number of the tick being run.</summary>
     public long Tick { get; private set; }
+
+    /// <summary>
+    /// Runs <paramref name="body"/> for 0..<paramref name="count"/>-1 on the worker pool and waits, in a serial phase (a slow-world pass over independent items: each call may
+    /// change only its own item). The result must not depend on the order the items run in.
+    /// </summary>
+    internal void ParallelFor(int count, Action<int> body) => pool.ForEach(count, body);
+    /// <summary>Game seconds per game hour (docs/game/game-loop.md "The clock", Verified; the engine's <c>GameClock</c> has the same).</summary>
+    public const double SecondsPerGameHour = 1200.0 / 11;
+    /// <summary>
+    /// The game hours (day x 24 + time of day): the AI's hour windows read it. It advances by one tick of game time each tick; a host with a clock sets it from
+    /// the clock before each tick (the clock can be set). An input like the commands, so not part of the state hash.
+    /// </summary>
+    public double GameHours { get; set; }
+    /// <summary>The integer hour of day, 0 to 23 (the game's sky controller hour that the AI compares windows with).</summary>
+    public int Hour => Math.Clamp((int)(((GameHours % 24) + 24) % 24), 0, 23);
     public float TickSeconds => Settings.TickSeconds;
     /// <summary>The snapshot the last tick published, and the one before it (for interpolating); <see cref="WorldSnapshot.Empty"/> before.</summary>
     public WorldSnapshot Snapshot { get; private set; } = WorldSnapshot.Empty;
@@ -115,7 +165,14 @@ public sealed partial class World : IDisposable
         systems.Add(system);
         phases.Add(new SystemPhases(this, system, systems.Count - 1));
         animations ??= system as IAnimationSource;
+        projectiles ??= system as IProjectileSource;
+        trades ??= system as Trading.ITradeSource;
+        dialogues ??= system as Dialogue.IDialogueSource;
+        ragdolls ??= system as Ragdolls.IRagdollSource;
     }
+
+    /// <summary>Whether the character answers the player's Talk (the dialogue system finds event-1 dialogue for it); the host asks between ticks.</summary>
+    public bool CanTalk(CharacterId id) => dialogues is not null && Characters.Phase == TablePhase.Outside && Characters.TryResolveNext(id, out int slot) && dialogues.CanTalk(this, slot);
 
     /// <summary>Runs one simulation tick.</summary>
     public void RunTick()
@@ -125,7 +182,7 @@ public sealed partial class World : IDisposable
 
         // 1. Inputs (serial).
         table.Phase = TablePhase.Inputs;
-        var due = Commands.TakeDue(Tick);
+        var due = TakeDue();
         foreach (var s in systems) s.Inputs(this, due);
 
         // 2. Schedule (serial): the grid of the last tick's positions, then the systems.
@@ -165,7 +222,58 @@ public sealed partial class World : IDisposable
         table.Phase = TablePhase.Outside;
         table.EndTick();
         Tick++;
+        GameHours += TickSeconds / SecondsPerGameHour;
         if (Settings.PublishSnapshots) Publish();
+    }
+
+    /// <summary>
+    /// Queues a command a system decided on inside the tick (retaliation, auto-aggro) for the tick it is stamped with (at least the next one).
+    /// Serial phases only. These are world state, not the host's: they never go through <see cref="Commands"/>, so a host enqueuing from
+    /// another thread cannot interleave with them. At a tick they come before the host's commands of that tick, in the order they were deferred.
+    /// </summary>
+    public void Defer(SimCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (Characters.Phase == TablePhase.Parallel) throw new InvalidOperationException("commands are deferred in serial phases only");
+        if (command.Tick <= Tick) throw new ArgumentException("a deferred command is for a later tick", nameof(command));
+        deferred.Add(command);
+    }
+
+    /// <summary>The commands deferred for later ticks (for tests).</summary>
+    public int DeferredCount => deferred.Count;
+
+    IReadOnlyList<SimCommand> TakeDue()
+    {
+        var external = Commands.TakeDue(Tick);
+        if (deferred.Count == 0) return external;
+        var due = new List<SimCommand>(deferred.Count + external.Count);
+        int kept = 0;
+        for (int k = 0; k < deferred.Count; k++)
+        {
+            if (deferred[k].Tick <= Tick) due.Add(deferred[k]);
+            else deferred[kept++] = deferred[k];
+        }
+        deferred.RemoveRange(kept, deferred.Count - kept);
+        due.AddRange(external);
+        return due;
+    }
+
+    /// <summary>Posts a message for the player (a relation crossing a threshold...); serial phases only. The host shows them.</summary>
+    public void Post(string message)
+    {
+        lock (messages) messages.Add(message);
+    }
+
+    /// <summary>Takes the messages posted since the last call (the host, between ticks).</summary>
+    public IReadOnlyList<string> TakeMessages()
+    {
+        lock (messages)
+        {
+            if (messages.Count == 0) return [];
+            string[] all = [.. messages];
+            messages.Clear();
+            return all;
+        }
     }
 
     /// <summary>Runs <paramref name="ticks"/> ticks.</summary>
@@ -193,6 +301,9 @@ public sealed partial class World : IDisposable
         Squads.Hash(ref h);
         Platoons.Hash(ref h);
         Player.Hash(ref h);
+        if (Uniques.Count > 0) Uniques.Hash(ref h);   // only once a unique is tracked, so worlds without one hash as before
+        if (Fixtures.Count > 0) Fixtures.Hash(ref h);   // only once a town with buildings registered, so worlds without them hash as before
+        if (Buildings.Count > 0 || Buildings.Towns.Count > 0) Buildings.Hash(ref h);   // only once the player has a site, so worlds without one hash as before
         foreach (var s in systems) if (s is IStateHashed hashed) hashed.Hash(ref h);
         return h.Value;
     }

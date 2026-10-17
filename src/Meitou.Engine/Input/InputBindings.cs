@@ -19,6 +19,12 @@ public enum InputAction
     Screenshot, ToggleSettings,
     /// <summary>The debug overlays: the key list, the frame statistics, the profiler chart (gpu, cpu, off).</summary>
     ToggleKeys, ToggleStats, CycleProfiler,
+    /// <summary>The small frame-rate counter at the top left.</summary>
+    ToggleFps,
+    /// <summary>The game's quicksave and quickload (F5 and F9, docs/game/ui-input.md): the host saves to and loads from its own "quicksave" slot.</summary>
+    QuickSave, QuickLoad,
+    /// <summary>The game's <c>floor_up</c> / <c>floor_down</c>: the viewed floor of the buildings with a player character inside (docs/formats/zones.md "Interior view").</summary>
+    FloorUp, FloorDown,
     Quit,
 }
 
@@ -81,8 +87,10 @@ public sealed class InputBindings
         Set(InputAction.RotateRight, Key.E, Key.Right);
         Set(InputAction.PitchUp, Key.Up);
         Set(InputAction.PitchDown, Key.Down);
-        Set(InputAction.ZoomIn, Key.PageUp);
-        Set(InputAction.ZoomOut, Key.PageDown);
+        Set(InputAction.ZoomIn, Key.Home);   // the game's camera_zoom_in / out and floor_up / down keys (docs/game/ui-input.md)
+        Set(InputAction.ZoomOut, Key.End);
+        Set(InputAction.FloorUp, Key.PageUp);
+        Set(InputAction.FloorDown, Key.PageDown);
         Set(InputAction.Orbit, MouseButton.Middle);   // right is the command button (move order)
         Set(InputAction.ToggleFreeCamera, Key.Semicolon);
         Set(InputAction.Pause, Key.Space);
@@ -93,6 +101,9 @@ public sealed class InputBindings
         Set(InputAction.Speed3, Key.F4);
         Set(InputAction.Screenshot, Key.F8, Key.PrintScreen);   // the game's own screenshot keys (docs/game/ui-input.md)
         Set(InputAction.ToggleSettings, Key.Tab);
+        Set(InputAction.ToggleFps);   // Ctrl+F9 in the game (plain F9 is the game's quickload), so unbound here
+        Set(InputAction.QuickSave, Key.F5);
+        Set(InputAction.QuickLoad, Key.F9);
         Set(InputAction.ToggleKeys, Key.F10);
         Set(InputAction.ToggleStats, Key.F11);
         Set(InputAction.CycleProfiler, Key.F12);

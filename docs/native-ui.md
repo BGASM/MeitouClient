@@ -1,0 +1,73 @@
+# Native UI and extensions
+
+UI mode (--ui/Tab) is independent of graphics. Both modes use the installed MyGUI layouts,
+skins and fonts for the in-game HUD, windows and Escape menu. Meitou customises the title,
+scene transitions and settings; Faithful retains their original presentation where implemented.
+Vulkan paints both, choice persisted. `Meitou.Ui` has no window/GPU/simulation dependency.
+Host supplies snapshot text/availability and actions that enqueue commands. Extensions receive
+read-only binding copies, never mutable world. [MyGUI](formats/mygui.md), [parity](faithful-ui-parity.md).
+
+## Settings
+
+`SettingsMenu` shares category/row geometry and input between both modes: Display, Graphics
+(World/Lighting/Water/Effects), Interface, Controls and Advanced. Faithful uses MyGUI skins;
+Meitou uses the [UI kit](meitou-ui.md)'s rounded rust plates and paper Save action. Tab or Options
+opens it; Esc/the original Kenshi X/Save saves preferences and returns. Changes apply live, with the active
+upscaler shown separately from the requested one. Terrain texture quality needs a restart.
+The modal pauses simulation and captures world input; wheel/PageUp/PageDown scroll, Tab/arrows
+focus/adjust, Enter activates. Binding capture rejects conflicting/reserved controls; Esc cancels,
+Delete unbinds. Defaults and cache deletion ask first. The viewer retains its debug panel.
+Settings use 42px rows with a concise description for every setting, 14px labels,
+13px values/buttons and 11px hints, with a 17px label-to-description offset;
+paper section headers break up the dark plate. `FontPixels` specifies em pixels,
+with 2×2 oversampling, kerning and fractional glyph positioning for small text and motion.
+Wheel/PageUp/PageDown scrolling eases toward a clamped target independently of frame rate;
+clicking stops the glide. Opening/closing takes 140/100ms, page changes 120ms, hover
+brightening eases in/out over 160ms and dropdowns fade over 100ms. Hover keeps the raised
+button artwork; the sunken surface indicates a press or selection.
+Motion changes opacity/position, keeping type size fixed and input aligned.
+Window art is a continuous surface baked at 2x the logical size;
+only buttons use nine-slice scaling. The dialog is 1120×720 logical pixels; selection uses
+pressed surfaces without yellow focus rings/underlines. Weather/time previews are omitted.
+Graphics includes the Meitou switches under their related tabs; Advanced contains cache actions.
+Pages omit descriptive blurbs; field hints explain the setting's effect and useful constraints.
+The sidebar shows the build's nearest Git tag and short commit, embedded during compilation
+(`BuildGitTag`/`BuildGitCommit` can override them for source archives).
+Click a slider's number to type a value (selected initially); Enter/Tab or clicking outside
+applies it, Esc cancels. Decimals (dot/comma), scientific notation, numpad, Ctrl+A and cursor/
+selection editing are supported. Invalid/non-finite input leaves the setting unchanged;
+valid input is clamped to the slider range and uses its existing rounding rules.
+
+## Extension API
+
+Provisional ApiVersion1: IUiExtension registered explicitly with UiHost.Register, returning
+IDisposable. No automatic mod-DLL scanning/loading; incompatible versions/duplicate module IDs
+or keys rejected. Keys namespace extension-id:local-name. Failed registration rolls back;
+disposal removes factories/styles/overrides/actions/contributions; re-register supported.
+
+RegisterControl builds UiNodes; RegisterStyle supplies state colours/alignment/skin/font/scale/
+TextPadding UiInsets; OverrideStyle scoped replacement. RegisterAction receives read-only frame
+context/string argument; disabled controls never call it. Contribute supplies ordered slot tree
+with optional UI-mode restriction. OverrideControl can extend context.CreateBaseControl(id).
+Source/test interfaces are authoritative for signatures; samples in Ui extension tests.
+
+Builtin `meitou` actions drive the original controls in both modes. UiSlots:
+hud.toolbar,hud.selection,hud.squad,hud.overlay; first3 map original regions in both modes,
+overlay viewport. Equal-order later contribution draws above earlier; shared slot does not automatically
+insert into builtin layout. Override factory or choose explicit child placement.
+
+## Layout, input and lifetime
+
+Panels/labels/buttons/compound children: pixel/percentage/offset/right-bottom placement,
+absolute/row/column flow, padding/gaps. Parent disabled propagates; clip drawing/hits to parent/
+slot. Labels pass input through; panels block world in region. F7 suppresses all UI mouse regions.
+Registration/build/action on UI thread; fresh tree each UiFrameContext, no blocking callbacks.
+Painter only receives UiControls, never calls module code. Contribution/action exceptions raise
+UiHost.Diagnostic; failed contribution omitted atomically, others continue. Modules own resources
+outside registration. HUD uses actual snapshot aggregates, shared portrait rendering and original
+screen input in both modes, including I/C/M/T/Y shortcuts, map pan/zoom/orders and modal pause.
+Inventory/stat interactions and current gaps are tracked in parity ledger.
+Inventory drags draw the cell's icon/count at its footprint size and original grab point,
+above windows without intercepting drops; the source hides until release/cancellation.
+Escape/right click cancels; changing the source snapshot or closing its window cancels too.
+[Host](engine.md), [saves](simulation.md#quicksave-and-quickload).

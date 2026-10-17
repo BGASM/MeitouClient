@@ -52,7 +52,7 @@ internal sealed unsafe partial class CharacterRenderer
         motionCamera = false;
         var previous = havePreviousCamera ? previousUnjittered : motionUnjittered;
         (previousUnjittered, havePreviousCamera) = (motionUnjittered, true);
-        if (liveCount == 0 || !CharacterSwitches.MotionVectors) return;
+        if (liveCount == 0) return;
         motionCalls++;
         if (motionDepthIndex is { } known && known.Texture == targets.NearDepth) motionDepth = known.Index;
         else
@@ -61,10 +61,13 @@ internal sealed unsafe partial class CharacterRenderer
             motionDepthIndex = (targets.NearDepth, motionDepth = Gpu.Bindless.Register(BindlessKind.Texture2D, targets.NearDepth));
         }
         motionPass = true;
+        // This draw is the "characters" stage's, not the post chain's: the lap before ends the post time so far, the one after is the characters'.
+        StageClock.Lap(StageClock.Post, "post to motion");
         try
         {
             DrawView(new ViewConstants { ViewProjection = motionViewProjection, PreviousViewProjection = previous, Eye = motionEye, NearPlanes = targets.NearPlanes, JitterNdc = targets.JitterNdc }, motionEye, motionFrustum);
         }
         finally { motionPass = false; }
+        StageClock.Lap(StageClock.Characters, "characters motion");
     }
 }

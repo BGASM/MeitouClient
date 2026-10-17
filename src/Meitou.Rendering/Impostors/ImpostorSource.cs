@@ -120,7 +120,7 @@ public sealed class ImpostorSource
             File(LeavesPath);
             foreach (var t in TexturePaths) File(t);
             sb.Append(Main.Describe()).Append('\n').Append(Leaves?.Describe() ?? "-").Append('\n');
-            sb.Append(CultureInfo.InvariantCulture, $"{MaxScale:R}|{MeanScale:R}|grid {ImpostorClass.DefaultGrid} magnify {ImpostorClass.Magnification:R} bias {ImpostorClass.BiasScale:R}");
+            sb.Append(CultureInfo.InvariantCulture, $"{MaxScale:R}|{MeanScale:R}|grid {ImpostorClass.DefaultGrid} magnify {ImpostorClass.Magnification:R} bias 1");
             // Appended only for rocks: the tree atlases' keys (and so their cache files) stay what they were.
             if (IsRock) sb.Append(CultureInfo.InvariantCulture, $"\nrock {RockBakerVersion} {RockMaterial}\nrock frame {ImpostorClass.RockMaxFrame}");
             return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));

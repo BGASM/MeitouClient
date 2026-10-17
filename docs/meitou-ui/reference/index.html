@@ -1,0 +1,257 @@
+<!doctype html>
+<!-- Meitou UI reference gallery. Run tools/scripts/meitou-ui-textures.ps1 first, then open this file. Spec: docs/meitou-ui.md -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meitou UI</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@0,600;1,600&display=swap">
+<link rel="stylesheet" href="bundle.css">
+<style>
+:root {
+  --vignette: #080605;
+  --plate: #1c1714;
+  --plate-tint: rgba(14, 11, 9, 0.86);
+  --plate-rim: rgba(175, 166, 139, 0.12);
+  --metal-edge: #1a1514;
+  --paper: #7a6d61;
+  --paper-light: #d9ceb8;
+  --paper-edge: rgba(20, 8, 6, 0.9);
+  --paper-wear: rgba(60, 35, 20, 0.35);
+  --main: #afa68b;
+  --secondary: #140806;
+  --title: #492620;
+  --bad: #59231a;
+  --bad-bright: #bf4834;
+  --good: #a8b774;
+  --greyed: #444444;
+  --greyed-bright: #777777;
+  --brass: #816635;
+  --brass-light: #c4a062;
+  --dialogue-option: #b3b3b3;
+  --dialogue-hover: #00ff00;
+  --dialogue-bubble: #e6e6e6;
+  --item-standard: #e0cccc;
+  --grade-0: #666666;
+  --grade-1: #d9ccbf;
+  --grade-2: #4099b3;
+  --grade-3: #66fc80;
+  --grade-4: #fceb0d;
+  --artifact: #0dfceb;
+  --bar-life: #7e7a4f;
+  --bar-healed: #baa87f;
+  --bar-stunned: #5b514e;
+  --bar-hurt: #733625;
+  --bar-robot: #726d68;
+  --marker-ally: #5cb473;
+  --marker-neutral: #dfdfdf;
+  --marker-enemy: #e65139;
+  --marker-player: #8dcdff;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 24px;
+  --cell: 36px;
+  --radius-bar: 3px;
+  --radius-portrait: 4px;
+  --radius-btn: 7px;
+  --radius-card: 10px;
+  --plate-drop: 0 6px 14px rgba(0, 0, 0, 0.55);
+  --paper-border: inset 0 0 0 2px rgba(20, 8, 6, 0.9), inset 0 0 0 3px rgba(20, 8, 6, 0.25), inset 0 0 10px rgba(60, 35, 20, 0.35);
+  --plate-border: inset 0 0 0 1px rgba(175, 166, 139, 0.12);
+  --font-exo: "Exo 2", "Segoe UI", Tahoma, sans-serif;
+}
+h2 { margin: 32px 24px 8px; font: 600 12px/16px ui-monospace, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--main); }
+.mt-stage { min-height: 0; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="bundle.js"></script>
+</head>
+<body>
+<script>var M = window.MeitouUI, h = React.createElement;</script>
+<h2 id="h-MainMenu">MainMenu</h2>
+<div id="MainMenu"></div>
+<script>
+(function () {
+var root = ReactDOM.createRoot(document.getElementById('MainMenu'));
+root.render(h('div', { className: 'mt-menu-scene', style: { height: 480, display: 'flex', alignItems: 'flex-end', padding: '0 0 28px 40px', boxSizing: 'border-box', backgroundImage: 'radial-gradient(ellipse at 75% 30%, #4a3f33, #080605 80%)' } },
+  h(M.MainMenu, { save: { squad: 'Beep', line: "Beep's squad · Day 152 · The Hub", meta: 'c.4,250 · 31h played' } })));
+})();
+</script>
+<h2 id="h-SaveCard">SaveCard</h2>
+<div id="SaveCard"></div>
+<script>
+(function () {
+var root = ReactDOM.createRoot(document.getElementById('SaveCard'));
+root.render(h('div', { className: 'mt-stage' },
+  h('div', { style: { width: 320 } },
+    h(M.SaveCard, { squad: "Beep", line: "Beep's squad · Day 152 · The Hub", meta: 'c.4,250 · 31h played' }))));
+})();
+</script>
+<h2 id="h-Button">Button</h2>
+<div id="Button"></div>
+<script>
+(function () {
+var root = ReactDOM.createRoot(document.getElementById('Button'));
+root.render(h('div', { className: 'mt-stage' },
+  h('div', { className: 'mt-stack', style: { width: 260 } },
+    h(M.Button, { variant: 'primary' }, 'Recruit'),
+    h(M.Button, { icon: 'load', block: true }, 'Load Game'),
+    h(M.Button, { icon: 'options', block: true, pressed: true }, 'Options'),
+    h(M.Button, { icon: 'exit', block: true, variant: 'danger' }, 'Exit')),
+  h('div', { className: 'mt-row' },
+    h(M.Button, null, 'Trade'),
+    h(M.Button, { size: 'sm' }, 'Take all'),
+    h(M.Button, { disabled: true }, 'Talk'))));
+})();
+</script>
+<h2 id="h-Tabs">Tabs</h2>
+<div id="Tabs"></div>
+<script>
+(function () {
+var root = ReactDOM.createRoot(document.getElementById('Tabs'));
+root.render(h('div', { className: 'mt-stage' },
+  h(M.Tabs, { tabs: ['Inventory', 'Stats', 'Health', { id: 'Jobs', label: 'Jobs', disabled: true }], defaultValue: 'Stats', label: 'Character' })));
+})();
+</script>
+<h2 id="h-Checkbox">Checkbox</h2>
+<div id="Checkbox"></div>
+<script>
+(function () {
+var root = ReactDOM.createRoot(document.getElementById('Checkbox'));
+root.render(h('div', { className: 'mt-stage' },
+  h('div', { className: 'mt-plate mt-stack' },
+    h(M.Checkbox, { label: 'Auto-loot', defaultChecked: true }),
+    h(M.Checkbox, { label: 'Hold position' }),
+    h(M.Checkbox, { label: 'Block', disabled: true }))));
+})();
+</script>
+<h2 id="h-TimeControls">TimeControls</h2>
+<div id="TimeControls"></div>
+<script>
+(function () {
+var root = ReactDOM.createRoot(document.getElementById('TimeControls'));
+root.render(h('div', { className: 'mt-stage' },
+  h(M.TimeControls, { defaultSpeed: 1, day: 152, time: '14:32', money: 4250 })));
+})();
+</script>
+<h2 id="h-Window">Window</h2>
+<div id="Window"></div>
+<script>
+(function () {
+var root = ReactDOM.createRoot(document.getElementById('Window'));
+var tabs = h(M.Tabs, { tabs: ['Inventory', 'Stats', 'Health', 'Jobs'], defaultValue: 'Health', label: 'Character' });
+var limbs = [['Head', 100, 100], ['Chest', 76, 100, 30], ['Stomach', 100, 100], ['Left Arm', -14, 80], ['Right Arm', 80, 80], ['Left Leg', 52, 80], ['Right Leg', 80, 80]];
+root.render(h('div', { className: 'mt-stage' },
+  h(M.Window, { title: 'Beep', meta: 'Hiver', width: 520, tabs: tabs, footer: [h('span', { key: 1 }, 'Free Drifter'), h('span', { key: 2 }, 'c.4,250')] },
+    h(M.Card, null,
+      h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px 20px' } },
+        limbs.map(function (l) { return h(M.StatBar, { key: l[0], label: l[0], value: l[1], max: l[2], stun: l[3] }); }),
+        h(M.StatBar, { label: 'Hunger', value: 243, max: 300, tone: 'hunger' }))))));
+})();
+</script>
+<h2 id="h-Card">Card</h2>
+<div id="Card"></div>
+<script>
+(function () {
+var root = ReactDOM.createRoot(document.getElementById('Card'));
+root.render(h('div', { className: 'mt-stage' },
+  h(M.Card, { title: 'Stats', style: { width: 280 } },
+    h(M.SkillRow, { name: 'Strength', level: 34, progress: .42 }),
+    h(M.SkillRow, { name: 'Toughness', level: 51, progress: .8 })),
+  h(M.Card, { floating: true, style: { width: 240 } }, 'Paid c.300 to the Hub bar for a bed.'),
+  h(M.Card, { variant: 'plate', title: 'Shinobi Thieves', style: { width: 240 } }, 'Relations 12. Allied with the Hub.')));
+})();
+</script>
+<h2 id="h-Message">Message</h2>
+<div id="Message"></div>
+<script>
+(function () {
+var root = ReactDOM.createRoot(document.getElementById('Message'));
+root.render(h('div', { className: 'mt-stage' },
+  h(M.Message, null, 'Paid c.300'),
+  h(M.Message, null, 'Beep has been knocked unconscious')));
+})();
+</script>
+<h2 id="h-StatBar">StatBar</h2>
+<div id="StatBar"></div>
+<script>
+(function () {
+var root = ReactDOM.createRoot(document.getElementById('StatBar'));
+root.render(h('div', { className: 'mt-stage' },
+  h(M.Card, { style: { width: 300 } }, h('div', { className: 'mt-stack' },
+    h(M.StatBar, { label: 'Chest', value: 76, max: 100, stun: 30 }),
+    h(M.StatBar, { label: 'Left Arm', value: -14, max: 80 }),
+    h(M.StatBar, { label: 'Hunger', value: 243, max: 300, tone: 'hunger' }),
+    h(M.StatBar, { label: 'Right Leg', value: 80, max: 80, tone: 'robot' })))));
+})();
+</script>
+<h2 id="h-SkillRow">SkillRow</h2>
+<div id="SkillRow"></div>
+<script>
+(function () {
+var root = ReactDOM.createRoot(document.getElementById('SkillRow'));
+root.render(h('div', { className: 'mt-stage' },
+  h(M.Card, { style: { width: 300 } },
+    h(M.SkillRow, { name: 'Melee Attack', level: 34, progress: .6 }),
+    h(M.SkillRow, { name: 'Dexterity', level: 41, bonus: 5, progress: .2 }),
+    h(M.SkillRow, { name: 'Stealth', level: 12, bonus: -3, progress: .9 }))));
+})();
+</script>
+<h2 id="h-InventoryGrid">InventoryGrid</h2>
+<div id="InventoryGrid"></div>
+<script>
+(function () {
+var root = ReactDOM.createRoot(document.getElementById('InventoryGrid'));
+var items = [
+  { name: 'Katana', x: 0, y: 0, w: 1, h: 4, selected: true },
+  { name: 'Ration', x: 1, y: 0, count: 6 },
+  { name: 'Bandage', x: 2, y: 0, count: 12 },
+  { name: 'Iron Plates', short: 'Iron', x: 1, y: 1, w: 2, h: 2, count: 3 },
+  { name: 'Hashish', x: 3, y: 0, count: 2 },
+  { name: 'Dried Meat', short: 'Meat', x: 4, y: 0, count: 4 }
+];
+root.render(h('div', { className: 'mt-stage' },
+  h('div', { className: 'mt-plate' }, h(M.InventoryGrid, { cols: 8, rows: 5, items: items }))));
+})();
+</script>
+<h2 id="h-ItemTooltip">ItemTooltip</h2>
+<div id="ItemTooltip"></div>
+<script>
+(function () {
+var root = ReactDOM.createRoot(document.getElementById('ItemTooltip'));
+root.render(h('div', { className: 'mt-stage' },
+  h(M.ItemTooltip, { name: 'Meitou Katana', grade: 4, gradeName: 'Meitou', kind: 'Katana',
+    stats: [['Cut damage', '68'], ['Blunt damage', '14'], ['Attack bonus', '+4', 'good'], ['Indoor penalty', '−2', 'bad']],
+    description: 'A blade made by a master. Nothing finer exists.', weight: 6, value: 61200 })));
+})();
+</script>
+<h2 id="h-SquadCard">SquadCard</h2>
+<div id="SquadCard"></div>
+<script>
+(function () {
+var root = ReactDOM.createRoot(document.getElementById('SquadCard'));
+root.render(h('div', { className: 'mt-stage' },
+  h('div', { className: 'mt-plate mt-row', style: { padding: 6, gap: 2 } },
+    h(M.SquadCard, { name: 'Beep', health: .9, selected: true }),
+    h(M.SquadCard, { name: 'Ruka', health: .55 }),
+    h(M.SquadCard, { name: 'Hamut', health: .1, status: 'Unconscious' }),
+    h(M.SquadCard, { name: 'Burn', health: 1 }))));
+})();
+</script>
+<h2 id="h-Dialogue">Dialogue</h2>
+<div id="Dialogue"></div>
+<script>
+(function () {
+var root = ReactDOM.createRoot(document.getElementById('Dialogue'));
+root.render(h('div', { className: 'mt-stage' },
+  h(M.Dialogue, { speaker: 'Holy Nation Paladin', faction: 'Holy Nation', text: 'Do you pray to Okran?',
+    choices: ['Yes, of course.', 'No.', '[Leave]'] })));
+})();
+</script>
+</body>
+</html>

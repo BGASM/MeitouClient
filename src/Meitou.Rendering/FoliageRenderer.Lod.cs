@@ -13,15 +13,15 @@ public sealed unsafe partial class FoliageRenderer
 
     /// <summary>
     /// The Meitou <c>lod</c> switch: TERRAIN-mode meshes are drawn with generated coarser levels where the difference would show less than
-    /// <see cref="LodTolerance"/> pixels. Faithful draws every instance at full detail. Needs the GPU cull (not its verify mode).
+    /// <see cref="LodTolerance"/> pixels. Faithful draws every instance at full detail. Needs the GPU cull.
     /// </summary>
     public bool Lod { get; set; } = true;
 
     /// <summary>Pixels per radian of the main camera's render (set each frame by the world frame): the scale of a perspective view's level choice. 0: no levels.</summary>
     public float LodPixelsPerRadian { get; set; }
 
-    /// <summary>How many pixels (of the render, before the upscaler) a generated level may deviate from the original surface; <c>MEITOU_LOD_PIXELS</c>.</summary>
-    public float LodTolerance { get; set; } = Env("MEITOU_LOD_PIXELS", DefaultLodTolerance);
+    /// <summary>How many pixels (of the render, before the upscaler) a generated level may deviate from the original surface.</summary>
+    public float LodTolerance { get; set; } = DefaultLodTolerance;
 
     /// <summary>
     /// The Meitou <c>lod-far</c> switch: past <see cref="LodFarDistance"/> units from the eye the pixel tolerance of the generated levels grows in proportion to the distance (a plant
@@ -29,16 +29,16 @@ public sealed unsafe partial class FoliageRenderer
     /// </summary>
     public bool LodFar { get; set; } = true;
 
-    /// <summary>Where the tolerance starts to grow with the distance (<see cref="LodFar"/>); <c>MEITOU_LOD_FAR</c>.</summary>
-    public float LodFarDistance { get; set; } = Env("MEITOU_LOD_FAR", DefaultLodFarDistance);
+    /// <summary>Where the tolerance starts to grow with the distance (<see cref="LodFar"/>).</summary>
+    public float LodFarDistance { get; set; } = DefaultLodFarDistance;
 
     public const float DefaultLodFarDistance = 2500f;
 
     /// <summary>The default <see cref="LodTolerance"/>: the Tab slider "Foliage LOD distance x" shows this divided by the tolerance.</summary>
     public const float DefaultLodTolerance = 4f;
 
-    /// <summary>How many radii of the mesh one radian of shading deviation (<see cref="FoliageLodSet.NormalAngles"/>) counts as in a level's deviation; <c>MEITOU_LOD_NORMAL</c>.</summary>
-    public float LodNormalWeight { get; set; } = Env("MEITOU_LOD_NORMAL", 0.02f);
+    /// <summary>How many radii of the mesh one radian of shading deviation (<see cref="FoliageLodSet.NormalAngles"/>) counts as in a level's deviation.</summary>
+    public float LodNormalWeight { get; set; } = 0.02f;
 
     /// <summary>
     /// The Meitou <c>screen-lod</c> switch (docs/render-foliage.md, "Screen-size LOD"; <see cref="FoliageScreenLod"/>): a foliage mesh whose triangles are under <see cref="ScreenLodTriPixels"/> square pixels
@@ -47,11 +47,11 @@ public sealed unsafe partial class FoliageRenderer
     /// </summary>
     public bool ScreenLod { get; set; } = true;
 
-    /// <summary>Square pixels under which a mean triangle counts as not seen; <c>MEITOU_SCREEN_LOD_TRI</c>.</summary>
-    public float ScreenLodTriPixels { get; set; } = Env("MEITOU_SCREEN_LOD_TRI", 1.5f);
+    /// <summary>Square pixels under which a mean triangle counts as not seen.</summary>
+    public float ScreenLodTriPixels { get; set; } = 1.5f;
 
-    /// <summary>How many times the pixel tolerance a level may deviate while the level before has sub-pixel triangles; <c>MEITOU_SCREEN_LOD_MULT</c>.</summary>
-    public float ScreenLodMultiple { get; set; } = Env("MEITOU_SCREEN_LOD_MULT", 2f);
+    /// <summary>How many times the pixel tolerance a level may deviate while the level before has sub-pixel triangles.</summary>
+    public float ScreenLodMultiple { get; set; } = 2f;
 
     /// <summary>The render's pixels per radian for the screen-size rules: the main camera's, or a 1080-line picture's with the 50 degree field of view before the first frame.</summary>
     float ScreenLodPixelsPerRadian => LodPixelsPerRadian > 0 ? LodPixelsPerRadian : Meitou.Rendering.Impostors.ImpostorClass.ReferenceHeight / (2 * MathF.Tan(25 * MathF.PI / 180));
@@ -66,12 +66,8 @@ public sealed unsafe partial class FoliageRenderer
         return result;
     }
 
-    /// <summary>How many shadow texels a level may deviate in a cascade; <c>MEITOU_LOD_TEXELS</c>.</summary>
-    public float LodShadowTolerance { get; set; } = Env("MEITOU_LOD_TEXELS", 2f);
-
-    /// <summary><c>MEITOU_LOD_ALT=1</c>: levels on every other frame only (the stage names of those frames end in <c>+lod</c>), for timing both in one run.</summary>
-    internal static readonly bool LodAlternate = Environment.GetEnvironmentVariable("MEITOU_LOD_ALT") == "1";
-    static readonly bool LodLog = Environment.GetEnvironmentVariable("MEITOU_LOD_LOG") == "1";
+    /// <summary>How many shadow texels a level may deviate in a cascade.</summary>
+    public float LodShadowTolerance { get; set; } = 2f;
 
     /// <summary>The shadow cascade being drawn: its texel in world units (0: unknown, no levels in it).</summary>
     float lodTexel;
@@ -149,7 +145,7 @@ public sealed unsafe partial class FoliageRenderer
     {
         lodWaiting = lodRunning = 0;
         foreach (var t in lodTasks.Values) if (!t.IsCompleted) lodRunning++;
-        if (!Lod || !GpuCull || GpuCullVerify) return;
+        if (!Lod || !GpuCull) return;
         foreach (var a in assetsByMesh.Values)
         {
             if (!a.Terrain || a.LodDone || !a.Resident || a.Main is null || a.Triangles < FoliageLodBuilder.MinTriangles) continue;
@@ -159,8 +155,7 @@ public sealed unsafe partial class FoliageRenderer
                 if (lodRunning >= 3) { lodWaiting++; continue; }
                 lodRunning++;
                 float radius = a.Radius;
-                string label = a.Mesh.Name;
-                lodTasks[name] = task = BackgroundWork.Run(() => MakeLods(name, radius, label));
+                lodTasks[name] = task = BackgroundWork.Run(() => MakeLods(name, radius));
             }
             if (!task.IsCompleted) continue;
             a.LodDone = true;   // an unloaded mesh makes them again with its next residency
@@ -171,7 +166,7 @@ public sealed unsafe partial class FoliageRenderer
         }
     }
 
-    LodResult MakeLods(string name, float radius, string label)
+    LodResult MakeLods(string name, float radius)
     {
         var watch = Stopwatch.StartNew();
         var path = assets.Find(name) ?? assets.Find(Path.GetFileName(name.Replace('\\', '/')));
@@ -194,10 +189,6 @@ public sealed unsafe partial class FoliageRenderer
             else { lodBuilt++; lodBuildMs += ms; lodFileBytes += bytes; }
             if (set is null) lodNone++;
         }
-        if (LodLog)
-            Console.WriteLine(set is null
-                ? $"lod       {label} ({name}): no level ({model.Parts.Sum(p => p.Indices.Length / 3)} triangles, {(hit ? "cached" : $"built in {ms:0} ms")})"
-                : $"lod       {label} ({name}): {string.Join(" > ", set.Triangles.Select((t, i) => i == 0 ? $"{t}" : $"{t} (dev {set.Errors[i] / radius * 100:0.00}% of r {radius:0}, normals {set.NormalAngles[i] * 57.3f:0}�)"))} ({(hit ? "cached" : $"built in {ms:0} ms, {bytes / 1024} KB")})");
         return new LodResult(set, hit, ms, bytes);
     }
 
@@ -297,8 +288,8 @@ public sealed unsafe partial class FoliageRenderer
 
     bool IsRockBatch(int batch) => batch >= gpuOrder.Count && batch < gpuOrder.Count + gpuRockOrder.Count;
 
-    /// <summary>The work lists of this frame have generated levels (the switch, the GPU cull, not its verify mode; with <see cref="LodAlternate"/> every other frame).</summary>
-    bool LodWanted => Lod && GpuCull && !GpuCullVerify && !(LodAlternate && (Gpu.Frame.Number & 1) == 1);
+    /// <summary>The work lists of this frame have generated levels (the switch and the GPU cull).</summary>
+    bool LodWanted => Lod && GpuCull;
 
     /// <summary>Whether this view picks generated levels, and how it measures them.</summary>
     FoliageLodView CurrentLodView(float eyeY)

@@ -29,7 +29,23 @@ public sealed class GameDatabase
         db.Issues.AddRange(loadOrder.Issues);
         foreach (var entry in loadOrder.Entries)
             db.Apply(FcsReader.ReadFile(entry.Path), entry.Name);
+        db.AddWallMasters();
         return db;
+    }
+
+    /// <summary>
+    /// The loader's post-pass (docs/formats/fcs-mod.md "Game loader", <b>Verified</b> <c>FUN_1406c34f0</c>): every BUILDING whose <c>link type</c> is not 3 (SINGLE: towers, gates) sets a
+    /// <c>wall master</c> reference (values 0, 0, 0) on each record its <c>wall subsections</c> lists, back to itself; a subsection that is not loaded is skipped. Run once after the files.
+    /// </summary>
+    public void AddWallMasters()
+    {
+        foreach (var master in records.Values)
+        {
+            if (master.Type != FcsRecordType.BUILDING || master.GetInt("link type") == 3) continue;
+            foreach (var sub in master.GetReferences("wall subsections"))
+                if (records.TryGetValue(sub.TargetStringId, out var section))
+                    section.ReferenceList("wall master")[master.StringId] = new ReferenceValues(0, 0, 0);
+        }
     }
 
     /// <summary>Applies one file on top of everything loaded so far.</summary>

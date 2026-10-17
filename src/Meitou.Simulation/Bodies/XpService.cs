@@ -122,11 +122,16 @@ public sealed class XpService(GameConstants constants, BodyOptions options)
     /// Strength from carrying (<c>FUN_1408c60c0</c>, called by the movement tick): amount = (1 - e)^2 capped at 0.5, doubled unless in state 0xb (pass
     /// <paramref name="doubled"/> = true for the usual case), times <c>xp rate strength from walking</c>, through the continuous entry.
     /// </summary>
-    public float StrengthFromCarrying(CharacterStats stats, RaceData race, float encumbranceFactor, float dtSeconds, bool doubled = true)
-    {
-        float amount = MathF.Min((1 - encumbranceFactor) * (1 - encumbranceFactor), 0.5f) * (doubled ? 2 : 1) * constants.XpRateStrengthFromWalking;
-        return Continuous(stats, race, StatsEnumerated.Strength, dtSeconds, amount);
-    }
+    public float StrengthFromCarrying(CharacterStats stats, RaceData race, float encumbranceFactor, float dtSeconds, bool doubled = true) =>
+        Continuous(stats, race, StatsEnumerated.Strength, dtSeconds, StrengthCarryRate(encumbranceFactor, doubled));
+
+    /// <summary>The amount <see cref="StrengthFromCarrying"/> feeds the continuous entry, which the information panel shows as "Strength XP:" (<c>FUN_1408c60c0</c>; 0 when unencumbered).</summary>
+    public float StrengthCarryRate(float encumbranceFactor, bool doubled = true) =>
+        1 - encumbranceFactor <= 0 ? 0 : MathF.Min((1 - encumbranceFactor) * (1 - encumbranceFactor), 0.5f) * (doubled ? 2 : 1) * constants.XpRateStrengthFromWalking;
+
+    /// <summary>What the information panel shows as "Athletics XP:" (<c>FUN_1408c5ec0</c>): the encumbrance factor, x1.5 above 80 % of the run value; <see cref="AthleticsFromRunning"/> scales it by <c>xp rate athletics</c>.</summary>
+    public static float AthleticsRate(float encumbranceFactor, float speed, float runValue) =>
+        MathF.Max(encumbranceFactor, 0) * (runValue * 0.8f < speed ? 1.5f : 1);
 
     /// <summary>
     /// Athletics from running (<c>FUN_1408c6660</c>): the encumbrance factor (x1.5 when the speed is over 80% of the character's maximum) times
@@ -142,6 +147,14 @@ public sealed class XpService(GameConstants constants, BodyOptions options)
     public float SwimmingInWater(CharacterStats stats, RaceData race, bool carrying, float dtSeconds) =>
         Continuous(stats, race, StatsEnumerated.Swimming, dtSeconds, carrying ? 10 : 5);
 
+    /// <summary>
+    /// Stealth while sneaking (<c>FUN_1408c65a0</c>, from the sneaker's sense update): the continuous entry with amount 0.2 when no hostile NPC is about, 0.9 when one has it
+    /// within sight range unseen, 1.5 when a looker's spot meter on it is filling or full (Verified literals; the "about" and "seen" gates are <b>Observed</b> readings of
+    /// the original's flags). The per-hearing-check gain of <c>FUN_1408c7330</c> is not modelled.
+    /// </summary>
+    public float Sneaking(CharacterStats stats, RaceData race, StealthExposure exposure, float dtSeconds) =>
+        Continuous(stats, race, StatsEnumerated.Stealth, dtSeconds, exposure switch { StealthExposure.Unobserved => 0.2f, StealthExposure.Near => 0.9f, _ => 1.5f });
+
     /// <summary>Lockpicking (<c>FUN_1408c62e0</c>): 1.2 x race[37] on success, 0.24 x on failure, straight into the core curve.</summary>
     public float Lockpicking(CharacterStats stats, RaceData race, bool success) =>
         stats.Gain(StatsEnumerated.Lockpicking, (success ? 1.2f : 0.24f) * race.StatMultiplier(StatsEnumerated.Lockpicking));
@@ -155,9 +168,9 @@ public sealed class XpService(GameConstants constants, BodyOptions options)
     /// <c>XP rate medic 99</c> (at skill 99). The interpolation argument is hidden in the decompile (<b>Unknown</b>); here t = (skill - 1) / 98. The
     /// stat trained is the patient's race's <c>heal stat</c>.
     /// </summary>
-    public float Medic(CharacterStats stats, RaceData patientRace, RaceData medicRace, float dtSeconds)
+    public float Medic(CharacterStats stats, RaceData patientRace, RaceData medicRace, float dtSeconds, StatsEnumerated? healStat = null)
     {
-        var stat = patientRace.HealStat;
+        var stat = healStat ?? patientRace.HealStat;
         float skill = stats[stat];
         float t = Math.Clamp((skill - 1) / 98, 0, 1);
         float secondsPerPoint = constants.XpRateMedic1 + (constants.XpRateMedic99 - constants.XpRateMedic1) * t;

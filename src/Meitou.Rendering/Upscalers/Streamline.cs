@@ -111,8 +111,8 @@ public sealed unsafe class Streamline : IDisposable
     [UnmanagedCallersOnly]
     static void OnLog(int type, byte* message)
     {
-        // 0 info, 1 warning, 2 error; info only with MEITOU_STREAMLINE_LOG=1.
-        if (type == 0 && Environment.GetEnvironmentVariable("MEITOU_STREAMLINE_LOG") != "1") return;
+        // 0 info, 1 warning, 2 error; info only with MEITOU_UPSCALER_LOG=1.
+        if (type == 0 && Environment.GetEnvironmentVariable("MEITOU_UPSCALER_LOG") != "1") return;
         Console.WriteLine($"streamline {(type == 2 ? "error" : type == 1 ? "warning" : "info")}: {Marshal.PtrToStringAnsi((nint)message)?.TrimEnd()}");
     }
 

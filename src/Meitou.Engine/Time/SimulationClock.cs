@@ -79,6 +79,9 @@ public sealed class SimulationClock
     /// <summary>The achieved speed over any span of time: the asked <paramref name="speed"/> scaled by the share of the owed ticks that ran (the speed itself when none were owed).</summary>
     public static double AchievedSpeedOver(double speed, long ran, long dropped) => ran + dropped == 0 ? speed : speed * ran / (ran + dropped);
 
+    /// <summary>Drops the game time owed towards the next tick (<see cref="FixedStepClock.ResetPhase"/>): the duel's restart, so each lap ticks on the same frames.</summary>
+    public void ResetPhase() => steps.ResetPhase();
+
     /// <summary>Adds a frame's real time and returns how many simulation ticks to run now.</summary>
     public int Advance(double realSeconds)
     {

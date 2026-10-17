@@ -1,5 +1,6 @@
 using System.Numerics;
 using Meitou.Data.Gameplay;
+using Meitou.Data.Gameplay.Bodies;
 using Meitou.Simulation.Bodies;
 
 namespace Meitou.Simulation;
@@ -27,6 +28,7 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
     public BodyOptions Options { get; } = options ?? BodyOptions.Default;
     /// <summary>The <see cref="MedicalContext.BodyTimeScale"/> every character gets (default 1: the documented rates).</summary>
     public float BodyTimeScale { get; } = bodyTimeScale;
+    readonly XpService xp = new(constants, options ?? BodyOptions.Default);
 
     public void Act(World world, Partition part, EffectBuffer effects)
     {
@@ -47,9 +49,10 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
                 n.Velocity = Vector3.Zero;
             }
             if (medical.Dead) continue;
-            // The load: the inventory weight against the strength the injuries leave (character-stats.md "Encumbrance and carrying").
+            // The load: the inventory weight, plus carry person weight while carrying someone, against the strength the injuries leave (character-stats.md "Encumbrance and carrying").
             float load = cold.Inventory?.ContentWeight() ?? 0;
-            float encumbrance = load <= 0 ? 1 : Encumbrance.Factor(Constants, load, false, stats.Strength, medical.StatMultiplier(Meitou.Data.Gameplay.Bodies.StatsEnumerated.Strength));
+            bool carrying = !cold.Carrying.IsNone;
+            float encumbrance = load <= 0 && !carrying ? 1 : Encumbrance.Factor(Constants, load, carrying, stats.Strength, medical.StatMultiplier(Meitou.Data.Gameplay.Bodies.StatsEnumerated.Strength));
             var ctx = new MedicalContext(Constants, Options, race)
             {
                 EncumbranceFactor = encumbrance,
@@ -58,11 +61,22 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
                 Seed = world.Seed,
                 CharacterKey = Rng.Key(table.IdOf(i)),
                 BodyTimeScale = BodyTimeScale,
+                Resting = n.Task == (byte)CharacterTask.Rest,
             };
+            // The combat system's own context (hits) reads the encumbrance from the fighter, so it matches the one used here.
+            if (cold.Fighter is { } fighter) fighter.EncumbranceFactor = encumbrance;
             events ??= [];
             events.Clear();
             medical.Tick(HoursPerTick, ctx, events);
             n.MaxSpeed = Speed.Run(race, stats, medical, encumbrance);
+            TrainOnTheMove(stats, race, medical, in n, encumbrance, world.TickSeconds);
+            if ((cold.Orders & CharacterOrders.Sneak) != 0 && !medical.Incapacitated)
+            {
+                // An exposure older than a second (a looker's scan interval with room to spare) has lapsed.
+                var exposure = cold.StealthExposureTick >= world.Tick - (long)MathF.Ceiling(1 / world.TickSeconds) ? cold.StealthExposure : StealthExposure.Unobserved;
+                xp.Sneaking(stats, race, exposure, world.TickSeconds);
+            }
+            if (cold.IsPlayer || table.IdOf(i) == world.Player.Inspected) cold.Extended = ExtendedOf(stats, race, medical, n.MaxSpeed, encumbrance, ctx.Resting);
             n.Health = Math.Clamp(medical.Blood / MathF.Max(MedicalState.BloodCapacity(race, stats.Strength), 1) * 100, 0, 100);
             foreach (var e in events)
             {
@@ -75,12 +89,46 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
         }
     }
 
+    /// <summary>
+    /// The numbers behind the information panel's extended lines (<c>FUN_140895350</c>, docs/game/ui-screens.md section 4). Toughness XP: 1, or 2 with the left arm crippled, plus 2
+    /// for the right arm and 2 for blood-loss KO (the original adds a fourth term for a counter at <c>+0xa4</c> under 15, <b>Unknown</b>, left out). Strength XP is the carrying rate;
+    /// what the original shows instead with a weapon in hand ("Weapon weight") is not modelled.
+    /// </summary>
+    ExtendedStats ExtendedOf(CharacterStats stats, RaceData race, MedicalState medical, float speed, float encumbrance, bool resting)
+    {
+        float runValue = Speed.RunValue(race, stats.Athletics);
+        var arms = medical.Aggregates();
+        float toughness = (arms.LeftArmDisabled ? 2 : 1) + (arms.RightArmDisabled ? 2 : 0) + (medical.BloodKo ? 2 : 0);
+        float hunger = race.HungerRate * MedicalState.HungerSituationFactor(Constants, resting || medical.Unconscious || medical.Dead, false, encumbrance);
+        return new ExtendedStats(XpService.AthleticsRate(encumbrance, speed, runValue), xp.StrengthCarryRate(encumbrance), toughness,
+            MedicalState.KoPoint(Constants, stats.Toughness), speed, runValue, hunger);
+    }
+
+    /// <summary>
+    /// XP outside combat (character-stats.md "Levelling"; the movement tick <c>FUN_1408c6660</c>): athletics while running, strength while carrying a load. A character counts as
+    /// running when it moves faster than its race walk speed (+1); whether walking trains too is <b>Unknown</b> (the doc names running). Strength rises only when the load
+    /// encumbers it, and only while it moves. The speed the stat sees is the velocity the movement system left this tick.
+    /// </summary>
+    void TrainOnTheMove(CharacterStats stats, RaceData race, MedicalState medical, in CharacterHot n, float encumbrance, float dt)
+    {
+        if (medical.Incapacitated) return;
+        float speed = MathF.Sqrt(n.Velocity.X * n.Velocity.X + n.Velocity.Z * n.Velocity.Z);
+        if (speed < 1) return;
+        if (speed > n.WalkSpeed + 1) xp.AthleticsFromRunning(stats, race, encumbrance, speed / MathF.Max(n.MaxSpeed, 1), dt);
+        if (encumbrance < 1) xp.StrengthFromCarrying(stats, race, encumbrance, dt);
+    }
+
     public void SlowWorld(World world)
     {
         var table = world.Characters;
         for (int i = 0; i < table.HighWater; i++)
         {
-            if (table.Next[i].Alive && table.Cold(i) is { DiedTick: >= 0 } cold && world.Tick - cold.DiedTick >= CorpseTicks) table.Remove(new CharacterId(i, table.Next[i].Generation));
+            if (table.Next[i].Alive && table.Cold(i) is { DiedTick: >= 0 } cold && world.Tick - cold.DiedTick >= CorpseTicks)
+            {
+                var corpse = new CharacterId(i, table.Next[i].Generation);
+                world.Uniques.Left(corpse);
+                table.Remove(corpse);
+            }
         }
     }
 }

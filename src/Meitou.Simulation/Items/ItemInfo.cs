@@ -13,12 +13,26 @@ public sealed record ItemInfo(string Id, string Name, FcsRecordType Type)
     /// <summary><c>inventory footprint width</c> / <c>height</c>: cells in a grid.</summary>
     public int Width { get; init; } = 1;
     public int Height { get; init; } = 1;
-    public bool Stackable { get; init; }
+    /// <summary>
+    /// How many units one inventory cell holds: ITEM <c>stackable</c>, an int ("number that can be stacked in inventory", default 1 in <c>fcs.def</c>; 1 means it does not stack). Weapons,
+    /// armour, containers, map items, crossbows and limbs are always 1 (the exe's stack limit returns 1 for those types before it reads the field). Below 1 counts as 1 (engine; the data has no 0).
+    /// </summary>
+    public int StackLimit { get; init; } = 1;
+    /// <summary>A CONTAINER's <c>stackable bonus minimum</c> and <c>stackable bonus mult</c>: inside it an item's stack limit is trunc(max(limit, minimum) x mult) (1 and 1 for other items).</summary>
+    public int StackBonusMinimum { get; init; } = 1;
+    public float StackBonusMult { get; init; } = 1;
     /// <summary><c>item function</c> (3 food, 15 raw meat, 8 drugs, 1 first aid kit, ...).</summary>
     public int Function { get; init; }
     /// <summary>The record's <c>charges</c> (default 1).</summary>
     public float Charges { get; init; } = 1;
     public int Value { get; init; }
+    /// <summary><c>trade item</c>: sells for its full price unless stolen (docs/game/economy.md section 5).</summary>
+    public bool TradeItem { get; init; }
+    /// <summary>
+    /// The record's <c>quality</c> (1 to 100). For a first aid kit this is the quality that caps the medic's skill in the bandaging rate (character-stats.md "First aid, medkits and robot
+    /// repair"). It is read from the record when needed and is not copied to <see cref="ItemInstance.Quality"/>, which is the clothing grade.
+    /// </summary>
+    public float Quality { get; init; }
     /// <summary>A CONTAINER's <c>storage size width</c> / <c>height</c> (cells of its contents grid; 0 for other items).</summary>
     public int StorageWidth { get; init; }
     public int StorageHeight { get; init; }
@@ -31,17 +45,39 @@ public sealed record ItemInfo(string Id, string Name, FcsRecordType Type)
     /// </summary>
     public bool IsFood => Type == FcsRecordType.ITEM && Function == 3;
 
+    /// <summary>An ordinary first aid kit (<c>item function</c> 1): bandages organic body parts (<b>Observed</b>, character-stats.md).</summary>
+    public const int FirstAidKitFunction = 1;
+    /// <summary>A splint kit (<c>item function</c> 2, <b>Verified</b>: <c>hasSplintKit</c> and the Splint Kit records): splints limbs (character-stats.md "Splints").</summary>
+    public const int SplintKitFunction = 2;
+    /// <summary>A robot repair kit (<c>item function</c> 12): repairs robotic parts.</summary>
+    public const int RobotKitFunction = 12;
+
     public static ItemInfo From(GameRecord r) => new(r.StringId, r.Name, r.Type)
     {
         Weight = r.GetFloat("weight kg"),
         Width = Math.Max(r.GetInt("inventory footprint width", 1), 1),
         Height = Math.Max(r.GetInt("inventory footprint height", 1), 1),
-        Stackable = r.GetBool("stackable"),
+        StackLimit = StackLimitOf(r),
         Function = r.GetInt("item function"),
         Charges = r.GetFloat("charges", 1),
         Value = r.GetInt("value"),
+        TradeItem = r.GetBool("trade item"),
+        Quality = r.GetFloat("quality"),
         StorageWidth = r.GetInt("storage size width"),
         StorageHeight = r.GetInt("storage size height"),
         EncumbranceEffect = r.Type == FcsRecordType.CONTAINER ? r.GetFloat("encumbrance effect", 1) : 1,
+        StackBonusMinimum = r.Type == FcsRecordType.CONTAINER ? r.GetInt("stackable bonus minimum", 1) : 1,
+        StackBonusMult = r.Type == FcsRecordType.CONTAINER ? r.GetFloat("stackable bonus mult", 1) : 1,
     };
+
+    /// <summary>The stack limit of an item record (<see cref="StackLimit"/>): 1 for the types that never stack, else the record's <c>stackable</c> (at least 1).</summary>
+    public static int StackLimitOf(GameRecord r) => r.Type is FcsRecordType.WEAPON or FcsRecordType.ARMOUR or FcsRecordType.CONTAINER or FcsRecordType.MAP_ITEM
+        or FcsRecordType.CROSSBOW or FcsRecordType.LIMB_REPLACEMENT ? 1 : Math.Max(r.GetInt("stackable", 1), 1);
+
+    /// <summary>
+    /// The stack limit of an item inside a container with the given bonus (the exe's <c>FUN_1407466b0</c>, <b>Observed</b>): trunc(max(limit, minimum) x mult), at least 1. The types that
+    /// never stack keep 1 (the caller checks them first, as the exe does). The function's third input, a flag of the inventory section that forces the base to 1, is not read here
+    /// (<b>Unknown</b> which sections set it).
+    /// </summary>
+    public static int StackLimitIn(int limit, int bonusMinimum, float bonusMult) => Math.Max((int)(Math.Max(limit, bonusMinimum) * bonusMult), 1);
 }

@@ -38,11 +38,12 @@ static class GiShaders
             return (vec2(tile) * float(inner + 2) + 1.0 + oct * float(inner)) * invSize;
         }
         // One cascade: rgb the irradiance (the lighting pass's envDiffuse), a how much of it to take (0 outside, 1 a cell inside its edge).
-        vec4 giCascade(int c, vec3 p, vec3 n, vec3 v)
+        // push: how many cells further along the normal to look up (a retry when every probe round the point is inside geometry).
+        vec4 giCascade(int c, vec3 p, vec3 n, vec3 v, float push)
         {
             vec4 g0 = uGiGrid[c * 2], g1 = uGiGrid[c * 2 + 1];
             float s = g0.z, sy = g0.w;
-            vec3 q = p + (n * 0.2 + v * 0.8) * (0.3 * min(s, sy));
+            vec3 q = p + (n * 0.2 + v * 0.8) * (0.3 * min(s, sy)) + n * (push * min(s, sy));
             vec2 cell = (q.xz - g0.xy) / s;
             float edge = min(min(cell.x, cell.y), min(float(GI_N - 1) - cell.x, float(GI_N - 1) - cell.y));
             if (edge <= 0.0) return vec4(0.0);
@@ -54,7 +55,7 @@ static class GiShaders
             vec2 octN = giOct(n) * 0.5 + 0.5;
             uvec2 offset = uvec2(g1.xy);
             vec3 sum = vec3(0.0);
-            float total = 0.0;
+            float total = 0.0, coverage = 0.0;
             for (int k = 0; k < 4; k++)
             {
                 ivec2 o = ivec2(k & 1, k >> 1);
@@ -65,10 +66,14 @@ static class GiShaders
                 int l0 = min(int(ly), GI_NY - 2);
                 float fy = ly - float(l0);
                 float wxz = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+                // A dense room grid is short: fade to the outer cascade above its last layer, rather than stretching that layer upwards.
+                float heightShare = clamp(float(GI_NY) - (q.y - base) / sy, 0.0, 1.0);
+                coverage += wxz * heightShare;
+                if (heightShare <= 0.0) continue;
                 for (int j = 0; j < 2; j++)
                 {
                     int layer = l0 + j;
-                    float weight = wxz * (j == 1 ? fy : 1.0 - fy);
+                    float weight = wxz * heightShare * (j == 1 ? fy : 1.0 - fy);
                     // A corner the point is nearly opposite of adds next to nothing: skip its fetches.
                     if (weight < GI_MIN_WEIGHT) continue;
                     vec3 probe = vec3(g0.x + float(w.x) * s, base + (float(layer) + 0.5) * sy, g0.y + float(w.y) * s);
@@ -96,16 +101,33 @@ static class GiShaders
                     total += weight;
                 }
             }
-            return total > 1e-5 ? vec4(sum / total, clamp(edge, 0.0, 1.0)) : vec4(0.0);
+            return total > 1e-5 ? vec4(sum / total, clamp(edge, 0.0, 1.0) * coverage) : vec4(0.0);
         }
         // The probes' irradiance at a surface (p: world position, n: its normal, v: towards the eye): rgb, a the share to take (0: none cover it).
         vec4 giIrradiance(vec3 p, vec3 n, vec3 v)
         {
-            vec4 a = giCascade(0, p, n, v);
+            vec4 a = giCascade(0, p, n, v, 0.0);
+            // A room grid's probes in the walls, floor and furniture are invalid: next to them the point can have none valid round it, and the coarse
+            // cascade would paint the corner dark. Look again a cell into the room before falling back.
+            if (a.a <= 0.0) a = giCascade(0, p, n, v, 1.0);
             if (a.a >= 1.0) return a;
-            vec4 b = giCascade(1, p, n, v);
+            vec4 b = giCascade(1, p, n, v, 0.0);
             float wa = a.a, wb = b.a * (1.0 - a.a), t = wa + wb;
             return t > 0.0 ? vec4((a.rgb * wa + b.rgb * wb) / t, t) : vec4(0.0);
+        }
+
+        // Presentation gain only: never feed amplified light back into the probe solver.
+        // Indoors the light is at least the game's ambient luminance (no surface darker than without GI; the probes see corners as dark), more
+        // where the GI is brighter. Its colour turns from the ambient's to the GI's as the GI's share of the ambient rises from 0.1 to 0.25 (in the
+        // Hub bar the lamps' surroundings read 0.15-0.3, the rest 0.05-0.15): warm round the lamps, neutral where they barely reach.
+        // uGiParams.w <= 1 leaves the GI as it is.
+        vec3 giSurfaceIrradiance(vec3 irradiance, vec3 sky, bool interior)
+        {
+            if (!interior || uGiParams.w <= 1.0) return irradiance;
+            const vec3 lum = vec3(0.2126, 0.7152, 0.0722);
+            float value = max(dot(irradiance, lum), 1e-6), ambient = max(dot(sky, lum), 1e-6);
+            vec3 hue = mix(sky / ambient, irradiance / value, smoothstep(0.1, 0.25, value / ambient));
+            return hue * max(value, ambient);
         }
 
         """;
@@ -132,17 +154,17 @@ static class GiShaders
     /// last frame there (the bounces beyond the first). A ray that misses sees the lighting pass's ambient in its direction. Back faces of objects
     /// count as dark and give a negative distance (the blend marks probes that see many as inside).
     /// </summary>
-    public static readonly string ProbeTrace = $$"""
+    public static string ProbeTrace(int rays) => $$"""
         #version 460
         #extension GL_EXT_ray_query : require
         #extension GL_EXT_buffer_reference : require
         #extension GL_EXT_buffer_reference_uvec2 : require
         #extension GL_EXT_scalar_block_layout : require
-        layout(local_size_x = {{GiProbes.Rays}}) in;
+        layout(local_size_x = {{rays}}) in;
         {{Meitou.Rendering.Gpu.BindlessTable.Declarations(1)}}
 
         layout(set = 0, binding = 0) uniform accelerationStructureEXT uScene;
-        struct Geometry { uvec2 vertices; uvec2 indices; uint stride; uint kind; uint diffuse; uint alphaMap; float alphaThreshold; uint pad0; uint pad1; uint pad2; };
+        struct Geometry { uvec2 vertices; uvec2 indices; uint stride; uint kind; uint diffuse; uint alphaMap; float alphaThreshold; uint emitter; uint pad1; uint pad2; };
         layout(set = 0, binding = 1, std430) readonly buffer Geometries { Geometry geometries[]; };
         layout(set = 0, binding = 2, std430) writeonly buffer RayResults { vec4 rays[]; };
         layout(set = 0, binding = 3, std140) uniform Params
@@ -157,8 +179,10 @@ static class GiShaders
             vec4 albedo;        // rgb: the objects' albedo, w: the terrain ground colour map present
             vec4 rayLength;     // x per cascade 0, y cascade 1, z the sleepers' period
             vec4 uLightGrid;    // the lamps (WorldLamps; w 0: none)
+            vec4 extra;         // y: the far cascade's period
         };
         layout(set = 0, binding = 13, std430) readonly buffer ProbeState { vec4 positions[]; };
+        layout(set = 0, binding = 14, std430) readonly buffer ProbeList { uint probeList[]; };
         {{Sleep}}
         layout(set = 0, binding = 4) uniform sampler2D uGiIrradiance;
         layout(set = 0, binding = 5) uniform sampler2D uGiDistance;
@@ -170,6 +194,8 @@ static class GiShaders
         layout(set = 0, binding = 11) uniform sampler2D uLightIndex;
         layout(set = 0, binding = 12) uniform sampler2D uLightData;
         #define LAMP_DIFFUSE_ONLY
+        float giLampVisibility(vec3 world, vec3 n, vec3 toLamp, int indoor, uint emitter);
+        #define LAMP_VISIBILITY(world, n, toLamp, indoor, emitter) giLampVisibility(world, n, toLamp, indoor, emitter)
         {{LampShaders.Defines}}{{LampShaders.Lighting}}
         // The bounces read the probes without the visibility test: a quarter of the fetches, and the light seen in a bounce is blurred anyway.
         #define GI_NO_VISIBILITY
@@ -208,6 +234,25 @@ static class GiShaders
         }
         #define TRACE(q) while (rayQueryProceedEXT(q)) { if (solid(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false) + rayQueryGetIntersectionGeometryIndexEXT(q, false), rayQueryGetIntersectionPrimitiveIndexEXT(q, false), rayQueryGetIntersectionBarycentricsEXT(q, false))) rayQueryConfirmIntersectionEXT(q); }
 
+        float giLampVisibility(vec3 world, vec3 n, vec3 toLamp, int indoor, uint emitter)
+        {
+            if (indoor == 0) return 1.0;
+            float d = length(toLamp);
+            if (d <= 1.0) return 1.0;
+            rayQueryEXT shadow;
+            rayQueryInitializeEXT(shadow, uScene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsCullBackFacingTrianglesEXT | gl_RayFlagsNoOpaqueEXT, 0xFF,
+                world - origin.xyz + n * 0.5, 0.0, toLamp / d, d - 1.0);
+            while (rayQueryProceedEXT(shadow))
+            {
+                int record = rayQueryGetIntersectionInstanceCustomIndexEXT(shadow, false) + rayQueryGetIntersectionGeometryIndexEXT(shadow, false);
+                // Light positions can be embedded in their fixture. The fixture must not extinguish its own source.
+                if ((emitter == 0u || geometries[record].emitter != emitter) && solid(record,
+                    rayQueryGetIntersectionPrimitiveIndexEXT(shadow, false), rayQueryGetIntersectionBarycentricsEXT(shadow, false)))
+                    rayQueryConfirmIntersectionEXT(shadow);
+            }
+            return rayQueryGetIntersectionTypeEXT(shadow, true) == gl_RayQueryCommittedIntersectionNoneEXT ? 1.0 : 0.0;
+        }
+
         vec3 fibonacci(uint i, uint n)
         {
             float k = float(i) + 0.5;
@@ -219,8 +264,8 @@ static class GiShaders
 
         void main()
         {
-            // This frame's share of the probes: every uGiParams.z-th, from uGiParams.y (the rays are stored by workgroup).
-            uint probe = gl_WorkGroupID.x * uint(uGiParams.z) + uint(uGiParams.y), ray = gl_LocalInvocationID.x;
+            // This frame's probes: the CPU's list (GiProbes.BuildList; bit 31 a slow update, the rays are stored by workgroup).
+            uint probe = probeList[gl_WorkGroupID.x] & 0x3FFFFFFFu, ray = gl_LocalInvocationID.x;
             // probe = ((cascade · N + window row) · N + window column) · layers + layer
             int layer = int(probe % uint(GI_NY)), rest = int(probe / uint(GI_NY));
             int wx = rest % GI_N, wz = (rest / GI_N) % GI_N, c = rest / (GI_N * GI_N);
@@ -280,7 +325,7 @@ static class GiShaders
             }
             vec4 bounce = giIrradiance(hit, n, -dir);
             vec3 ambient = mix(skyIrradiance(n) * {{F(1 - Meitou.Data.World.KenshiLighting.DielectricSpecular)}} * amHit.rgb * env, bounce.rgb, bounce.a);
-            // The lamps around the hit (unshadowed, as the game lights them): their light bounces too.
+            // The lamps around the hit; indoor sources are visibility-tested so occluded lamp light cannot bounce through walls.
             vec3 lamps = vec3(0.0), lampSpecular = vec3(0.0);
             if (uLightGrid.w > 0.5) lampLight(hit, n, -dir, 1.0, 1.0, lamps, lampSpecular);
             rays[slot] = vec4(colour * (sun + ambient + lamps), t);
@@ -290,12 +335,12 @@ static class GiShaders
     /// <summary>
     /// The probe blend: one workgroup per probe. It reads the probe's rays and blends them into its irradiance tile (cosine weights) and its
     /// distance tile (the mean distance and its square, sharpened weights, over <c>uGiGrid[2c + 1].z</c>), borders included, over the last
-    /// values by the hysteresis. A probe whose position changed (the grid scrolled, a new column) starts over. A probe that sees back faces in
-    /// over a quarter of its rays is inside geometry: alpha 0, which the surfaces' sampling leaves out.
+    /// values by the hysteresis, including validity. A probe whose position changed starts over. Back faces in a quarter of the rays
+    /// lower its validity towards zero, so a noisy occupancy estimate cannot switch a surface's light on/off each update.
     /// </summary>
-    public static readonly string ProbeBlend = $$"""
+    public static string ProbeBlend(int rays) => $$"""
         #version 460
-        layout(local_size_x = {{GiProbes.Rays}}) in;
+        layout(local_size_x = {{rays}}) in;
         const int GI_N = {{GiProbes.Columns}}, GI_NY = {{GiProbes.Layers}}, GI_IRR = {{GiProbes.IrradianceTexels}}, GI_DIST = {{GiProbes.DistanceTexels}};
         layout(set = 0, binding = 0, std430) readonly buffer RayResults { vec4 rays[]; };
         layout(set = 0, binding = 1, std430) buffer ProbeState { vec4 positions[]; };
@@ -309,14 +354,17 @@ static class GiShaders
             vec4 lightDir;
             vec4 maps;
             vec4 albedo;
-            vec4 rayLength;     // z: the sleepers' period
+            vec4 rayLength;     // z: the sleepers' period, w: the hidden probes' period
+            vec4 uLightGrid;
+            vec4 extra;         // y: the far cascade's period
         };
         layout(set = 0, binding = 3, rgba16f) uniform image2D uIrradiance;
         layout(set = 0, binding = 4, rg16f) uniform image2D uDistance;
         layout(set = 0, binding = 5) uniform sampler2D uGiBase;
+        layout(set = 0, binding = 6, std430) readonly buffer ProbeList { uint probeList[]; };
         {{Sleep}}
-        shared vec4 sRays[{{GiProbes.Rays}}];
-        shared vec3 sDirs[{{GiProbes.Rays}}];
+        shared vec4 sRays[{{rays}}];
+        shared vec3 sDirs[{{rays}}];
         shared uint sBack, sNear;
         shared bool sMoved;
         // The inner texels' new values: the borders copy them (only the inner texels are blended).
@@ -351,7 +399,7 @@ static class GiShaders
 
         void main()
         {
-            uint probe = gl_WorkGroupID.x * uint(uGiParams.z) + uint(uGiParams.y), id = gl_LocalInvocationID.x, count = gl_WorkGroupSize.x;
+            uint entry = probeList[gl_WorkGroupID.x], probe = entry & 0x3FFFFFFFu, id = gl_LocalInvocationID.x, count = gl_WorkGroupSize.x;
             int layer = int(probe % uint(GI_NY)), rest = int(probe / uint(GI_NY));
             int wx = rest % GI_N, wz = (rest / GI_N) % GI_N, c = rest / (GI_N * GI_N);
             vec4 g0 = uGiGrid[c * 2], g1 = uGiGrid[c * 2 + 1];
@@ -380,7 +428,8 @@ static class GiShaders
             barrier();
             if (id == 0u) positions[stateSlot] = vec4(world, sNear != 0u ? 1.0 : 2.0);
             bool valid = float(sBack) < 0.25 * float(count);
-            float hysteresis = sMoved ? 0.0 : uGiParams.w;
+            // A hidden probe (bit 31) is updated every rayLength.w-th round: the hysteresis of that many updates in one.
+            float hysteresis = sMoved ? 0.0 : ((entry >> 31) != 0u ? pow(uGiParams.w, rayLength.w) : (entry >> 30 & 1u) != 0u ? pow(uGiParams.w, extra.y) : uGiParams.w);
             ivec2 tileIndex = ivec2(colX, (c * GI_N + colZ) * GI_NY + layer);
             float maxDistance = g1.z;
 
@@ -398,8 +447,10 @@ static class GiShaders
                     total += w;
                 }
                 vec3 value = total > 1e-4 ? sum / total : vec3(0.0);
-                vec3 old = imageLoad(uIrradiance, irrOrigin + src).rgb;
-                sIrradiance[t] = vec4(mix(value, old, hysteresis), valid ? 1.0 : 0.0);
+                vec4 old = imageLoad(uIrradiance, irrOrigin + src);
+                vec4 blended = mix(vec4(value, valid ? 1.0 : 0.0), old, hysteresis);
+                if (!valid && blended.a < 0.001) blended.a = 0.0;
+                sIrradiance[t] = blended;
             }
 
             ivec2 distOrigin = tileIndex * (GI_DIST + 2);

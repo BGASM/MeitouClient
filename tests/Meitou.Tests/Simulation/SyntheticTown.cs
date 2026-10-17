@@ -13,17 +13,20 @@ static class SyntheticTown
     const uint New = 0x10;
     public static readonly Vector3 Centre = new(1000, 300, 2000);
 
-    static FcsRecord Rec(string id, FcsRecordType type, string name)
+    internal static FcsRecord Rec(string id, FcsRecordType type, string name)
     {
         return new FcsRecord { StringId = id, Flags = New, Name = name, RecordType = type };
     }
 
-    static FcsReference Ref(string id, int v0 = 0, int v1 = 0, int v2 = 0) => new(id, v0, v1, v2);
+    internal static FcsReference Ref(string id, int v0 = 0, int v1 = 0, int v2 = 0) => new(id, v0, v1, v2);
 
     public static readonly Vector3 Far = new(9500, 300, 2000);
 
-    /// <summary><paramref name="roaming"/> adds a second town (<c>31-t</c>, far away), roaming squads and bar squads at the first, and a roaming budget for the faction.</summary>
-    public static GameDatabase Database(int residentSquads = 3, bool overrideFlag = false, bool roaming = false, bool anatomy = false, bool items = false)
+    /// <summary><paramref name="roaming"/> adds a second town (<c>31-t</c>, far away), roaming squads and bar squads at the first, and a roaming budget for the faction;
+    /// <paramref name="extra"/> adds records, <paramref name="changePatrol"/> changes the resident <c>Patrol</c> template (<c>10-t</c>) and <paramref name="changeFolk"/> the
+    /// <c>Faction folk</c> one (<c>12-t</c>, the roaming squads') before the database is made.</summary>
+    public static GameDatabase Database(int residentSquads = 3, bool overrideFlag = false, bool roaming = false, bool anatomy = false, bool items = false,
+        IReadOnlyList<FcsRecord>? extra = null, Action<FcsRecord>? changePatrol = null, Action<FcsRecord>? changeFolk = null)
     {
         var race = Rec("1-t", FcsRecordType.RACE, "Testers");
         var parts = new List<FcsRecord>();
@@ -77,7 +80,9 @@ static class SyntheticTown
         patrol.References["animals"] = [Ref("4-t", 1, 0, 50)];
         var gated = Rec("11-t", FcsRecordType.SQUAD_TEMPLATE, "Gated");
         gated.References["squad"] = [Ref("2-t", 5)];
-        gated.References["world state"] = [Ref("90-t")];
+        gated.References["world state"] = [Ref("90-t", 1)];   // needs a state that does not hold: the boss dead
+        var bossDead = Rec("90-t", FcsRecordType.WORLD_EVENT_STATE, "Boss dead");
+        bossDead.References["NPC is"] = [Ref("3-t", 0)];
         var factionTemplate = Rec("12-t", FcsRecordType.SQUAD_TEMPLATE, "Faction folk");
         factionTemplate.References["squad"] = [Ref("2-t", 3)];
 
@@ -117,8 +122,11 @@ static class SyntheticTown
         var file = new FcsFile();
         file.Records.AddRange(parts);
         file.Records.AddRange(itemRecords);
-        file.Records.AddRange([race, guard, boss, dog, patrol, gated, factionTemplate, faction, town, nameless, startoff]);
+        file.Records.AddRange([race, guard, boss, dog, patrol, gated, bossDead, factionTemplate, faction, town, nameless, startoff]);
         if (far is not null) file.Records.Add(far);
+        changePatrol?.Invoke(patrol);
+        changeFolk?.Invoke(factionTemplate);
+        if (extra is not null) file.Records.AddRange(extra);
         var db = new GameDatabase();
         db.Apply(file, "test.mod");
         return db;

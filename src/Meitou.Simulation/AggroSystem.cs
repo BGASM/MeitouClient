@@ -1,0 +1,502 @@
+using System.Numerics;
+using Meitou.Data.Gameplay;
+using Meitou.Simulation.Combat;
+
+namespace Meitou.Simulation;
+
+/// <summary>Settings of the <see cref="AggroSystem"/> (docs/simulation.md "Hostility and relations"; the original's figures in docs/game/perception.md).</summary>
+public sealed record AggroSettings
+{
+    /// <summary>A character looks round once every this many ticks (staggered by slot: slot s on the ticks where tick % n == s % n). Engine choice: the original
+    /// updates the senses of 8 characters per frame in turn (docs/game/perception.md "Update rate").</summary>
+    public int ScanEveryTicks { get; init; } = 15;
+    /// <summary>How far an NPC sees, in world units (dm), before the race's <c>vision range mult</c>: the original's outdoor range (1500, <c>FUN_140851bc0</c>, Verified),
+    /// in full daylight; straight ahead only, the view cone shortens it to the side (<see cref="AggroSystem.Visibility"/>).</summary>
+    public float SightRange { get; init; } = AggroSystem.OutdoorSight;
+    /// <summary>An NPC fighting farther than this from where its fight began gives up. Engine choice (the original's rule is <b>Unknown</b>): twice the daylight sight,
+    /// so a fight begun at the edge of sight reaches its target.</summary>
+    public float LeashRange { get; init; } = 3000;
+    /// <summary>Game seconds an NPC that gave up does not pick a new fight by itself (it still answers an attack).</summary>
+    public float CalmSeconds { get; init; } = 20;
+    /// <summary>Keep a <see cref="AggroSystem.Log"/> of every fight started (the host prints it; tests read it).</summary>
+    public bool RecordLog { get; init; }
+}
+
+/// <summary>A fight the <see cref="AggroSystem"/> started: who saw whom, the factions, the distance and how many squad mates joined.</summary>
+public readonly record struct AggroEntry(long Tick, CharacterId Attacker, CharacterId Target, int AttackerFaction, int TargetFaction, float Distance, int Joined);
+
+/// <summary>
+/// Hostility by faction relations (an <b>engine stand-in</b> for the stage 9 AI's senses and target choice, docs/simulation.md "Combat"):
+/// <list type="bullet">
+/// <item><b>Look</b> (<c>Act</c>, parallel, own slot, reading the last tick's positions through the <see cref="SpatialGrid"/>): an awake NPC with a fighter, not fighting,
+/// not fleeing, not treating or resting, whose turn it is (one in <see cref="AggroSettings.ScanEveryTicks"/>, by slot) finds the nearest living, awake character with a body
+/// that it sees (the original's daylight test: within its range R = <see cref="AggroSettings.SightRange"/> x its race's <c>vision range mult</c> times the view-cone factor
+/// of <see cref="Visibility"/>) whose faction its own is hostile to (relation -30 or lower) and that neither faction coexists with; ties go to the lower slot. It emits one
+/// effect at that target.</item>
+/// <item><b>Decide</b> (<c>Apply</c>, serial commit order): the looker, if still free, and its free squad mates within twice their own range R of the target (the original's
+/// squad-shared sightings, <c>GroupSense</c>) get an <see cref="AttackOrder"/> for the next tick through <see cref="World.Defer"/>. The player's characters never look and never join.</item>
+/// <item><b>Leash and stand down</b> (<c>SlowWorld</c>, serial, every tick): an NPC that starts fighting (by this system, retaliation or anything else) has its position
+/// kept; beyond <see cref="AggroSettings.LeashRange"/> from it the NPC stops and stays calm (no looking) for <see cref="AggroSettings.CalmSeconds"/>. When its fight is
+/// over (target down, or stopped) it goes back to what it did before (wander or follow; a go-to becomes idle, which the roaming squads order again).</item>
+/// </list>
+/// The live relation table is hashed here once a deed has changed it (<see cref="FactionRelations.Changes"/>).
+/// </summary>
+public sealed class AggroSystem(FactionRelations relations, AggroSettings? settings = null) : ITickSystem, IStateHashed
+{
+    /// <summary>The <see cref="Effect.Kind"/> of a sighting: <c>Target</c> is the enemy, <c>Amount</c> the distance.</summary>
+    public const int SightEffect = 1;
+    /// <summary>The <see cref="Effect.Kind"/> of a hostile looker's exposure of a sneaker: <c>Target</c> is the sneaker, <c>Amount</c> its <see cref="StealthExposure"/>.</summary>
+    public const int ExposureEffect = 2;
+    const byte NoTask = 0xFF;
+
+    /// <summary>The original's vision range outdoors before the race multiplier (<c>FUN_140851bc0</c>: race <c>vision range mult</c> x 1500; 500 flat inside a building).</summary>
+    public const float OutdoorSight = 1500;
+    /// <summary>The edge of the original's view cone: the cosine of the angle off the facing at which the view factor reaches 0 (about 78.5 degrees; <c>FUN_140852f70</c>).</summary>
+    public const float ConeEdge = 0.2f;
+    /// <summary>The smallest view factor that counts as seen (<c>FUN_140857b10</c>: above 0.01).</summary>
+    public const float MinVisibility = 0.01f;
+
+    /// <summary>
+    /// The original's sight test for an NPC looking at a character who is not sneaking or crawling, in full daylight with both lit alike (<c>FUN_140852f70</c>): the
+    /// view factor v = (cos a - 0.2) / 0.8, a the angle between the looker's facing and the direction to the target (3D), and the target is seen when v is above 0.01
+    /// and the distance is at most R x v. Returns v when seen, else 0. A target at the looker's own position counts as seen straight ahead (an engine choice).
+    /// </summary>
+    public static float Visibility(Vector3 eye, float yaw, Vector3 target, float range)
+    {
+        var d = target - eye;
+        float dist = d.Length();
+        if (dist < 1e-3f) return 1;
+        if (dist > range) return 0;
+        float cos = (MathF.Sin(yaw) * d.X + MathF.Cos(yaw) * d.Z) / dist;
+        float v = (cos - ConeEdge) / (1 - ConeEdge);
+        return v > MinVisibility && dist <= range * v ? v : 0;
+    }
+
+    /// <summary>
+    /// The sight test for a sneaking target: the view factor v of <see cref="Visibility"/>'s cone, scaled by <see cref="Orders.SneakView"/>, must reach the distance
+    /// (d at most R x v'). Returns v' when it does, else 0; in view, the target still has to fill the looker's spot meter (<see cref="Orders.SpotSeconds"/>).
+    /// </summary>
+    public static float SneakVisibility(Vector3 eye, float yaw, Vector3 target, float range, float stealth)
+    {
+        var d = target - eye;
+        float dist = d.Length();
+        if (dist < 1e-3f) return 1;
+        if (dist > range) return 0;
+        float v = Orders.SneakView(((MathF.Sin(yaw) * d.X + MathF.Cos(yaw) * d.Z) / dist - ConeEdge) / (1 - ConeEdge), stealth);
+        return v > MinVisibility && dist <= range * v ? v : 0;
+    }
+
+    /// <summary>The noise a moving character makes reaches lerp(speed / max speed, 350, 600) units (<c>FUN_140851d10</c>, Verified constants; clear weather, not sneaking).</summary>
+    public const float NoiseNear = 350, NoiseFar = 600;
+    /// <summary>The chance per check that a character within the noise range is heard when it is not sneaking (<c>FUN_140857500</c>, Verified constant).</summary>
+    public const float HearOdds = 0.75f;
+
+    /// <summary>How far a character moving at <paramref name="speed"/> (its top speed <paramref name="maxSpeed"/>) is heard; 0 when it stands still (the original hears only movers, Observed).</summary>
+    public static float NoiseRange(float speed, float maxSpeed)
+    {
+        if (!(speed > 0.01f)) return 0;
+        float t = maxSpeed > 0 ? Math.Clamp(speed / maxSpeed, 0, 1) : 1;
+        return NoiseNear + (NoiseFar - NoiseNear) * t;
+    }
+
+    /// <summary>The original's chance to hear a character at <paramref name="distance"/> with noise range <paramref name="noise"/>: 0.75 x (1 - d^2 / N^2), rolled each check.</summary>
+    public static float HearChance(float distance, float noise) => noise > 0 && distance < noise ? HearOdds * (1 - distance * distance / (noise * noise)) : 0;
+
+    /// <summary>A character's daylight sight range R: <paramref name="sight"/> x its race's <c>vision range mult</c>.</summary>
+    public static float RangeOf(CharacterCold cold, float sight) => sight * (cold.Race?.VisionRangeMult ?? 1);
+
+    struct Slot
+    {
+        public int Generation;
+        public bool Tracked;
+        public Vector2 Origin;
+        public byte Task;
+        public long CalmUntil;
+        /// <summary>The looker's spot meters on sneaking characters, in target slot order (null: none); written by its own partition only.</summary>
+        public List<Spot>? Spots;
+    }
+
+    /// <summary>
+    /// One spot meter (the original's <c>SensoryData::SpottingPeopleMgr::Spot</c>): it fills by dt / <see cref="Orders.SpotSeconds"/> while the looker sees the sneaking target,
+    /// empties by dt / <see cref="Orders.SpotForgetSeconds"/> while it does not, and is dropped at 0. Above 1 the target counts as seen.
+    /// </summary>
+    struct Spot
+    {
+        public int Target, Generation;
+        public float Value;
+    }
+
+    /// <summary>A sneaking target the looker sees this scan, with its spot time.</summary>
+    readonly record struct Sighting(int Target, int Generation, float Seconds);
+
+    [ThreadStatic] static List<Sighting>? sightings;
+
+    Slot[] slots = [];
+    int size;
+    readonly List<AggroEntry> log = [];
+    readonly HashSet<int> taken = [];
+    long takenTick = -1;
+
+    public AggroSettings Settings { get; } = settings ?? new AggroSettings();
+    public FactionRelations Relations { get; } = relations;
+    /// <summary>The fights started since the last <see cref="TakeLog"/> (with <see cref="AggroSettings.RecordLog"/>).</summary>
+    public IReadOnlyList<AggroEntry> Log => log;
+
+    /// <summary>Takes the log (the host, between ticks).</summary>
+    public AggroEntry[] TakeLog()
+    {
+        AggroEntry[] all = [.. log];
+        log.Clear();
+        return all;
+    }
+
+    /// <summary>The fights this system started so far.</summary>
+    public long Started { get; private set; }
+
+    public void Schedule(World world) => Sync(world.Characters);
+
+    void Sync(CharacterTable table)
+    {
+        int n = table.HighWater;
+        if (slots.Length < n)
+        {
+            int old = slots.Length;
+            Array.Resize(ref slots, Math.Max(n, slots.Length * 2));
+            for (int i = old; i < slots.Length; i++) slots[i] = new Slot { Generation = -1, Task = NoTask };
+        }
+        size = Math.Max(size, n);
+        var next = table.Next;
+        if (present.Length != Relations.Count) { present = new bool[Relations.Count]; hasEnemy = new bool[Relations.Count]; }
+        Array.Clear(present);
+        for (int i = 0; i < n; i++)
+        {
+            int generation = next[i].Alive ? next[i].Generation : -1;
+            if (slots[i].Generation != generation) slots[i] = new Slot { Generation = generation, Task = NoTask };
+            if (generation >= 0 && table.Cold(i) is { Medical: not null } c && Relations.Contains(c.Faction))
+            {
+                present[c.Faction] = true;
+            }
+        }
+        // Which factions have an enemy among the factions present: a peaceful crowd skips its looks. Worked out again only when the set changes.
+        if (present.AsSpan().SequenceEqual(presentBefore) && Relations.Changes == changesBefore) return;
+        presentBefore = (bool[])present.Clone();
+        changesBefore = Relations.Changes;
+        presentList.Clear();
+        for (int f = 0; f < present.Length; f++) if (present[f]) presentList.Add(f);
+        foreach (int f in presentList)
+        {
+            hasEnemy[f] = false;
+            foreach (int g in presentList)
+                if (IsEnemy(Relations, f, g)) { hasEnemy[f] = true; break; }
+        }
+    }
+
+    bool[] present = [], presentBefore = [], hasEnemy = [];
+    long changesBefore = -1;
+    readonly List<int> presentList = [];
+
+    // ------------------------------------------------------------------ look
+
+    struct Scan
+    {
+        public CharacterTable Table;
+        public FactionRelations Relations;
+        public int Self, Faction;
+        public Vector3 Eye;
+        public float Yaw, Range;
+        public ulong Seed, Key, Tick;
+        /// <summary>The looker's AI stance (<see cref="Ai.AiStance.Aggressive"/> for a character the AI does not run) and, for the territorial one, its home.</summary>
+        public Ai.AiStance Stance;
+        public Vector2 Home;
+        public float HomeR2;
+        public int Best;
+        public float BestD2;
+        /// <summary>The best target so far has the Taunt order: it outranks every target without it.</summary>
+        public bool BestTaunts;
+        /// <summary>The looker's spot meters (read only during the query) and the sneakers it sees this scan.</summary>
+        public List<Spot>? Spots;
+        public List<Sighting> Sightings;
+        public EffectBuffer Effects;
+    }
+
+    public void Act(World world, Partition part, EffectBuffer effects)
+    {
+        var table = world.Characters;
+        var prev = table.Previous;
+        var next = table.Next;
+        int every = Math.Max(1, Settings.ScanEveryTicks);
+        int phase = (int)(world.Tick % every);
+        int first = part.Start + ((phase - part.Start % every) % every + every) % every;
+        for (int i = first; i < part.End; i += every)
+        {
+            if (!prev[i].Alive || i >= slots.Length || world.Tick < slots[i].CalmUntil) continue;
+            byte task = next[i].Task;
+            if (task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat || task == (byte)CharacterTask.Rest && !AiSleeper(table.Cold(i))) continue;
+            if (table.Cold(i) is not { IsPlayer: false, InCombat: false, Fleeing: false, IsImprisoned: false, Fighter.CanAttack: true, Medical.Incapacitated: false, Carrying.IsNone: true } cold || !Relations.Contains(cold.Faction)) continue;
+            var stance = cold.Ai?.Stance ?? Ai.AiStance.Aggressive;
+            if (stance == Ai.AiStance.Passive || !hasEnemy[cold.Faction] && stance != Ai.AiStance.AggressiveNeutrals) continue;
+            float range = RangeOf(cold, Settings.SightRange);
+            if (!(range > 0)) continue;
+            var scan = new Scan
+            {
+                Table = table, Relations = Relations, Self = i, Faction = cold.Faction,
+                Eye = prev[i].Position, Yaw = prev[i].Yaw, Range = range, Best = -1, BestD2 = float.MaxValue,
+                Seed = world.Seed, Key = Rng.Key(new CharacterId(i, prev[i].Generation)), Tick = (ulong)world.Tick,
+                Stance = stance,
+                Home = cold.Ai?.Squad.HomeCentre ?? default, HomeR2 = cold.Ai is { } mind ? mind.Squad.HomeRadius * mind.Squad.HomeRadius : 0,
+                Spots = slots[i].Spots, Sightings = sightings ??= [], Effects = effects,
+            };
+            scan.Sightings.Clear();
+            world.Grid.Query(scan.Eye.X, scan.Eye.Z, MathF.Max(range, NoiseFar), ref scan, Visit);
+            if (scan.Best >= 0) effects.Emit(i, scan.Best, SightEffect, MathF.Sqrt(scan.BestD2));
+            if (scan.Spots is not null || scan.Sightings.Count > 0) slots[i].Spots = AdvanceSpots(scan.Spots, scan.Sightings, every * world.TickSeconds, table);
+        }
+    }
+
+    /// <summary>
+    /// Moves a looker's spot meters on by one scan of <paramref name="dt"/> seconds: a seen sneaker's meter fills by dt / its spot time (a new one starts at 0), the others
+    /// empty by dt / <see cref="Orders.SpotForgetSeconds"/>; empty meters and gone targets are dropped. Returns the list in target slot order (null when empty).
+    /// </summary>
+    static List<Spot>? AdvanceSpots(List<Spot>? spots, List<Sighting> seen, float dt, CharacterTable table)
+    {
+        spots ??= [];
+        foreach (var x in seen)
+        {
+            int k = spots.FindIndex(p => p.Target == x.Target && p.Generation == x.Generation);
+            if (k < 0) spots.Add(new Spot { Target = x.Target, Generation = x.Generation, Value = dt / x.Seconds });
+            else spots[k] = spots[k] with { Value = spots[k].Value + dt / x.Seconds };
+        }
+        for (int k = spots.Count - 1; k >= 0; k--)
+        {
+            var p = spots[k];
+            if (!table.Previous[p.Target].Alive || table.Previous[p.Target].Generation != p.Generation) { spots.RemoveAt(k); continue; }
+            if (seen.Exists(x => x.Target == p.Target)) continue;
+            p.Value -= dt / Orders.SpotForgetSeconds;
+            if (p.Value <= 0) spots.RemoveAt(k);
+            else spots[k] = p;
+        }
+        if (spots.Count == 0) return null;
+        spots.Sort((a, b) => a.Target.CompareTo(b.Target));
+        return spots;
+    }
+
+    /// <summary>Whether the NPC in slot <paramref name="looker"/> has spotted the sneaker <paramref name="target"/> (its spot meter is full; serial phases).</summary>
+    public bool Spotted(int looker, CharacterId target) => looker < slots.Length && SpotOf(slots[looker].Spots, target.Slot, target.Generation) > 1;
+
+    /// <summary>The looker's spot meter on <paramref name="slot"/> before this scan (0: none).</summary>
+    static float SpotOf(List<Spot>? spots, int slot, int generation)
+    {
+        if (spots is null) return 0;
+        foreach (var p in spots) if (p.Target == slot && p.Generation == generation) return p.Value;
+        return 0;
+    }
+
+    static void Visit(int slot, ref Scan s)
+    {
+        if (slot == s.Self) return;
+        ref readonly var other = ref s.Table.Previous[slot];
+        float d2 = Vector3.DistanceSquared(other.Position, s.Eye);
+        if (d2 > s.Range * s.Range && d2 > NoiseFar * NoiseFar) return;
+        var orders = s.Table.Cold(slot)?.Orders ?? CharacterOrders.None;
+        bool sneaking = (orders & CharacterOrders.Sneak) != 0;
+        // The Taunt order draws the looker (its tooltip: "draw more of the enemy to attack him"): a taunter outranks any target without it, nearest first among them.
+        // A sneaking taunter is not conspicuous. Engine choice: the original's weighting is Unknown.
+        bool taunts = !sneaking && (orders & CharacterOrders.Taunt) != 0;
+        // Strictly better only: the grid visits a cell's slots in ascending order, so a tie keeps the lower slot within a cell; across cells the
+        // order is the grid's fixed one. Either way it is a function of the state. A sneaker farther than the best still gets its spot meter.
+        bool better = taunts != s.BestTaunts ? taunts : d2 < s.BestD2;
+        if (!better && !sneaking) return;
+        if (s.Table.Cold(slot) is not { Medical.Incapacitated: false } c) return;
+        // Wanted characters are the arrest system's (Crime.ArrestSystem): the police spot, fine or arrest them there.
+        bool enemy = s.Stance != Ai.AiStance.Passive
+            && (IsEnemy(s.Relations, s.Faction, c.Faction) || s.Stance == Ai.AiStance.AggressiveNeutrals && IsNeutral(s.Relations, s.Faction, c.Faction));
+        if (!enemy) return;
+        // The AI's stances (docs/simulation.md "AI", Combat goals): the defensive one joins fights only, the territorial one keeps to its home.
+        if (s.Stance == Ai.AiStance.Defensive && !c.InCombat) return;
+        if (s.Stance == Ai.AiStance.Territorial && Vector2.DistanceSquared(new Vector2(other.Position.X, other.Position.Z), s.Home) > s.HomeR2) return;
+        // A sneaking target is harder to see and to hear (the Sneak order; docs/game/perception.md "Sight", "Spotting a sneaker" and "Hearing"): in view it fills the
+        // looker's spot meter and counts as seen only once the meter was full before this scan.
+        float stealth = sneaking ? Orders.Stealth(c) : -1;
+        bool seen;
+        if (sneaking)
+        {
+            float v = SneakVisibility(s.Eye, s.Yaw, other.Position, s.Range, stealth);
+            bool full = SpotOf(s.Spots, slot, other.Generation) > 1;
+            if (v > 0) s.Sightings.Add(new Sighting(slot, other.Generation, Orders.SpotSeconds(v, stealth)));
+            if (d2 <= s.Range * s.Range)
+                s.Effects.Emit(s.Self, slot, ExposureEffect, (float)(full && v > 0 ? StealthExposure.Detected : v > 0 ? StealthExposure.Noticed : StealthExposure.Near));
+            if (!better) return;
+            seen = full && v > 0;
+        }
+        else seen = Visibility(s.Eye, s.Yaw, other.Position, s.Range) > 0;
+        if (!seen)
+        {
+            float speed = new Vector2(other.Velocity.X, other.Velocity.Z).Length();
+            float p = stealth >= 0
+                ? speed > 0.01f ? Orders.SneakHearChance(MathF.Sqrt(d2), Orders.SneakNoise(stealth), stealth) : 0
+                : HearChance(MathF.Sqrt(d2), NoiseRange(speed, other.MaxSpeed));
+            if (!(p > 0) || Rng.Float(Rng.Hash(s.Seed, s.Key, RngPurpose.Sense, (s.Tick << 20) ^ (ulong)(uint)slot)) >= p) return;
+        }
+        s.Best = slot;
+        s.BestD2 = d2;
+        s.BestTaunts = taunts;
+    }
+
+    /// <summary>
+    /// Whether a character of faction <paramref name="mine"/> picks a fight with one of <paramref name="theirs"/>: hostile one way (mine to theirs, -30 or lower),
+    /// and neither lists the other in <c>coexistence</c> (engine choice: the flag's effect in the original is <b>Unknown</b>, so either side's is enough).
+    /// Same faction and allies are never enemies (an ally is at 50 or above, so not hostile).
+    /// </summary>
+    /// <summary>Neither an ally (nor the same faction) nor hostile: whom ATTACK_ENEMIES_AND_NEUTRALS adds to the enemies.</summary>
+    public static bool IsNeutral(FactionRelations relations, int mine, int theirs) =>
+        relations.Contains(theirs) && !relations.IsAlly(mine, theirs) && !relations.IsHostile(mine, theirs);
+
+    /// <summary>A character the AI put to bed or sat down (<see cref="Ai.AiBehaviour.Sleep"/>, <see cref="Ai.AiBehaviour.Sit"/>): unlike one resting by order, it can be roused into a fight.</summary>
+    static bool AiSleeper(CharacterCold? cold) => cold?.Ai is { Behaviour: Ai.AiBehaviour.Sleep or Ai.AiBehaviour.Sit };
+
+    public static bool IsEnemy(FactionRelations relations, int mine, int theirs) =>
+        relations.Contains(theirs) && relations.IsHostile(mine, theirs) && !relations.Coexists(mine, theirs) && !relations.Coexists(theirs, mine);
+
+    // ------------------------------------------------------------------ decide
+
+    public void Apply(World world, in Effect e)
+    {
+        if (e.Kind == ExposureEffect)
+        {
+            // The sneaker keeps the highest exposure any looker gave it this tick.
+            if (world.Characters.Cold(e.Target) is not { } sneaker) return;
+            var level = (StealthExposure)(int)e.Amount;
+            if (sneaker.StealthExposureTick != world.Tick || level > sneaker.StealthExposure) sneaker.StealthExposure = level;
+            sneaker.StealthExposureTick = world.Tick;
+            if (level >= StealthExposure.Noticed) Watch(world, sneaker, world.Characters.IdOf(e.Source), level);
+            return;
+        }
+        if (e.Kind != SightEffect) return;
+        if (takenTick != world.Tick) { taken.Clear(); takenTick = world.Tick; }
+        var table = world.Characters;
+        var next = table.Next;
+        int i = e.Source, t = e.Target;
+        if (!Free(table, i, taken) || !next[t].Alive || table.Cold(t) is not { Medical.Incapacitated: false } target) return;
+        var fighters = new List<CharacterId> { table.IdOf(i) };
+        taken.Add(i);
+        JoinMates(world, table, i, t, fighters);
+        var targetId = table.IdOf(t);
+        world.Defer(new AttackOrder(fighters, targetId) { Tick = world.Tick + 1 });
+        Started++;
+        if (Settings.RecordLog) log.Add(new AggroEntry(world.Tick, fighters[0], targetId, table.Cold(i)!.Faction, target.Faction, e.Amount, fighters.Count - 1));
+    }
+
+    /// <summary>How long a watcher stays on a sneaker's list after its last look (<c>FUN_1408586d0</c>: entries older than 4 s are dropped, Verified literal).</summary>
+    public const float WatcherSeconds = 4;
+
+    /// <summary>Puts <paramref name="looker"/> on the sneaker's watcher list at <paramref name="level"/> (or updates it) and drops lapsed entries.</summary>
+    static void Watch(World world, CharacterCold sneaker, CharacterId looker, StealthExposure level)
+    {
+        var list = sneaker.Watchers ??= [];
+        long lapse = world.Tick - (long)MathF.Ceiling(WatcherSeconds / world.TickSeconds);
+        list.RemoveAll(w => w.Tick < lapse || w.Looker == looker);
+        list.Add(new StealthWatcher(looker, level, world.Tick));
+    }
+
+    /// <summary>
+    /// The looker's free squad mates join when the target is within twice their own range R (in the squad's member order). The original shares a squad's sightings
+    /// (<c>GroupSense</c>): a member counts a character a mate saw or heard as seen within 2 R, with no view cone or light test (<c>FUN_140857b10</c>, Observed).
+    /// </summary>
+    void JoinMates(World world, CharacterTable table, int slot, int target, List<CharacterId> fighters)
+    {
+        var squad = table.Cold(slot)!.SquadId >= 0 ? world.Squads.Find(table.Cold(slot)!.SquadId) : null;
+        if (squad is null) return;
+        var at = table.Next[target].Position;
+        foreach (var m in squad.Members)
+        {
+            if (!table.TryResolveNext(m, out int s) || s == slot || !Free(table, s, taken)) continue;
+            float r = 2 * RangeOf(table.Cold(s)!, Settings.SightRange);
+            if (Vector3.DistanceSquared(table.Next[s].Position, at) > r * r) continue;
+            fighters.Add(m);
+            taken.Add(s);
+        }
+    }
+
+    static bool Free(CharacterTable table, int slot, HashSet<int> taken)
+    {
+        if (taken.Contains(slot) || !table.Next[slot].Alive) return false;
+        byte task = table.Next[slot].Task;
+        if (task is (byte)CharacterTask.Attack or (byte)CharacterTask.Treat || task == (byte)CharacterTask.Rest && !AiSleeper(table.Cold(slot))) return false;
+        return table.Cold(slot) is { IsPlayer: false, InCombat: false, Fleeing: false, IsImprisoned: false, Fighter.CanAttack: true, Medical.Incapacitated: false, Carrying.IsNone: true };   // a carrier picks no fight (the original's engagement weight is 0 while carrying)
+    }
+
+    // ------------------------------------------------------------------ leash and stand down
+
+    public void SlowWorld(World world)
+    {
+        var table = world.Characters;
+        Sync(table);   // characters spawned this tick
+        var next = table.Next;
+        float leash2 = Settings.LeashRange * Settings.LeashRange;
+        long calm = (long)MathF.Ceiling(Settings.CalmSeconds / world.TickSeconds);
+        for (int i = 0; i < table.HighWater; i++)
+        {
+            ref var n = ref next[i];
+            if (!n.Alive) continue;
+            var cold = table.Cold(i)!;
+            if (cold.IsPlayer) continue;
+            ref var s = ref slots[i];
+            var here = new Vector2(n.Position.X, n.Position.Z);
+            if (n.Task == (byte)CharacterTask.Attack)
+            {
+                if (!s.Tracked)
+                {
+                    s.Tracked = true;
+                    s.Origin = here;
+                }
+                else if (Vector2.DistanceSquared(here, s.Origin) > leash2 && world.Tick >= s.CalmUntil)
+                {
+                    world.Defer(new StopCommand([table.IdOf(i)]) { Tick = world.Tick + 1 });
+                    s.CalmUntil = world.Tick + calm;
+                }
+                continue;
+            }
+            if (!s.Tracked)
+            {
+                s.Task = n.Task;   // the routine to go back to after a fight
+                continue;
+            }
+            s.Tracked = false;
+            if (cold.Medical is { Incapacitated: true } || cold.InCombat || n.Task != (byte)CharacterTask.Idle) continue;   // down (it wakes into wandering) or busy with something else
+            MovementSystem.Stop(table, i);
+            n.Task = s.Task is (byte)CharacterTask.Wander or (byte)CharacterTask.Follow or (byte)CharacterTask.Idle ? s.Task
+                : s.Task == (byte)CharacterTask.GoTo ? (byte)CharacterTask.Idle : (byte)CharacterTask.Wander;
+            n.TaskTime = 0;
+        }
+    }
+
+    public void Hash(ref StateHasher hasher)
+    {
+        hasher.Add(Relations.Changes);
+        if (Relations.Changes > 0)
+        {
+            int n = Relations.Count;
+            for (int a = 0; a < n; a++)
+                for (int b = 0; b < n; b++) hasher.Add(Relations.Get(a, b));
+        }
+        hasher.Add(size);
+        for (int i = 0; i < size; i++)
+        {
+            ref readonly var s = ref slots[i];
+            hasher.Add(s.Generation);
+            hasher.Add(s.Tracked);
+            hasher.Add(s.Origin.X);
+            hasher.Add(s.Origin.Y);
+            hasher.Add(s.Task);
+            hasher.Add(s.CalmUntil);
+            if (s.Spots is { } spots)   // only while a looker has meters, so worlds without sneakers hash as before
+                foreach (var p in spots)
+                {
+                    hasher.Add(p.Target);
+                    hasher.Add(p.Generation);
+                    hasher.Add(p.Value);
+                }
+        }
+        hasher.Add(Started);
+    }
+}

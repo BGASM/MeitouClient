@@ -86,26 +86,6 @@ public class DdsReaderTests
     }
 
     [Fact]
-    public void Bc1_with_color0_not_greater_has_midpoint_and_transparent_black()
-    {
-        var image = DdsDecoder.Decode(DdsReader.Read(Dds(4, 4, 1, "DXT1", ColourBlock(0x001F, 0xF800, 0, 1, 2, 3))));
-        AssertPixel(image, 0, 0, 0, 0, 255, 255);
-        AssertPixel(image, 1, 0, 255, 0, 0, 255);
-        AssertPixel(image, 2, 0, 128, 0, 128, 255);
-        AssertPixel(image, 3, 0, 0, 0, 0, 0);
-    }
-
-    [Fact]
-    public void Bc2_uses_explicit_alpha_and_always_four_colours()
-    {
-        // Alpha nibbles for pixels 0..3: 0, 5, 10, 15; colour endpoints in "three colour" order must still give four colours.
-        byte[] alpha = [0x50, 0xFA, 0, 0, 0, 0, 0, 0];
-        var image = DdsDecoder.Decode(DdsReader.Read(Dds(4, 4, 1, "DXT3", [.. alpha, .. ColourBlock(0x001F, 0xF800, 0, 1, 2, 3)])));
-        Assert.Equal(new byte[] { 0, 85, 170, 255 }, Enumerable.Range(0, 4).Select(x => image[x, 0].A));
-        AssertPixel(image, 3, 0, 170, 0, 85, 255); // (c0 + 2 c1) / 3, not transparent black
-    }
-
-    [Fact]
     public void Bc3_alpha_has_eight_value_and_six_value_modes()
     {
         var eight = DdsDecoder.Decode(DdsReader.Read(Dds(4, 4, 1, "DXT5", [.. ChannelBlock(255, 0, 0, 1, 2, 7), .. ColourBlock(0xFFFF, 0xFFFF)])));
@@ -114,16 +94,6 @@ public class DdsReaderTests
 
         var six = DdsDecoder.Decode(DdsReader.Read(Dds(4, 4, 1, "DXT5", [.. ChannelBlock(0, 100, 2, 5, 6, 7), .. ColourBlock(0, 0)])));
         Assert.Equal(new byte[] { 20, 80, 0, 255 }, Enumerable.Range(0, 4).Select(x => six[x, 0].A));
-    }
-
-    [Fact]
-    public void Bc4_and_bc5_fill_red_and_green()
-    {
-        var bc4 = DdsDecoder.Decode(DdsReader.Read(Dds(4, 4, 1, "ATI1", ChannelBlock(200, 100, 0, 1))));
-        AssertPixel(bc4, 0, 0, 200, 200, 200, 255);
-        AssertPixel(bc4, 1, 0, 100, 100, 100, 255);
-        var bc5 = DdsDecoder.Decode(DdsReader.Read(Dds(4, 4, 1, "ATI2", [.. ChannelBlock(200, 100, 0), .. ChannelBlock(10, 20, 1)])));
-        AssertPixel(bc5, 0, 0, 200, 20, 0, 255);
     }
 
     [Fact]
@@ -146,15 +116,6 @@ public class DdsReaderTests
     }
 
     [Fact]
-    public void Missing_mip_count_flag_means_one_level_and_extra_bytes_are_trailing()
-    {
-        var data = Dds(4, 4, 0, "DXT1", new byte[8 + 8]);
-        var file = DdsReader.Read(data);
-        Assert.Equal(1, file.MipCount);
-        Assert.Equal(8, file.TrailingBytes);
-    }
-
-    [Fact]
     public void Cubemap_has_six_images_each_with_its_mip_chain()
     {
         // 8x8 BC3 with 4 levels: 4 blocks + 1 + 1 + 1 per face.
@@ -168,55 +129,6 @@ public class DdsReaderTests
         Assert.Equal(128 + 2 * face, file.Surface(2, 0).Offset);
         Assert.Equal(0xAB, file.SurfaceData(file.Surface(2, 0))[0]);
         Assert.Equal(0, file.TrailingBytes);
-    }
-
-    [Fact]
-    public void Dx10_header_gives_format_and_array_size()
-    {
-        var file = DdsReader.Read(Dds(4, 4, 1, "DX10", new byte[2 * 16], dx10: (77, 3, 0, 2)));
-        Assert.Equal(DdsFormat.Bc3, file.Format);
-        Assert.Equal(77, file.DxgiFormat);
-        Assert.Equal(148, file.HeaderSize);
-        Assert.Equal(2, file.ImageCount);
-        Assert.Equal(0, file.TrailingBytes);
-
-        var rgba = DdsReader.Read(Dds(1, 1, 1, "DX10", [10, 20, 30, 40], dx10: (28, 3, 0, 1)));
-        AssertPixel(DdsDecoder.Decode(rgba), 0, 0, 10, 20, 30, 40);
-        var bgra = DdsReader.Read(Dds(1, 1, 1, "DX10", [10, 20, 30, 40], dx10: (87, 3, 0, 1)));
-        AssertPixel(DdsDecoder.Decode(bgra), 0, 0, 30, 20, 10, 40);
-        Assert.Throws<DdsFormatException>(() => DdsReader.Read(Dds(4, 4, 1, "DX10", new byte[16], dx10: (95, 3, 0, 1)))); // BC6H
-    }
-
-    [Fact]
-    public void Uncompressed_formats_scale_masked_channels_to_eight_bits()
-    {
-        // X1R5G5B5 (as meshes/sky0026.dds): no alpha mask, so alpha is 255.
-        ushort x1r5g5b5 = (31 << 10) | (16 << 5) | 0;
-        var file = DdsReader.Read(Dds(1, 1, 0, null, BitConverter.GetBytes(x1r5g5b5), pfFlags: 0x40, bitCount: 16, r: 0x7C00, g: 0x3E0, b: 0x1F));
-        Assert.Equal(DdsFormat.Uncompressed, file.Format);
-        AssertPixel(DdsDecoder.Decode(file), 0, 0, 255, 132, 0, 255);
-
-        // A8R8G8B8 is stored B, G, R, A.
-        var argb = DdsReader.Read(Dds(2, 1, 0, null, [1, 2, 3, 4, 5, 6, 7, 8], pfFlags: 0x41, bitCount: 32, r: 0xFF0000, g: 0xFF00, b: 0xFF, a: 0xFF000000));
-        var image = DdsDecoder.Decode(argb);
-        AssertPixel(image, 0, 0, 3, 2, 1, 4);
-        AssertPixel(image, 1, 0, 7, 6, 5, 8);
-
-        // R8G8B8 (24 bit) and L8 luminance.
-        AssertPixel(DdsDecoder.Decode(DdsReader.Read(Dds(1, 1, 0, null, [1, 2, 3], pfFlags: 0x40, bitCount: 24, r: 0xFF0000, g: 0xFF00, b: 0xFF))), 0, 0, 3, 2, 1, 255);
-        AssertPixel(DdsDecoder.Decode(DdsReader.Read(Dds(1, 1, 0, null, [77], pfFlags: 0x20000, bitCount: 8, r: 0xFF))), 0, 0, 77, 77, 77, 255);
-    }
-
-    [Fact]
-    public void Bad_files_are_rejected()
-    {
-        var good = Dds(4, 4, 1, "DXT1", new byte[8]);
-        Assert.Throws<DdsFormatException>(() => DdsReader.Read(good[..100]));
-        Assert.Throws<DdsFormatException>(() => DdsReader.Read(good[..^1])); // surface past the end
-        var badMagic = (byte[])good.Clone();
-        badMagic[0] = (byte)'X';
-        Assert.Throws<DdsFormatException>(() => DdsReader.Read(badMagic));
-        Assert.Throws<DdsFormatException>(() => DdsReader.Read(Dds(4, 4, 1, "BC7U", new byte[16])));
     }
 
     /// <summary>

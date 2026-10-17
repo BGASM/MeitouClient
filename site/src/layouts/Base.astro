@@ -1,0 +1,130 @@
+---
+import '@fontsource/exo-2/400.css';
+import '@fontsource/exo-2/600.css';
+import '../styles/meitou.css';
+import DiscordIcon from '../components/DiscordIcon.astro';
+import GithubIcon from '../components/GithubIcon.astro';
+
+interface Props {
+  title: string;
+  description?: string;
+  /** Loop the background video behind the first view. */
+  video?: boolean;
+}
+
+const { title, description = 'MeitouClient: a .NET reimplementation of the Kenshi engine.', video = false } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <link rel="icon" href="/favicon.ico" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <div class="mt-scene">
+      {video && (
+        <div class="bg" aria-hidden="true">
+          <video autoplay muted loop playsinline preload="auto" poster="/bgvideo.jpg">
+            <source src="/bgvideo.webm" type="video/webm" />
+          </video>
+        </div>
+      )}
+      <header class:list={['top', { 'is-over': video }]}>
+        {!video && <a class="brand" href="/">Meitou<span>Client</span></a>}
+        <a class="gh" href="https://discord.gg/DVAHH2n9DR">
+          <DiscordIcon />
+          Discord
+        </a>
+        <a class="gh" href="https://github.com/VlcekM/MeitouClient">
+          <GithubIcon />
+          GitHub
+        </a>
+      </header>
+      {video && <a class="brand is-corner" href="/">Meitou<span>Client</span></a>}
+      <main>
+        <slot />
+      </main>
+      <footer class="foot mt-caption">
+        GPL-3.0-or-later · No game assets are distributed · Not affiliated with Lo-Fi Games
+      </footer>
+    </div>
+    {video && (
+      <script is:inline>
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) document.querySelector('.bg video')?.pause();
+      </script>
+    )}
+  </body>
+</html>
+
+<style>
+  /* --frame: the page ground around the video; --edge: where content starts, just inside the frame. */
+  .mt-scene { --frame: 36px; --edge: calc(var(--frame) + 24px); }
+
+
+  /* First view: the video in a frame with rounded inner corners, behind the header and hero. */
+  .bg {
+    position: absolute;
+    top: var(--frame);
+    left: var(--frame);
+    right: var(--frame);
+    height: calc(100svh - 2 * var(--frame));
+    overflow: hidden;
+    border-radius: calc(4 * var(--radius-card));
+    pointer-events: none;
+  }
+  .bg video { display: block; width: 100%; height: 100%; object-fit: cover; }
+  /* Slight vignette: darker corners, a band behind the header, a soft patch behind the hero text. */
+  .bg::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 760px 380px at 16% 12%, rgba(8, 6, 5, .55), transparent 70%),
+      linear-gradient(rgba(8, 6, 5, .45), transparent 120px),
+      radial-gradient(ellipse at center, transparent 55%, rgba(8, 6, 5, .5) 100%);
+  }
+  .top, main, .foot { position: relative; }
+  .top {
+    display: flex;
+    align-items: center;
+    gap: var(--space-7);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    padding: var(--edge);
+  }
+  /* On the video page the hero title takes the top left; the links float at the top right. */
+  .top.is-over { position: absolute; top: 0; right: 0; z-index: 1; }
+  .brand {
+    margin-right: auto;
+    color: #fff;
+    font: 600 30px/36px var(--font-exo);
+    text-decoration: none;
+  }
+  .brand span { font-weight: 400; }
+  /* On the video page the wordmark sits at the bottom right of the first view. */
+  .brand.is-corner { position: absolute; z-index: 1; right: var(--edge); top: calc(100svh - var(--edge) - 36px); margin: 0; }
+  .gh { display: inline-flex; align-items: center; gap: var(--space-4); color: #fff; font: 400 16px/21px var(--font-exo); text-decoration: none; opacity: .85; transition: opacity .16s ease; }
+  .gh:hover { color: #fff; opacity: 1; }
+  main { padding: 0 var(--edge); }
+  .foot { padding: var(--space-7) var(--edge) 36px; text-align: center; }
+
+  /* Phones: no frame, the video fills the whole first view and the content gets nearly the full width. The wordmark
+     moves to the bottom left under the buttons, and a darker scrim keeps the hero text readable on any frame. */
+  @media (max-width: 640px) {
+    .mt-scene { --frame: 0px; --edge: 20px; }
+    .bg { border-radius: 0; }
+    .bg::after {
+      background:
+        linear-gradient(rgba(8, 6, 5, .7), rgba(8, 6, 5, .3) 45%, rgba(8, 6, 5, .65)),
+        radial-gradient(ellipse at center, transparent 55%, rgba(8, 6, 5, .5) 100%);
+    }
+    .top { gap: var(--space-6); padding: calc(var(--edge) - 12px) var(--edge); }
+    .gh { min-height: 44px; }
+    .brand { font-size: 26px; line-height: 32px; }
+    .brand.is-corner { right: auto; left: var(--edge); top: calc(100svh - var(--edge) - 32px); }
+    .foot { padding-bottom: var(--space-7); }
+  }
+</style>

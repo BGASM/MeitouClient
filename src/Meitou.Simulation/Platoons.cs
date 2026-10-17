@@ -22,7 +22,7 @@ public enum PlatoonState : byte
 public sealed class Platoon
 {
     public required int Id { get; init; }
-    /// <summary>The town (a position in the population's site list) whose pool it counts against.</summary>
+    /// <summary>The town (a position in the population's site list) whose pool it counts against; -1 for a save's wild platoon.</summary>
     public required int Origin { get; init; }
     public required string TemplateId { get; init; }
     public int Faction { get; init; } = -1;
@@ -45,7 +45,57 @@ public sealed class Platoon
     public long UnloadAtTick { get; set; } = -1;
     /// <summary>Seconds before a loaded platoon's leader is sent on again when it has no go-to (a blocked path must not be retried every look).</summary>
     public float OrderCooldown { get; set; }
+    /// <summary>The AI package it runs (an AI_PACKAGE id, saved as <c>currentPackage</c>; null: none) and the off-screen job that package gives (<see cref="Ai.PlatoonJobs"/>).</summary>
+    public string? Package { get; set; }
+    public Ai.PlatoonJob Job { get; set; }
+    /// <summary>A short-range patrol's next point (null: none; it goes to <see cref="Target"/> instead).</summary>
+    public Vector2? Point { get; set; }
+    /// <summary>The save's platoon this stand-in is (null: one the population made): its characters are made from the save, not from <see cref="Key"/>.</summary>
+    public Saving.SavedPlatoon? Saved { get; init; }
+    /// <summary>
+    /// A squad the population made, kept as its characters while it is not in the world (null: none): a town's squad since its town unloaded, or (the Meitou
+    /// <see cref="PopulationSystem.KeepRoamers"/> switch) a roaming one since it first left. Made of them again, never rolled anew.
+    /// </summary>
+    public StoredSquad? Stored { get; set; }
+    /// <summary>A platoon of its town's own (residents, bar squads, slaves; saved or stored): it never travels, its squad is run by the AI like the town's, and it is not in the roaming pool.</summary>
+    public bool Pinned => Saved?.Pinned == true || Stored?.Pinned == true;
+    /// <summary>A save's wild platoon (a nest's or a homeless one, <see cref="Origin"/> -1): it never travels and counts against its wild site, not a town's pool.</summary>
+    public bool Wild => Saved?.Wild is not null;
+    /// <summary>Game seconds it has been a stand-in with no reason to be kept (the Faithful <see cref="PopulationSystem.KeepRoamers"/>: the original's orphan timer).</summary>
+    public float OrphanSeconds { get; set; }
+    /// <summary>A town's own squad that lost so many that its town makes it afresh when it next comes into the world (<see cref="PopulationSystem"/> regeneration).</summary>
+    public bool Regenerate { get; set; }
+    /// <summary>
+    /// The faction campaign it marches in (null: none; <c>PopulationCampaigns.cs</c>): kept (never despawned) until the campaign is removed, moved by the campaign off
+    /// screen and led to <see cref="CampaignGoal"/> while loaded, out of the roaming pools.
+    /// </summary>
+    public CampaignInstance? Campaign { get; set; }
+    /// <summary>Where its campaign sends it (the target for the leader platoon, the leader for the others; set each population look).</summary>
+    public Vector2? CampaignGoal { get; set; }
 }
+
+/// <summary>
+/// A squad the population made, kept while it is not in the world (docs/simulation.md "Population"): each member's own <see cref="CharacterCold"/> (name, look, body,
+/// kit, bounties) with where it stood, and the squad's home, shop and AI package. Its platoon is made of them again; a save writes them as the platoon.
+/// </summary>
+public sealed class StoredSquad
+{
+    public required string Name { get; init; }
+    /// <summary>A town's own squad (else a roaming one, which travels).</summary>
+    public bool Pinned { get; init; } = true;
+    public Meitou.Data.World.TownBuilding? HomeBuilding { get; init; }
+    public Trading.Shop? Shop { get; set; }
+    /// <summary>The AI package it ran (saved as <c>currentPackage</c>; null: none).</summary>
+    public string? Package { get; set; }
+    /// <summary>The platoon position the members' places belong to (a stand-in that travelled since takes them along), and the tick they were stored at.</summary>
+    public Vector2 Anchor { get; set; }
+    public long StoredTick { get; set; }
+    /// <summary>The characters while the platoon is not in the world (empty while it is).</summary>
+    public List<StoredMember> Members { get; } = [];
+}
+
+/// <summary>A character of a <see cref="StoredSquad"/>: its cold state, cleared of what only meant something in the world, and its place.</summary>
+public sealed record StoredMember(CharacterCold Cold, Vector3 Position, float Yaw, bool Leader);
 
 /// <summary>The roaming squads of a world, by id. Ids are never reused. Part of the state hash.</summary>
 public sealed class PlatoonRegistry
@@ -80,6 +130,35 @@ public sealed class PlatoonRegistry
             h.Add(p.SquadId);
             h.Add(p.UnloadAtTick);
             h.Add(p.OrderCooldown);
+            if (p.Job != Ai.PlatoonJob.None || p.Point is not null)
+            {
+                // Only for platoons whose package gives an off-screen job, so worlds without AI packages hash as before.
+                h.Add((int)p.Job);
+                h.Add(p.Point.HasValue);
+                h.Add(p.Point ?? default);
+            }
+            if (p.Stored is { } stored)
+            {
+                // Only for stored squads, so worlds without them hash as before.
+                h.Add(stored.Members.Count);
+                foreach (var m in stored.Members) h.Add(m.Position);
+                h.Add(stored.Anchor);
+                h.Add(stored.Pinned);
+            }
+            if (p.OrphanSeconds > 0) h.Add(p.OrphanSeconds);   // only while counting, so worlds without it hash as before
+            if (p.Campaign is { } campaign)
+            {
+                // Only for campaign platoons, so worlds without them hash as before.
+                h.Add(campaign.Faction);
+                h.Add(campaign.Id);
+                h.Add(p.CampaignGoal ?? default);
+            }
+            if (p.Saved is { } saved)
+            {
+                // Only for a save's platoons, so worlds without them hash as before.
+                h.Add(saved.Pinned);
+                h.Add(saved.Touched);
+            }
         }
     }
 }

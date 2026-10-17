@@ -206,12 +206,10 @@ internal sealed class ShoreField : IDisposable
         Rect = new Vector4(baked.X0, baked.Z0, baked.X1, baked.Z1);
     }
 
-    static readonly bool StreamLog = Environment.GetEnvironmentVariable("MEITOU_STREAM_LOG") == "1";
-
-    /// <summary>MEITOU_STREAM_LOG=1: a line for a piece of the render thread's work on the field that took 1 ms or more.</summary>
+    /// <summary>With <c>--log-spikes</c>: a line for a piece of the render thread's work on the field that took 1 ms or more.</summary>
     static void Log(long start, string what)
     {
-        if (!StreamLog) return;
+        if (!UploadProfile.On) return;
         double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - start) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
         string parts = UploadProfile.Take();
         if (ms >= 1) Console.WriteLine($"water     shore field {what}: {ms:0.0} ms on the render thread [{parts}]");

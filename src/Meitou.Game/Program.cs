@@ -8,14 +8,15 @@ static class Program
 {
     static int Main(string[] args)
     {
-        args = Meitou.Rendering.Display.JitSwitches.Apply(args, out int? relaunchedExit);
-        if (relaunchedExit is { } exit) return exit;
+        GameConsole.AttachToParent();
+        GameConsole.StartLog();
         RenderJobs.RaiseRenderThread();
         GameOptions game;
+        string[] rest;
         WorldOptions? world;
         try
         {
-            (game, var rest) = GameOptions.Split(args);
+            (game, rest) = GameOptions.Split(args);
             world = WorldOptions.Parse(rest);
         }
         catch (Exception e) when (e is ArgumentException or FormatException or IndexOutOfRangeException)
@@ -28,13 +29,30 @@ static class Program
             Console.WriteLine(GameOptions.Usage);
             return 2;
         }
+        if (game.UiShowcase && world.Screenshot is null)
+        {
+            Console.Error.WriteLine("--ui-showcase needs --screenshot <path>.");
+            return 2;
+        }
+        if (game.TitlePreview && world.Screenshot is null)
+        {
+            Console.Error.WriteLine("--title-preview needs --screenshot <path>.");
+            return 2;
+        }
+        // Booting to the Meitou title: the world is loaded round the title's view, which it shows first (docs/engine.md).
+        bool toTitle = game.TitlePreview || world.Screenshot is null && !game.NewGame && game.Load is null && game.Sandbox == 0 && !game.Duel && !game.NoPopulation;
+        if (world.X is null && world.Zone is null && world.Town is null && toTitle) (world.X, world.Z) = TitleComposition.Focus;
         if (world.X is null && world.Zone is null && world.Town is null) world.Town = "The Hub";
-        var install = GameInstall.LocateOrAsk();
+        var install = GameInstall.Locate();
+        if (install is null)
+            using (GameConsole.ForPrompt()) install = GameInstall.LocateOrAsk();
         if (install is null)
         {
             Console.Error.WriteLine($"Kenshi install not found: set {GameInstall.EnvironmentVariable} or create {GameInstall.LocalConfigFile}.");
             return 1;
         }
+        // A native splash at once, until the game window draws (docs/engine.md "Loading"); not for pictures or a listing.
+        using var splash = world.Screenshot is null && !game.ListStarts ? SplashWindow.Show(install.DataDirectory) : null;
         var config = UserConfig.Load();
         Meitou.Data.GameDatabase? db = null;
         Meitou.Data.Gameplay.NewGameStart? start = null;
@@ -42,13 +60,32 @@ static class Program
         {
             // The animation sandbox: no world, a flat floor (docs/simulation.md "Sandbox"). The real game data is still loaded for the characters and animations.
             db = Meitou.Data.GameDatabase.Load(Meitou.Data.LoadOrder.FromInstall(install));
-            (world.NoTextures, world.NoObjects, world.NoFoliage, world.NoWater, world.NoReflections, world.NoDistant) = (true, true, true, true, true, true);
+            (world.NoTextures, world.NoObjects, world.NoFoliage, world.NoWater, world.NoFogFeatures, world.WaterReflection, world.DistantZones) = (true, true, true, true, true, 0, 0);
             world.Post.Ssao = false;   // SSAO bands a perfectly flat floor; the Tab panel can turn it back on
+            world.NoParticles = true;   // no weather or map effects to show (the effect library and every map placer would be read)
+            world.Clouds ??= 0;   // no cloud layer: the volume march and the cloud shadows skip at density 0
+            world.Weather ??= "Default";   // clear; the scheduler would roll the weather of the world region under the floor
             world.Distance ??= 70;
             world.Pitch ??= 22;
             world.Yaw ??= 35;
             using var flat = WorldFrame.LoadFlat(world, db);
-            return new GameHost(install, flat, new AssetLocator(install), world, game, config, null).Run();
+            return new GameHost(install, flat, new AssetLocator(install), world, game, config, null) { Splash = splash }.Run();
+        }
+        if (game.Duel)
+        {
+            // The trailer duel (docs/simulation.md "Duel"): the world round its spot at sunset, clear, the camera low beside the pair looking into the sun.
+            if (game.NewGame || game.NoPopulation)
+            {
+                Console.Error.WriteLine("--duel makes its own two characters: drop --new-game and --no-population.");
+                return 2;
+            }
+            var spot = game.DuelAt is { } at ? new Vector2(at.X, at.Z) : GameHost.DuelSpot;
+            (world.X, world.Z, world.Town) = (spot.X, spot.Y, null);
+            if (!rest.Contains("--time")) world.Hour = GameHost.DuelHour;
+            world.Weather ??= "Default";
+            world.Distance ??= 90;
+            world.Pitch ??= 8;
+            world.Yaw ??= 90;   // looking west into the sunset, the pair left and right
         }
         if (game.ListStarts || game.NewGame)
         {
@@ -84,9 +121,29 @@ static class Program
             world.Town = null;
             Console.WriteLine($"new game  {start.Name}: {start.Money} cats, {start.Squad.Count} squad link(s), at {at.Value.X:0}, {at.Value.Y:0}");
         }
+        Meitou.Data.Save.SaveGame? save = null;
+        if (game.Load is { } folder)
+        {
+            if (game.NewGame || game.NoPopulation || game.Duel)
+            {
+                Console.Error.WriteLine("--load starts in the save: drop --new-game, --no-population and --duel.");
+                return 2;
+            }
+            try { save = Meitou.Data.Save.SaveGame.Load(folder); }
+            catch (Exception e) when (e is IOException or FormatException or ArgumentException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine($"--load {folder}: {e.Message}");
+                return 1;
+            }
+            // The world round the saved camera; the load then puts the camera on the player's leader (GameHost.FinishQuickLoad).
+            var at = save.Camera.Position;
+            (world.X, world.Z, world.Town, world.Zone) = (at.X, at.Z, null, null);
+        }
+        // Interactive: the host reads the world behind its loading screen (docs/engine.md "Loading"); a picture reads it first.
+        if (world.Screenshot is null)
+            return new GameHost(install, null!, new AssetLocator(install), world, game, config, start) { StartSave = save, Splash = splash, LoadScene = () => WorldFrame.Load(install, world, db) }.Run();
         using var scene = WorldFrame.Load(install, world, db);
         if (scene is null) return 1;
-        if (world.Info) return 0;
-        return new GameHost(install, scene, new AssetLocator(install), world, game, config, start).Run();
+        return new GameHost(install, scene, new AssetLocator(install), world, game, config, start) { StartSave = save }.Run();
     }
 }

@@ -1,0 +1,286 @@
+using System.Numerics;
+using Meitou.Data.Gameplay.Ai;
+using Meitou.Data.World;
+
+namespace Meitou.Simulation.Ai;
+
+/// <summary>
+/// The package classes the engine builds, from the package's <c>signal func</c> (docs/game/ai.md "Signal functions and the package classes", Verified mapping).
+/// What each class does beyond the base class is <b>Unknown</b> except <see cref="Retreat"/> (docs/game/perception.md 7.3, Observed); the others are engine choices
+/// (docs/simulation.md "AI", Package classes).
+/// </summary>
+public enum PackageClass : byte
+{
+    /// <summary>The base <c>AIPackage</c> (signals 0, 2, 3, 7, 8, 9, 18, 21): can always start, never finishes.</summary>
+    Plain = 0,
+    /// <summary><c>RetreatAndRefresh</c> (5): starts when the squad is not intact, finishes when it is.</summary>
+    Retreat = 1,
+    /// <summary><c>GoOutOnPatrol</c> (6) and <c>GoOutOnPatrol_Cannibal</c> (4): a walk round the outskirts of the home town every few hours.</summary>
+    Patrol = 2,
+    /// <summary><c>GoOutOnPatrol_Running</c> (23): the same at a run.</summary>
+    PatrolRunning = 3,
+    /// <summary><c>Package_HangAroundBar</c> with argument 0 (17): the squad's home becomes the town's bar.</summary>
+    Bar = 4,
+    /// <summary><c>Package_HangAroundBar</c> with argument 1 (26, outdoors only): the squad stays out of doors.</summary>
+    BarOutdoors = 5,
+    /// <summary>The contract classes (12 to 15, 33): started only as a contract (<see cref="StartContract"/>), finished when its hours are over.</summary>
+    Contract = 6,
+    /// <summary>Wars, prisoner shipping, refugees, cannibal raids, occupation, campaigns, the wandering trader: not built; never start (except as a lone slot-0 package), never finish.</summary>
+    Unbuilt = 7,
+}
+
+public static class PackageClasses
+{
+    public static PackageClass Of(int signal) => signal switch
+    {
+        0 or 2 or 3 or 7 or 8 or 9 or 18 or 21 => PackageClass.Plain,
+        5 => PackageClass.Retreat,
+        4 or 6 => PackageClass.Patrol,
+        23 => PackageClass.PatrolRunning,
+        17 => PackageClass.Bar,
+        26 => PackageClass.BarOutdoors,
+        12 or 13 or 14 or 15 or 33 => PackageClass.Contract,
+        _ => PackageClass.Unbuilt,
+    };
+}
+
+/// <summary>What a package of a class needs from the world when the blackboard chooses (<see cref="AiSystem"/> gives it; null: the base-class rules only).</summary>
+public interface IPackageRules
+{
+    bool CanStart(Blackboard board, AiPackage package, PackageClass kind);
+    bool Finished(Blackboard board, AiPackage package, PackageClass kind);
+    /// <summary>A package of the class just started (a patrol lays out its route, a bar package moves the home).</summary>
+    void Started(Blackboard board, AiPackage package, PackageClass kind);
+}
+
+/// <summary>
+/// A squad's AI state (docs/game/ai.md "Blackboard update"): its packages by slot, the package running and the role lists it loaded, a contract package that
+/// overrides the slots, and what the running package needs: a home building, a patrol route. Changed only in <see cref="AiSystem"/>'s serial step; the members' think reads it.
+/// </summary>
+public sealed class Blackboard
+{
+    static readonly IReadOnlyList<AiGoal>[] NoRoles = [[], [], [], [], []];
+
+    readonly SortedDictionary<int, List<AiPackage>> slots = [];
+
+    public Blackboard(IEnumerable<SlottedPackage> packages)
+    {
+        foreach (var (slot, package) in packages)
+        {
+            if (!slots.TryGetValue(slot, out var list)) slots[slot] = list = [];
+            list.Add(package);
+        }
+    }
+
+    /// <summary>The package running (null: none could start; the members take only their default goals).</summary>
+    public AiPackage? Current { get; private set; }
+    public PackageClass CurrentClass => Current is { } p ? PackageClasses.Of(p.Signal) : PackageClass.Plain;
+    public int CurrentSlot { get; private set; } = -1;
+    /// <summary>The current package's place in its slot's list (-1: none, or a contract).</summary>
+    public int CurrentIndex { get; private set; } = -1;
+    /// <summary>Raised whenever another package starts, so the members choose again at once.</summary>
+    public int Version { get; private set; }
+    /// <summary>The current package's goals per <see cref="AiRole"/>.</summary>
+    public IReadOnlyList<AiGoal>[] Roles { get; private set; } = NoRoles;
+    /// <summary>How many members act out each goal type (the crowding count of the original's <c>TaskInfo</c>), as counted on the last package cadence.</summary>
+    public Dictionary<TaskType, int> Crowd { get; } = [];
+    /// <summary>All packages in slot order (highest first), as listed.</summary>
+    public IEnumerable<SlottedPackage> Packages => slots.Reverse().SelectMany(s => s.Value.Select(p => new SlottedPackage(s.Key, p)));
+
+    /// <summary>A contract package (the original's <c>contractjob</c>, set by dialogue's <c>AI contract</c>): while it runs it takes precedence over every slot.</summary>
+    public AiPackage? Contract { get; private set; }
+    /// <summary>The game hours (<see cref="World.GameHours"/>) the contract ends at.</summary>
+    public double ContractEnd { get; private set; }
+
+    /// <summary>The town the squad belongs to (a site index, -1: none) and the building it lives in (null: none known); <see cref="OwnHome"/> is the one it was given, <see cref="Home"/> the one in use (a bar package moves it to the bar).</summary>
+    public int Town { get; init; } = -1;
+    public TownBuilding? OwnHome { get; set; }
+    public TownBuilding? Home { get; set; }
+    /// <summary>The members it was made with: the squad size of the intact rule.</summary>
+    public int Size { get; set; }
+    /// <summary>The squad is intact (docs/game/perception.md 7.3), as the last serial step found it.</summary>
+    public bool Intact { get; set; } = true;
+    /// <summary>A patrol's route (world X/Z) and the point the leader walks to next; empty when no patrol runs.</summary>
+    public Vector2[] Route { get; set; } = [];
+    public int RouteIndex { get; set; }
+    /// <summary>The game hours from which the next patrol may start, and when the running one gives up.</summary>
+    public double NextPatrol { get; set; }
+    public double PatrolGiveUp { get; set; }
+
+    /// <summary>
+    /// One pass of the original's package choice (docs/game/ai.md "Blackboard update", Verified): a running contract first; then slots from the highest down until
+    /// one reports success. In a slot the list is scanned in order: the current package stays while it is not finished, or hands over to its <c>Leads to</c> package
+    /// when it is; an entry before it that can start pre-empts it; a lone slot-0 package starts even when it cannot. Without <paramref name="rules"/> every
+    /// package keeps the base class's rules except that only plain packages can start.
+    /// </summary>
+    public void Update(IPackageRules? rules = null, double hours = 0)
+    {
+        if (Contract is { } contract)
+        {
+            if (hours < ContractEnd) return;
+            Contract = null;
+            Current = null;   // the slots choose again
+        }
+        foreach (var (slot, list) in slots.Reverse())
+            if (TrySlot(slot, list, rules)) return;
+    }
+
+    bool TrySlot(int slot, List<AiPackage> list, IPackageRules? rules)
+    {
+        if (slot == 0 && list.Count == 1)
+        {
+            if (Current != list[0]) Start(list[0], 0, rules);
+            else if (Finished(list[0], rules))
+            {
+                // Finished and alone: its Leads to, else itself again once it can start (a patrol's next round).
+                if (list[0].LeadsTo is { } hop && Find(hop) is { } follow) Start(follow.Package, follow.Slot, rules);
+                else if (CanStart(list[0], rules)) Start(list[0], 0, rules);
+            }
+            return true;
+        }
+        foreach (var p in list)
+        {
+            if (p == Current)
+            {
+                if (!Finished(p, rules)) return true;
+                if (p.LeadsTo is { } next && Find(next) is { } follow)
+                {
+                    Start(follow.Package, follow.Slot, rules);
+                    return true;
+                }
+                return false;
+            }
+            if (CanStart(p, rules))
+            {
+                Start(p, slot, rules);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool CanStart(AiPackage p, IPackageRules? rules)
+    {
+        var kind = PackageClasses.Of(p.Signal);
+        return kind == PackageClass.Plain || (rules?.CanStart(this, p, kind) ?? false);
+    }
+
+    bool Finished(AiPackage p, IPackageRules? rules)
+    {
+        var kind = PackageClasses.Of(p.Signal);
+        return kind != PackageClass.Plain && (rules?.Finished(this, p, kind) ?? false);
+    }
+
+    SlottedPackage? Find(string id)
+    {
+        foreach (var (slot, list) in slots)
+            foreach (var p in list)
+                if (p.Id == id) return new SlottedPackage(slot, p);
+        return null;
+    }
+
+    void Start(AiPackage package, int slot, IPackageRules? rules)
+    {
+        Current = package;
+        CurrentSlot = slot;
+        CurrentIndex = slot >= 0 && slots.TryGetValue(slot, out var list) ? list.IndexOf(package) : -1;
+        Roles = package.Roles;
+        Version++;
+        Route = [];
+        RouteIndex = 0;
+        Home = OwnHome;
+        rules?.Started(this, package, PackageClasses.Of(package.Signal));
+    }
+
+    /// <summary>Makes the members think again at once (a patrol moved on).</summary>
+    public void Touch() => Version++;
+
+    /// <summary>
+    /// Starts a contract package that runs for <paramref name="hours"/> game hours from <paramref name="now"/> (docs/game/ai.md "Dialogue and AI": under 1 hour
+    /// means 10 minutes, Observed). It takes precedence over the slots until it ends; then the slots choose again.
+    /// </summary>
+    public void StartContract(AiPackage package, double now, double hours, IPackageRules? rules = null)
+    {
+        Contract = package;
+        ContractEnd = now + (hours < 1 ? 10.0 / 60 : hours);
+        Start(package, -1, rules);
+    }
+
+    internal void Hash(ref StateHasher hasher)
+    {
+        hasher.Add(CurrentSlot);
+        hasher.Add(CurrentIndex);
+        hasher.Add(Version);
+        hasher.Add(Contract is not null);
+        hasher.Add(ContractEnd);
+        hasher.Add(Intact);
+        hasher.Add(Route.Length);
+        foreach (var p in Route) hasher.Add(p);
+        hasher.Add(RouteIndex);
+        hasher.Add(NextPatrol);
+        hasher.Add(PatrolGiveUp);
+        hasher.Add(Home?.Position ?? default);
+    }
+}
+
+/// <summary>How readily an AI character starts a fight with someone it sees (docs/simulation.md "AI", Combat goals): from the combat goals of its lists in their hours.</summary>
+public enum AiStance : byte
+{
+    /// <summary>Starts no fight (it still fights back when attacked).</summary>
+    Passive = 0,
+    /// <summary>Attacks enemies that are fighting (PROTECT_ALLIES and the like).</summary>
+    Defensive = 1,
+    /// <summary>Attacks enemies within its home (TERRITORIAL_AGGRESSION_BUT_DONT_LEAVE_HOME).</summary>
+    Territorial = 2,
+    /// <summary>Attacks enemies on sight (ATTACK_ENEMIES; also the default for a character whose lists hold no combat goal, the old rule).</summary>
+    Aggressive = 3,
+    /// <summary>Attacks enemies and neutrals on sight (ATTACK_ENEMIES_AND_NEUTRALS).</summary>
+    AggressiveNeutrals = 4,
+}
+
+/// <summary>What the AI decided for one character (<see cref="CharacterCold.Ai"/>): the goal it acts out, where its post and bed are, how readily it fights.</summary>
+public sealed class AiMind
+{
+    /// <summary>The squad it thinks for (fixed for the mind's life: a character does not change squads), held so the think needs no lookup. Not hashed (the squad is).</summary>
+    public required Squad Squad { get; init; }
+    /// <summary>Its place among the squad's members when the mind was made: which bed and which node of the home it takes.</summary>
+    public int MemberIndex { get; init; }
+    /// <summary>The goal being acted out (null before the first think).</summary>
+    public AiGoal? Goal { get; set; }
+    public AiBehaviour Behaviour { get; set; }
+    public AiStance Stance { get; set; } = AiStance.Aggressive;
+    /// <summary>The <see cref="Blackboard.Version"/> the goal was chosen under.</summary>
+    public int Version { get; set; } = -1;
+    /// <summary>Its own spot: where it stood when the AI took it over (the stand-in where the home has no node or bed for it).</summary>
+    public Vector2 Post { get; set; }
+    /// <summary>The centre and radius <see cref="MovementSystem"/>'s wander uses instead of the squad's home (radius 0: the squad's).</summary>
+    public Vector2 WanderCentre { get; set; }
+    public float WanderRadius { get; set; }
+    /// <summary>Its race's <c>AI Goals</c>, looked up once when the mind is made (the lookup takes a lock; the think runs on every worker). Follows from the race, so not hashed.</summary>
+    public IReadOnlyList<AiGoal> RaceGoals { get; init; } = [];
+    /// <summary>It was sent walking to a spot and has not arrived.</summary>
+    public bool Walking { get; set; }
+    /// <summary>Walks in a row that ended away from the spot (no way there, or interrupted); at <see cref="AiSystem.MaxFailedWalks"/> it gives the spot up.</summary>
+    public int FailedWalks { get; set; }
+    /// <summary>The home's spots kept failing: it uses <see cref="Post"/> instead until its home changes.</summary>
+    public bool HomeUnreachable { get; set; }
+    /// <summary>Whether its lists hold any combat goal at all (else the stance stays the old default).</summary>
+    public bool HasCombatGoals { get; set; }
+    /// <summary>The role list and hour <see cref="Stance"/> was worked out for (a cache; the stance itself is hashed).</summary>
+    internal IReadOnlyList<AiGoal>? StanceFrom { get; set; }
+    internal int StanceHour { get; set; } = -1;
+
+    internal void Hash(ref StateHasher hasher)
+    {
+        hasher.Add((int)(Goal?.Task.Type ?? TaskType.None));
+        hasher.Add((int)Behaviour);
+        hasher.Add((int)Stance);
+        hasher.Add(Version);
+        hasher.Add(Post);
+        hasher.Add(WanderCentre);
+        hasher.Add(WanderRadius);
+        hasher.Add(Walking);
+        hasher.Add(FailedWalks);
+        hasher.Add(HomeUnreachable);
+    }
+}

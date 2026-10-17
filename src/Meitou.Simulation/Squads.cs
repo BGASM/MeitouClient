@@ -7,7 +7,7 @@ public enum SquadRole { Squad1 = 0, Squad2 = 1, Leader = 2, Slave = 4 }
 
 /// <summary>
 /// A squad in the world: the platoon of docs/game/game-loop.md "Factions and squads", reduced to what loaded squads need now (the
-/// active half; the unloaded half and the AI packages come with the AI stage). Plain object, changed only in the serial phases.
+/// active half; the unloaded half is still the roaming platoon's stand-in). Plain object, changed only in the serial phases.
 /// </summary>
 public sealed class Squad
 {
@@ -24,13 +24,28 @@ public sealed class Squad
     /// <summary>The place and radius the squad wanders in when it has no orders (the town's centre and radius for residents).</summary>
     public Vector2 HomeCentre { get; set; }
     public float HomeRadius { get; set; }
+    /// <summary>
+    /// The building the town gave it as its home (docs/game/factions-squads-towns.md "Town residents"), or the one a save names; the AI takes it as the squad's own
+    /// home. Null: none (the AI picks one).
+    /// </summary>
+    public Meitou.Data.World.TownBuilding? HomeBuilding { get; set; }
     /// <summary>The roaming platoon this loaded squad is the active half of (-1: a resident or other squad).</summary>
     public int PlatoonId { get; init; } = -1;
+    /// <summary>The active half of a pinned saved platoon (<see cref="Platoon.Pinned"/>): a town's own squad from a save, treated as the town's squads are (AI, guards).</summary>
+    public bool Pinned { get; init; }
+    /// <summary>One of its town's own squads: the town made it, or a save holds it as the town's.</summary>
+    public bool TownOwn => Town >= 0 && (PlatoonId < 0 || Pinned);
+    /// <summary>How many it was made with (its town's regeneration measures losses against it; not part of the state).</summary>
+    public int SpawnSize { get; set; }
     public List<CharacterId> Members { get; } = [];
     /// <summary>The member the others follow (the role-2 leader, else the first member); <see cref="CharacterId.None"/> when none is alive.</summary>
     public CharacterId Leader { get; set; } = CharacterId.None;
     /// <summary>The squad's purse in cats (save key <c>money</c> of the platoon; a roaming squad carries it over its unloading). The economy stage spends it.</summary>
     public long Money { get; set; }
+    /// <summary>The squad's shop, when it is a trader (<see cref="Trading.TradeSystem"/>); null otherwise.</summary>
+    public Trading.Shop? Shop { get; set; }
+    /// <summary>The squad's AI packages and the one running (<see cref="Ai.AiSystem"/>); null for a squad the AI does not run.</summary>
+    public Ai.Blackboard? Ai { get; set; }
 }
 
 /// <summary>The squads of a world, by id. Ids are never reused.</summary>
@@ -80,6 +95,8 @@ public sealed class SquadRegistry
             {
                 hasher.Add(m);
             }
+            s.Shop?.Hash(ref hasher);   // nothing for squads that do not trade, so the pinned hashes of worlds without shops stay
+            s.Ai?.Hash(ref hasher);     // nor for squads without AI packages
         }
     }
 }

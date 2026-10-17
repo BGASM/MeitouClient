@@ -48,7 +48,7 @@ public readonly record struct SkyColours(Vector3 Sun, Vector3 Zenith, Vector3 Ho
 /// exposure band of the game's HDR composite (<see cref="MinLuminance"/>, <see cref="MaxLuminance"/>). Simple mode is the old colour
 /// model. A shader that wants any of it includes <see cref="AtmosphereShaders.Functions"/> and gets its uniforms from <see cref="Apply"/>.
 /// </summary>
-public sealed unsafe class SkyRenderer : IDisposable
+public sealed unsafe partial class SkyRenderer : IDisposable
 {
     /// <summary>The renderer whose uniforms <see cref="Apply"/> sets (there is one per world view).</summary>
     public static SkyRenderer? Active { get; private set; }
@@ -115,18 +115,138 @@ public sealed unsafe class SkyRenderer : IDisposable
     // SkyX's skydome per pixel (HDR): the scattered light, its night glow and starfield; no sun disc (the game's sun is the Mie lobe).
     static string F(float v) => v.ToString("0.#########", System.Globalization.CultureInfo.InvariantCulture) + (v == MathF.Floor(v) ? ".0" : "");
 
-    static readonly string SkyFragment = "#version 330 core\n" + AtmosphereShaders.Functions + $$"""
+    /// <summary>The procedural stars' look, in pixels (the Meitou <c>stars</c> switch): the core's Gaussian sigma, and for stars brighter than <see cref="StarHaloFrom"/> a wider halo (sigma <see cref="StarHaloSigma"/> + <see cref="StarHaloGrow"/> × brightness, a share <see cref="StarHaloShare"/> of the brightness above the threshold, at most <see cref="StarHaloMax"/>).</summary>
+    public const float StarSigma = 0.7f, StarCoreReach = 2.2f, StarHaloFrom = 0.4f, StarHaloSigma = 1.8f, StarHaloGrow = 1.6f, StarHaloShare = 0.25f, StarHaloMax = 0.5f;
+
+    // The Meitou night sky (the `stars` switch; docs/formats/sky.md "Meitou night sky"): procedural point stars on the celestial sphere, evaluated per pixel.
+    // StarField / NightAtmosphere (Meitou.Data) are the reference for every number here.
+    static string Vec3(Vector3 v) => $"vec3({F(v.X)}, {F(v.Y)}, {F(v.Z)})";
+    static string Vec4(float a, float b, float c, float d) => $"vec4({F(a)}, {F(b)}, {F(c)}, {F(d)})";
+
+    static readonly string StarShader = $$"""
+
+        uniform vec4 uStarsMeitou;     // x: 1 stars computed, -1 Meitou but the sun is up (none), 0 the game's texture; y: layers drawn; z: seconds (twinkle); w: star gain
+        uniform vec4 uCelX, uCelY, uCelZ;   // the celestial axes in world coordinates (the rows of the world -> celestial turn)
+        const float STAR_SIGMA = {{F(StarSigma)}};
+        const float STAR_GAMMA = {{F(StarField.BrightnessGamma)}};
+        const vec3 EXTINCTION = {{Vec3(NightAtmosphere.ExtinctionPerAirMass)}};
+        const vec4 STAR_A[3] = vec4[3]({{string.Join(", ", StarField.Layers.Select(l => Vec4(l.Cells, l.Count / (4 * MathF.PI), l.BrightestMagnitude, MathF.Pow(10, l.Slope * (l.FaintestMagnitude - l.BrightestMagnitude)))))}});
+        const vec4 STAR_B[3] = vec4[3]({{string.Join(", ", StarField.Layers.Select(l => Vec4(1 / (l.Slope * MathF.Log(10)), 0, l.ReachPixels, 0)))}});
+        const vec3 STAR_COLOUR[{{StarColours.TableSize}}] = vec3[{{StarColours.TableSize}}]({{string.Join(", ", StarColours.Table().Select(Vec3))}});
+
+        // pcg3d, as StarField.Pcg3d.
+        uvec3 starHash(uvec3 v)
+        {
+            v = v * 1664525u + 1013904223u;
+            v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+            v ^= v >> 16u;
+            v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+            return v;
+        }
+        // The one-word hash (PCG, O'Neill) of a cell id that decides whether the cell has a star: StarField.Pcg1.
+        uint starHash1(uint v)
+        {
+            uint state = v * 747796405u + 2891336453u;
+            uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+            return (word >> 22u) ^ word;
+        }
+        // The cube face of a direction (the largest component's axis) and the position on it, -1..1: StarField.Face.
+        int starFace(vec3 d, out vec2 uv, out float m)
+        {
+            vec3 a = abs(d);
+            if (a.x >= a.y && a.x >= a.z) { m = a.x; uv = d.yz / m; return d.x > 0.0 ? 0 : 1; }
+            if (a.y >= a.z) { m = a.y; uv = d.xz / m; return d.y > 0.0 ? 2 : 3; }
+            m = a.z; uv = d.xy / m;
+            return d.z > 0.0 ? 4 : 5;
+        }
+        vec3 starFaceDir(int face, vec2 q)
+        {
+            float s = (face & 1) == 0 ? 1.0 : -1.0;
+            int k = face >> 1;
+            return k == 0 ? vec3(s, q.x, q.y) : (k == 1 ? vec3(q.x, s, q.y) : vec3(q.x, q.y, s));
+        }
+        vec2 starPick(vec3 v, int k) { return k == 0 ? v.yz : (k == 1 ? v.xz : v.xy); }
+        float starComp(vec3 v, int k) { return k == 0 ? v.x : (k == 1 ? v.y : v.z); }
+
+        // The light of the procedural stars at one pixel (texture units): the two or four cells of each layer nearest the pixel, a star a Gaussian of
+        // STAR_SIGMA pixels with its energy kept (peak = brightness / (2 pi sigma^2)), the brightest with a wider halo. toPixels maps the face's units to pixels.
+        vec3 starPoints(int face, vec2 uv, mat2 toPixels, int layers, float seconds, float twinkle)
+        {
+            vec3 sum = vec3(0.0);
+            float pixelUv = inversesqrt(abs(toPixels[0].x * toPixels[1].y - toPixels[1].x * toPixels[0].y));   // face units per pixel
+            for (int L = 0; L < layers; L++)
+            {
+                vec4 A = STAR_A[L], B = STAR_B[L];
+                float n = A.x;
+                int ni = int(n);
+                vec2 g = (uv * 0.5 + 0.5) * n;
+                vec2 cell = floor(g);
+                vec2 fr = g - cell;
+                ivec2 base = ivec2(cell);
+                // A neighbouring cell's star can reach this pixel only from within B.z pixels of the shared edge (a star's spot is cut off there): look at the
+                // neighbours on the sides that near, usually none or one, up to the diagonal one. A bright layer's cells are large, its reach (the halo) long.
+                float reach = min(0.5, B.z * pixelUv * n * 0.5);
+                ivec2 nb = ivec2(fr.x < reach ? -1 : (fr.x > 1.0 - reach ? 1 : 0), fr.y < reach ? -1 : (fr.y > 1.0 - reach ? 1 : 0));
+                for (int k = 0; k < 4; k++)
+                {
+                    if (((k & 1) != 0 && nb.x == 0) || ((k & 2) != 0 && nb.y == 0)) continue;
+                    ivec2 ic = base + ivec2((k & 1) != 0 ? nb.x : 0, (k & 2) != 0 ? nb.y : 0);
+                    if (ic.x < 0 || ic.y < 0 || ic.x >= ni || ic.y >= ni) continue;
+                    vec2 centre = (vec2(ic) + 0.5) * (2.0 / n) - 1.0;
+                    // The cell's chance of a star (StarField.CellChance) against a one-word hash of the cell (StarField.Pcg1); the full three-word hash only for the stars.
+                    float w3 = 1.0 + dot(centre, centre);
+                    float chance = A.y * (4.0 / (n * n)) * inversesqrt(w3) / w3;
+                    float draw = float(starHash1(((uint(L * 6 + face) * 256u + uint(ic.y)) * 256u + uint(ic.x))) >> 16u) * (1.0 / 65536.0);
+                    if (draw >= chance) continue;
+                    uvec3 h = starHash(uvec3(uint(ic.x), uint(ic.y), uint(face + 8 * L)));
+                    vec2 j =vec2(float(h.y & 0xFFFFu), float(h.y >> 16u)) * (1.0 / 65536.0);
+                    vec2 lo = vec2(ic.x == 0 ? {{F(StarField.FaceEdgeMargin)}} : {{F(StarField.CellMargin)}}, ic.y == 0 ? {{F(StarField.FaceEdgeMargin)}} : {{F(StarField.CellMargin)}});
+                    vec2 hi = vec2(ic.x == ni - 1 ? {{F(1 - StarField.FaceEdgeMargin)}} : {{F(1 - StarField.CellMargin)}}, ic.y == ni - 1 ? {{F(1 - StarField.FaceEdgeMargin)}} : {{F(1 - StarField.CellMargin)}});
+                    vec2 suv = (vec2(ic) + mix(lo, hi, j)) * (2.0 / n) - 1.0;
+                    vec2 px = toPixels * (suv - uv);
+                    float r2 = dot(px, px);
+                    if (r2 > B.z * B.z) continue;   // out of the layer's reach: no need for the star's brightness
+                    float mag = A.z + log(1.0 + float(h.z & 0xFFFFu) * (1.0 / 65536.0) * (A.w - 1.0)) * B.x;
+                    float b = pow(10.0, -0.4 * STAR_GAMMA * mag);
+                    if (r2 > (b > {{F(StarHaloFrom)}} ? 400.0 : {{F(StarCoreReach * StarCoreReach)}})) continue;
+                    float sigma2 = STAR_SIGMA * STAR_SIGMA;
+                    float e = b * exp(-r2 / (2.0 * sigma2)) / (6.2831853 * sigma2);
+                    if (b > {{F(StarHaloFrom)}})
+                    {
+                        float hs = {{F(StarHaloSigma)}} + {{F(StarHaloGrow)}} * b, hs2 = hs * hs;
+                        e += min((b - {{F(StarHaloFrom)}}) * {{F(StarHaloShare)}}, {{F(StarHaloMax)}}) * b * exp(-r2 / (2.0 * hs2)) / (6.2831853 * hs2);
+                    }
+                    // Twinkle: low stars only (the amplitude is 0 high up), two slow sines at random rates, fainter stars more.
+                    if (twinkle > 0.0)
+                    {
+                        float p1 = float(h.x >> 16u) * (1.0 / 65536.0), p2 = fract(p1 * 37.17);
+                        e *= max(1.0 + twinkle * (1.0 - 0.5 * min(b, 1.0)) * (0.6 * sin(seconds * (4.0 + 5.0 * p1) + 40.0 * p1) + 0.4 * sin(seconds * (9.0 + 7.0 * p2) + 40.0 * p2)), 0.0);
+                    }
+                    sum += STAR_COLOUR[int(float(h.z >> 16u) * ({{F(StarColours.TableSize / 65536f)}}))] * e;
+                }
+            }
+            return sum;
+        }
+
+        """;
+
+    static readonly string SkyFragment = "#version 330 core\n" + AtmosphereShaders.Functions + StarShader + $$"""
 
         in vec2 vNdc;
         out vec4 fragColour;
         uniform mat4 uInverseViewProjection;
-        uniform vec4 uSkyExtra;        // x: unused, y: cloud density c (0 skips the cloud pass), z: the starfield's shift (texture units, wrapped), w: unused
+        uniform vec4 uSkyExtra;        // x: the planets' fill light (PlanetFill), y: cloud density c (0 skips the cloud pass), z: the starfield's shift (texture units, wrapped); w unused
         uniform vec4 uPlanetBody0, uPlanetBody1;   // the game's two planets (docs/formats/sky.md "Planets"): xyz towards the centre, w the sine of the angular radius
         uniform vec4 uPlanetSpin;      // cos and sin of each planet's turn about y: (cos 0, sin 0, cos 1, sin 1)
         uniform vec4 uCloudLight;      // rgb: zenithLight, a: Darkness
         uniform vec4 uCloudSun;        // rgb: sunColour.rgb, a: DensityOffset
         uniform vec4 uCloudWind;       // xy: the wind offset x 0.00005 (wrapped to 0..1)
-        uniform sampler2D uStars, uPlanet0, uPlanet1, uClouds, uCloudsNormal, uCloudsTile;
+        uniform vec4 uCloudMeitou;     // x: 2 prepared volume, 1 legacy lit layer, 0 Faithful; yzw legacy parallax
+        uniform vec4 uCloudKey;        // Meitou clouds: rgb the key light (sun, and the planet at night) in sunColour's unit
+        uniform vec4 uCloudKeyDir;     // Meitou clouds: xyz towards the key light
+        uniform vec4 uCloudAmbient;    // Meitou clouds: rgb the sky's mean light on the clouds (before the exposure's square root)
+        uniform sampler2D uStars, uPlanet0, uPlanet1, uClouds, uCloudsNormal, uCloudsTile, uCloudsSmooth, uCloudsTileSmooth;   // the last two: the Meitou clouds' smoothed copies (MeitouClouds.SmoothRed)
+        uniform sampler2D uVolumeImage;
         uniform vec4 uHas;             // stars, planet 0, cloud textures (all three), planet 1 present
         // moon.hlsl: planet01.mesh's texture lit by the real sun direction, plus the skydome's Rayleigh colour towards it (no Mie, no night glow), opaque.
         // The sphere is hit analytically; its object normal (the mesh turns about y) gives the mesh's UV sphere coordinate. rgba: colour and coverage.
@@ -151,8 +271,13 @@ public sealed unsafe class SkyRenderer : IDisposable
             float far = length(ray), thickness;
             ray /= far;
             vec3 scatter = SKYX_EXPOSURE * skyxRayleighPhase(dot(uAtmoSun.xyz, ray)) * SKYX_RAYLEIGH * skyxInScatter(ray, far, uAtmoSun.xyz, thickness);
-            return vec4(albedo * clamp(dot(n, uAtmoSun.xyz), 0.0, 1.0) + scatter, cover);
+            // uSkyExtra.x: a presentation-only fill from the viewer's side (PlanetFill), so the face away from the sun shows too; 0 in play.
+            return vec4(albedo * (clamp(dot(n, uAtmoSun.xyz), 0.0, 1.0) + uSkyExtra.x * clamp(-dot(n, dir), 0.0, 1.0)) + scatter, cover);
         }
+        // The cloud layer's density and tile: the game's textures, or with the Meitou clouds their smoothed copies (MeitouClouds.SmoothRed: the BC1 blocks' steps
+        // showed as grain and contour bands once the clouds were lit). The condition is on a uniform, so the derivatives stay defined.
+        float cloudsRed(vec2 uv) { if (uCloudMeitou.x > 0.5) return texture(uCloudsSmooth, uv).r; return texture(uClouds, uv).r; }
+        float cloudsTileRed(vec2 uv) { if (uCloudMeitou.x > 0.5) return texture(uCloudsTileSmooth, uv).r; return texture(uCloudsTile, uv).r; }
         void main()
         {
             vec4 a = uInverseViewProjection * vec4(vNdc, 0.0, 1.0);
@@ -160,54 +285,138 @@ public sealed unsafe class SkyRenderer : IDisposable
             vec3 dir = normalize(b.xyz / b.w - a.xyz / a.w);
             float night;
             vec3 col = atmoSky(dir, night);
+            vec3 skyBehind = col;   // the Meitou clouds' share of ambient from the sky right behind them
             float aboveHorizon = smoothstep(-0.02, 0.06, dir.y);
 
             // Stars: SkyX_Starfield.dds (SkyX's HDR form: nightmult · texture · (0.35 + saturate(−sunY · 0.45)) · 2) on the dome's own texture coordinates
             // (Starfield.Uv: azimuthal-equidistant round the zenith, the horizon a circle of radius 0.4 round (0.4, 0.4)), shifted along both axes with the
             // game hours. Sampled outside the branch below so the gradients are defined (t · normalize(xz) is continuous, also at the zenith).
-            float zenith = acos(clamp(dir.y, 0.0, 1.0)) / (0.5 * ATMO_PI);
-            vec2 around = dot(dir.xz, dir.xz) > 1e-12 ? normalize(dir.xz) : vec2(0.0);
-            vec3 stars = texture(uStars, vec2({{F(Starfield.Centre)}}) + {{F(Starfield.Radius)}} * zenith * around + uSkyExtra.z).rgb;
-            if (uHas.x > 0.5 && night > 0.0 && dir.y > 0.0)
+            // The Meitou stars (uStarsMeitou.x: 1) replace that texture with the procedural sky of the celestial sphere (docs/formats/sky.md "Meitou night sky"): the
+            // direction turned into celestial coordinates, its cube face position and the map from face units to pixels (all with derivatives, so outside the
+            // non-uniform branches; these conditions are on uniforms), then the point stars, dimmed and reddened by the air.
+            vec3 stars = vec3(0.0);
+            bool computeStars = uStarsMeitou.x > 0.5;
+            int starFaceIndex = 0;
+            vec2 starUv = vec2(0.0);
+            mat2 starToPixels = mat2(1.0);
+            if (computeStars)
+            {
+                vec3 cdir = vec3(dot(uCelX.xyz, dir), dot(uCelY.xyz, dir), dot(uCelZ.xyz, dir));
+                vec3 dcx = dFdx(cdir), dcy = dFdy(cdir);
+                float starMajor;
+                starFaceIndex = starFace(cdir, starUv, starMajor);
+                int sk = starFaceIndex >> 1;
+                float sgn = (starFaceIndex & 1) == 0 ? 1.0 : -1.0;
+                vec2 dux = (starPick(dcx, sk) - starUv * (sgn * starComp(dcx, sk))) / starMajor;
+                vec2 duy = (starPick(dcy, sk) - starUv * (sgn * starComp(dcy, sk))) / starMajor;
+                float det = dux.x * duy.y - duy.x * dux.y;
+                starToPixels = abs(det) > 1e-14 ? mat2(duy.y, -dux.y, -duy.x, dux.x) / det : mat2(1e6);
+            }
+            else if (uStarsMeitou.x == 0.0)
+            {
+                float zenith = acos(clamp(dir.y, 0.0, 1.0)) / (0.5 * ATMO_PI);
+                vec2 around = dot(dir.xz, dir.xz) > 1e-12 ? normalize(dir.xz) : vec2(0.0);
+                stars = texture(uStars, vec2({{F(Starfield.Centre)}}) + {{F(Starfield.Radius)}} * zenith * around + uSkyExtra.z).rgb;
+            }
+            if (night > 0.0 && dir.y > 0.0 && (computeStars || uHas.x > 0.5))
+            {
+                if (computeStars)
+                {
+                    float altitude = degrees(asin(clamp(dir.y, 0.0, 1.0)));
+                    float airMass = 1.0 / (dir.y + 0.50572 * pow(altitude + 6.07995, -1.6364));
+                    vec3 transmission = exp(-EXTINCTION * (airMass - 1.0)) * smoothstep({{F(NightAtmosphere.HorizonLow)}}, {{F(NightAtmosphere.HorizonHigh)}}, altitude);
+                    float twinkle = clamp((airMass - {{F(NightAtmosphere.ScintillationFreeAirMass)}}) / {{F(NightAtmosphere.ScintillationRange)}}, 0.0, 1.0) * {{F(NightAtmosphere.ScintillationMax)}};
+                    stars = starPoints(starFaceIndex, starUv, starToPixels, int(uStarsMeitou.y), uStarsMeitou.z, twinkle) * uStarsMeitou.w * transmission;
+                }
                 col += night * aboveHorizon * stars * (0.35 + clamp(-uAtmoSun.y * 0.45, 0.0, 1.0)) * 2.0;
+            }
+            // Meitou night air (docs/formats/sky.md "Night air"): a planet is far beyond the air, so it is seen through it: its light is hidden by the veil (more towards the
+            // horizon) and the air's own glow shows over it, the same colour the sky beside it has (atmoSky), so the dark side of a planet is not a black hole in the glow
+            // and its foot fades into the horizon haze as far land does. Both are exactly 0 in Faithful and by day (uAtmoNight.a = 0).
+            vec3 airDir = vec3(dir.x, max(dir.y, 0.0), dir.z);
+            float veil = atmoNightVeil(airDir);
+            vec3 air = atmoNightAir(normalize(airDir)) * uAtmoTint;
             // The planets: render queue 6 with the priorities 1 and 2, after the skydome (queue 5) and before the cloud entity (queue 6, priority 100), so the
             // clouds pass in front of them. The large one first, then the small one, which covers the large one's edge where the discs overlap (about half a degree).
             if (uHas.y > 0.5)
             {
                 vec4 p = planet(dir, uPlanetBody0, uPlanetSpin.x, uPlanetSpin.y, uPlanet0);
-                col = mix(col, p.rgb, p.a);
+                col = mix(col, p.rgb * (1.0 - veil) + air, p.a);
             }
             if (uHas.w > 0.5)
             {
                 vec4 p = planet(dir, uPlanetBody1, uPlanetSpin.z, uPlanetSpin.w, uPlanet1);
-                col = mix(col, p.rgb, p.a);
+                col = mix(col, p.rgb * (1.0 - veil) + air, p.a);
             }
             // Clouds: SkyX's cloud layer on the dome (SkyX_Clouds.hlsl, docs/formats/clouds.md), after the sky, the stars and the planets;
             // alpha-blended over them in HDR. The dome direction below the horizon is evaluated at a hair above it (alpha is then the horizon value).
-            if (uHas.z > 0.5 && uSkyExtra.y > 0.0)
+            if (uCloudMeitou.x > 1.5)
+            {
+                vec4 cloud = texture(uVolumeImage, vNdc * 0.5 + 0.5);
+                col = col * (1.0 - cloud.a) + cloud.rgb;
+                // Match the far land's Kenshi haze target. The planar layer supplied this horizon band;
+                // a finite volume misses shallow rays, which otherwise exposes a crisp seam at hazed mountains.
+                vec3 haze = mix(hazeTarget(dir * max(uAtmoFog.w, uAtmoHaze.z)), uAtmoHazeCloud.rgb, uAtmoHazeCloud.a);
+                // Full cloud cover is opaque at the horizon even with Meitou surface haze at 0.93.
+                float closure = max(min(uAtmoAltitude.y, 1.0), uAtmoHazeCloud.a);
+                float horizon = (1.0 - smoothstep(0.05, 0.15, dir.y)) * (1.0 - uAtmoAltitude.x)
+                              * closure * smoothstep(0.0, 0.05, uSkyExtra.y);
+                col = mix(col, haze, horizon);
+            }
+            else if (uHas.z > 0.5 && uSkyExtra.y > 0.0)
             {
                 vec3 d = normalize(vec3(dir.x, max(dir.y, 0.0005), dir.z));
                 float o = uCloudSun.w;
                 const float MULT = {{F(CloudLayer.DensityMultiplier)}}, SCALE = {{F(CloudLayer.Scale)}}, HEIGHT = {{F(CloudLayer.Height)}};
                 vec2 wind = uCloudWind.xy;
+                const vec2 SHIFT = vec2({{F(CloudLayer.SecondLookupShift.X)}}, {{F(CloudLayer.SecondLookupShift.Y)}});
                 // The plane hit: the cloud point is d · height / d.y, the texture coordinate its xz · scale.
-                vec2 uv = d.xz * (HEIGHT / d.y) * SCALE;
-                float density = texture(uClouds, uv + wind).r;
+                vec2 uv = d.xz * (HEIGHT / d.y) * SCALE * uCloudMeitou.y + uCloudMeitou.zw;
+                float density = cloudsRed(uv + wind);
                 vec3 normal = -(2.0 * texture(uCloudsNormal, uv + wind).rgb - 1.0);
                 normal = vec3(normal.x, normal.z, normal.y);   // the shader swaps y and z
                 density = clamp((density + o) * MULT, 0.0, 1.0);
                 // The fake volume: the direction bent along the normal map, the plane raised where the cloud is thin.
                 vec3 nd = normalize(d + {{F(CloudLayer.VolumetricDisplacement)}} * d.y * vec3(normal.x, 0.0, normal.z));
                 float vh = (HEIGHT + HEIGHT * (1.0 - density) * {{F(CloudLayer.HeightVolume)}} * d.y) / nd.y;
-                uv = nd.xz * vh * SCALE;
-                density = (texture(uClouds, uv + wind + vec2({{F(CloudLayer.SecondLookupShift.X)}}, {{F(CloudLayer.SecondLookupShift.Y)}})).r + o) * MULT;
-                float tile = texture(uCloudsTile, uv - wind).r;
+                uv = nd.xz * vh * SCALE * uCloudMeitou.y + uCloudMeitou.zw;
+                density = (cloudsRed(uv + wind + SHIFT) + o) * MULT;
+                float tile = cloudsTileRed(uv - wind);
                 density += tile * {{F(CloudLayer.TileWeight)}};
                 vec3 pixel = uCloudLight.rgb + uCloudSun.rgb * (1.0 - density * 0.1);
+                float top = 1.0, dark = 1.0;   // the colour's ceiling (the game's 1, saturate; the Meitou clouds' brighter edges towards the sun) and the share of Darkness
+                if (uCloudMeitou.x > 0.5)
+                {
+                    // Meitou clouds (MeitouClouds in Meitou.Data, docs/formats/clouds.md "Meitou clouds"): the same layer lit by the key light through the cloud's
+                    // depth towards it, the lesser of the path up through the layer (the pixel's density over the light's height) and the path sideways across it
+                    // (density taps along the light's direction on the plane), with a two-lobed phase, plus the sky's light as the ambient.
+                    vec3 L = uCloudKeyDir.xyz;
+                    vec2 lxz = dot(L.xz, L.xz) > 1e-8 ? normalize(L.xz) : vec2(0.0);
+                    vec2 at = uv + wind + SHIFT;
+                    float side = 0.0;
+                    for (int k = 1; k <= {{MeitouClouds.LightSteps}}; k++)
+                        side += clamp((texture(uCloudsSmooth, at + lxz * ({{F(MeitouClouds.LightStep)}} * float(k))).r + o) * MULT, 0.0, 1.0);
+                    float thick = max(density, 0.0);
+                    // A light below the layer (the sun just set, the cloud still sees it) shines on the underside the eye sees: a short path.
+                    float up = L.y > 0.0 ? thick * min(1.0 / L.y, {{F(MeitouClouds.MaxSlant)}}) : thick * 0.25;
+                    float across = (side + 0.5 * clamp(thick, 0.0, 1.0)) * {{F(MeitouClouds.SidePath)}};
+                    float depth = min(up, across);
+                    float through = {{F(1 - MeitouClouds.MultipleShare)}} * exp(-{{F(MeitouClouds.Extinction)}} * depth)
+                                  + {{F(MeitouClouds.MultipleShare)}} * exp(-{{F(MeitouClouds.Extinction * MeitouClouds.MultipleExtinction)}} * depth);
+                    float c = dot(d, L);
+                    float phase = {{F(MeitouClouds.ForwardShare)}} * {{F(1 - MeitouClouds.ForwardG * MeitouClouds.ForwardG)}} / pow(max({{F(1 + MeitouClouds.ForwardG * MeitouClouds.ForwardG)}} - {{F(2 * MeitouClouds.ForwardG)}} * c, 1e-6), 1.5)
+                                + {{F(1 - MeitouClouds.ForwardShare)}} * {{F(1 - MeitouClouds.BackwardG * MeitouClouds.BackwardG)}} / pow(max({{F(1 + MeitouClouds.BackwardG * MeitouClouds.BackwardG)}} - {{F(2 * MeitouClouds.BackwardG)}} * c, 1e-6), 1.5);
+                    vec3 ambient = mix(uCloudAmbient.rgb, skyBehind / sqrt(SKYX_EXPOSURE), {{F(MeitouClouds.AmbientFromSky)}});
+                    ambient = mix(ambient, vec3(dot(ambient, vec3(0.2126, 0.7152, 0.0722))), uCloudAmbient.a)
+                                 * (1.0 - {{F(MeitouClouds.BaseDarkening)}} * clamp(0.5 * thick, 0.0, 1.0));
+                    pixel = uCloudKey.rgb * (through * phase * {{F(MeitouClouds.KeyGain)}}) + ambient * {{F(MeitouClouds.AmbientGain)}};
+                    top = 8.0;
+                    dark = {{F(MeitouClouds.DarknessShare)}};
+                }
                 // The horizon band: from 0.05 to 0.15 of d.y the layer gives way to the uniform alpha o + 0.5 (horizonClouds.a).
                 float band = clamp(10.0 * clamp(d.y - {{F(CloudLayer.DistanceAttenuation)}}, 0.0, 1.0), 0.0, 1.0);
                 density += band;
-                pixel *= 1.0 - clamp(density, 0.0, 1.0) * uCloudLight.a;
+                pixel *= 1.0 - clamp(density, 0.0, 1.0) * uCloudLight.a * dark;
                 // Below d.y = 0.05 the alpha is the uniform horizon value, but the colour above still followed the texture lookups, whose uv runs to hundreds of units
                 // there (height / d.y): minified to a few texels they sparkle (a row of white ticks along the horizon). The colour gives way to the plain
                 // horizonClouds colour below d.y = 0.05 (from 0.01 up; above 0.05 the layer is untouched): the game's own horizon cloud colour, darkened
@@ -216,7 +425,7 @@ public sealed unsafe class SkyRenderer : IDisposable
                 pixel = mix(plain, pixel, clamp((d.y - 0.01) / 0.04, 0.0, 1.0));
                 float alpha = density * clamp(1.0 - tile + o, 0.0, 1.0);
                 alpha = mix(o + 0.5, alpha, band);
-                col = mix(col, clamp(pixel, 0.0, 1.0) * sqrt(SKYX_EXPOSURE), clamp(alpha, 0.0, 1.0));
+                col = mix(col, clamp(pixel, 0.0, top) * sqrt(SKYX_EXPOSURE), clamp(alpha, 0.0, 1.0));
             }
             // The game's fog pass runs over the sky too (post/fog.hlsl atmosphere_fog_fs): a pixel with no geometry has distance = farClip, its atmosphere term is
             // dropped and the weather's term alone remains, alpha = ease-in-out(saturate(farClip / fog distance)) x fogColour.a, colour = fog colour x sunColour.w
@@ -236,7 +445,7 @@ public sealed unsafe class SkyRenderer : IDisposable
     // Native programs (docs/renderer-native.md 7.1, wave 3 agent D): the same SPIR-V as the GL programs they replace.
     readonly SkyProg simple, sky;
     // Native textures with the GL sampler state their GL versions had (phase 8 stage 2); null when the file was not found.
-    SampledImage? starsTexture, cloudsTexture, cloudsNormalTexture, cloudsTileTexture, irradianceCube, specularCube, ambientMap;
+    SampledImage? starsTexture, cloudsTexture, cloudsNormalTexture, cloudsTileTexture, cloudsSmooth, cloudsTileSmooth, irradianceCube, specularCube, ambientMap;
     // The game's two planets' textures (SkyPlanet.All order); null when the file was not found.
     readonly SampledImage?[] planetTextures = new SampledImage?[SkyPlanet.All.Length];
     readonly PassTimer skyTimer;
@@ -259,18 +468,42 @@ public sealed unsafe class SkyRenderer : IDisposable
     /// </summary>
     public float HazeStrength { get; set; } = Enhancements.MeitouHazeStrength;
     /// <summary>
-    /// The Meitou <c>night</c> switch (viewer, not the game's): the game's haze colour is SkyX's sunlit in-scattering, which is black once the sun is down,
-    /// so its ramp turns everything past 0.6 D black at night and only the land round the camera stays lit. With this on, the haze strength is scaled
-    /// by <see cref="NightHazeFactor"/>: the game's by day, down to <see cref="Enhancements.MeitouNightHazeFloor"/> at night. False: the game's.
+    /// The Meitou <c>night</c> switch, "night air" (viewer, not the game's; docs/formats/sky.md "Night air"): the game's haze colour is SkyX's sunlit
+    /// in-scattering, which is black once the sun is down, so its ramp turns everything past 0.6 D black against a black sky. With this on the air has a
+    /// faint radiance of its own at night (<see cref="Meitou.Data.World.NightAir"/>: airglow and the planet's light scattered by the air): the haze
+    /// (its ramp the game's) fades the far land into it and the sky adds the same colour above the horizon, falling off with the height, in place of
+    /// SkyX's own night glow. False: the game's black haze and glow.
     /// </summary>
-    public bool ThinNightHaze { get; set; } = true;
+    public bool NightAir { get; set; } = true;
 
-    /// <summary>The night switch's scale on the haze strength at the sun's height <paramref name="sunY"/>: 1 above 0.05, the floor below −0.15, smooth between.</summary>
-    public static float NightHazeFactor(float sunY)
-    {
-        float t = Math.Clamp((sunY + 0.15f) / 0.2f, 0, 1);
-        return Enhancements.MeitouNightHazeFloor + (1 - Enhancements.MeitouNightHazeFloor) * t * t * (3 - 2 * t);
-    }
+    /// <summary>
+    /// The Meitou <c>planetshine</c> switch (viewer, not the game's; docs/formats/sky.md "Planetshine"): the big planet lights the land at night. The
+    /// published light (direction, colour: <c>uAtmoLight</c>, <c>uAtmoSunLight</c>, the <see cref="WorldLighting"/>, the shadows' direction) becomes the sun's
+    /// and the planet's together, the planet's alone once the sun is down; the ambient and the sky stay the game's. False: the game's.
+    /// </summary>
+    public bool Planetshine { get; set; } = true;
+
+    /// <summary>Presentation-only fill light on the planets from the viewer's side (the title raises it so their whole face shows); 0, the game's look, in play.</summary>
+    public float PlanetFill { get; set; }
+
+    /// <summary>Presentation-only turn of the planets' directions (the Meitou title nudges them into its framing); identity in play.</summary>
+    public Quaternion PlanetTurn { get; set; } = Quaternion.Identity;
+
+    /// <summary>The planetshine's strength: a multiple of the physical value (<see cref="Meitou.Data.World.Planetshine"/>).</summary>
+    public float PlanetshineStrength { get; set; } = Enhancements.MeitouPlanetshineStrength;
+
+    /// <summary>The planet's mean colour (<see cref="Meitou.Data.World.Planetshine.MeanAlbedo(Meitou.Data.Textures.DdsFile)"/>), read when the texture loads.</summary>
+    public Vector3 PlanetAlbedo { get; private set; } = new(Meitou.Data.World.Planetshine.FallbackAlbedo);
+
+    /// <summary>The planet's light counts as light for the shadows when its luminance is above this share of the reference sun light (a new planet casts nothing worth drawing).</summary>
+    const float PlanetLitFloor = 1e-4f;
+
+    /// <summary>
+    /// The sun height the shadow pass tests against its cut-off (<see cref="ShadowPass.MinSunHeight"/>): the real sun's, but while the planet
+    /// is lighting the land (planetshine on, some light of it) never under the horizon, so the shadows go on all night along the published direction.
+    /// </summary>
+    public float ShadowSunHeight => state.PlanetLit ? MathF.Max(state.Sun.Y, 0) : state.Sun.Y;
+
     /// <summary>
     /// The eye's height above the highest ground or water within the game's longest camera boom (<see cref="KenshiCamera.MaxDistance"/>) around it,
     /// set each frame by <see cref="SetEye"/>. The game's camera never gets more than <see cref="KenshiCamera.MaxHeightAbovePivot"/> above its
@@ -310,9 +543,58 @@ public sealed unsafe class SkyRenderer : IDisposable
 
     /// <summary>Game hours since the load (the starfield's shift: SkyX's time runs at game speed, from the sky's creation, docs/formats/sky.md "Stars").</summary>
     public double StarHours { get; set; }
-    /// <summary>The game's day and hour, which turn the planets (<see cref="SkyPlanet.Spin"/>).</summary>
+    /// <summary>The game's day and hour, which turn the planets (<see cref="SkyPlanet.Spin"/>) and, with the Meitou <c>stars</c> switch, the stars (<see cref="CelestialSphere"/>).</summary>
     public int Day { get; set; }
     public float Hour { get; set; } = 13;
+
+    /// <summary>The sun's path (latitude, sunrise, sunset): the celestial pole of the Meitou stars is the axis it turns about. The game's CONSTANTS by default (54°, 5, 23).</summary>
+    public SkyClock Clock { get; set; } = new(54, 5, 23);
+
+    /// <summary>
+    /// The Meitou <c>stars</c> switch (viewer design, not the game's; docs/formats/sky.md "Meitou night sky"): a procedural night sky, point stars
+    /// turning about the sun's axis, in place of the game's starfield texture. False: the game's texture on its own mapping.
+    /// </summary>
+    public bool MeitouStars
+    {
+        get => meitouStars;
+        set => meitouStars = value;
+    }
+    bool meitouStars = true;
+
+    /// <summary>
+    /// The Meitou <c>clouds</c> switch: a world-anchored procedural volume lit by the sun and planet (docs/render-clouds.md).
+    /// False: the game's flat cloud layer. Call PrepareClouds before opening each scene host.
+    /// </summary>
+    public bool LitClouds { get; set; } = true;
+
+    /// <summary>
+    /// The Meitou <c>cloudshadows</c> switch (viewer design; the game has no cloud shadows, docs/formats/clouds.md "Meitou cloud shadows"): the cloud layer, anchored
+    /// to the world at <see cref="Meitou.Data.World.MeitouClouds.PlaneHeight"/>, shades the sun light on the land and the water. False: none.
+    /// </summary>
+    public bool CloudShadows { get; set; } = true;
+
+    /// <summary>The eye in world units, for the Meitou clouds' parallax (the sky pass's matrix is a rotation only); the frame sets it.</summary>
+    public Vector3 Eye { get; set; }
+
+    /// <summary>Cloud shadows: strength, density offset (legacy) or coverage (volume), base height, and mode (0 legacy / 1 volume).</summary>
+    Vector4 CloudShadowUniform()
+    {
+        if (VolumeShadows)
+            return new Vector4(MeitouClouds.ShadowAt(state.Sun.Y), CloudDensity, VolumetricClouds.Bottom, 1);
+        bool on = CloudShadows && Physical && cloudsSmooth is not null && cloudsTileSmooth is not null && CloudDensity > 0;
+        float strength = on ? MeitouClouds.ShadowAt(state.Sun.Y) : 0;
+        return new Vector4(strength, CloudLayer.DensityOffset(CloudDensity), MeitouClouds.PlaneHeight, 0);
+    }
+
+    /// <summary>The gain on the Meitou point stars' light, in the starfield texture's units.</summary>
+    public float StarGain { get; set; } = DefaultStarGain;
+    public const float DefaultStarGain = 20;
+
+    /// <summary>Seconds on the viewer's clock for the stars' twinkle (set by the frame; 0 holds them still for a picture).</summary>
+    public float StarSeconds { get; set; }
+
+    /// <summary>How many of <see cref="StarField.Layers"/> the sky draws: all on a discrete GPU, the brighter ones on an integrated one (the faint background is sub-pixel).</summary>
+    public int StarLayers { get; set; } = StarField.Layers.Length;
 
     /// <summary>The physical haze only: world units in one density scale height of SkyX's air (the game's world unit is Unknown; a viewer choice).</summary>
     public float ScaleHeightUnits { get; set; } = 40000;
@@ -369,13 +651,16 @@ public sealed unsafe class SkyRenderer : IDisposable
     struct State
     {
         public Vector3 Sun, SunLight, LightDirection, CloudSun, CloudZenith;   // the last two: sunColour.rgb and zenithLight of the cloud pass
+        public Vector3 CloudKey, CloudKeyDirection, CloudAmbient;   // the Meitou clouds' key light (colour, direction) and ambient (MeitouClouds)
         public float Environment, MinLuminance, FogDistance;
         public SkyColours Colours;
         public WorldLighting Light;
-        public bool Valid;
+        public Vector4 Night;           // the night air (Meitou.Data NightAir): rgb its colour at full night, w its weight (0: none)
+        public bool Valid, PlanetLit;   // PlanetLit: planetshine adds light of the planet in this state (ShadowSunHeight)
     }
     State state;
     Vector3 builtSun = new(float.NaN);
+    (bool On, float Strength, Vector3 Albedo, bool Air) builtPlanetshine;
     SkyWeather? builtWeather;
     Vector3 builtTint;
     bool builtPhysical;
@@ -386,6 +671,8 @@ public sealed unsafe class SkyRenderer : IDisposable
         simple = new SkyProg(gpu, Vertex, SimpleFragment, "sky simple");
         sky = new SkyProg(gpu, Vertex, SkyFragment, "sky");
         skyTimer = new PassTimer(gpu);
+        // MEITOU_FORCE_INTEGRATED=1 (VulkanDevice.IsIntegrated) shows the integrated GPU's star layers on any card.
+        if (gpu.Device.IsIntegrated) StarLayers = StarField.IntegratedLayers;
         if (assets is not null)
         {
             LoadTextures(assets);
@@ -405,11 +692,16 @@ public sealed unsafe class SkyRenderer : IDisposable
             if (assets.Find("SkyX_Starfield.dds") is { } stars) starsTexture = SampledImage.FromDds(Gpu, DdsReader.ReadFile(stars), repeat: true, "sky stars");
             for (int i = 0; i < SkyPlanet.All.Length; i++)
                 if (assets.Find(SkyPlanet.All[i].Texture) is { } planet)
-                    planetTextures[i] = SampledImage.FromDds(Gpu, DdsReader.ReadFile(planet), repeat: true, $"sky planet {SkyPlanet.All[i].Material}");
+                {
+                    var dds = DdsReader.ReadFile(planet);
+                    planetTextures[i] = SampledImage.FromDds(Gpu, dds, repeat: true, $"sky planet {SkyPlanet.All[i].Material}");
+                    if (i == 0) PlanetAlbedo = Meitou.Data.World.Planetshine.MeanAlbedo(dds);   // the planetshine's colour, from a low level of the map
+                }
             if (assets.Find("Clouds.dds") is { } clouds)
             {
                 var img = TextureLoader.LoadFile(clouds, allMips: false).Levels[0];
                 cloudsTexture = SampledImage.Rgba8(Gpu, img, repeat: true, mipmaps: true, "sky clouds");
+                cloudsSmooth = SampledImage.Rgba8(Gpu, new RgbaImage(img.Width, img.Height, MeitouClouds.SmoothRed(img.Pixels, img.Width, img.Height)), repeat: true, mipmaps: true, "sky clouds smooth");
             }
             if (assets.Find("CloudsNormal.dds") is { } cloudsNormal)
             {
@@ -420,6 +712,7 @@ public sealed unsafe class SkyRenderer : IDisposable
             {
                 var img = TextureLoader.LoadFile(cloudsTile, allMips: false).Levels[0];
                 cloudsTileTexture = SampledImage.Rgba8(Gpu, img, repeat: true, mipmaps: true, "sky clouds tile");
+                cloudsTileSmooth = SampledImage.Rgba8(Gpu, new RgbaImage(img.Width, img.Height, MeitouClouds.SmoothRed(img.Pixels, img.Width, img.Height)), repeat: true, mipmaps: true, "sky clouds tile smooth");
             }
             if (assets.Find("mp_irradiance.dds") is { } irradiance) irradianceCube = SampledImage.Cube(Gpu, DdsReader.ReadFile(irradiance), "sky irradiance");
             if (assets.Find("mp_specularity.dds") is { } specularity) specularCube = SampledImage.Cube(Gpu, DdsReader.ReadFile(specularity), "sky specularity");
@@ -465,21 +758,53 @@ public sealed unsafe class SkyRenderer : IDisposable
             var simple = SkyColours.For(sun);
             var light = simple.Lighting(fogDistance);
             state = new State { Sun = sun, Colours = simple, Light = light, FogDistance = fogDistance, Valid = true, MinLuminance = Exposure.Min,
-                CloudSun = KenshiLighting.SunColour(sun), CloudZenith = CloudLayer.ZenithLight(sun, SkyColourMultiplier) };
+                CloudSun = KenshiLighting.SunColour(sun), CloudZenith = CloudLayer.ZenithLight(sun, SkyColourMultiplier),
+                CloudKey = KenshiLighting.SunColour(sun), CloudKeyDirection = sun, CloudAmbient = MeitouClouds.Ambient(sun, SkyColourMultiplier, Vector4.Zero) };
             builtPhysical = false;
             PrepareMs = watch.Elapsed.TotalMilliseconds;
             return (simple, light);
         }
         // SkyX's sky does not depend on the eye's height (its camera is fixed); the light only changes with the sun and the weather.
-        if (!builtPhysical || !ReferenceEquals(builtWeather, Weather) || builtTint != SkyColourMultiplier || (sun - builtSun).LengthSquared() > 1e-10f)
+        var planetshine = (Planetshine, PlanetshineStrength, PlanetAlbedo, NightAir);
+        if (!builtPhysical || !ReferenceEquals(builtWeather, Weather) || builtTint != SkyColourMultiplier || (sun - builtSun).LengthSquared() > 1e-10f || builtPlanetshine != planetshine)
         {
             builtSun = sun;
             builtWeather = Weather;
             builtTint = SkyColourMultiplier;
+            builtPlanetshine = planetshine;
             builtPhysical = true;
             var sunLight = KenshiLighting.SunLight(sun);
             var lightDir = KenshiLighting.LightDirection(sun);
+            // The ambient stays the game's: its factor comes from the sun's own (clamped) direction, never the planet's, whose height of 12 degrees would
+            // raise the night ambient fivefold.
             float env = KenshiLighting.EnvironmentFactor(lightDir);
+            // Meitou planetshine: from the end of the sun's light the planet is the light (docs/formats/sky.md "Planetshine"): its colour in the sun light's own
+            // unit (the sun at the zenith, undimmed by the air in between, is the reference), added to the sun's, the direction weighted by their brightness.
+            bool planetLit = false;
+            var cloudPlanet = Vector3.Zero;   // the planet's light the Meitou clouds take (MeitouClouds.Key), with the planetshine
+            float reference = Meitou.Data.World.Planetshine.Luminance(KenshiLighting.SunLight(Vector3.UnitY));
+            // What the water's glint is lit by (WorldLighting.GlintDirection / GlintColour): the sun's own radiance and the planet disc's radiance as the sky pass draws it
+            // (unboosted: the strength-scaled light below is an irradiance made 60 times brighter than the disc, which blew the glint out). Left default (the sun's) by day.
+            Vector3 glintDirection = default, glintColour = default;
+            if (Planetshine && Meitou.Data.World.Planetshine.Weight(sun.Y) is var weight and > 0)
+            {
+                var planetLight = Meitou.Data.World.Planetshine.Light(sun, SkyPlanet.All[0], PlanetAlbedo, reference, PlanetshineStrength) * weight;
+                cloudPlanet = planetLight;
+                var disc = Meitou.Data.World.Planetshine.DiscRadiance(sun, SkyPlanet.All[0], PlanetAlbedo) * weight;
+                (glintDirection, glintColour) = Meitou.Data.World.Planetshine.Combine(lightDir, sunLight * (MathF.PI * (1 - KenshiLighting.DielectricSpecular)),
+                    SkyPlanet.All[0].Towards, disc);
+                (lightDir, sunLight) = Meitou.Data.World.Planetshine.Combine(lightDir, sunLight, SkyPlanet.All[0].Towards, planetLight);
+                planetLit = Meitou.Data.World.Planetshine.Luminance(planetLight) > PlanetLitFloor * reference;
+            }
+            // Meitou night air (docs/formats/sky.md "Night air"): the colour at full night from the airglow and the planet's light (the strength-scaled one, whatever the
+            // planetshine switch says), and its weight by the sun's height; the shaders add it to the haze's colour and to the sky's.
+            var night = Vector4.Zero;
+            if (NightAir && Meitou.Data.World.NightAir.Weight(sun.Y) is var airWeight and > 0)
+            {
+                var air = Meitou.Data.World.NightAir.Colour(Meitou.Data.World.Planetshine.Light(sun, SkyPlanet.All[0], PlanetAlbedo, reference, PlanetshineStrength));
+                night = new Vector4(air, airWeight);
+            }
+            var (cloudKeyDirection, cloudKey) = MeitouClouds.Key(sun, SkyPlanet.All[0].Towards, cloudPlanet);
             var tint = Vector3.One;   // the game tints only the cloud light (zenithLight, below), never the skydome (docs/formats/sky.md)
             var zenith = SkyXModel.Colour(Vector3.UnitY, sun) * tint;
             var flat = new Vector2(sun.X, sun.Z);
@@ -495,9 +820,10 @@ public sealed unsafe class SkyRenderer : IDisposable
             {
                 Sun = sun, SunLight = sunLight, LightDirection = lightDir, Environment = env, FogDistance = fogDistance,
                 CloudSun = KenshiLighting.SunColour(sun), CloudZenith = CloudLayer.ZenithLight(sun, SkyColourMultiplier),
-                MinLuminance = KenshiLighting.MinLuminance(sun.Y, Exposure.Min, Exposure.NightDarkness),
+                CloudKey = cloudKey, CloudKeyDirection = cloudKeyDirection, CloudAmbient = MeitouClouds.Ambient(sun, SkyColourMultiplier, night),
+                MinLuminance = KenshiLighting.MinLuminance(sun.Y, Exposure.Min, Exposure.NightDarkness), PlanetLit = planetLit,
                 Colours = new SkyColours(sun, zenith, horizon, sunRadiance, twilight),
-                Light = new WorldLighting(lightDir, sunRadiance, ambientSky, ambientGround, horizon, fogDistance), Valid = true,
+                Light = new WorldLighting(lightDir, sunRadiance, ambientSky, ambientGround, horizon, fogDistance, glintDirection, glintColour), Valid = true, Night = night,
             };
         }
         else
@@ -511,7 +837,7 @@ public sealed unsafe class SkyRenderer : IDisposable
 
     /// <summary>The values of <see cref="AtmosphereShaders.Functions"/>' loose uniforms (what <see cref="Apply"/> sets), by GLSL name minus <c>uAtmo</c>.</summary>
     public readonly record struct AtmosphereUniforms(Vector4 Tau, Vector4 Params, Vector4 Sun, Vector4 Light, Vector3 SunLight, Vector3 Tint, Vector4 Fog,
-        Vector3 FogColour, Vector4 Simple, Vector4 Haze, Vector4 HazeCloud, Vector4 Altitude, Vector4 Maps);
+        Vector3 FogColour, Vector4 Simple, Vector4 Haze, Vector4 HazeCloud, Vector4 Altitude, Vector4 Maps, Vector4 Night);
 
     /// <summary>The weather fog's own ease-in-out term (<c>1 - 2 (1 - a)^2</c>) counts as complete from 0.9998, as <see cref="FogVolumes.CullAlpha"/> does.</summary>
     const float FogComplete = 0.9998f;
@@ -594,8 +920,9 @@ public sealed unsafe class SkyRenderer : IDisposable
             // The weather fog is complete at a distance between `fog distance min` and `max` by the wind; the viewer has no wind and takes max.
             new Vector4(KenshiHaze ? 1f : 0f, hazeStart, hazeEnd, fogWeight > 0 && fogDistance > 1 ? 1f / fogDistance : 0f),
             new Vector4(cloud.X, cloud.Y, cloud.Z, pull),
-            new Vector4(KenshiHaze ? AltitudeWeight : 1f, MathF.Max(HazeStrength, 0) * (ThinNightHaze ? NightHazeFactor(s.Sun.Y) : 1f), AltitudeWeight, 0),
-            new Vector4(irradianceCube is not null ? 1f : 0f, specularCube is not null ? 1f : 0f, ambientMap is not null ? 1f : 0f, AmbientMap.HalfWorld));
+            new Vector4(KenshiHaze ? AltitudeWeight : 1f, MathF.Max(HazeStrength, 0), AltitudeWeight, 0),
+            new Vector4(irradianceCube is not null ? 1f : 0f, specularCube is not null ? 1f : 0f, ambientMap is not null ? 1f : 0f, AmbientMap.HalfWorld),
+            s.Night);
     }
 
     /// <summary>
@@ -624,6 +951,11 @@ public sealed unsafe class SkyRenderer : IDisposable
         g.PublishUniform("uAtmoHazeCloud", () => Published().HazeCloud, Valid);
         g.PublishUniform("uAtmoAltitude", () => Published().Altitude, Valid);
         g.PublishUniform("uAtmoMaps", () => Published().Maps, Valid);
+        g.PublishUniform("uAtmoNight", () => Published().Night, Valid);
+        g.PublishUniform("uAtmoCloud", CloudShadowUniform, Valid);
+        g.PublishUniform("uAtmoCloudWind", () => { var w = CloudLayer.TextureShift(cloudOffset); return VolumeShadows ? new Vector4(volume!.ShadowOrigin.X, volume.ShadowOrigin.Y, VolumetricClouds.ShadowSpan, 0) : new Vector4(w.X, w.Y, 0, 0); }, Valid);
+        g.Publish("uAtmoClouds", () => VolumeShadows ? volume!.ShadowMap : state.Valid && cloudsSmooth is { } t ? t.Sampled() : default);
+        g.Publish("uAtmoCloudsTile", () => state.Valid && cloudsTileSmooth is { } t ? t.Sampled() : default);
     }
 
     // The values the getters above share, computed once per ApplyGlobals call (FrameGlobals.ApplyCount) instead of once per name.
@@ -697,13 +1029,22 @@ public sealed unsafe class SkyRenderer : IDisposable
         var s = state;
         var p = program.P;
         float coverage = CloudDensity;
-        p.Set(program.Extra, 0, coverage, Starfield.Shift(StarHours), 0);
+        // The Meitou stars: nothing to draw once the sun is high (SkyX's night factor is 0 by day; the game's texture is not drawn then either), so the pass skips them.
+        bool meitou = MeitouStars;
+        bool night = meitou && s.Sun.Y < 0.3f;
+        p.Set(program.StarsMeitou, meitou ? (night ? 1 : -1) : 0, StarLayers, StarSeconds, StarGain);
+        // Staging the title's sun must not turn the stars, which stay continuous into the loading sky.
+        var frame = CelestialSphere.Frame(Clock with { SunTurn = 0 }, Day, Hour);
+        p.Set(program.CelX, frame.X.X, frame.X.Y, frame.X.Z, 0);
+        p.Set(program.CelY, frame.Y.X, frame.Y.Y, frame.Y.Z, 0);
+        p.Set(program.CelZ, frame.Z.X, frame.Z.Y, frame.Z.Z, 0);
+        p.Set(program.Extra, PlanetFill, coverage, Starfield.Shift(StarHours), 0);
         // The planets: fixed directions and sizes, each turned by the game's day and hour.
         Span<float> spin = stackalloc float[4];
         for (int i = 0; i < 2; i++)
         {
             var planet = SkyPlanet.All[i];
-            var towards = planet.Towards;
+            var towards = Vector3.Transform(planet.Towards, PlanetTurn);
             p.Set(program.Planet[i], towards.X, towards.Y, towards.Z, planet.SinRadius);
             float a = planet.Spin(Day, Hour);
             (spin[2 * i], spin[2 * i + 1]) = (MathF.Cos(a), MathF.Sin(a));
@@ -715,6 +1056,13 @@ public sealed unsafe class SkyRenderer : IDisposable
         p.Set(program.CloudSun, s.CloudSun.X, s.CloudSun.Y, s.CloudSun.Z, CloudLayer.DensityOffset(coverage));
         var shift = CloudLayer.TextureShift(cloudOffset);
         p.Set(program.CloudWind, shift.X, shift.Y, 0, 0);
+        var key = s.CloudKey; var keyDir = s.CloudKeyDirection; var ambient = s.CloudAmbient;
+        // The Meitou clouds are anchored to the world (the eye's parallax, MeitouClouds.Parallax), so the cloud overhead is the one whose shadow falls here; the game's follow the eye.
+        var (parallaxScale, parallaxOffset) = LitClouds ? MeitouClouds.Parallax(Eye.X, Eye.Y, Eye.Z) : (1f, Vector2.Zero);
+        p.Set(program.CloudMeitou, LitClouds ? (volumeImage.IsNull ? 1 : 2) : 0, parallaxScale, parallaxOffset.X, parallaxOffset.Y);
+        p.Set(program.CloudKey, key.X, key.Y, key.Z, 0);
+        p.Set(program.CloudKeyDir, keyDir.X, keyDir.Y, keyDir.Z, 0);
+        p.Set(program.CloudAmbient, ambient.X, ambient.Y, ambient.Z, MeitouClouds.AmbientGreyAt(coverage));
         bool clouds = cloudsTexture is not null && cloudsNormalTexture is not null && cloudsTileTexture is not null;
         p.Set(program.Has, starsTexture is not null ? 1f : 0f, planetTextures[0] is not null ? 1f : 0f, clouds ? 1f : 0f, planetTextures[1] is not null ? 1f : 0f);
         // A missing texture reads GL's stand-in, which an unbound sampler does too.
@@ -724,19 +1072,9 @@ public sealed unsafe class SkyRenderer : IDisposable
         if (cloudsTexture is not null) p.Bind(program.Clouds, cloudsTexture.Sampled());
         if (cloudsNormalTexture is not null) p.Bind(program.CloudsNormal, cloudsNormalTexture.Sampled());
         if (cloudsTileTexture is not null) p.Bind(program.CloudsTile, cloudsTileTexture.Sampled());
-    }
-
-    /// <summary>
-    /// Records <paramref name="count"/> sky passes back to back and returns the CPU time each took to record (ms; no table any more), for the
-    /// screenshot mode's cost report (<c>MEITOU_SKY_BENCH</c>). The GL version waited for the GPU (<c>Finish</c>); the native API has no such
-    /// wait inside a frame, so the GPU's share shows in <see cref="GpuMs"/> instead.
-    /// </summary>
-    public (double SkyPassMs, double TableMs) Benchmark(Matrix4x4 viewProjection, int count = 100)
-    {
-        var colours = state.Colours;
-        var watch = Stopwatch.StartNew();
-        for (int i = 0; i < count; i++) Draw(viewProjection, colours);
-        return (watch.Elapsed.TotalMilliseconds / count, 0);
+        if (cloudsSmooth is not null) p.Bind(program.CloudsSmooth, cloudsSmooth.Sampled());
+        if (cloudsTileSmooth is not null) p.Bind(program.CloudsTileSmooth, cloudsTileSmooth.Sampled());
+        if (!volumeImage.IsNull) p.Bind(program.VolumeImage, volumeImage);
     }
 
     /// <summary>Collects finished GPU timings: native timestamps, read once their frame's slot comes round. Nothing waits, also with
@@ -756,7 +1094,7 @@ public sealed unsafe class SkyRenderer : IDisposable
     }
 
     public string DescribeCost() =>
-        Physical ? $"CPU {PrepareMs:0.00} ms (last prepare); GPU sky pass {GpuMs:0.00} ms/frame (SkyX per pixel)"
+        Physical ? $"CPU {PrepareMs:0.00} ms (last prepare); GPU sky pass {GpuMs:0.00} ms/frame (SkyX per pixel)" + (SkySkipped ? "; sky and clouds not drawn (a fog block hides the sky)" : volume is null || !VolumeEnabled ? "" : CloudsFogged ? $"; clouds not marched (the weather fog covers the sky), shadow map {volume.ShadowGpuMs:0.00} ms" : $"; GPU clouds {volume.MainGpuMs:0.00}, reflection {volume.ReflectionGpuMs:0.00}, shadow map {volume.ShadowGpuMs:0.00} ms")
                  : $"simple sky: GPU {GpuMs:0.00} ms/frame";
 
     /// <summary>Mean GPU time of a sky pass over the last hundred or so (a running mean, halved now and then).</summary>
@@ -765,8 +1103,11 @@ public sealed unsafe class SkyRenderer : IDisposable
     public void Dispose()
     {
         if (Active == this) Active = null;
-        foreach (var t in new[] { starsTexture, cloudsTexture, cloudsNormalTexture, cloudsTileTexture, irradianceCube, specularCube, ambientMap }) t?.Dispose();
+        foreach (var t in new[] { starsTexture, cloudsTexture, cloudsNormalTexture, cloudsTileTexture, cloudsSmooth, cloudsTileSmooth, irradianceCube, specularCube, ambientMap }) t?.Dispose();
         foreach (var t in planetTextures) t?.Dispose();
+        volumeShadowsReady = false;
+        volume?.Dispose();
+        volume = null;
         simple.Dispose();
         sky.Dispose();
     }
@@ -821,10 +1162,10 @@ sealed class SkyProg : IDisposable
 {
     public readonly LegacyProgram P;
     public readonly NativeSegment Segment;
-    public readonly UniformHandle InverseViewProjection, Extra, PlanetSpin, CloudLight, CloudSun, CloudWind, Has;
+    public readonly UniformHandle InverseViewProjection, Extra, PlanetSpin, CloudLight, CloudSun, CloudWind, CloudMeitou, CloudKey, CloudKeyDir, CloudAmbient, Has, StarsMeitou, CelX, CelY, CelZ;
     public readonly UniformHandle[] Planet;
     public readonly SkyColourHandles Colours;
-    public readonly SamplerSlot Stars, Planet0, Planet1, Clouds, CloudsNormal, CloudsTile;
+    public readonly SamplerSlot Stars, Planet0, Planet1, Clouds, CloudsNormal, CloudsTile, CloudsSmooth, CloudsTileSmooth, VolumeImage;
     public readonly Meitou.Rendering.Gpu.Shaders.SamplerInfo? StarsInfo, CloudsInfo;
 
     public SkyProg(GpuContext gpu, string vertex, string fragment, string name)
@@ -839,13 +1180,24 @@ sealed class SkyProg : IDisposable
         CloudLight = P.Uniform("uCloudLight");
         CloudSun = P.Uniform("uCloudSun");
         CloudWind = P.Uniform("uCloudWind");
+        CloudMeitou = P.Uniform("uCloudMeitou");
+        CloudKey = P.Uniform("uCloudKey");
+        CloudKeyDir = P.Uniform("uCloudKeyDir");
+        CloudAmbient = P.Uniform("uCloudAmbient");
         Has = P.Uniform("uHas");
+        StarsMeitou = P.Uniform("uStarsMeitou");
+        CelX = P.Uniform("uCelX");
+        CelY = P.Uniform("uCelY");
+        CelZ = P.Uniform("uCelZ");
         Stars = P.Sampler("uStars");
         Planet0 = P.Sampler("uPlanet0");
         Planet1 = P.Sampler("uPlanet1");
         Clouds = P.Sampler("uClouds");
         CloudsNormal = P.Sampler("uCloudsNormal");
         CloudsTile = P.Sampler("uCloudsTile");
+        CloudsSmooth = P.Sampler("uCloudsSmooth");
+        CloudsTileSmooth = P.Sampler("uCloudsTileSmooth");
+        VolumeImage = P.Sampler("uVolumeImage");
         if (Stars.IsValid) StarsInfo = P.SamplerInfo(Stars);
         if (Clouds.IsValid) CloudsInfo = P.SamplerInfo(Clouds);
     }
@@ -967,6 +1319,7 @@ internal sealed class SampledImage : IDisposable
             }
         return new SampledImage(ctx, t, TextureMinFilter.LinearMipmapLinear, TextureMagFilter.Linear, TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge);
     }
+
 
     public void Dispose() => Texture.Dispose();
 }

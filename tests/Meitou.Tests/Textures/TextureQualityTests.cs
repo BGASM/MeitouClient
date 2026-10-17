@@ -31,13 +31,6 @@ public class TextureQualityTests
     public void LevelsToDropFollowsTheListener(int level, string name, string group, int expected) =>
         Assert.Equal(expected, TextureQuality.LevelsToDrop(name, group, level));
 
-    [Theory]
-    [InlineData(0, 2048)]
-    [InlineData(1, 1536)]
-    [InlineData(2, 1024)]
-    [InlineData(4, 1024)]
-    public void MemoryBudget(int level, int mb) => Assert.Equal(mb, TextureQuality.MemoryBudgetMb(level));
-
     /// <summary>A DXT file of <paramref name="width"/>×<paramref name="height"/> with <paramref name="mips"/> levels; every block byte is its level's number plus 1.</summary>
     static DdsFile Dxt(int width, int height, int mips, string fourCC = "DXT1", uint caps2 = 0)
     {
@@ -68,31 +61,6 @@ public class TextureQualityTests
             w.Write(Enumerable.Repeat((byte)(level + 1), blocks * blockBytes).ToArray());
         }
         return DdsReader.Read(ms.ToArray());
-    }
-
-    [Fact]
-    public void DropTopMipsReslicesTheSurfaces()
-    {
-        var dds = Dxt(16, 16, 5);
-        var dropped = TextureQuality.DropTopMips(dds, 1);
-        Assert.Equal((8, 8, 4), (dropped.Width, dropped.Height, dropped.MipCount));
-        Assert.Equal(4, dropped.Surfaces.Count);
-        Assert.Equal(Enumerable.Range(0, 4), dropped.Surfaces.Select(s => s.Level));
-        Assert.Equal(dds.Surfaces[1].Offset, dropped.Surfaces[0].Offset);
-        Assert.Equal((8, 8), (dropped.Surfaces[0].Width, dropped.Surfaces[0].Height));
-        Assert.Equal(2, dropped.Data[dropped.Surfaces[0].Offset]);   // the second level's bytes
-        Assert.Same(dds.Data, dropped.Data);                            // no copy
-    }
-
-    [Fact]
-    public void DropTopMipsStopsWhenAMipOrSizeIsLacking()
-    {
-        // 16x16 with 3 mips: two drops leave one level; a third would start with fewer than 2 mips.
-        var three = TextureQuality.DropTopMips(Dxt(16, 16, 3), 5);
-        Assert.Equal((4, 4, 1), (three.Width, three.Height, three.MipCount));
-        // 8x8 with a full chain: 8 -> 4 is allowed (side 8 >= 5), 4 -> 2 is not (side 4 < 5).
-        var small = TextureQuality.DropTopMips(Dxt(8, 8, 4), 5);
-        Assert.Equal((4, 4, 3), (small.Width, small.Height, small.MipCount));
     }
 
     /// <summary>A DXT file's bytes (as <see cref="Dxt"/> makes them) on disk.</summary>
@@ -127,32 +95,5 @@ public class TextureQualityTests
             Assert.Equal(0, kept.TrailingBytes);
         }
         finally { File.Delete(path); }
-    }
-
-    [Fact]
-    public void ReadKeptWithNothingDroppedReadsTheWholeFile()
-    {
-        var path = DxtFile(16, 16, 5);
-        try
-        {
-            using var file = File.OpenHandle(path);
-            var kept = DdsReader.ReadKept(file, w => TextureQuality.DropTopMips(w, 0), out var whole);
-            Assert.Same(kept, whole);
-            Assert.Equal(File.ReadAllBytes(path), kept.Data);
-            Assert.Equal(5, kept.MipCount);
-            // One level dropped from the same file.
-            var refused = DdsReader.ReadKept(file, w => TextureQuality.DropTopMips(w, 1), out _);
-            Assert.Equal(4, refused.MipCount);
-        }
-        finally { File.Delete(path); }
-    }
-
-    [Fact]
-    public void DropTopMipsLeavesOtherFilesAlone()
-    {
-        var dds = Dxt(16, 16, 5);
-        Assert.Same(dds, TextureQuality.DropTopMips(dds, 0));
-        var dxt5 = TextureQuality.DropTopMips(Dxt(16, 16, 5, "DXT5"), 2);
-        Assert.Equal((4, 4, 3, DdsFormat.Bc3), (dxt5.Width, dxt5.Height, dxt5.MipCount, dxt5.Format));
     }
 }

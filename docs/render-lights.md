@@ -1,27 +1,28 @@
 # Lamps (the game's point and spot lights)
 
-Status: 2026-10-09, branch `global-illumination`. The data side, meaning what a LIGHT record holds and where the lights are placed, is in
+The data side, meaning what a LIGHT record holds and where the lights are placed, is in
 [formats/lights.md](formats/lights.md). This page covers how the renderer draws them. The claims say where they come from: *from the code*,
 *measured* (how), or *open*.
 
-The game draws these lights in both looks, so this is not a Faithful / Meitou switch. `--lights off` turns them off (the parity gates use
-it), and the bench's `lights` A/B switch does the same.
+The game draws these lights in both looks, so this is not a Faithful / Meitou switch. The bench's `lights` A/B switch turns them off (the former `--lights off` option, which the parity gates used, was removed).
 
 ## What is drawn
 
 *From the code* (`WorldLamps`, `LampShaders`):
 
-- **Which lights.** The outdoor lights of every placed building (`WorldLights.ForWorld`, without the interior layouts): 1302 in the base
-  game (**Measured**, the `lamps` log line). They are read on a worker at start.
-  - Interior lights are left out. The game gives its lights no shadows, so they would shine through the walls.
+- **Which lights.** The lights of every placed building and its exterior/interior layouts (`WorldLights.ForWorld`), read on a worker at start.
+  Interior lamps enter the grid only with a loaded owner mask (matched by the building prefix of their placement id). Their direct light is
+  clipped to its convex footprint and height range with a0.5-unit surface tolerance (see [zones](formats/zones.md#interior-masks)).
+  Masks above32 edges are unsupported; direct lamps have no occluder shadows within that hull.
   - Every light is always on. No base-game building is a light building (formats/lights.md), and what the buildings' on state is for
     town buildings is **Unknown**.
 - **Binning.** Each frame, the lights whose reach overlaps a 64 × 64 grid of 128-unit cells around the eye (8192 units across, at most
   1024 lights) are written to three textures, one set per frame slot:
   - `uLightCells` (RG32F): each cell's first entry and count;
   - `uLightIndex` (R32F): the light numbers, 1024 per row;
-  - `uLightData` (RGBA32F): a row of 4 texels per light: position and radius; radiance and type; spot direction and the cosine of the
-    outer half cone; the cosine of the inner half cone and the falloff.
+  - `uLightData` (RGBA32F): a row of37 texels per light: position/radius; radiance/type; spot direction/outer cosine;
+    inner cosine/falloff/room edge count/emitter id; room min/max height; up to32 inward footprint planes (normal X/Z, offset, 0).
+    Edge count0 means an exterior lamp; unused room texels are ignored.
 
   `uLightGrid` holds the grid's corner, its cell size and its cells per side. Its w is 0 when there is nothing to draw, and then the
   shaders skip the lamps entirely.
@@ -33,13 +34,16 @@ it), and the bench's `lights` A/B switch does the same.
 - **Native and legacy.** The legacy programs take the uniform and the three samplers by name. The native frame block has `lightGrid` at
   8608 and the three bindless indices at 8624, 8628 and 8632 (`FrameConstants` is 8640 bytes).
 - **Probe GI** ([render-gi.md](render-gi.md)). The probe trace binds the same textures (bindings 10–12, `uLightGrid` in its parameters)
-  and adds the lights' diffuse light at each hit (`LAMP_DIFFUSE_ONLY`), so lamp light bounces too.
+  and adds the lights' diffuse light at each hit (`LAMP_DIFFUSE_ONLY`), so lamp light bounces too. Interior lamps additionally use
+  a ray from the hit towards the lamp; intervening geometry blocks the bounce source. The lamp's owning fixture is excluded from its
+  own shadow query (light points may be embedded in it); all other geometry still occludes. Direct raster lamps retain the game's unshadowed
+  shading within the building mask. Interiors keep probe lighting; there is no ambient override.
 
 ## Measured
 
 - **Parity** (`image-diff`, 1280 × 720, `--view hub` and `--view swamp`, against `b84b372`):
-  - with `--lights off`: mean 0.0000 for both views;
-  - with `--gi --faithful gi --lights off`: mean 0.0000 for both views;
+  - with the lamps off (then `--lights off`): mean 0.0000 for both views;
+  - with `--faithful gi` and the lamps off (then `--gi --faithful gi --lights off`): mean 0.0000 for both views;
   - with the lamps at noon: the Hub mean 0.0000, the swamp mean 0.03.
 - **Cost** (RTX 4070, Mongrel at 22:00, 1920 × 1080 with DLSS 0.67, `--ab lights`): +0.07 ms GPU per frame.
 - **Picture** (Mongrel at 22:00): small blue-white pools under the lamp posts, mean difference 0.38. The lights' radii are 60–300 units,

@@ -47,7 +47,6 @@ public sealed unsafe partial class GpuContext : IDisposable
         Device = device;
         Features = GpuFeatures.Of(device);
         Features.Require(device.DeviceName);
-        HostMemory = new HostMemory();
         Defaults = new GpuDefaults(device);
         Samplers = new SamplerCache(device);
         Shaders = new ShaderLibrary(device);
@@ -69,10 +68,6 @@ public sealed unsafe partial class GpuContext : IDisposable
     public BindlessTable Bindless { get; }
     public Uploader Uploads { get; }
     public GpuFrame Frame { get; }
-    /// <summary>Per-frame host-visible chunks by buffer handle (for the draw log).</summary>
-    public HostMemory HostMemory { get; }
-    /// <summary>The draw log of the frame being recorded, when one is asked for (<see cref="DrawLog.RequestedPath"/>).</summary>
-    public DrawLog? Log { get; internal set; }
     /// <summary>The upscaler's texture LOD bias: added to the mip level of every mipmapped fetch (set by the post-processing chain).</summary>
     public float LodBias { get; set; }
 
@@ -169,8 +164,8 @@ public sealed unsafe partial class GpuContext : IDisposable
         throw new InvalidOperationException("descriptor set allocation failed");
     }
 
-    /// <summary>Waits for the GPU, then copies level 0 / layer 0 of a colour texture into host memory (tests and tools; never inside a frame).</summary>
-    public byte[] ReadBack(Texture texture, int bytesPerTexel)
+    /// <summary>Waits for the GPU, then copies level 0 / layer <paramref name="layer"/> of a colour texture into host memory (tests and tools; never inside a frame).</summary>
+    public byte[] ReadBack(Texture texture, int bytesPerTexel, int layer = 0)
     {
         Device.Frames.WaitAll();
         int w = texture.Desc.Width, h = texture.Desc.Height;
@@ -181,7 +176,7 @@ public sealed unsafe partial class GpuContext : IDisposable
             var cb = Device.BeginImmediate();
             var region = new BufferImageCopy
             {
-                ImageSubresource = new ImageSubresourceLayers(texture.Desc.Aspect, 0, 0, 1),
+                ImageSubresource = new ImageSubresourceLayers(texture.Desc.Aspect, 0, (uint)layer, 1),
                 ImageExtent = new Extent3D((uint)w, (uint)h, 1),
             };
             Device.Vk.CmdCopyImageToBuffer(cb, texture.Image, ImageLayout.General, buffer.Buffer, 1, &region);
@@ -205,6 +200,5 @@ public sealed unsafe partial class GpuContext : IDisposable
         dummyTextures.Clear();
         Samplers.Dispose();
         Defaults.Dispose();
-        Log?.Dispose();
     }
 }

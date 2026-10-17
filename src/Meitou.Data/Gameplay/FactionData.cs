@@ -39,6 +39,16 @@ public sealed record FactionData
     /// <summary><c>not real</c>: wildlife, ruins, slaves, "No Faction"...</summary>
     public bool NotReal { get; init; }
     public bool OffersBounties { get; init; }
+    /// <summary>
+    /// The first <c>legal system</c> reference (a FACTION id; null: none): the faction whose ledger entry the faction's bounties use (the loader stores it at <c>+0x38</c>,
+    /// docs/game/economy.md 11.2, <b>Observed</b>; e.g. Bounty Hunters and Medics Guild -> United Cities).
+    /// </summary>
+    public string? LegalSystem { get; init; }
+    /// <summary>
+    /// The faction books crimes as bounties: the faction loader <c>FUN_1407fe270</c> sets the faction's byte <c>+0x40</c> to true for <c>fundamental type</c> LAW_ENFORCEMENT and
+    /// otherwise to <c>offers bounties</c> (<b>Observed</b>, docs/game/economy.md 11.6). In the base data: Police, Mercenary Police, United Cities, The Holy Nation, Shek Kingdom, Republic of Tertius.
+    /// </summary>
+    public bool BooksBounties => FundamentalType == FundamentalType.LawEnforcement || OffersBounties;
     public float RunAwayRatioOfSquadSize { get; init; }
     public float RunAwayRatioRelativeToEnemy { get; init; }
     public int MaxProsperity { get; init; }
@@ -57,6 +67,9 @@ public sealed record FactionData
     public IReadOnlyList<RecordLink> Biomes { get; init; } = [];
     public IReadOnlyList<RecordLink> NoGoZones { get; init; } = [];
     public IReadOnlyList<RecordLink> TradeCulture { get; init; } = [];
+    /// <summary><c>doors lock level</c> (fcs.def default 40) and <c>lock level random</c> (10): base and spread of every building lock the faction owns (docs/game/locks.md "Lock object").</summary>
+    public int DoorsLockLevel { get; init; } = 40;
+    public int LockLevelRandom { get; init; } = 10;
     public IReadOnlyList<RecordLink> BuildingsReplacements { get; init; } = [];
 
     public static FactionData From(GameRecord r)
@@ -78,6 +91,7 @@ public sealed record FactionData
             RoadPreference = r.GetFloat("road preference"),
             NotReal = r.GetBool("not real"),
             OffersBounties = r.GetBool("offers bounties"),
+            LegalSystem = r.GetReferences("legal system") is { Count: > 0 } legal ? legal[0].TargetStringId : null,
             RunAwayRatioOfSquadSize = r.GetFloat("run away ratio of squad size"),
             RunAwayRatioRelativeToEnemy = r.GetFloat("run away ratio relative to enemy"),
             MaxProsperity = r.GetInt("max prosperity"),
@@ -96,6 +110,8 @@ public sealed record FactionData
             NoGoZones = Links("no-go zones"),
             TradeCulture = Links("trade culture"),
             BuildingsReplacements = Links("buildings replacements"),
+            DoorsLockLevel = RecordReading.Int(r, "doors lock level", 40),
+            LockLevelRandom = RecordReading.Int(r, "lock level random", 10),
         };
     }
 
@@ -108,8 +124,10 @@ public sealed record FactionData
 /// ordered pair A to B the relation is the value of B in A's explicit <c>relations</c> list if there is one, else the smaller of the
 /// two factions' <c>default relation</c>; A to A is 100. Relations then change at run time (trust, wars, deeds: section 3.4, a later
 /// stage); this is the table they start from. Faction numbers are positions in the list given to <see cref="Build"/>.
-/// The player's faction has no table in the game (it asks the other side); here it is a row like any other, built by the same
-/// rule, and callers that count NPC pairs leave it out.
+/// The player's faction has no table in the game (section 3.1, <b>Observed</b>: "player towards X" is answered by X's table about the
+/// player, "player towards player" is 100 with the allied flag). With <see cref="PlayerFaction"/> set every query of the player's row is
+/// answered that way; the row itself is still built by the same rule (callers that count NPC pairs leave it out) but is then never read.
+/// This is the live table of a game: <see cref="Event"/> applies the section 3.4 changes and counts them in <see cref="Changes"/>.
 /// </summary>
 public sealed class FactionRelations
 {
@@ -133,11 +151,75 @@ public sealed class FactionRelations
     public IReadOnlyList<FactionData> Factions { get; }
     public int Count => Factions.Count;
 
+    /// <summary>The player's faction (a position in <see cref="Factions"/>), whose row is answered by the other side's table; -1: none.</summary>
+    public int PlayerFaction { get; set; } = -1;
+
+    /// <summary>How many <see cref="Event"/>s changed a value so far (the state hash covers the table once this is above 0).</summary>
+    public long Changes { get; private set; }
+
     /// <summary>The position of a faction id in <see cref="Factions"/>, or -1.</summary>
     public int IndexOf(string id) => index.GetValueOrDefault(id, -1);
 
-    /// <summary>The relation of faction <paramref name="a"/> towards <paramref name="b"/>, -100 to 100.</summary>
-    public float Get(int a, int b) => relation[a * Count + b];
+    /// <summary>Whether <paramref name="f"/> is a faction of this table.</summary>
+    public bool Contains(int f) => (uint)f < (uint)Count;
+
+    /// <summary>The relation of faction <paramref name="a"/> towards <paramref name="b"/>, -100 to 100 (the player's row is asked of the other side).</summary>
+    public float Get(int a, int b)
+    {
+        if (a == PlayerFaction && a >= 0) return a == b ? 100 : relation[b * Count + a];
+        return relation[a * Count + b];
+    }
+
+    /// <summary>
+    /// The relation event of slot 5 (section 3.4, <b>Observed</b>): faction <paramref name="a"/>'s view of <paramref name="b"/> moves by the
+    /// kind's delta times <paramref name="x"/>, only while it is above the kind's floor (a fall) or below its ceiling (a rise), so one event
+    /// can overshoot the floor by up to the delta; then it is clamped to [-100, 100]. Nothing happens when <paramref name="a"/> is
+    /// <c>not real</c> or the kind has no row. A change asked of the player's row is applied to the other side's table, as in the game.
+    /// Returns the value before and after.
+    /// </summary>
+    public (float Before, float After) Event(int a, int b, RelationEventKind kind, float x)
+    {
+        if (a == PlayerFaction && a >= 0) (a, b) = (b, a);
+        float before = Get(a, b);
+        if (a == b || Factions[a].NotReal) return (before, before);
+        (float delta, float floor, float ceiling) = kind switch
+        {
+            RelationEventKind.Slight => (-0.05f * x, -20f, 100f),
+            RelationEventKind.Offence => (-2.5f * x, -50f, 100f),
+            RelationEventKind.Stealing => (-10f * x, -50f, 100f),
+            RelationEventKind.Murder => (-20f * x, -100f, 100f),
+            RelationEventKind.Assault => (-20f * x, -75f, 100f),
+            RelationEventKind.Drift => (0.15f * x, -100f, 5f),
+            RelationEventKind.EscapePrison => (-10f * x, -60f, 100f),
+            _ => (0f, 0f, 0f),
+        };
+        float after = before;
+        if ((delta < 0 && before > floor) || (delta > 0 && before < ceiling)) after = Math.Clamp(before + delta, -100, 100);
+        if (after != before)
+        {
+            relation[a * Count + b] = after;
+            Changes++;
+        }
+        return (before, after);
+    }
+
+    /// <summary>
+    /// Adds <paramref name="delta"/> to <paramref name="a"/>'s relation towards <paramref name="b"/>, clamped to [-100, 100] (dialogue's <c>change relations</c> and DA_AFFECT_RELATIONS,
+    /// docs/game/dialogue.md "Effects"); a change asked of the player's row goes to the other side's table, as in <see cref="Event"/>. Returns the value before and after.
+    /// </summary>
+    public (float Before, float After) Add(int a, int b, float delta)
+    {
+        if (a == PlayerFaction && a >= 0) (a, b) = (b, a);
+        float before = Get(a, b);
+        if (a == b || !Contains(a) || !Contains(b)) return (before, before);
+        float after = Math.Clamp(before + delta, -100, 100);
+        if (after != before)
+        {
+            relation[a * Count + b] = after;
+            Changes++;
+        }
+        return (before, after);
+    }
 
     /// <summary>Sets the relation of faction <paramref name="a"/> towards <paramref name="b"/> (a loaded save does this; trust and the other state live outside this table).</summary>
     public void Set(int a, int b, float value) => relation[a * Count + b] = value;
@@ -148,8 +230,12 @@ public sealed class FactionRelations
     /// <summary>A to B: B is A itself, or the relation is at or above <see cref="AllyThreshold"/>.</summary>
     public bool IsAlly(int a, int b) => a == b || Get(a, b) >= AllyThreshold;
 
-    /// <summary>A to B: B is A itself, or A lists B in <c>coexistence</c>.</summary>
-    public bool Coexists(int a, int b) => a == b || coexist[a * Count + b];
+    /// <summary>A to B: B is A itself, or A lists B in <c>coexistence</c> (for the player's row: B lists the player).</summary>
+    public bool Coexists(int a, int b)
+    {
+        if (a == b) return true;
+        return a == PlayerFaction && a >= 0 ? coexist[b * Count + a] : coexist[a * Count + b];
+    }
 
     public static FactionRelations Build(IReadOnlyList<FactionData> factions)
     {
@@ -173,4 +259,20 @@ public sealed class FactionRelations
     }
 
     public static FactionRelations Build(GameDatabase db) => Build(FactionData.LoadAll(db));
+}
+
+/// <summary>
+/// The event kinds of the relation table's slot 5 (docs/game/factions-squads-towns.md section 3.4, <b>Observed</b>). The numbers are the
+/// game's; the names of 3, 4, 5 and 12 follow the <c>CrimeEnum</c> values they line up with, which is <b>Unknown</b> (the call sites were not
+/// traced); 1 and 2 have no known meaning; 8 is the time-scaled drift capped at +5.
+/// </summary>
+public enum RelationEventKind
+{
+    Slight = 1,
+    Offence = 2,
+    Stealing = 3,
+    Murder = 4,
+    Assault = 5,
+    Drift = 8,
+    EscapePrison = 12,
 }

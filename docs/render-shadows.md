@@ -1,74 +1,33 @@
-# Shadow rendering
+# Shadows
 
-Part of the world view of `meitou-viewer` (and the game, which shares `src/Meitou.Rendering`); options, keys and the rest of the world mode are in [viewer.md](viewer.md#world-mode).
+`ShadowPass`, `ShadowLod`, `ShadowFogCap`, `ShadowZoneBox`; original cascade/settings/shader
+rules: [formats/shadows.md](formats/shadows.md). Engine API: [renderer-native](renderer-native.md).
 
+## Modes and resources
 
-The sun's shadow map as the game's CSM mode draws it ([formats/shadows.md](formats/shadows.md)): four cascades in one atlas
-(`--shadow-quality <0|1|2>`, 1024² / 2048² / 4096², default 2048²; `--shadow-range <u>`, default 5000 in Faithful and 10000 in Meitou (1000-9000 and 1000-15000; the F5 toggle swaps the default if the range was not touched); `--no-shadows`), drawn
-before the reflection and the main pass from the terrain, objects and foliage meshes. `--debug-shadows 1|2|3` shows the cascade
-maps, the term per cascade, or the term over the picture.
+Faithful reproduces researched cascade fits/splits/casters/receiver. Meitou fits useful camera
+ranges, stable grids and soft filtering, plus terrain-horizon shadow beyond local caster range.
+Shadow-quality default2 uses4096²; Tab supports1024/2048/4096. Cascade arrays include a fifth
+Meitou cascade; consumers must use current layer count/splits, not assume four tiles everywhere.
+Depth-array views, samplers, receiver blocks and frame-global publication must agree.
 
-That is the Faithful choice of the `shadows` switch (F5, `--faithful shadows`). The default is the **Meitou shadows**
-([formats/shadows.md](formats/shadows.md#meitou-shadows-the-shadows-switch)): the same atlas, quality and range, but cascades
-fitted from the camera's near plane to the range (all four in use), drawn on a schedule (the first every frame, the
-others every 4th, 16th and 32nd frame unless the camera or the sun made them stale, each kept with the matrices it was drawn with;
-[formats/shadows.md](formats/shadows.md) "Schedule": the stage's GPU time 0.72 to 0.30 ms with a still camera, 0.92 to 0.34-0.46 with a turning one, 2026-10-08), a soft receiver (16-tap rotated disk,
-contact-hardening penumbrae from a blocker search, cascades blended, a fade instead of the cut-off at the range's end) and the
-terrain's own shadow out to the horizon, so mountains shadow valleys at low sun. The debug view 2 still tints by the game's
-cascade selection. It is also the cheaper one (**Observed**, same caveats as below, against `--faithful shadows`): Hub
-fly-benchmark shadow stage 2.43 against 3.31 ms CPU; forest camera 2.1-2.3 against 3.6 ms CPU and 0.29 against 0.77 ms GPU
-(details in the format doc).
+## Scheduling and casters
 
-**Shadow pass cost** (**Observed**, 2026-10-05, RTX 4070, Debug build, 1600 x 900, `--faithful all --time 13`; the machine shared with
-other agents' viewers, so spread is large). `--screenshot` logs print the pass per cascade (`WorldFrame.DetailedStats`: terrain
-triangles, objects and foliage instances, draw calls and CPU ms, and the foliage's steps: culling, upload, meshes, TERRAIN-mode rocks)
-and the foliage main pass per depth slice.
-- *Where the time went*: at the forest camera (`--at -37582,-80684 --yaw -70.5 --pitch 6.1 --distance 10588`) the shadow pass cost
-  ~17-27 ms of CPU against ~1.5 ms of GPU. Cascades 0 and 1 are unused there (the camera's near plane is beyond their split), cascade 2
-  draws nothing, and cascade 3 drew 11,214 foliage instances in 6,051 draw calls: 64 instanced batches of trees and bushes and 5,978
-  single draws of TERRAIN-mode rocks (`TerrainRenderer.DrawMeshes`, one draw per placement and part with its matrix as a uniform),
-  which alone took ~23 ms. The foliage candidate cache shared by the cascades was working (`cull (cached)` in the log, ~1.2-1.4 ms a
-  cascade); the cost was VkGl's per-draw work (~4 µs: pipeline lookup, the loose-uniform block copied to the ring for the new matrix,
-  descriptor offsets, vertex and index buffer binds) times thousands of draws. The main pass had the same pattern on a smaller scale:
-  574 rocks, ~2.8 ms.
-- *Fix*: the TERRAIN-mode meshes (foliage rocks and TERRAIN-mode objects) are drawn instanced, one draw per (vertex array, index count,
-  mirrored or not), the placement as four per-instance rows at locations 7 to 10 (`TerrainShaders.MeshInstanceLocation`) and, in the
-  main pass, the feature's biome row in row 0's w (it only reaches the position's unused w) read as a flat varying
-  (`TerrainShaders.MeshFragment`). Exactness: the shaders compute the position with the uniform form's arithmetic; the shadow map is
-  depth only with a Less test, so the order of the draws cannot change a texel; in colour only two different placements at exactly
-  the same depth could show the order. Measured against the build before (itself identical in two full runs): 0 differing pixels on
-  all ten parity views (`tools/scripts/parity.sh`, `--faithful all`) and on `--debug-shadows 1` (the atlas drawn into the picture) at
-  the forest and The Hub. The rock view with `--debug-shadows 1` (90 rocks on screen) was identical in 8 of 9 runs; one run differed
-  in 20 pixels (largest 14/255) at a distant building, not a rock, with the same streaming and residency counts in its log; the
-  build before was identical in 9 of 9. Unexplained at the time. Most likely explained 2026-10-06: two texture uploads into the same
-  image in one upload command buffer raced (synchronisation validation: 10 WRITE_AFTER_WRITE hazards per view); a build with step-2
-  timing changes showed few-pixel rock-view differences in 2 of 9 runs, and with the uploads ordered by a barrier 0 of 9 and sync
-  validation clean (docs/engine.md "Vulkan backend", "Memory and order").
-- *Numbers* (`--fly-benchmark 300 --fly-speed 0`, a still camera, three interleaved runs each, medians): forest, draws per frame
-  7,485 -> 977, shadow stage 25.3 -> 5.7 ms (its foliage part 23.9 -> 4.2), foliage main pass 7.5 -> 4.1 ms, render-thread CPU per
-  frame (p50, commands recorded) 36.9 -> 13.3 ms; The Hub (`--town "The Hub" --distance 40000 --pitch 3`; 46 rocks in the main pass, 3 in the shadow map), draws
-  777 -> 746, shadow stage 3.2 -> 3.1 ms, CPU per frame 6.7 -> 6.6 ms (within noise).
-- *Not done*: reusing last frame's map when the sun, every cascade's snapped box and the LOD eye are unchanged. It would be exact
-  only if every change to the casters (streamed meshes and textures arriving or unloading, foliage pages, terrain height windows, LOD
-  and range settings) invalidated it, and there is no single version counter for that yet; a missed case would show stale shadows in
-  motion that the still-picture gate cannot catch. Left: the foliage candidate pass (~1.3 ms for the first drawn cascade, which records
-  every instance within 1.2 x the shadow range, and ~1.2 ms to test them against each further cascade) and the terrain patches
-  (~0.9 ms for cascade 3).
+Near cascades refresh rapidly; far cascades cache/stagger according to camera/sun changes.
+`shadow-spread` budgets one due far cascade per frame; invalidation must not reuse an incompatible
+matrix. GPU culls and CPU zone/group work lists are per cascade. `shadow-zone-box` excludes
+nonintersecting zone bounds before building lists. Record secondaries in stable caster order.
 
+`shadow-coarse` / generated object levels select geometry against cascade texel size, not colour
+pixel size. Preserve silhouette and alpha coverage; impostor casters have their own fade/plane.
+`shadow-fogcap` can shorten reach only when placed fog conservatively hides every relevant
+receiver. Shadow-map rendering and shadow receiving are distinct costs; omit receiver work only
+where lighting cannot contribute. Minimum-radius impostor filter omits blocker search.
 
-**Spikes of the Meitou schedule** (**Observed**, 2026-10-09, RTX 4070, `--view swamp --size 1920x1080 --upscaler dlss --render-scale native`, DLSS verified, per-frame trace of which cascades were drawn against the stage's GPU time).
-- *Cause*: the stage costs 0.2 ms when only cascade 0 is drawn and about 1.1 (cascade 1), 1.3-1.5 (2) and 1.6-1.8 ms (3) for each far cascade drawn on top, so its cost is the number of far cascades drawn in a frame. Of 684 frames 404 drew none (mean 0.24 ms, 21 % of the stage's time), 251 drew one (mean 1.16, max 2.46 ms, 63 %), 25 drew two (2.54, up to 3.64) and 4 drew three (3.4); the 29 frames with two or more are the p99 (3.2 ms) and 17 % of the time. They came from coincidences: the cadence (1, 4, 16, 32) and the "camera orbited out of the box" redraws (cascade 3: 59 of its 79 draws, cascade 2: 23 of 66) are independent, and nothing kept them apart. Not the cause: the terrain map and landmark map (built once, in the first frame), range-drift or sun-jump redraws of all cascades (one, at frame 0), the blocker tiles (a fullscreen triangle per redrawn tile, negligible).
-- *Fix* (`ShadowSchedule.Pick`, CPU only, no shader change): at most `FarBudget` (1) far cascades are drawn per frame; the other wanted redraws are owed and go on the following frames, the longest-waiting first, and are forced after `MaxWait` (3) frames whatever the budget. A cascade with no map yet is never deferred, cascade 0 is not counted. The total demand is about 0.5 far draws a frame, so the queue is short (traced: 38 deferrals in 684 frames, mostly one frame). A deferred cascade keeps the matrices it was drawn with, as every cached cascade does, and its staleness test (box coverage, sun turn) still holds the next frame. `MEITOU_SHADOW_BUDGET=0` and `--ab shadow-spread` give the old behaviour.
-- *Paired result* (`--ab shadow-spread --ab-period 64`, 1024 frames, orbit): shadows stage mean 0.74 against 0.74 ms (the same work), p95 1.92 against 2.19, p99 2.36 against 2.93, max 2.60 against 3.84; GPU total p99 8.11 against 8.84 ms, frame p99 8.55 against 9.35 ms (means unchanged, 6.23 against 6.25). A still camera (384 frames, only cadence redraws): shadows p99 1.89 (spread) against 1.75, no gain there (the redraws do not collide); the frame and total p99 differences are noise. Picture A against B: orbit 119 pixels differ by 4/255 or more, none by 12 (max 8); still 3 pixels by 4 or more (max 5). So the delay of a cascade's redraw by a frame or two is not visible; the two sides' absolute numbers drift with other programs on the GPU, only the pair counts.
-- *Not done*: the p99 now is a single cascade 2 or 3 redraw (1.3-1.8 ms); lowering it further needs splitting a cascade's draw over frames (by tile quadrant, with the old content kept), and the mean is the same work as before.
+## Validation and limits
 
-**Coarse casters in the far cascades** (`shadow-coarse`, `ShadowLod`; **Observed**, 2026-10-09, RTX 4070, `--view swamp --size 1920x1080 --upscaler dlss --render-scale native`, DLSS verified, `MEITOU_STREAMLINE_PATH` set).
-- *How each caster picked its level before.* Every cascade used the main view's rules, measured from the camera's eye, whatever the cascade's texel (the texels on the swamp are 1.7, 4.1, 8.8 and 20.1 world units for cascades 0 to 3; `MEITOU_SHADOW_LOG=1` prints them). **Terrain**: the main tree's nodes and morph (16 px error), so the casters are exactly the surface the receivers see. **Objects**: the game's mesh levels by `value = distance - radius` from the eye (levels at typically 4000 and 8000 units, most meshes have one or two levels), cross-faded. **TERRAIN-mode rocks and plants**: generated levels (`FoliageRenderer.LodShadowTolerance`, 2 texels). **Foliage meshes** (trees, bushes, no levels of their own): the full mesh, or the flat impostor caster beyond the colour view's transition distance (4000 units, 12000 for the large class), which only applies where the atlas is resident; the colour view plans residency from its own distances, so in a cascade most meshes stay meshes. Foliage meshes under two texels are dropped (`MinFoliageCasterTexels`, before this change).
-- *The rule* (cascades 1 to 3 only; cascade 0 is as before; Meitou shadows only, the game's CSM keeps its casters): **objects** take the level of `max(distance, texel x pixel scale)`, the distance at which one pixel of the render is one texel wide (`ObjectLodFloor`; cascade 1 reaches the first level at 4000, cascades 2 and 3 the coarsest; no cross-fade is left where the floor is past the last level); **rocks** accept generated levels up to 4 texels of deviation (`MEITOU_SHADOW_ROCK_TEXELS`, 2 before); **foliage meshes with a resident impostor atlas** cast the impostor from 200 units on when their world radius is at most 8 texels (`MEITOU_SHADOW_IMPOSTOR_TEXELS`; the atlas's 12 x 12 sun directions move the shadow by about 0.12 radius, so 8 texels keeps that under a texel); **terrain** nodes are no finer than the level whose grid error (`TerrainLod.Roughness` 2 x spacing, 18 x 2^l units) is within `MEITOU_SHADOW_TERRAIN_TEXELS` texels (`TerrainQuadtree.FloorLevel`, set around the cascade's node selection only). Objects with only one level (most buildings) have nothing coarser to take; generated building levels are a possible follow-up, not built.
-- *Terrain does nothing at the default, on purpose.* Level 1's grid error is 72 units, more than even cascade 3's 20-unit texel, so at one texel no level can be dropped on the swamp. A probe at 4 texels takes cascade 3 to level 1 (its terrain primitives 159k to 108k in the mean-per-frame table) for -0.02 +-0.03 ms of the stage when all cascades are drawn every frame, and 8 and 16 texels were lost in noise; the caster would then differ from the receiver's own surface by up to 72 units, which the bias does not cover. The plumbing stays (the floor never opens a crack: the ranges keep neighbouring nodes within one level) and `MEITOU_SHADOW_TERRAIN_TEXELS` sets it for a larger cascade (a 4096 atlas has smaller texels, a longer range larger ones).
-- *Result with the real schedule* (`--ab shadow-coarse --ab-period 64 --bench-frames 768`, orbit, three runs; A coarse, B as before, +-95 %): shadows stage mean 0.63 against 0.66 (-0.04 +-0.10), 0.61 against 0.66 (-0.05 +-0.11); p95 1.50 / 1.41 against 1.70 / 1.80, **p99 1.79 / 1.64 against 2.10 / 1.99 (-0.31 / -0.35 ms)**, max 1.92 against 2.13. GPU total 5.87 against 5.90 (-0.03 +-0.28) and 5.87 against 5.92 (-0.05 +-0.27); frame 6.14 against 6.31 (-0.17 +-0.40), 5.88 against 5.96. `--bench-motion turn`: shadows 0.52 against 0.57 (-0.04 +-0.09), p95 1.27 against 1.45, p99 1.52 against 1.79; total 5.26 against 5.33 (-0.07 +-0.19). So the means are inside the noise and what is won is the redraw spike (one far cascade redrawing is about 0.3 ms cheaper); the far cascades are drawn about 0.5 times a frame, so this does **not** move the 6 to 5 ms target. Render-thread time of the shadows stage +0.17 +-0.22 ms (one run): a coarsened cascade's impostor ranges differ from cascade 0's, so the foliage work list is built again for it (`gpuWorkTexel` in its reuse key).
-- *The effect with every far cascade drawn every frame* (`MEITOU_SHADOW_CADENCE=1,1,1,1 MEITOU_SHADOW_BUDGET=0 --bench-motion still --ab-period 16 --bench-frames 256`; an amplified measurement for the mechanism, not the saving): shadows stage 2.70 against 3.01 ms (-0.32 +-0.04, -10 %), GPU total 7.55 against 7.85. By part, each alone (320 to 384 frames, the card shared with another program in part of the runs): objects -0.22 +-0.03 (1 texel; 2 and 4 texels -0.27 and -0.30), rocks -0.09 +-0.04, impostors -0.08 +-0.06, terrain -0.02 +-0.03. Primitives per cascade draw (`--bench-tris`, coarse against before): cascade 1 objects 633 k against 727 k, rocks 208 k against 240 k, foliage meshes 612 k both, terrain 320 k both; cascade 2 objects 647 k against 877 k, rocks 289 k against 459 k, meshes 1.43 M against 1.44 M, terrain 670 k both; cascade 3 objects 980 k against 1.21 M, rocks 189 k against 316 k, meshes 1.77 M against 1.95 M, terrain 1.11 M both. The foliage meshes are the largest part left and barely change: few atlases are resident for them in a cascade, and a mesh bigger than 8 texels keeps its geometry.
-- *Pictures* (`--upscaler off --bench-motion still --no-particles`, A against B, 1920x1080, the sun at its view's time): swamp 3,341 pixels differ by 1/255 or more, 96 by 4 or more, 3 by 12 or more (mean 0.0014, max 16); swamp at 17:00 (longer shadows) 4,553 / 187 / 1 (max 13); the Hub 1,133 / 224 / 54 (max 56); Heft desert (`--world --town Heft --radius 2 --distance 3000 --pitch 10 --yaw 300 --time 12`) 11,932 / 313 / 70 (mean 0.0036, max 117). In the desert the differing pixels are a few small blobs at the shadow edges of the distant fortress walls and turbines (objects at a coarser level); no acne or detached shadows show in the diff maps. With DLSS the stills differ by noise alone (swamp: 91 pixels by 4 or more, none by 12, max 7, as two runs of one build).
-- *Knobs*: `MEITOU_SHADOW_COARSE=0` starts with the switch off, `MEITOU_SHADOW_OBJECT_TEXELS` (1), `_TERRAIN_TEXELS` (1), `_ROCK_TEXELS` (4), `_IMPOSTOR_TEXELS` (8), each 0 turning that part off; `MEITOU_SHADOW_LOG=1` prints a line per cascade drawn.
-
-**Generated object levels in the cascades** (`object-lod-gen`, [render-objects.md](render-objects.md#generated-levels-object-lod-gen-2026-10-09); **Observed**): the buildings had nothing coarser than the game's 4000 / 8000 levels for `ShadowLod.ObjectLodFloor` to take. The floor is looked up in the mesh's merged level curve, which now holds generated levels placed by the main view's pixel error, so a far cascade's casters use them where one texel is as large as 1.5 pixels of the render. Swamp, `--ab object-lod-gen --ab-period 16`: shadows stage 0.44 against 0.59 ms (-0.16 +-0.04); Hub -0.03.
+Check low sun, cutout trees, interiors, cascade boundaries, camera/clock cuts, reflection and
+far terrain. Compare redraw spikes/p99 as well as mean; cached passes can hide costs in averages.
+**Observed** moving swamp views: far-cascade redraws cause spikes; scheduling/coarser casters can
+reduce tails without a significant mean gain. Fog-cap and extra-cascade rules must preserve
+clear views and Faithful behaviour. Source formulas/unknowns remain in the format reference.

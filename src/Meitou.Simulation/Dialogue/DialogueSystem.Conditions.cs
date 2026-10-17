@@ -1,0 +1,137 @@
+using System.Numerics;
+using Meitou.Data.Gameplay;
+using Meitou.Data.Gameplay.Bodies;
+using Meitou.Data.Gameplay.Dialogue;
+
+namespace Meitou.Simulation.Dialogue;
+
+public sealed partial class DialogueSystem
+{
+    /// <summary>
+    /// One condition (<c>FUN_140676950</c>, docs/game/dialogue.md "Conditions"): <c>who</c> 0 tests the speaker, any other value the target. Yes/no conditions pass when the computed
+    /// answer equals value &gt; 0; counts compare by <c>compare by</c> (Num3: 1 &lt;, 2 &gt;, else ==; Num2: 1 &lt;, else &gt;=). Conditions whose inputs Meitou does not have
+    /// (squad memory flags, building locks, slavery, town walls, missions, personality functions) compute "no".
+    /// </summary>
+    bool Condition(World world, Conversation c, DialogueCondition dc, CharacterId me, CharacterCold mc, CharacterId other)
+    {
+        var subjectId = dc.Who == 0 ? me : other;
+        var s = Cold(world, subjectId);
+        bool b = dc.Value > 0;
+        bool Bool(bool computed) => computed == b;
+        bool Num3(double v) => dc.CompareBy switch { 1 => v < dc.Value, 2 => v > dc.Value, _ => v == dc.Value };
+        bool Num2(double v) => dc.CompareBy == 1 ? v < dc.Value : v >= dc.Value;
+        if (dc.Condition == 76) return Bool(s is not null);
+        if (dc.Condition == 13) return Num3(counters.GetValueOrDefault((me, c.Event)).Count);
+        if (s is null) return dc.Condition is 6 or 15 or 34 or 51 || !b;
+        int meF = mc.Faction, sF = s.Faction;
+        var relations = data.Relations;
+        switch (dc.Condition)
+        {
+            case 6 or 15 or 34 or 51: return true;
+            case 1: return Num2(sF == meF ? 100 : relations.Contains(meF) && relations.Contains(sF) ? (int)relations.Get(meF, sF) : 0);
+            case 2: return Num2(world.Player.Money);
+            case 3 or 10 or 12: return Num3(0);
+            case 4 or 5:
+                return Bool(Cold(world, s.Carrying) is { } body && (body.Medical?.Dead ?? false) == (dc.Condition == 5) && (body.Bounties?.AmountFor(meF) ?? 0) > 0);
+            case 9: return Bool(s.SquadId >= 0 && world.Squads.Find(s.SquadId)?.Shop is not null);
+            case 14: return Bool(s.IsImprisoned);
+            case 16:
+            {
+                var whom = subjectId == me ? other : subjectId;
+                return Bool(Position(world, whom) is { } p && Position(world, me) is { } q && Vector3.DistanceSquared(p, q) < 67600);
+            }
+            case 18:
+            {
+                var whom = subjectId == me ? other : subjectId;
+                return Num2(mc.SquadId >= 0 && met.TryGetValue((mc.SquadId, whom), out double at) ? world.GameHours - at : 0);
+            }
+            case 17: return Bool(mc.SquadId >= 0 && world.Squads.Find(mc.SquadId)?.HomeBuilding is { } home && Position(world, subjectId) is { } inside && InBuilding(home, inside));
+            case 19: return Bool(s.SquadId < 0 || world.Squads.Find(s.SquadId)?.Leader == subjectId);
+            case 20:
+            {
+                var whom = subjectId == me ? other : subjectId;
+                return Bool(mc.SquadId >= 0 && met.ContainsKey((mc.SquadId, whom)));
+            }
+            case 24: return Bool(relations.Contains(meF) && relations.Contains(sF) && relations.IsAlly(meF, sF));
+            case 25: return Bool(relations.Contains(meF) && relations.Contains(sF) && relations.IsHostile(meF, sF));
+            case 27: return Bool(Parts(s, BodyPartType.Leg).Any(p => p.Flesh < 0));
+            case 28: return Bool(Parts(s, BodyPartType.Arm).Any(p => p.Flesh < 0));
+            case 29: return Bool(Parts(s, BodyPartType.Head).Any(p => Fraction(p) < 0.2f));
+            case 30 or 42: return Bool(s.Medical is { Unconscious: false } m && m.Parts.Any(p => p.Template.Vital && Fraction(p) < 0.1f));
+            case 31: return Bool(Position(world, subjectId) is { } where && TownAt(where) is >= 0 and var town && (town >= data.SiteFactions.Count || data.SiteFactions[town] != world.Player.Faction));
+            case 32: return subjectId == me ? b : Bool(Speed(world, subjectId) > (world.Characters.TryResolveNext(subjectId, out int rs) ? world.Characters.Next[rs].WalkSpeed * 1.2f : float.MaxValue));
+            case 33: return Bool(CopsAround(world, me));
+            case 35: return Num3(SquadOf(world, subjectId).Count(m => world.Characters.IsAlive(m)));
+            case 36: return Bool(s.IsPlayer || (world.Player.Faction >= 0 && sF == world.Player.Faction));
+            case 38: return Bool(SquadOf(world, subjectId).All(m => Cold(world, m)?.Fighter?.IsAnimal == true));
+            case 40: return Num2(s.RecentlyWanted > 0 || s.Recognition >= 1 ? s.Bounties?.AmountFor(meF) ?? 0 : 0);
+            case 41: return Bool(s.Medical is { Unconscious: true, Dead: false });
+            case 43: return Bool(SquadOf(world, subjectId).All(m => Cold(world, m)?.Medical?.Incapacitated != false));
+            case 44: return Bool(s.Medical?.Dead == true);
+            case 45: return Bool(s.Appearance?.Female == true);
+            case 46: return b && Cold(world, s.Carrying) is { Medical.Dead: false, NpcClass: FundamentalType.Adventurer or FundamentalType.Bandit or FundamentalType.Slave or FundamentalType.Civilian };
+            case 47: return Num2(s.Bounties?.AmountFor(meF) ?? 0);
+            case 48: return Bool(s.Fighter is { IsAnimal: false, Weapon: null });
+            case 56: return Bool(s.InCombat);
+            case 60: return Bool(Position(world, me) is { } here && NearestTownOf(sF, here) is { } d && d <= 23040);
+            case 63: return Bool(s.IsImprisoned && s.InWhat is { } cage && world.Fixtures.Find(cage)?.Lock is { EffectivelyLocked: true });
+            case 65: return Bool(s.Race is not null && s.Race.StringId == mc.Race?.StringId);
+            case 66: return Bool(s.IsPlayer && world.Player.Money >= (s.Bounties?.AmountFor(meF) ?? 0));
+            case 67: return Bool((s.Orders & CharacterOrders.Sneak) != 0 && !s.InCombat);
+            case 71: return Bool(s.Medical is { } fed && fed.Hunger < 1.7f);
+            case 72:
+            {
+                var looks = SquadOf(world, subjectId).Select(m => Cold(world, m)?.Appearance?.Female).Where(f => f is not null).ToArray();
+                return Bool(looks.Length == 0 || (looks.Contains(true) && looks.Contains(false)));
+            }
+            case 74: return Num3(-1);
+            case 77:
+                return s.NpcClass is FundamentalType.LawEnforcement or FundamentalType.Trader or FundamentalType.Diplomat or FundamentalType.Military ? !b : b;
+            case 79: return Bool(s.Race?.IsRobot == true || (s.Medical?.Parts.Any(p => p.Limb == Bodies.LimbState.Replaced) ?? false));
+            default: return Bool(false);
+        }
+    }
+
+    /// <summary>DC_IN_MY_BUILDING, engine reading (as the lock rounds'): within the building's farthest node or bed + 10 (at least 30) of its origin, on the ground.</summary>
+    static bool InBuilding(Meitou.Data.World.TownBuilding b, Vector3 at)
+    {
+        float r = 0;
+        foreach (var s in b.Spots) r = MathF.Max(r, Vector2.Distance(new(s.Position.X, s.Position.Z), new(b.Position.X, b.Position.Z)));
+        r = MathF.Max(30, r + 10);
+        return Vector2.DistanceSquared(new(at.X, at.Z), new(b.Position.X, b.Position.Z)) <= r * r;
+    }
+
+    static IEnumerable<Bodies.HealthPart> Parts(CharacterCold c, BodyPartType type) => c.Medical?.Parts.Where(p => p.Template.Type == type) ?? [];
+
+    static float Fraction(Bodies.HealthPart p) => p.Flesh / MathF.Max(1e-3f, p.MaxHp);
+
+    static Vector3? Position(World world, CharacterId id) => world.Characters.TryResolveNext(id, out int s) ? world.Characters.Next[s].Position : null;
+
+    static float Speed(World world, CharacterId id) =>
+        world.Characters.TryResolveNext(id, out int s) ? new Vector2(world.Characters.Next[s].Velocity.X, world.Characters.Next[s].Velocity.Z).Length() : 0;
+
+    /// <summary>DC_COPS_AROUND, engine reading of the speaker's sensed law enforcement: an awake law-enforcement NPC within the outdoor sight.</summary>
+    static bool CopsAround(World world, CharacterId me)
+    {
+        if (Position(world, me) is not { } at) return false;
+        var table = world.Characters;
+        float r = AggroSystem.OutdoorSight;
+        for (int i = 0; i < table.HighWater; i++)
+            if (table.Next[i].Alive && table.Cold(i) is { NpcClass: FundamentalType.LawEnforcement, Medical.Incapacitated: false } && table.IdOf(i) != me
+                && Vector3.DistanceSquared(table.Next[i].Position, at) <= r * r) return true;
+        return false;
+    }
+
+    /// <summary>The ground distance from <paramref name="at"/> to the nearest placed town of <paramref name="faction"/>; null: none.</summary>
+    float? NearestTownOf(int faction, Vector3 at)
+    {
+        float? best = null;
+        for (int i = 0; i < data.Sites.Count && i < data.SiteFactions.Count; i++)
+        {
+            if (data.SiteFactions[i] != faction) continue;
+            float d = Vector2.Distance(new(at.X, at.Z), new(data.Sites[i].Position.X, data.Sites[i].Position.Z));
+            if (best is null || d < best) best = d;
+        }
+        return best;
+    }
+}

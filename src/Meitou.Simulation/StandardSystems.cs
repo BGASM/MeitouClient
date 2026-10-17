@@ -18,8 +18,26 @@ public enum StandardParts
     Animation = 64,
     Feed = 128,
     Retaliation = 256,
+    /// <summary>First aid and resting (<see cref="Meitou.Simulation.FirstAid.FirstAidSystem"/>).</summary>
+    FirstAid = 512,
+    /// <summary>Fights started by faction hostility, the leash and standing down (<see cref="AggroSystem"/>); with it the player's assaults and killings change the relations.</summary>
+    Aggro = 1024,
+    /// <summary>NPC squads running away from a lost fight (<see cref="FleeSystem"/>), by the relations of the data.</summary>
+    Flee = 2048,
+    /// <summary>Carrying downed characters, the rescue job and looting (<see cref="Meitou.Simulation.Carrying.CarrySystem"/>).</summary>
+    Carry = 4096,
+    /// <summary>Crimes and bounties (<see cref="Meitou.Simulation.Crime.CrimeSystem"/>): pending crimes from the player's deeds, witnesses, the police; the arrests, fines and jail (<see cref="Meitou.Simulation.Crime.ArrestSystem"/>) and the lock orders (<see cref="Meitou.Simulation.Locks.LockSystem"/>) come with it.</summary>
+    Crime = 8192,
+    /// <summary>Shops, prices and trading (<see cref="Meitou.Simulation.Trading.TradeSystem"/>).</summary>
+    Trade = 16384,
+    /// <summary>The AI packages of the squads and their members' goals (<see cref="Meitou.Simulation.Ai.AiSystem"/>); runs right after the player system.</summary>
+    Ai = 32768,
+    /// <summary>Player construction (<see cref="Meitou.Simulation.Construction.ConstructionSystem"/>): placing sites, building and dismantling them, the auto-job.</summary>
+    Construction = 65536,
+    /// <summary>Talking to NPCs: the Talk order and the conversation (<see cref="Meitou.Simulation.Dialogue.DialogueSystem"/>).</summary>
+    Dialogue = 131072,
     /// <summary>What the game runs.</summary>
-    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation,
+    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee | Carry | Crime | Trade | Ai | Construction | Dialogue,
 }
 
 /// <summary>What <see cref="StandardSystems.Build"/> builds and with which settings; the defaults are the game's.</summary>
@@ -41,6 +59,19 @@ public sealed class StandardSystemOptions
     /// <summary>Null: the animation system's default; the game passes the CONSTANTS value.</summary>
     public float? AnimationBlendRate { get; init; }
     public FeedSettings? Feed { get; init; }
+    public Meitou.Simulation.Dialogue.DialogueSettings? Dialogue { get; init; }
+    public Meitou.Simulation.FirstAid.FirstAidSettings? FirstAid { get; init; }
+    public AggroSettings? Aggro { get; init; }
+    public Meitou.Simulation.Carrying.CarrySettings? Carry { get; init; }
+    public Meitou.Simulation.Crime.CrimeSettings? Crime { get; init; }
+    public Meitou.Simulation.Crime.ArrestSettings? Arrest { get; init; }
+    public Meitou.Simulation.Trading.TradeSettings? Trade { get; init; }
+    public Meitou.Simulation.Ai.AiSettings? Ai { get; init; }
+    public Meitou.Simulation.Construction.ConstructionSettings? Construction { get; init; }
+    /// <summary>The rigs the characters are drawn with: given, the physics ragdolls run (after the animation); null, the fall and lying clips stand in for them.</summary>
+    public Meitou.Data.Characters.CharacterRigs? Ragdolls { get; init; }
+    /// <summary>What ragdolls fall onto (null: the walkable ground, no buildings).</summary>
+    public Meitou.Simulation.Ragdolls.IRagdollEnvironment? RagdollEnvironment { get; init; }
 }
 
 /// <summary>The built systems in tick order, with the ones the host talks to.</summary>
@@ -51,6 +82,16 @@ public sealed class StandardSystemSet
     public MovementSystem? Movement { get; init; }
     /// <summary>Built when combat, pursuit or retaliation is asked for.</summary>
     public CombatSystem? Combat { get; init; }
+    public AggroSystem? Aggro { get; init; }
+    public Meitou.Simulation.Carrying.CarrySystem? Carry { get; init; }
+    public Meitou.Simulation.Crime.CrimeSystem? Crime { get; init; }
+    public Meitou.Simulation.Crime.ArrestSystem? Arrest { get; init; }
+    public Meitou.Simulation.Locks.LockSystem? Locks { get; init; }
+    public Meitou.Simulation.Trading.TradeSystem? Trade { get; init; }
+    public Meitou.Simulation.Ai.AiSystem? Ai { get; init; }
+    public Meitou.Simulation.Construction.ConstructionSystem? Construction { get; init; }
+    public Meitou.Simulation.Ragdolls.RagdollSystem? Ragdolls { get; init; }
+    public Meitou.Simulation.Dialogue.DialogueSystem? Dialogue { get; init; }
 }
 
 /// <summary>
@@ -61,14 +102,27 @@ public sealed class StandardSystemSet
 /// <list type="number">
 /// <item><b>Population first</b>: it takes the focus command in <c>Inputs</c> and loads, spawns and unloads in <c>SlowWorld</c>, so every system after it sees the characters it made.
 /// <b>Player before movement</b>: the player system applies <c>SelectCommand</c>/<c>StopCommand</c> in <c>Inputs</c> and the movement system's <c>MoveOrder</c> in the same step reads the selection that results.</item>
+/// <item><b>AI after the player, before pursuit and movement</b>: its <c>Think</c> (a character's goal, written into its own task and path flags) runs before the movement
+/// system's, which follows the task the same tick; its <c>SlowWorld</c> sees the squads the population made this tick and gives them their blackboards. It adds nothing
+/// to the hash until a squad has AI packages.</item>
 /// <item><b>Pursuit before movement</b>: pursuit raises <c>NeedPath</c> in its <c>Schedule</c> and the movement system answers the same tick.</item>
 /// <item><b>Body before combat</b>: the body system ticks the medical state (<c>TickMedical</c> is off in the combat system) and the combat
 /// system reads its result in the same tick; with it on, combat does that itself.</item>
 /// <item><b>Combat before animation and retaliation</b>: the combat system swaps its read and write arrays at the end of its <c>SlowWorld</c>,
 /// so a system placed after it sees the new tick's combat state and one placed before it the old one. Retaliation reads the combat state of the tick that just ended
 /// (animation is placed after combat in the game's order, and the golden hashes pin it). Moving the swap to a separate end-of-tick hook would change what retaliation reads.</item>
+/// <item><b>Carry after body, before combat</b>: its <c>SlowWorld</c> sees the knock-outs of this tick's medical step and the corpses the body system removed, so a carrier that went down
+/// drops its load in the same tick; its <c>Inputs</c> come before combat's, so a carrier ordered to attack lets go of the body first. Everything it does is serial.</item>
+/// <item><b>Construction after carry, before combat</b>: its walks and work (all serial) see the characters the body and carry systems left this tick, and a builder ordered to attack lets go of its site before combat's <c>Inputs</c> run; it adds nothing to the hash until the player has a site.</item>
 /// <item><b>Feed after body</b>: the game's order; eating reads hunger the body system advanced in the same tick.</item>
-/// <item><b>Retaliation last</b>: it queues <c>AttackOrder</c>s for the next tick from <c>SlowWorld</c>, after combat has swapped its arrays.</item>
+/// <item><b>Retaliation, then aggro, last</b>: both defer <c>AttackOrder</c>s for the next tick (<see cref="World.Defer"/>) after combat has swapped its arrays; aggro's
+/// leash sweep sees the tasks every other system left, and its look (<c>Act</c>) runs after combat's, reading only the last tick's positions.
+/// <b>Flee after aggro</b>: a squad that breaks sends its runners off after every fight of the tick was ordered, and its stop orders are deferred like theirs.</item>
+/// <item><b>Crime last</b>: its witness sweep (<c>SlowWorld</c>) sees the positions, carry links and pending crimes every other system left this tick; the deeds are reported to it by
+/// combat (<c>Inputs</c>, commit, the bolt flight in <c>Schedule</c>) and carrying (<c>SlowWorld</c>), all serial. It adds nothing to the hash until a crime is pending. The arrest system
+/// right after it acts on the bookings and sightings of the same tick, then the lock system (its picks book crimes the next sweep sees).</item>
+/// <item><b>Trade after crime</b>: a caught fence is reported to the crime system from the trade's <c>Inputs</c>, and the shops are opened and restocked in <c>SlowWorld</c> after the
+/// population made the tick's squads. It adds nothing to the hash until a squad has a shop.</item>
 /// </list>
 /// An extra system a test wants (a probe, a poke) goes after these.
 /// </summary>
@@ -83,21 +137,67 @@ public static class StandardSystems
         MovementSystem? movement = null;
         CombatSystem? combat = null;
         if (Has(StandardParts.Population)) systems.Add(population = new PopulationSystem(data, o.Population));
-        if (Has(StandardParts.Player)) systems.Add(new PlayerSystem());
-        if (Has(StandardParts.Pursuit | StandardParts.Combat | StandardParts.Retaliation))
+        if (Has(StandardParts.Player)) systems.Add(new PlayerSystem(data));
+        Meitou.Simulation.Ai.AiSystem? ai = null;
+        if (Has(StandardParts.Ai)) systems.Add(ai = new Meitou.Simulation.Ai.AiSystem(data, o.Ai));
+        if (Has(StandardParts.Pursuit | StandardParts.Combat | StandardParts.Retaliation | StandardParts.Flee))
             combat = new CombatSystem(data.Combat.Techniques, data.Combat.Constants, data.Bodies.Constants, data.BodyOptions, o.AnimationLengths ?? new AnimationLengths(), o.Combat);
+        if (combat is not null && Has(StandardParts.Aggro)) combat.Relations = data.Relations;
         if (Has(StandardParts.Pursuit)) systems.Add(new PursuitSystem(combat!));
         if (Has(StandardParts.Movement)) systems.Add(movement = new MovementSystem(new PathService(walkability, o.SynchronousPaths)));
+        if (Has(StandardParts.FirstAid)) systems.Add(new FirstAid.FirstAidSystem(data.Bodies.Constants, data.BodyOptions, data.Items, o.FirstAid));
         if (Has(StandardParts.Body)) systems.Add(new BodySystem(data.Bodies.Constants, data.BodyOptions, o.BodyTimeScale));
+        Meitou.Simulation.Carrying.CarrySystem? carry = null;
+        Meitou.Simulation.Ragdolls.RagdollSystem? ragdolls = null;
+        if (Has(StandardParts.Carry))
+        {
+            // The lift takes the length of the shoulder lift left clip (1 s when the lengths are not known).
+            carry = new Meitou.Simulation.Carrying.CarrySystem(data.Bodies.Constants, data.BodyOptions, o.AnimationLengths?.Of(Meitou.Simulation.Carrying.CarrySystem.LiftClip) ?? 1, o.Carry);
+            if (Has(StandardParts.Aggro)) carry.Relations = data.Relations;
+            systems.Add(carry);
+        }
+        Meitou.Simulation.Construction.ConstructionSystem? construction = null;
+        if (Has(StandardParts.Construction)) systems.Add(construction = new Meitou.Simulation.Construction.ConstructionSystem(data, o.Construction));
         if (Has(StandardParts.Combat)) systems.Add(combat!);
         if (Has(StandardParts.Animation))
         {
             var library = o.AnimationLibrary ?? AnimationLibrary.FromDatabase(data.Db);
             var lengths = o.AnimationLengths ?? new AnimationLengths();
-            systems.Add(new AnimationSystem(library, lengths, o.AnimationBlendRate ?? 4, combat));
+            var animation = new AnimationSystem(library, lengths, o.AnimationBlendRate ?? 4, combat);
+            systems.Add(animation);
+            // Ragdolls right after the animation: they start from and pin to this tick's pose, and the whole body's position is theirs before anything later reads it.
+            if (o.Ragdolls is not null) systems.Add(ragdolls = new Meitou.Simulation.Ragdolls.RagdollSystem(o.Ragdolls, o.RagdollEnvironment));
+            animation.Ragdolls = ragdolls;
+            // The stealth knock-out swing lasts the length of the knockout record's clip.
+            if (carry is not null && library.IndexOf(Meitou.Simulation.Carrying.CarrySystem.KnockoutClip) is >= 0 and var ko) carry.KnockoutSeconds = lengths.Of(library.Definitions[ko].Clip);
         }
         if (Has(StandardParts.Feed)) systems.Add(new FeedSystem(data.Items, o.Feed));
         if (Has(StandardParts.Retaliation)) systems.Add(new RetaliationSystem(combat!));
-        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat };
+        AggroSystem? aggro = null;
+        if (Has(StandardParts.Aggro)) systems.Add(aggro = new AggroSystem(data.Relations, o.Aggro));
+        if (carry is not null) carry.Aggro = aggro;
+        if (Has(StandardParts.Flee)) systems.Add(new FleeSystem(data.Relations, combat!, o.Aggro?.SightRange ?? AggroSystem.OutdoorSight));
+        Meitou.Simulation.Crime.CrimeSystem? crime = null;
+        Meitou.Simulation.Crime.ArrestSystem? arrest = null;
+        Meitou.Simulation.Locks.LockSystem? locks = null;
+        if (Has(StandardParts.Crime))
+        {
+            // Last: its sweep sees every position, task and carry link the tick left; the deeds come in from combat and carrying in their own serial steps.
+            systems.Add(crime = new Meitou.Simulation.Crime.CrimeSystem(data.Relations, o.Crime));
+            if (combat is not null) combat.Crimes = crime;
+            if (carry is not null) carry.Crimes = crime;
+            // Right after it: the police act on this tick's bookings and sightings; the lock orders (picking, getting out) report their crimes to it.
+            systems.Add(arrest = new Meitou.Simulation.Crime.ArrestSystem(crime, data.Bodies.Constants, o.Arrest) { Carry = carry });
+            systems.Add(locks = new Meitou.Simulation.Locks.LockSystem(data.Bodies.Constants, data.BodyOptions) { Crimes = crime });
+        }
+        Meitou.Simulation.Trading.TradeSystem? trade = null;
+        if (Has(StandardParts.Trade))
+        {
+            systems.Add(trade = new Meitou.Simulation.Trading.TradeSystem(data, o.Trade));
+            trade.Crimes = crime;
+        }
+        Meitou.Simulation.Dialogue.DialogueSystem? talk = null;
+        if (Has(StandardParts.Dialogue)) systems.Add(talk = new Meitou.Simulation.Dialogue.DialogueSystem(data, o.Dialogue, population));
+        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime, Arrest = arrest, Locks = locks, Trade = trade, Ai = ai, Construction = construction, Ragdolls = ragdolls, Dialogue = talk };
     }
 }

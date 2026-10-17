@@ -40,8 +40,17 @@ public sealed record SkyClock(float LatitudeDegrees, float Sunrise, float Sunset
     public Vector3 SunDirection(float hour)
     {
         float a = Phase(hour) * MathF.PI, lat = LatitudeDegrees * MathF.PI / 180f;
-        return new Vector3(MathF.Cos(a), MathF.Cos(lat) * MathF.Sin(a), MathF.Sin(lat) * MathF.Sin(a));
+        var sun = new Vector3(MathF.Cos(a), MathF.Cos(lat) * MathF.Sin(a), MathF.Sin(lat) * MathF.Sin(a));
+        if (SunTurn == 0) return sun;
+        float c = MathF.Cos(SunTurn), s = MathF.Sin(SunTurn);
+        return new Vector3(sun.X * c - sun.Z * s, sun.Y, sun.X * s + sun.Z * c);
     }
+
+    /// <summary>
+    /// Presentation only (not the game's): turns the sun's path about the vertical by this many radians, counter-clockwise in X/Z, so a staged
+    /// view (the Meitou title) can put the sun where its framing wants it. 0 for the game.
+    /// </summary>
+    public float SunTurn { get; init; }
 }
 
 /// <summary>

@@ -128,40 +128,64 @@ public sealed unsafe class TerrainTextures : IDisposable
 
 
     /// <param name="layerSize">Edge length every layer texture is brought to (the arrays need one size).</param>
-    public static TerrainTextures Create(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets, int layerSize = 512, int worldColourSize = 2048)
+    /// <summary>
+    /// What <see cref="Create"/> reads and works out on the CPU (about 2.5 s at a cold start): the blend information, the biomes, the overlay map windows, the decoded
+    /// blend map, the ground colour baked from it and the world colour map box-filtered from the 64 colour tiles, the foliage biome map. Made by <see cref="Prepare"/>
+    /// on any thread, so a game can make it on a worker while its window keeps drawing.
+    /// </summary>
+    public sealed class Source
     {
-        var info = BlendInfoFile.Open(install);
-        var all = BiomeTerrain.ByIndex(db);
-        var messages = new List<string>();
-        MapWindows? maps = null;
-        try { maps = MapWindows.Open(install, messages); }
+        internal BlendInfoFile Info = null!;
+        internal Dictionary<uint, BiomeTerrain> All = null!;
+        internal MapWindows? Maps;
+        internal RgbaImage? Blend;
+        internal byte[]? Ground, WorldColour;
+        internal int WorldColourSize;
+        internal FoliageBiomeMap? BiomeMap;
+        internal readonly List<string> Messages = [];
+    }
+
+    /// <summary>The CPU part of <see cref="Create"/>, on any thread (it makes no GPU resource).</summary>
+    public static Source Prepare(GameInstall install, GameDatabase db, int worldColourSize = 2048)
+    {
+        var s = new Source { Info = BlendInfoFile.Open(install), All = BiomeTerrain.ByIndex(db) };
+        try { s.Maps = MapWindows.Open(install, s.Messages); }
         catch (Exception e) when (e is IOException or InvalidDataException)
         {
-            messages.Add($"overlay maps: {e.Message}");
+            s.Messages.Add($"overlay maps: {e.Message}");
         }
-        var t = new TerrainTextures(gpu, install, assets, info, [.. all.Values], layerSize, maps);
-        t.Messages.AddRange(messages);
-        if (maps is null) t.MapState = 0;
+        try { s.Blend = TextureLoader.LoadImage(File.ReadAllBytes(Path.Combine(install.DataDirectory, TerrainMaps.BlendMap))); }
+        catch (Exception e) when (e is IOException or InvalidDataException)
+        {
+            s.Messages.Add($"biome textures: {e.Message}");
+        }
+        try { PrepareWorld(install, s, worldColourSize); }
+        catch (Exception e) when (e is IOException or InvalidDataException or ArgumentException)
+        {
+            s.Messages.Add($"world maps: {e.Message}");
+        }
+        try { s.BiomeMap = FoliageBiomeMap.Open(install); }
+        catch (Exception e) when (e is IOException or InvalidDataException or ArgumentException)
+        {
+            s.Messages.Add($"biome map: {e.Message}");
+        }
+        return s;
+    }
+
+    public static TerrainTextures Create(GpuContext gpu, GameInstall install, GameDatabase db, AssetLocator assets, int layerSize = 512, int worldColourSize = 2048, Source? source = null)
+    {
+        source ??= Prepare(install, db, worldColourSize);
+        var t = new TerrainTextures(gpu, install, assets, source.Info, [.. source.All.Values], layerSize, source.Maps);
+        t.Messages.AddRange(source.Messages);
+        if (source.Maps is null) t.MapState = 0;
         else
         {
             t.MapState = 1;
             t.AllocateMaps();
         }
-        try { t.BuildBiomes(); }
-        catch (Exception e) when (e is IOException or InvalidDataException)
-        {
-            t.Messages.Add($"biome textures: {e.Message}");
-        }
-        try { t.BuildWorld(install, db, all, worldColourSize); }
-        catch (Exception e) when (e is IOException or InvalidDataException or ArgumentException)
-        {
-            t.Messages.Add($"world maps: {e.Message}");
-        }
-        try { t.biomeMap = FoliageBiomeMap.Open(install); }
-        catch (Exception e) when (e is IOException or InvalidDataException or ArgumentException)
-        {
-            t.Messages.Add($"biome map: {e.Message}");
-        }
+        if (source.Blend is { } blend) t.BuildBiomes(blend);
+        t.BuildWorld(source);
+        t.biomeMap = source.BiomeMap;
         return t;
     }
 
@@ -216,7 +240,7 @@ public sealed unsafe class TerrainTextures : IDisposable
             if (state[r].Resident) bits[r >> 5] |= 1u << (r & 31);
     }
 
-    void BuildBiomes()
+    void BuildBiomes(RgbaImage blend)
     {
         if (biomes.Count == 0) return;
         // The cell table (GL RGBA8UI, nearest, clamped), written whole by UploadCells.
@@ -234,7 +258,6 @@ public sealed unsafe class TerrainTextures : IDisposable
         using (var batch = Gpu.Uploads.Begin())
             batch.Write(paramTexture.Texture, 0, 0, Rect(0, 0, TerrainShaders.ParamTexels, biomes.Count), new byte[biomes.Count * TerrainShaders.ParamTexels * 16]);
 
-        var blend = TextureLoader.LoadImage(File.ReadAllBytes(Path.Combine(install.DataDirectory, TerrainMaps.BlendMap)));
         blendTexture = Rgba8(blend.Width, blend.Height, blend.Pixels, mipmaps: false, "terrain blend map");
         HasBiomes = true;
     }
@@ -290,7 +313,7 @@ public sealed unsafe class TerrainTextures : IDisposable
         }
         catch (Meitou.Rendering.Gpu.Core.VulkanException e)
         {
-            Messages.Add($"terrain layer array allocation: {e.Message}; try a smaller --layer-size");
+            Messages.Add($"terrain layer array allocation: {e.Message}; try a higher --texture-quality");
             return null;
         }
     }
@@ -710,10 +733,27 @@ public sealed unsafe class TerrainTextures : IDisposable
     /// (what the textured layers fade to, and finer than the game's 128² <c>distant.png</c>), and the colour map
     /// shrunk to <paramref name="colourSize"/>² (0: none).
     /// </summary>
-    void BuildWorld(GameInstall install, GameDatabase db, Dictionary<uint, BiomeTerrain> all, int colourSize)
+    /// <summary>The ground colour and world colour textures from what <see cref="PrepareWorld"/> made.</summary>
+    void BuildWorld(Source s)
     {
-        var blend = TextureLoader.LoadImage(File.ReadAllBytes(Path.Combine(install.DataDirectory, TerrainMaps.BlendMap)));
-        var field = BiomeField.Bake(info, blend.Width, blend.Height, blend.Pixels,
+        if (s.Ground is { } ground && s.Blend is { } blend)
+        {
+            groundTexture = Rgba8(blend.Width, blend.Height, ground, mipmaps: true, "terrain ground colour");
+            HasGround = true;
+        }
+        if (s.WorldColour is { } colour)
+        {
+            worldColourTexture = Rgba8(s.WorldColourSize, s.WorldColourSize, colour, mipmaps: true, "terrain world colour");
+            HasWorldColour = true;
+        }
+    }
+
+    /// <summary>The ground colour baked from the blend map and the world colour map box-filtered from the colour tiles (CPU, any thread).</summary>
+    static void PrepareWorld(GameInstall install, Source s, int colourSize)
+    {
+        if (s.Blend is not { } blend) return;
+        var all = s.All;
+        var field = BiomeField.Bake(s.Info, blend.Width, blend.Height, blend.Pixels,
             c => all.TryGetValue(c, out var b) ? new Vector4(b.GroundColour * b.BrightnessFix, 1) : null, new Vector4(0.6f, 0.55f, 0.45f, 1));
         var rgba = new byte[field.Length * 4];
         for (int i = 0; i < field.Length; i++)
@@ -721,8 +761,7 @@ public sealed unsafe class TerrainTextures : IDisposable
             var v = Vector4.Clamp(field[i], Vector4.Zero, Vector4.One) * 255;
             (rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2], rgba[i * 4 + 3]) = ((byte)v.X, (byte)v.Y, (byte)v.Z, 255);
         }
-        groundTexture = Rgba8(blend.Width, blend.Height, rgba, mipmaps: true, "terrain ground colour");
-        HasGround = true;
+        s.Ground = rgba;
         if (colourSize <= 0) return;
 
         // 8 x 8 colour tiles, each box-filtered down to colourSize / 8.
@@ -750,8 +789,7 @@ public sealed unsafe class TerrainTextures : IDisposable
                     (colour[d], colour[d + 1], colour[d + 2], colour[d + 3]) = ((byte)(r / n), (byte)(g / n), (byte)(b / n), 255);
                 }
         });
-        worldColourTexture = Rgba8(colourSize, colourSize, colour, mipmaps: true, "terrain world colour");
-        HasWorldColour = true;
+        (s.WorldColour, s.WorldColourSize) = (colour, colourSize);
     }
 
     /// <summary>The terrain material's textures (null where one does not exist yet), for the native draws that read them by bindless index.</summary>

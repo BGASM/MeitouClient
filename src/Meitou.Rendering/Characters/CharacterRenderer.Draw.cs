@@ -31,25 +31,36 @@ internal sealed unsafe partial class CharacterRenderer
     readonly List<Batch> active = [];
     Transient instances;
     bool depthPass, motionPass;
+    float shadowLodFloor;
 
     /// <summary>The fog cull (set once by the world frame; the colour and motion passes use it, not the shadow cascades): characters wholly hidden by the fog the eye is in are skipped.</summary>
     internal FogVolumes? FogCull { get; set; }
+
+    /// <summary>Room masks used to give indoor characters the same indirect-light gain as their surroundings.</summary>
+    internal WorldObjectRenderer? InteriorObjects { get; set; }
 
     /// <summary>Draws the characters seen from <paramref name="eye"/> through <paramref name="frustum"/> into the open pass.</summary>
     public void Draw(Matrix4x4 viewProjection, Vector3 eye, Vector4[] frustum, Vector3 light, Vector3 fogColour, float fogDistance) =>
         DrawView(new ViewConstants { ViewProjection = viewProjection, Eye = eye, LightDir = light, FogColour = fogColour, FogDistance = fogDistance }, eye, frustum);
 
-    /// <summary>Draws the characters' depth for a shadow cascade (<see cref="CharacterShaders.DepthFragment"/>); levels chosen from <paramref name="lodEye"/>.</summary>
-    public void DrawDepth(Matrix4x4 worldToClip, Vector3 lodEye, Vector4[] frustum)
+    /// <summary>Draws the characters' depth for a shadow cascade (<see cref="CharacterShaders.DepthFragment"/>); levels chosen from <paramref name="lodEye"/>, never finer than
+    /// <paramref name="lodFloor"/> (<see cref="ShadowLod.ObjectLodFloor"/> of a far cascade's texel; 0: the distance rule alone), as the objects.</summary>
+    public void DrawDepth(Matrix4x4 worldToClip, Vector3 lodEye, Vector4[] frustum, float lodFloor = 0)
     {
-        depthPass = true;
+        (depthPass, shadowLodFloor) = (true, lodFloor);
         try { DrawView(new ViewConstants { ViewProjection = worldToClip, Eye = lodEye }, lodEye, frustum); }
-        finally { depthPass = false; }
+        finally { (depthPass, shadowLodFloor) = (false, 0); }
     }
 
-    void DrawView(in ViewConstants view, Vector3 eye, Vector4[] frustum)
+    void DrawView(in ViewConstants worldView, Vector3 eye, Vector4[] frustum)
     {
         var cpu = Stopwatch.StartNew();
+        // Drawn relative to the view's eye (the vertex program adds it back for the shading): skinned in world floats, an animated vertex far from
+        // the origin (the Hub, tens of thousands of units out) rounds to a different step every frame and the character visibly jiggles.
+        var origin = worldView.Eye;
+        var view = worldView;
+        view.ViewProjection = FromOrigin(origin, worldView.ViewProjection);
+        view.PreviousViewProjection = FromOrigin(origin, worldView.PreviousViewProjection);
         DrawnCharacters = DrawnParts = DrawCalls = 0;
         DrawnTriangles = 0;
         Array.Clear(LevelParts);
@@ -58,22 +69,34 @@ internal sealed unsafe partial class CharacterRenderer
         active.Clear();
 
         // 1. Cull, choose each part's level and group the instances by (mesh part, level, sidedness).
-        for (int i = 0; i < liveCount; i++)
+        // A portrait (portraitLive) draws that one character, unculled.
+        for (int i = portraitLive >= 0 ? portraitLive : 0, end = portraitLive >= 0 ? portraitLive + 1 : liveCount; i < end; i++)
         {
             ref var l = ref live[i];
-            if (!FrustumTests.SphereVisible(frustum, l.Centre, l.Radius)) continue;
-            if (!depthPass && FogCull?.Hidden(l.Centre, l.Radius, FogVolumes.CullKind.Characters) == true) continue;
+            if (portraitLive < 0 && (l.PortraitOnly || !FrustumTests.SphereVisible(frustum, l.Centre, l.Radius))) continue;
+            if (!depthPass && portraitLive < 0 && FogCull?.Hidden(l.Centre, l.Radius, FogVolumes.CullKind.Characters) == true) continue;
             DrawnCharacters++;
+            bool interior = portraitLive < 0 && InteriorObjects?.InteriorAt(l.Centre) is not null;
             foreach (var part in l.Asset.Parts)
             {
-                Matrix4x4 model = l.World;
-                if (!part.Shared) model = attach[l.AttachBase + part.AttachIndex] * l.World;
+                if (!part.ShowsWith(l.WeaponDrawn)) continue;
+                var world = Relative(l.World, origin);
+                Matrix4x4 model = world;
+                if (!part.Shared) model = attach[l.AttachBase + part.AttachIndex] * world;
                 var mesh = part.Mesh;
-                float value = MeshLod.Value(eye, Vector3.Transform(part.BoundsCentre, model), part.BoundsRadius * model.ScaleLength(), depthPass ? LodBias * ShadowLodBias : LodBias);
+                // The model is relative to the view's eye (above), so the LOD eye is too: with the world eye every part far from the origin took its last level.
+                float value = MeshLod.Value(eye - origin, Vector3.Transform(part.BoundsCentre, model), part.BoundsRadius * model.ScaleLength(), depthPass ? LodBias * ShadowLodBias : LodBias);
+                // In a shadow map hair is a silhouette, so it takes the rule's own distances there (its levels start CharacterContent.HairLodScale times farther for the picture).
+                if (depthPass) value = Math.Max(part.Material.Shading == CharacterShaders.ShadeHair && !l.Asset.Animal ? value * CharacterContent.HairLodScale : value, shadowLodFloor);
                 int level = MeshLod.Select(mesh.Distances, value);
+                if (depthPass && part.ShadowDistances is { } shadowLevels && MeshLod.Select(shadowLevels, value) is int k && k > 0) level = part.ShadowFirst + k - 1;   // the body's shadow-only levels
                 bool twoSided = part.Material.DoubleSided;
-                var instance = new CharInstance { Model = model, BoneBase = (uint)l.BoneBase, Material = (uint)part.MaterialSlot, MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
-                if (motionPass) instance.PreviousModel = part.Shared ? l.State.PreviousWorld : l.State.PreviousAttach[part.AttachIndex] * l.State.PreviousWorld;
+                var instance = new CharInstance { Model = model, BoneBase = (uint)l.BoneBase, Material = (uint)part.MaterialSlot, Flags = interior ? 1u : 0u, MorphBase = part.Morphed ? l.Asset.MorphBase : 0 };
+                if (motionPass)
+                {
+                    var previousWorld = Relative(l.State.PreviousWorld, origin);
+                    instance.PreviousModel = part.Shared ? previousWorld : l.State.PreviousAttach[part.AttachIndex] * previousWorld;
+                }
                 DrawnParts++;
                 foreach (var gp in mesh.Parts)
                 {
@@ -111,7 +134,7 @@ internal sealed unsafe partial class CharacterRenderer
         job.Frame = nativeFrame.Prepare(in view, [bones.Binding, materials.Binding, content.Morphs.Binding(Gpu.Frame), previousBones.Binding]);
         job.Cull = depthPass ? Vk.CullModeFlags.None : Vk.CullModeFlags.BackBit;
         for (int a = 0; a < 9; a++) job.Rows[a] = new BufferBinding(instances.Handle, instances.Offset + (ulong)(16 * a));
-        job.Push = new CharacterPush { DepthIndex = motionPass ? motionDepth : 0 };
+        job.Push = new CharacterPush { DepthIndex = motionPass ? motionDepth : 0, Fill = new(Fill, 0) };
         job.RowCount = motionPass ? 9 : 5;
         if (job.Draws.Length < active.Count) job.Draws = new DrawJob.Draw[Math.Max(active.Count, job.Draws.Length * 2)];
         int n = 0;
@@ -133,11 +156,31 @@ internal sealed unsafe partial class CharacterRenderer
         }
         job.Count = n;
         var timer = depthPass ? depthTimer : colourTimer;
-        timer.Begin();
+        if (portraitLive < 0) timer.Begin();
         Gpu.Record(label, job);
-        timer.End();
+        if (portraitLive < 0) timer.End();
         LastDrawCpuMs = cpu.Elapsed.TotalMilliseconds;
-        if (!depthPass) drawCpu.Add(LastDrawCpuMs);
+        if (!depthPass && portraitLive < 0) drawCpu.Add(LastDrawCpuMs);
+    }
+
+    /// <summary><paramref name="world"/> with <paramref name="origin"/> taken off its translation.</summary>
+    static Matrix4x4 Relative(Matrix4x4 world, Vector3 origin)
+    {
+        world.Translation -= origin;
+        return world;
+    }
+
+    /// <summary><paramref name="m"/> (world to clip) for positions relative to <paramref name="origin"/>: translation(origin) × m, in double so the
+    /// origin's large coordinates cancel exactly.</summary>
+    static Matrix4x4 FromOrigin(Vector3 origin, in Matrix4x4 m)
+    {
+        double x = origin.X, y = origin.Y, z = origin.Z;
+        var r = m;
+        r.M41 = (float)(x * m.M11 + y * m.M21 + z * m.M31 + m.M41);
+        r.M42 = (float)(x * m.M12 + y * m.M22 + z * m.M32 + m.M42);
+        r.M43 = (float)(x * m.M13 + y * m.M23 + z * m.M33 + m.M43);
+        r.M44 = (float)(x * m.M14 + y * m.M24 + z * m.M34 + m.M44);
+        return r;
     }
 
     readonly Dictionary<GpuObjectPart, MotionHolder> motionNatives = [];

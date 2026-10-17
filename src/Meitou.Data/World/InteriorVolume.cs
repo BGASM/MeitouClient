@@ -1,0 +1,212 @@
+using System.Collections.Concurrent;
+using System.Numerics;
+using Meitou.Content;
+using Meitou.Data.Fcs;
+using Meitou.Data.Physics;
+
+namespace Meitou.Data.World;
+
+/// <summary>
+/// The indoor volume of a placed building (docs/formats/zones.md, "Interior view"): the collision of its <c>interior mask</c> parts placed with the building's
+/// node (position, rotation, <c>scale</c>), kept as the convex footprint of the hull on the ground plane and its height range. A point inside is indoors.
+/// </summary>
+/// <param name="PlacementId">The building's instance id (what <see cref="PlacedMesh.PlacementId"/> carries for its parts).</param>
+/// <param name="Footprint">Convex polygon of the hull in world X/Z, counter-clockwise.</param>
+public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, float YMin, float YMax)
+{
+    /// <summary>Whether <paramref name="p"/> is inside the footprint and height range, both widened by <paramref name="margin"/>.</summary>
+    public bool Contains(Vector3 p, float margin = 0)
+    {
+        if (p.Y < YMin - margin || p.Y > YMax + margin || Footprint.Length < 3) return false;
+        var q = new Vector2(p.X, p.Z);
+        for (int i = 0; i < Footprint.Length; i++)
+        {
+            var a = Footprint[i];
+            var e = Footprint[(i + 1) % Footprint.Length] - a;
+            float len = e.Length();
+            if (len < 1e-4f) continue;
+            // Counter-clockwise: inside is to the left of every edge.
+            if ((e.X * (q.Y - a.Y) - e.Y * (q.X - a.X)) / len < -margin) return false;
+        }
+        return true;
+    }
+
+    Lazy<FloorSurfaces>? floors;
+
+    /// <summary>
+    /// The floor (0..3) a character standing at <paramref name="feet"/> in this building is on, from the building's floor collision under it (made on first use;
+    /// 0 when nothing is hit). See <see cref="FloorSurfaces.FloorAt"/>.
+    /// </summary>
+    public int FloorAt(Vector3 feet) => floors?.Value.FloorAt(feet) ?? 0;
+
+    /// <summary>
+    /// The volume of a building placed at <paramref name="position"/> / <paramref name="rotation"/>, or null when it has no <c>interior mask</c> part with a
+    /// readable collision file, or is a gateway (walked under, not entered). <paramref name="collision"/> loads a record's collision path (shared, cached).
+    /// </summary>
+    public static InteriorVolume? For(GameDatabase db, GameRecord building, string placementId, Vector3 position, Quaternion rotation, InteriorCollisions collision)
+    {
+        if (building.GetBool("is gateway")) return null;
+        float scale = building.GetFloat("scale", 1);
+        var node = WorldObjectLayout.InstanceTransform(position, rotation, new Vector3(scale > 0 ? scale : 1));
+        var points = new List<Vector2>();
+        float yMin = float.MaxValue, yMax = float.MinValue;
+        foreach (var r in building.GetReferences("interior mask"))
+        {
+            if (db.Find(r.TargetStringId) is not { Type: FcsRecordType.BUILDING_PART } mask) continue;
+            if (collision.Vertices(mask.GetPath("xml collision")) is not { } vertices) continue;
+            foreach (var v in vertices)
+            {
+                var w = Vector3.Transform(v, node);
+                points.Add(new Vector2(w.X, w.Z));
+                yMin = MathF.Min(yMin, w.Y);
+                yMax = MathF.Max(yMax, w.Y);
+            }
+        }
+        if (points.Count < 3) return null;
+        var hull = ConvexHull2(points);
+        if (hull.Length < 3) return null;
+        return new InteriorVolume(placementId, hull, yMin, yMax)
+        {
+            floors = new Lazy<FloorSurfaces>(() => FloorSurfaces.For(db, building, placementId, position, rotation, node, collision)),
+        };
+    }
+
+    /// <summary>Andrew's monotone chain: the convex hull of <paramref name="points"/>, counter-clockwise (X right, Y = world Z).</summary>
+    public static Vector2[] ConvexHull2(List<Vector2> points)
+    {
+        var p = points.Distinct().OrderBy(v => v.X).ThenBy(v => v.Y).ToArray();
+        if (p.Length < 3) return p;
+        var h = new Vector2[p.Length * 2];
+        int k = 0;
+        static float Cross(Vector2 o, Vector2 a, Vector2 b) => (a.X - o.X) * (b.Y - o.Y) - (a.Y - o.Y) * (b.X - o.X);
+        for (int i = 0; i < p.Length; i++)
+        {
+            while (k >= 2 && Cross(h[k - 2], h[k - 1], p[i]) <= 0) k--;
+            h[k++] = p[i];
+        }
+        for (int i = p.Length - 2, t = k + 1; i >= 0; i--)
+        {
+            while (k >= t && Cross(h[k - 2], h[k - 1], p[i]) <= 0) k--;
+            h[k++] = p[i];
+        }
+        return h[..(k - 1)];
+    }
+}
+
+/// <summary>
+/// The floor collision of a building in the interior view, in world space, to tell which floor a character stands on (docs/formats/zones.md "Interior view"):
+/// the shapes of its ordinary parts (collision groups 9..12, floor 0..3) and its stairs (15..18), the groups the game's downward ray tests.
+/// </summary>
+public sealed class FloorSurfaces
+{
+    /// <summary>One part's triangles (three corners each) with its floor, whether it is stairs, its height range and its X/Z box.</summary>
+    sealed record Surface(int Floor, bool Stairs, Vector3[] Corners, float YMin, float YMax, Vector2 Min, Vector2 Max);
+
+    readonly List<Surface> surfaces = [];
+
+    /// <summary>How far above the feet the downward ray starts (game: 10 units above the character).</summary>
+    public const float RayStart = 10;
+
+    /// <summary>The share of a stairs shape's height from the top within which a hit counts as the floor above (game: the top 30 %).</summary>
+    public const float StairsTop = 0.3f;
+
+    /// <summary>
+    /// The surfaces of a building placed with <paramref name="node"/> (position, rotation, scale; part collision is in building space): its parts with
+    /// their <c>interior</c> list, leaving out doors, <c>passable</c> parts, <c>is unwalkable roof</c> parts, a <c>path mode</c> IGNORE building's parts and
+    /// furniture (the groups the ray does not test). Parts without a mesh are not laid out, so their collision is missing (engine limit).
+    /// </summary>
+    public static FloorSurfaces For(GameDatabase db, GameRecord building, string placementId, Vector3 position, Quaternion rotation, Matrix4x4 node,
+        InteriorCollisions collision)
+    {
+        var result = new FloorSurfaces();
+        if (building.GetInt("path mode", 2) == 0 || building.GetBool("is exterior furniture") || building.GetBool("is interior furniture")) return result;   // IGNORE: no floor groups
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var p in WorldObjectLayout.Building(db, building, placementId, position, rotation, new BuildingState { WithInterior = true }))
+        {
+            var part = p.Source;
+            if (p.Owner != building || part.GetBool("passable") || part.GetBool("is unwalkable roof") || !seen.Add(part.StringId)) continue;
+            if (collision.Mesh(part.GetPath("xml collision")) is not { } mesh) continue;
+            var corners = new Vector3[mesh.Indices.Length];
+            for (int i = 0; i < corners.Length; i++) corners[i] = Vector3.Transform(mesh.Vertices[mesh.Indices[i]], node);
+            if (corners.Length == 0) continue;
+            var min = new Vector2(corners.Min(c => c.X), corners.Min(c => c.Z));
+            var max = new Vector2(corners.Max(c => c.X), corners.Max(c => c.Z));
+            result.surfaces.Add(new Surface(Math.Clamp(part.GetInt("building floor"), 0, 3), part.GetBool("is stairs"), corners,
+                corners.Min(c => c.Y), corners.Max(c => c.Y), min, max));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// The floor under <paramref name="feet"/>: a ray from <see cref="RayStart"/> above straight down, the highest hit. An ordinary part gives its floor; stairs
+    /// give the floor above theirs when the hit is in their top <see cref="StairsTop"/>, else their own (game: hits on stairs lower down give nothing and the
+    /// character keeps its floor; here, without a kept floor, their own). Nothing hit: 0.
+    /// </summary>
+    public int FloorAt(Vector3 feet)
+    {
+        float top = feet.Y + RayStart, best = float.NegativeInfinity;
+        int floor = 0;
+        var q = new Vector2(feet.X, feet.Z);
+        foreach (var s in surfaces)
+        {
+            if (q.X < s.Min.X || q.Y < s.Min.Y || q.X > s.Max.X || q.Y > s.Max.Y || s.YMin > top) continue;
+            for (int i = 0; i + 2 < s.Corners.Length; i += 3)
+            {
+                if (HeightAt(s.Corners[i], s.Corners[i + 1], s.Corners[i + 2], q) is not { } y || y > top || y <= best) continue;
+                best = y;
+                floor = !s.Stairs ? s.Floor
+                    : Math.Min(3, s.Floor + (s.YMax - s.YMin > 1e-3f && (s.YMax - y) <= StairsTop * (s.YMax - s.YMin) ? 1 : 0));
+            }
+        }
+        return floor;
+    }
+
+    /// <summary>The height of triangle (a, b, c) above <paramref name="q"/> (X/Z), or null when q is outside it or the triangle is vertical.</summary>
+    static float? HeightAt(Vector3 a, Vector3 b, Vector3 c, Vector2 q)
+    {
+        float d = (b.Z - c.Z) * (a.X - c.X) + (c.X - b.X) * (a.Z - c.Z);
+        if (MathF.Abs(d) < 1e-6f) return null;
+        float u = ((b.Z - c.Z) * (q.X - c.X) + (c.X - b.X) * (q.Y - c.Z)) / d;
+        float v = ((c.Z - a.Z) * (q.X - c.X) + (a.X - c.X) * (q.Y - c.Z)) / d;
+        float w = 1 - u - v;
+        const float e = -1e-4f;
+        if (u < e || v < e || w < e) return null;
+        return u * a.Y + v * b.Y + w * c.Y;
+    }
+}
+
+/// <summary>A collision file's shapes triangulated in Kenshi's Y-up building space: vertices and three indices per triangle.</summary>
+public sealed record CollisionMesh(Vector3[] Vertices, int[] Indices);
+
+/// <summary>The collision files that building parts name (the <c>interior mask</c> hulls, the floor parts), read and triangulated once each; safe from several threads.</summary>
+public sealed class InteriorCollisions(GameInstall install)
+{
+    readonly ConcurrentDictionary<string, CollisionMesh?> files = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Every triangulated vertex of the file's shapes, or null when the path is empty or the file is missing or unreadable.</summary>
+    public Vector3[]? Vertices(string recordPath) => Mesh(recordPath)?.Vertices;
+
+    /// <summary>The file's triangles, or null when the path is empty or the file is missing, unreadable or has no triangles.</summary>
+    public CollisionMesh? Mesh(string recordPath) =>
+        string.IsNullOrWhiteSpace(recordPath) ? null : files.GetOrAdd(recordPath, Load);
+
+    CollisionMesh? Load(string recordPath)
+    {
+        if (CollisionPaths.Resolve(install, recordPath) is not { } path) return null;
+        CollisionFile file;
+        try { file = CollisionFile.ReadFile(path); }
+        catch (Exception e) when (e is InvalidDataException or IOException or System.Xml.XmlException or FormatException) { return null; }
+        var vertices = new List<Vector3>();
+        var indices = new List<int>();
+        foreach (var s in file.Shapes)
+        {
+            var v = new List<Vector3>();
+            var i = new List<int>();
+            CollisionTriangulator.Triangulate(s, v, i);
+            int offset = vertices.Count;
+            vertices.AddRange(v.Select(CollisionTriangulator.ToWorldAxes));
+            indices.AddRange(i.Select(x => x + offset));
+        }
+        return vertices.Count == 0 ? null : new CollisionMesh([.. vertices], [.. indices]);
+    }
+}

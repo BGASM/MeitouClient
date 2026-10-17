@@ -49,6 +49,10 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         public required ObjectMaterialSet Materials;
         public required int Level;
         public required bool Town;
+        /// <summary>Back faces culled: the instances are <c>interior</c> parts (docs/formats/zones.md "Interior view"; the game culls building parts' back faces, so a room's ceiling vanishes seen from above).</summary>
+        public bool BackCull;
+        /// <summary>The placement ghost: 0 not, 1 valid (green), 2 invalid (red), 3 queued (blue) (<see cref="BatchKind.Ghost"/>).</summary>
+        public int Ghost;
         public bool Manual;
         /// <summary>Some instance is mid cross-fade (or a town's per-vertex fade): its draws need the program with the dither <c>discard</c>.</summary>
         public bool Fading;
@@ -125,11 +129,6 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
     /// instances, triangles, draw calls, part-limited instances, calls of Draw (a benchmark statistic; the caller divides by its frames).</summary>
     public readonly long[,] Totals = new long[2, 5];
 
-    /// <summary><c>MEITOU_OBJECT_PART_RANGE=&lt;u&gt;</c>: the game's <c>objects view range</c> the small building parts stop at (default 3000,
-    /// <see cref="ObjectRanges.ObjectsViewRange"/>); for benchmarks of longer object ranges (docs/render-distance-benchmark.md).</summary>
-    static readonly float PartViewRange = float.TryParse(Environment.GetEnvironmentVariable("MEITOU_OBJECT_PART_RANGE"), System.Globalization.NumberStyles.Float,
-        System.Globalization.CultureInfo.InvariantCulture, out float partRange) && partRange > 0 ? partRange : ObjectRanges.ObjectsViewRange;
-
     /// <summary>A benchmark statistic: the resolved real instances' bounding radii (world units, scaled) as percentiles, and how many have the
     /// part distance of <see cref="ObjectRanges.ObjectsViewRange"/> (small building parts) rather than none.</summary>
     public string SizeSurvey()
@@ -139,7 +138,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         int limited = streamer.AllZones.SelectMany(z => z.Real).Count(i => i.Gpu is not null && i.Limit < float.MaxValue / 2);
         float P(double q) => radii[Math.Min((int)(radii.Length * q), radii.Length - 1)];
         return string.Create(System.Globalization.CultureInfo.InvariantCulture,
-            $"{radii.Length} resolved real instances, radius p10 {P(0.1):0} / p25 {P(0.25):0} / p50 {P(0.5):0} / p75 {P(0.75):0} / p90 {P(0.9):0} / max {radii[^1]:0}; {limited} with a part distance (<= {PartViewRange:0} units)");
+            $"{radii.Length} resolved real instances, radius p10 {P(0.1):0} / p25 {P(0.25):0} / p50 {P(0.5):0} / p75 {P(0.75):0} / p90 {P(0.9):0} / max {radii[^1]:0}; {limited} with a part distance (<= {ObjectRanges.ObjectsViewRange:0} units)");
     }
     public double LastDrawCpuMs { get; private set; }
     public double LastUpdateMs { get; private set; }
@@ -181,7 +180,117 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
     float LandmarkReach => Math.Max(RealRange, LandmarkDistance * (guard?.RangeScale ?? 1f));
     /// <summary>Whether the landmarks are kept apart from the zones (the renderer was made with them).</summary>
     public bool HasLandmarks => landmarkClass is not null;
+
+    /// <summary>Presentation-only placements (<see cref="ObjectStreamer.Staged"/>): the Meitou title's staging; null in play.</summary>
+    public IReadOnlyList<PlacedMesh>? Staged { get => streamer.Staged; set => streamer.Staged = value; }
     float DistantReach => DistantRange * (guard?.RangeScale ?? 1f);
+
+    // ---- runtime buildings, construction sites and the placement ghost (docs/render-objects.md "Construction sites") ----
+
+    /// <summary>A building the player placed: part of its zone from now on (laid out apart from the rest of an already loaded zone).</summary>
+    public void AddRuntime(BuildingPlacement placement)
+    {
+        objects.AddRuntime(placement);
+        streamer.AddRuntime(placement);
+    }
+
+    /// <summary>A placed building is gone: its parts leave the zone.</summary>
+    public void RemoveRuntime(string instanceId)
+    {
+        if (objects.RemoveRuntime(instanceId) is { } removed) streamer.RemoveRuntime(instanceId, removed.Zone);
+    }
+
+    /// <summary>Forgets every runtime building (a loaded save replaces the world) and lays out the zones that had one again.</summary>
+    public void ClearRuntime() => streamer.Reload(objects.ClearRuntime());
+
+    /// <summary>
+    /// The sites under construction: placement id to the look's <c>f</c> (docs/game/buildings-production.md "Construction look"). A listed building draws only the part below
+    /// 1.2 f of each mesh's height, and a scaffold grid above. Read on the render thread; the host replaces it as it likes.
+    /// </summary>
+    public IReadOnlyDictionary<string, float>? Construction { get => construction; set => construction = value; }
+    IReadOnlyDictionary<string, float>? construction;
+
+    /// <summary>One placement ghost: a building's parts laid out at the origin, drawn at <paramref name="World"/> (rotation, then position) in the tint of <paramref name="State"/>.</summary>
+    public readonly record struct GhostDraw(IReadOnlyList<PlacedMesh> Parts, Matrix4x4 World, GhostState State);
+
+    /// <summary>The tint of a ghost: the one at the cursor can be placed or not; a queued one waits for Confirm.</summary>
+    public enum GhostState { Valid, Invalid, Queued }
+
+    // One slot per ghost drawn: the parts list its instances were made from, those instances, and where and how it is drawn now.
+    sealed class GhostSlot
+    {
+        public object? Parts;
+        public PlacedMesh[] Base = [];
+        public readonly List<ObjectStreamer.Instance> Instances = [];
+        public GhostState State;
+    }
+
+    readonly List<GhostSlot> ghostSlots = [];
+    bool ghostsDrawn;
+
+    /// <summary>
+    /// The placement ghosts of Build mode (docs/render-objects.md "Placement ghost"): each list of parts is laid out once (the same list keeps its instances), the
+    /// transforms follow every call. Empty: no ghost.
+    /// </summary>
+    public void SetGhosts(IReadOnlyList<GhostDraw> ghosts)
+    {
+        while (ghostSlots.Count > ghosts.Count)
+        {
+            DropGhost(ghostSlots[^1]);
+            ghostSlots.RemoveAt(ghostSlots.Count - 1);
+        }
+        while (ghostSlots.Count < ghosts.Count) ghostSlots.Add(new());
+        for (int s = 0; s < ghosts.Count; s++)
+        {
+            var (parts, world, state) = ghosts[s];
+            var slot = ghostSlots[s];
+            if (!ReferenceEquals(parts, slot.Parts))
+            {
+                DropGhost(slot);
+                slot.Parts = parts;
+                slot.Base = [.. parts.Where(p => !p.Interior)];
+                foreach (var p in slot.Base) slot.Instances.Add(streamer.MakeLoose(p));
+            }
+            slot.State = state;
+            for (int i = 0; i < slot.Instances.Count; i++)
+            {
+                var transform = slot.Base[i].Transform * world;
+                var inst = slot.Instances[i];
+                inst.Placed = slot.Base[i] with { Transform = transform };
+                inst.Transform = transform;
+                inst.Centre = inst.Gpu is { } gpu ? Vector3.Transform(gpu.Centre, transform) : transform.Translation;
+            }
+        }
+        ghostsDrawn = ghostSlots.Count > 0;
+    }
+
+    void DropGhost(GhostSlot slot)
+    {
+        foreach (var inst in slot.Instances) streamer.DropLoose(inst);
+        slot.Instances.Clear();
+        slot.Parts = null;
+        slot.Base = [];
+    }
+
+    void DrawGhosts(Vector3 eye, Vector4[] frustum, long now)
+    {
+        foreach (var slot in ghostSlots)
+        {
+            int tint = slot.State switch { GhostState.Valid => BatchKind.Ghost, GhostState.Invalid => BatchKind.GhostBad, _ => BatchKind.GhostQueued };
+            foreach (var inst in slot.Instances)
+            {
+                if (inst.Gpu is not { } gpu) continue;
+                if (!ReferenceEquals(inst.Mesh.Gpu, gpu)) { Unresolve(streamer.Loose, inst); continue; }
+                float value = Vector3.Distance(inst.Centre, eye) - inst.Radius;
+                if (!SphereVisible(frustum, inst.Centre, inst.Radius)) continue;
+                inst.Mesh.LastUsed = now;
+                DrawnInstances++;
+                int level = Math.Max(gpu.Curve.Select(Math.Max(value, 0) * LodBias), gpu.MinLevel);
+                // A dither coverage of 65 %: the building shows through as a screen-door.
+                Add(gpu, inst.Materials!, level, inst.Transform, 0, 0.65f, value, ghost: tint);
+            }
+        }
+    }
 
     /// <summary>Draw nothing but the real objects (no distant meshes): the game with distant towns off.</summary>
     public bool NoDistant { get; set; }
@@ -202,15 +311,15 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         {
             if (ObjectStreamer.ZoneDistance(zone.X0, zone.Z0, eye) > range) continue;
             foreach (var inst in zone.Real)
-                if (inst.Gpu is not null && inst.Materials is not null && Vector3.Distance(inst.Centre, eye) - inst.Radius <= range) yield return inst;
+                if (inst.Gpu is not null && inst.Materials is not null && Vector3.Distance(inst.Centre, eye) - inst.Radius <= range && !InteriorHidden(inst.Placed)) yield return inst;
         }
         if (streamer.LandmarkZone is { } landmarks)
             foreach (var inst in landmarks.Real)
-                if (inst.Gpu is not null && inst.Materials is not null && Vector3.Distance(inst.Centre, eye) - inst.Radius <= range) yield return inst;
+                if (inst.Gpu is not null && inst.Materials is not null && Vector3.Distance(inst.Centre, eye) - inst.Radius <= range && !InteriorHidden(inst.Placed)) yield return inst;
     }
 
-    /// <summary>Work in flight: zones being laid out, meshes decoding or uploading, textures decoding.</summary>
-    public int Pending => streamer.Pending + meshes.Pending + uploads.Count + textureCache.PendingCount + unresolvedInRange + (landmarkTask is not null ? 1 : 0);
+    /// <summary>Requested work: zone layouts, meshes and textures, including used textures deferred by memory pressure.</summary>
+    public int Pending => streamer.Pending + meshes.Pending + uploads.Count + textureCache.PendingCount + textureCache.UnresidentUsedCount + unresolvedInRange + (landmarkTask is not null ? 1 : 0);
 
     int unresolvedInRange;
     public List<string> Messages { get; } = [];
@@ -219,16 +328,9 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
     /// <summary>GPU memory held by streamed meshes and textures, for the stats line and the window title.</summary>
     public long ResidentBytes => meshes.Bytes + textureCache.ResidentBytes;
     public string ResidentDescription => $"{meshes.Bytes / 1048576.0:0} MB in {meshes.Resident} meshes ({meshes.Unloads} unloaded, {meshes.Reloads} reloaded, {meshes.Refined} remade finer, {meshes.Coarsened} coarser), {textureCache.Describe()}";
-    /// <summary><c>MEITOU_LANDMARK_LOG=1</c>: one line per resolved landmark, nearest first: its distance, LOD levels, the finest level the mesh holds, its size.</summary>
-    string LandmarkDetail() =>
-        Environment.GetEnvironmentVariable("MEITOU_LANDMARK_LOG") == "1" && streamer.LandmarkZone is { } zone
-            ? "\n" + string.Join("\n", zone.Real.Where(i => i.Gpu is not null).OrderBy(i => Vector3.Distance(eyeNow, i.Centre)).Select(i => string.Create(System.Globalization.CultureInfo.InvariantCulture,
-                $"landmark  {Path.GetFileName(i.Mesh.Key),-40} {Vector3.Distance(eyeNow, i.Centre),8:0} away, radius {i.Radius,6:0}, {i.Gpu!.LevelCount} levels, finest held {i.Gpu.MinLevel}, {i.Mesh.Bytes / 1024} KB")))
-            : "";
-
     public string Describe() =>
         $"{streamer.Loaded} zones, {streamer.Instances:N0} instances ({streamer.Resolved:N0} resolved{(streamer.LandmarkZone is { } lz ? $", of them {lz.Real.Count(i => i.Gpu is not null)} of {lz.Real.Count} landmarks" : "")}), {meshes.Resident}/{meshes.Total} meshes requested or resident, resident: {ResidentDescription}, " +
-        $"{towns.Count(t => t.Mesh.Status == ObjectMesh.State.Resident)}/{towns.Count} distant towns; {objects.Describe()}{LandmarkDetail()}";
+        $"{towns.Count(t => t.Mesh.Status == ObjectMesh.State.Resident)}/{towns.Count} distant towns; {objects.Describe()}";
 
     // ------------------------------------------------------------------ streaming
 
@@ -237,8 +339,6 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
 
     /// <summary>Follows the eye: lays out zones and loads meshes and textures around it, within <see cref="BudgetMs"/> of render-thread time.</summary>
     public void Update(Vector3 eye) => Update(eye, BudgetMs);
-
-    static readonly bool Log = Environment.GetEnvironmentVariable("MEITOU_STREAM_LOG") == "1";
 
     /// <summary>Colour draws of parts whose diffuse map was not resident (drawn grey) and, at the same moment, textures waiting for a finer image,
     /// the largest of each since <see cref="TakePopStats"/> (the benchmark's pop-in lines).</summary>
@@ -279,7 +379,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
             {
                 streamer.Landmarks = landmarkClass;
                 streamer.SetLandmarks(collected.Result);
-                Console.WriteLine($"landmarks {collected.Result.Count} placements of radius {LandmarkClass.MinRadius:0}+ kept apart from the zones ({landmarkClass!.Probes} mesh bounds read, {landmarkClass.WholeReads} of them whole files; {landmarkMs:0} ms on the workers)");
+                Console.WriteLine($"landmarks {collected.Result.Count} placements of radius {LandmarkClass.MinRadius:0}+ kept apart from the zones ({landmarkMs:0} ms on the workers)");
             }
             else
             {
@@ -288,11 +388,10 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
             }
         }
         streamer.Update(eye, streamRange, unlimited ? 64 : 1);
-        double tZones = watch.Elapsed.TotalMilliseconds;
         ResolveTowns(eye);
         unresolvedInRange = streamer.Scan(eye, RealRange, DistantReach, NoDistant, Resolve, unlimited ? int.MaxValue : 40);
         unresolvedInRange += streamer.ScanLandmarks(eye, LandmarkReach, Resolve, unlimited ? int.MaxValue : 10);
-        double tScan = watch.Elapsed.TotalMilliseconds;
+        unresolvedInRange += streamer.ScanLoose(streamer.Loose, eye, RealRange, Resolve, unlimited ? int.MaxValue : 10);
         meshes.Pump();
         MarkInRange(eye, force: unlimited);
         meshes.Trim();
@@ -305,6 +404,8 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
             if (streamer.LandmarkZone is { } landmarkZone)
                 foreach (var inst in landmarkZone.Real)
                     if (inst.Gpu is { } resolved && unloadedMeshes.Contains(resolved)) Unresolve(landmarkZone, inst);
+            foreach (var inst in streamer.Loose.Real)
+                if (inst.Gpu is { } resolved && unloadedMeshes.Contains(resolved)) Unresolve(streamer.Loose, inst);
             unloadedMeshes.Clear();
         }
         textureCache.Pump(wait: unlimited, max: unlimited ? 16 : 8, budgetMs: Math.Max(budgetMs * 0.5, 0.5));
@@ -317,8 +418,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         }
         uploads.Run(budgetMs);
         LastUpdateMs = watch.Elapsed.TotalMilliseconds;
-        if (Log && !unlimited && LastUpdateMs > 6)
-            Console.WriteLine($"slow objects update {LastUpdateMs:0.0} ms: zones {tZones:0.0}, scan {tScan - tZones:0.0}, uploads [{uploads.LastRun}]");
+        if (!unlimited && LastUpdateMs > 6) SpikeLog.Note($"slow objects update [{uploads.LastRun}]", ms: LastUpdateMs);
     }
 
     readonly HashSet<GpuObjectMesh> unloadedMeshes = [];
@@ -476,7 +576,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         inst.Centre = centre;
         inst.Radius = radius;
         inst.Limit = inst.Placed.Kind == PlacedKind.BuildingPart
-            ? ObjectRanges.PartRenderingDistance(gpu.Radius, inst.Placed.Owner.GetInt("function"), PartViewRange)
+            ? ObjectRanges.PartRenderingDistance(gpu.Radius, inst.Placed.Owner.GetInt("function"), ObjectRanges.ObjectsViewRange)
             : float.MaxValue;
         if (inst.Stand) { inst.Materials = distantMaterial; return true; }
         // A part's look comes from the material the layout chose (which differs per town), else from the resolver's candidates.
@@ -541,6 +641,65 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
     /// <summary>The water reflection's cull (set around the reflection pass's own draw): an instance (bounding sphere centre and radius) it answers false for is skipped.</summary>
     internal Func<Vector3, float, bool>? MirrorCull { get; set; }
 
+    /// <summary>
+    /// The buildings shown in the interior view (docs/formats/zones.md, "Interior view"): placement id to the viewed floor. Their parts above that floor
+    /// are hidden and their <c>interior</c> parts shown; every other building shows its outside (its interior parts hidden). Set by the game each frame.
+    /// </summary>
+    public IReadOnlyDictionary<string, int> InteriorView { get; set; } = new Dictionary<string, int>();
+
+    /// <summary>The indoor volume of a loaded building that contains <paramref name="p"/> (widened by <paramref name="margin"/>), or null.</summary>
+    public InteriorVolume? InteriorAt(Vector3 p, float margin = 0)
+    {
+        foreach (var zone in streamer.AllZones)
+        {
+            if (zone.Interiors.Count == 0 || ObjectStreamer.ZoneDistance(zone.X0, zone.Z0, p) > 200) continue;   // a building may stand over its zone's edge
+            foreach (var v in zone.Interiors)
+                if (v.Contains(p, margin)) return v;
+        }
+        return null;
+    }
+
+    /// <summary>The loaded mask of a building or one of its layout objects (building id / item id).</summary>
+    internal InteriorVolume? InteriorFor(string placementId)
+    {
+        int slash = placementId.IndexOf('/');
+        var owner = slash < 0 ? placementId.AsSpan() : placementId.AsSpan(0, slash);
+        foreach (var zone in streamer.AllZones)
+            foreach (var room in zone.Interiors)
+                if (owner.SequenceEqual(room.PlacementId)) return room;
+        return null;
+    }
+
+    /// <summary>Use room-scale probes only while the camera target is in or beside a viewed building.</summary>
+    internal Vector3? GiInteriorFocus(Vector3 target)
+    {
+        if (InteriorView.Count == 0) return null;
+        foreach (var zone in streamer.AllZones)
+            foreach (var room in zone.Interiors)
+            {
+                if (!InteriorView.ContainsKey(room.PlacementId)) continue;
+                var p = new Vector3(target.X, Math.Clamp(target.Y, room.YMin, room.YMax), target.Z);
+                if (room.Contains(p, 64)) return p;
+            }
+        return null;
+    }
+
+    /// <summary>Draw every floor of the buildings in the interior view (their interior parts stay as they are): the game does so in the water reflection.</summary>
+    internal bool AllFloors { get; set; }
+
+    /// <summary>
+    /// Whether the interior view leaves a building part out: an interior part (or inside-only furniture) of a building seen from outside, or, in the view, a
+    /// part or object above the viewed floor. Floor 0 is never hidden (game: only the floor 1..3 lists are switched).
+    /// </summary>
+    bool InteriorHidden(PlacedMesh p)
+    {
+        if (p.Kind != PlacedKind.BuildingPart) return false;
+        if (InteriorView.Count == 0 || !p.Interior && (p.Floor == 0 || AllFloors)) return p.Interior;
+        // Layout objects (signs, furniture) go with their building.
+        if (!InteriorView.TryGetValue(p.ParentPlacementId ?? p.PlacementId, out int floor)) return p.Interior;
+        return p.Floor > floor && !AllFloors;
+    }
+
     /// <summary>Draws the objects seen from <paramref name="eye"/> through <paramref name="frustum"/>.</summary>
     public void Draw(Matrix4x4 viewProjection, Vector3 eye, Vector4[] frustum, WorldRenderOptions options, Vector3 light, Vector3 fogColour, float fogDistance, TerrainRenderer terrain)
     {
@@ -555,7 +714,6 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         coarseDraws = 0;
         DrawnTriangles = 0;
         DrawCalls = 0;
-        callLoopMs = 0;
         foreach (var b in batchMap.Values) b.Count = 0;
         active.Clear();
         terrainMeshes.Clear();
@@ -587,6 +745,8 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
             float reach = LandmarkReach;
             foreach (var inst in landmarkZone.Real) DrawReal(landmarkZone, inst, reach, eye, frustum, options, now);
         }
+        // The placement ghost (Build mode): its parts at the cursor, dithered and tinted green or red; not in a shadow or the landmarks-only pass.
+        if (ghostsDrawn && !depthPass && !landmarksOnly) DrawGhosts(eye, frustum, now);
         if (!NoDistant && !landmarksOnly)
             foreach (var t in towns)
             {
@@ -599,8 +759,6 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
                 batch.Add(Matrix4x4.CreateTranslation(t.Town.Position));
                 DrawnInstances++;
             }
-
-        double tCull = cpu.Elapsed.TotalMilliseconds;
 
         // Nearest first: what a nearer batch covers fails the early depth test of the farther ones (the colour pass only; the depth passes have no shading to save).
         if (SortNearestFirst && !depthPass) active.Sort(static (a, b) => a.Near.CompareTo(b.Near));
@@ -615,12 +773,9 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
                 System.Runtime.InteropServices.MemoryMarshal.AsBytes(b.Data.AsSpan(0, b.Count)).CopyTo(target[(b.Offset * InstanceStride)..]);
         }
 
-        double tUpload = cpu.Elapsed.TotalMilliseconds;
-
         // 3. Draw: Prepare reads the textures (WorldTexture.Key) and makes the draw list, Record puts it into a native segment of VkGl's pass.
         var prog = depthPass ? depthProg : colourProg;
         int wireMode = debugLevels == 2 ? 2 : options.Wireframe;
-        double recordMs = 0;
         if (active.Count > 0)
         {
             var view = new ViewConstants { ViewProjection = viewProjection, Eye = eye, LightDir = light, FogColour = fogColour, FogDistance = fogDistance };
@@ -628,26 +783,19 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
             if (wireMode != 2)
             {
                 PrepareDraws(options, wire: false);
-                long r0 = ObjTiming ? Stopwatch.GetTimestamp() : 0;
                 RecordDraws(prog, wire: false, in view, fadeRange);
-                if (ObjTiming) recordMs += (Stopwatch.GetTimestamp() - r0) * 1000.0 / Stopwatch.Frequency;
             }
             if (wireMode != 0)
             {
                 PrepareDraws(options, wire: true);
-                long r0 = ObjTiming ? Stopwatch.GetTimestamp() : 0;
                 RecordDraws(prog, wire: true, in view, fadeRange);
-                if (ObjTiming) recordMs += (Stopwatch.GetTimestamp() - r0) * 1000.0 / Stopwatch.Frequency;
             }
         }
-        double tBatches = cpu.Elapsed.TotalMilliseconds;
-        int batchDraws = DrawCalls;
         if (terrainMeshes.Count > 0) DrawCalls += terrain.DrawMeshes(terrainMeshes, depthPass);
         LastDrawCpuMs = cpu.Elapsed.TotalMilliseconds;
         int kind = depthPass ? 1 : 0;
         (Totals[kind, 0], Totals[kind, 1], Totals[kind, 2], Totals[kind, 3], Totals[kind, 4]) =
             (Totals[kind, 0] + DrawnInstances, Totals[kind, 1] + DrawnTriangles, Totals[kind, 2] + DrawCalls, Totals[kind, 3] + PartLimited, Totals[kind, 4] + 1);
-        if (ObjTiming) ObjAccount(depthPass ? 1 : 0, tCull, tUpload, tBatches, LastDrawCpuMs, batchDraws, DrawCalls - batchDraws, recordMs);
     }
 
 
@@ -659,6 +807,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
     {
         if (inst.Gpu is not { } gpu) return;
         if (!ReferenceEquals(inst.Mesh.Gpu, gpu)) { Unresolve(zone, inst); return; }
+        if (InteriorHidden(inst.Placed)) return;
         float value = Vector3.Distance(inst.Centre, eye) - inst.Radius;
         float limit = Math.Min(range, inst.Limit);
         if (value >= limit || !SphereVisible(frustum, inst.Centre, inst.Radius) || MirrorCull?.Invoke(inst.Centre, inst.Radius) == false || FogCull?.Hidden(inst.Centre, inst.Radius, FogVolumes.CullKind.Objects) == true)
@@ -688,39 +837,6 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         Emit(inst, gpu, value, w, lodValue);
     }
 
-    /// <summary><c>MEITOU_OBJECT_TIMING=1</c>: the CPU time of <see cref="Draw"/>'s steps summed over the run by kind (colour or depth), with the
-    /// draws each issued, printed when the renderer is disposed (docs/renderer-native.md 7.1, wave 3 objects).</summary>
-    static readonly bool ObjTiming = Environment.GetEnvironmentVariable("MEITOU_OBJECT_TIMING") == "1";
-    static readonly int ObjSkip = int.TryParse(Environment.GetEnvironmentVariable("MEITOU_OBJECT_TIMING_SKIP"), out int skip) ? skip : 160;
-    readonly double[,] objMs = new double[2, 4];
-    readonly double[] objRecordMs = new double[2], objLoopMs = new double[2];
-    double callLoopMs;   // this call's record loops (the part of recordMs between the segment's setup and its end)
-    readonly long[] objSeen = new long[2], objCalls = new long[2], objBatchDraws = new long[2], objTerrainDraws = new long[2];
-
-    void ObjAccount(int k, double tCull, double tUpload, double tBatches, double tEnd, int batchDraws, int terrainDraws, double recordMs = 0)
-    {
-        if (objSeen[k]++ < ObjSkip) return;   // the first calls are cold (pipelines, streaming)
-        objCalls[k]++;
-        objRecordMs[k] += recordMs;
-        objLoopMs[k] += callLoopMs;
-        objMs[k, 0] += tCull; objMs[k, 1] += tUpload - tCull; objMs[k, 2] += tBatches - tUpload; objMs[k, 3] += tEnd - tBatches;
-        objBatchDraws[k] += batchDraws; objTerrainDraws[k] += terrainDraws;
-    }
-
-    void ReportObjectTiming()
-    {
-        if (!ObjTiming) return;
-        string[] names = ["colour", "depth"];
-        for (int k = 0; k < 2; k++)
-        {
-            if (objCalls[k] == 0) continue;
-            Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"" +
-                $"objects timing {names[k]}: {objCalls[k]} calls, per call us: cull {objMs[k, 0] * 1000 / objCalls[k]:F1}, upload {objMs[k, 1] * 1000 / objCalls[k]:F1}, batches {objMs[k, 2] * 1000 / objCalls[k]:F1}, terrain meshes {objMs[k, 3] * 1000 / objCalls[k]:F1}; " +
-                $"draws per call: batches {(double)objBatchDraws[k] / objCalls[k]:F1}, terrain {(double)objTerrainDraws[k] / objCalls[k]:F1}; " +
-                $"us per batch draw {(objBatchDraws[k] > 0 ? objMs[k, 2] * 1000 / objBatchDraws[k] : 0):F2} (record only {(objBatchDraws[k] > 0 ? objRecordMs[k] * 1000 / objBatchDraws[k] : 0):F2}, loop only {(objBatchDraws[k] > 0 ? objLoopMs[k] * 1000 / objBatchDraws[k] : 0):F3}; segment setup + end per call us {(objRecordMs[k] - objLoopMs[k]) * 1000 / objCalls[k]:F1})"));
-        }
-    }
-
     /// <summary>Adds an instance at its LOD level: two batches while blending levels, the upper level taking [0, t·w) of the dither range and the lower [t·w, w).</summary>
     void Emit(ObjectStreamer.Instance inst, GpuObjectMesh gpu, float value, float weight) => Emit(inst, gpu, value, weight, value);
 
@@ -732,21 +848,32 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         if (gpu.MinLevel > 0 && blend.Lower < gpu.MinLevel) coarseDraws++;
         if (gpu.MinLevel > 0) blend = new LodBlend(Math.Max(blend.Lower, gpu.MinLevel), Math.Max(blend.Upper, gpu.MinLevel), blend.T);
         var m = inst.Transform;
+        // Spare instance-matrix component: room GI gain without splitting shared furniture batches.
+        m.M34 = inst.Placed.Interior || inst.Placed.ParentPlacementId is not null && InteriorAt(m.Translation) is not null ? 1 : 0;
+        // Another spare component, M44: 1, or for a construction site the height of its scaffold clip plane (BuildingLodShaders.ScaffoldBase + world Y).
+        bool site = false;
+        if (construction is { Count: > 0 } && !inst.Stand && construction.TryGetValue(inst.Placed.ParentPlacementId ?? inst.Placed.PlacementId, out float built))
+        {
+            float scaleY = new Vector3(m.M21, m.M22, m.M23).Length();
+            m.M44 = BuildingLodShaders.ScaffoldBase + m.M42 + 1.2f * Math.Clamp(built, 0f, 1f) * gpu.Top * scaleY;
+            site = true;
+        }
         if (!blend.IsBlending)
         {
-            Add(gpu, inst.Materials!, blend.Lower, m, 0, weight >= 0.999f ? 2 : weight, value);
+            Add(gpu, inst.Materials!, blend.Lower, m, 0, weight >= 0.999f ? 2 : weight, value, inst.Placed.Interior, site);
             return;
         }
-        Add(gpu, inst.Materials!, blend.Upper, m, 0, blend.T * weight, value);
-        Add(gpu, inst.Materials!, blend.Lower, m, blend.T * weight, weight, value);
+        Add(gpu, inst.Materials!, blend.Upper, m, 0, blend.T * weight, value, inst.Placed.Interior, site);
+        Add(gpu, inst.Materials!, blend.Lower, m, blend.T * weight, weight, value, inst.Placed.Interior, site);
     }
 
-    void Add(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, Matrix4x4 m, float lo, float hi, float near)
+    void Add(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, Matrix4x4 m, float lo, float hi, float near, bool backCull = false, bool site = false, int ghost = 0)
     {
         var manual = gpu.Manual[level];
         // Fully visible: lo 0 and hi 2 (the shader keeps everything when hi >= 1 and lo is 0). With the early depth test off every batch is "fading": the old merging.
-        bool fading = !EarlyDepth.Enabled || lo > 0 || hi < 1;
-        var batch = BatchFor(manual ?? gpu, materials, manual is null ? level : 0, fading ? BatchKind.Fading : BatchKind.Solid);
+        // A construction site discards the fragments above its clip plane, so it needs the program with a discard as well.
+        bool fading = !EarlyDepth.Enabled || lo > 0 || hi < 1 || site;
+        var batch = BatchFor(manual ?? gpu, materials, manual is null ? level : 0, (fading ? BatchKind.Fading : BatchKind.Solid) | (backCull ? BatchKind.BackCull : 0) | ghost);
         batch.Manual = manual is not null;
         if (batch.Count == 0) { active.Add(batch); batch.Near = near; } else if (near < batch.Near) batch.Near = near;
         m.M14 = lo;
@@ -759,13 +886,19 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
     static class BatchKind
     {
         public const int Solid = 0, Fading = 1, Town = 2;
+        /// <summary>A flag on Solid or Fading: <see cref="Batch.BackCull"/>.</summary>
+        public const int BackCull = 4;
+        /// <summary>Flags: the placement ghost, valid or invalid (<see cref="Batch.Ghost"/>).</summary>
+        public const int Ghost = 8, GhostBad = 16, GhostQueued = 32;
     }
 
     Batch BatchFor(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, int kind)
     {
         var key = (gpu, materials, level, kind);
         if (!batchMap.TryGetValue(key, out var batch))
-            batchMap[key] = batch = new Batch { Mesh = gpu, Materials = materials, Level = level, Town = kind == BatchKind.Town, Fading = kind != BatchKind.Solid };
+            batchMap[key] = batch = new Batch { Mesh = gpu, Materials = materials, Level = level, Town = kind == BatchKind.Town,
+                Fading = (kind & ~(BatchKind.BackCull | BatchKind.Ghost | BatchKind.GhostBad | BatchKind.GhostQueued)) != BatchKind.Solid, BackCull = (kind & BatchKind.BackCull) != 0,
+                Ghost = (kind & BatchKind.GhostQueued) != 0 ? 3 : (kind & BatchKind.GhostBad) != 0 ? 2 : (kind & BatchKind.Ghost) != 0 ? 1 : 0 };
         return batch;
     }
 
@@ -803,6 +936,8 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         public ObjectPush Push;
         /// <summary>Drawn with the program without a discard (<see cref="EarlyDepth"/>): a batch of fully visible instances, a material without a cut-out.</summary>
         public bool Solid;
+        /// <summary>Back faces culled (<see cref="Batch.BackCull"/>, not for a double-sided material).</summary>
+        public bool BackCull;
     }
 
     ObjDraw[] draws = new ObjDraw[256];
@@ -949,9 +1084,12 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
                 {
                     var pm = b.Materials.Parts[Math.Min(i, b.Materials.Parts.Length - 1)];
                     Material(ref d, gp, pm, options);
+                    // The placement ghost: the shader tints a draw whose flat colour is non-zero.
+                    if (b.Ghost != 0) d.Push.FlatColour = b.Ghost == 1 ? new Vector3(0.35f, 1f, 0.45f) : b.Ghost == 2 ? new Vector3(1f, 0.3f, 0.25f) : new Vector3(0.5f, 0.7f, 1f);
                     // A part whose diffuse map is not resident yet is drawn plain grey (pop-in the benchmark counts).
                     if (!depthPass && options.Textures && d.Diffuse == 0 && pm.WantsDiffuse) untexturedDraws++;
                     d.Solid = !depthPass && !b.Fading && d.Push.AlphaThreshold == 0f;
+                    d.BackCull = b.BackCull && pm.Material is not { DoubleSided: true };
                 }
                 DrawCalls++;
                 DrawnTriangles += (long)gp.Count[b.Level] / 3 * b.Count;
@@ -974,8 +1112,8 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
     }
 
     ObjDraw[] drawScratch = [];
-    /// <summary><c>MEITOU_AB_SOLID_FIRST</c> (default on): see <see cref="SolidDrawsFirst"/>.</summary>
-    public static bool SolidFirst { get; set; } = Environment.GetEnvironmentVariable("MEITOU_AB_SOLID_FIRST") != "0";
+    /// <summary>On by default (the <c>solid-first</c> A/B turns it off): see <see cref="SolidDrawsFirst"/>.</summary>
+    public static bool SolidFirst { get; set; } = true;
 
     static void Material(ref ObjDraw d, GpuObjectPart gp, ObjectPartMaterial pm, WorldRenderOptions options)
     {
@@ -1032,7 +1170,6 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         job.Frame = nativeFrame.Prepare(in view);
         for (int a = 0; a < 4; a++) job.Rows[a] = new BufferBinding(instances.Handle, instances.Offset + (ulong)(16 * a));
         NewTextureSegment();
-        long loop0 = ObjTiming ? Stopwatch.GetTimestamp() : 0;
         if (job.Draws.Length < drawCount) job.Draws = new DrawJob.Draw[Math.Max(drawCount, job.Draws.Length * 2)];
         var list = draws;
         for (int i = 0; i < drawCount; i++)
@@ -1055,10 +1192,10 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
                 Pipeline = n.SegA == drawSegment ? n.PipeA! : PipelineFor(ref n, drawProg, drawSegment, state, targets.Formats, label),
                 Vertices = n.Vertices, Elements = new BufferBinding(n.Elements.Buffer, n.Elements.Offset + (ulong)part.Offset[d.Level] * 4),
                 Push = pc, IndexCount = (uint)part.Count[d.Level], Instances = d.Instances, FirstInstance = d.FirstInstance,
+                Cull = d.BackCull ? Silk.NET.Vulkan.CullModeFlags.BackBit : state.Cull,
             };
         }
         job.Count = drawCount;
-        if (ObjTiming) callLoopMs += (Stopwatch.GetTimestamp() - loop0) * 1000.0 / Stopwatch.Frequency;
         Gpu.Record(label, job);
     }
 
@@ -1074,6 +1211,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
             public BufferBinding Elements;
             public ObjectPush Push;
             public uint IndexCount, Instances, FirstInstance;
+            public Silk.NET.Vulkan.CullModeFlags Cull;
         }
 
         public WorldObjectRenderer Owner = null!;
@@ -1099,10 +1237,12 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
             var stages = Silk.NET.Vulkan.ShaderStageFlags.VertexBit | Silk.NET.Vulkan.ShaderStageFlags.FragmentBit;
             ObjectPush last = default;
             bool pushed = false;
+            var cull = state.Cull;
             for (int i = 0; i < Count; i++)
             {
                 ref readonly var d = ref Draws[i];
                 cmd.BindPipeline(d.Pipeline);
+                if (d.Cull != cull) cmd.SetRaster(cull = d.Cull, state.Front);
                 cmd.BindVertexBuffers(0, d.Vertices);
                 cmd.BindIndexBuffer(d.Elements, Silk.NET.Vulkan.IndexType.Uint32);
                 if (!pushed || !System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<ObjectPush>(in d.Push)).SequenceEqual(System.Runtime.InteropServices.MemoryMarshal.AsBytes(new ReadOnlySpan<ObjectPush>(in last))))
@@ -1177,7 +1317,6 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
     public void Dispose()
     {
         if (ObjectLodGen.Built + ObjectLodGen.Cached > 0) Console.WriteLine($"object lods  {ObjectLodGen.Built} meshes generated ({System.Diagnostics.Stopwatch.GetElapsedTime(0, ObjectLodGen.BuildTicks).TotalSeconds:0.0} s of worker time), {ObjectLodGen.Cached} read from the cache, {ObjectLodGen.Skipped} too small or not eligible");
-        ReportObjectTiming();
         colourProg.Dispose();
         solidProg.Dispose();
         depthProg.Dispose();

@@ -7,7 +7,8 @@ using Meitou.Simulation;
 namespace Meitou.Game;
 
 /// <summary>
-/// The player's hands and the minimal HUD (docs/game/ui-input.md): click or box select, right click move orders (shift queues),
+/// The player's hands and the minimal HUD (docs/game/ui-input.md): click or box select, right click move orders (shift queues; holding the
+/// button steers: the order follows the cursor),
 /// the squad keys, the clock and speed buttons. Everything the player does becomes a <see cref="SimCommand"/> at the world's
 /// current tick; this class never touches the simulation's state, it reads the published snapshot.
 /// Positions are framebuffer pixels, top-left origin. The host sets <see cref="ViewProjection"/>, <see cref="Eye"/>, <see cref="Width"/>
@@ -20,13 +21,17 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     public int Width = 1, Height = 1;
     /// <summary>How far from the camera a box select still takes characters.</summary>
     public const float BoxSelectRange = 7500;
-    /// <summary>Character height used for picking and for the box select's aim point.</summary>
-    public const float CharacterHeight = 2.2f;
+    /// <summary>A person's height (the renderer's sphere takes 20) for the box select's aim point and the pick capsule of a character the renderer does not draw.</summary>
+    public const float CharacterHeight = 18;
     const float DragThreshold = 5;
 
     Vector2? dragFrom;
     Vector2 mouse;
     bool dragging;
+    // The held right button's move order: where it goes now and the tick it was given.
+    bool steering;
+    Vector3 steerTarget;
+    long steerTick;
 
 
     IReadOnlyList<CharacterId> SelectedIds() => [.. Selected().Select(c => c.Id)];
@@ -47,63 +52,173 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     // ---- events ----
 
     /// <summary>Returns true when the click belonged to the HUD or the interface (the camera input should not see it).</summary>
-    public bool MouseDown(MouseButton button, Vector2 p, bool shift)
+    public bool MouseDown(MouseButton button, Vector2 p, bool shift, bool ctrl = false, bool alt = false)
     {
         mouse = p;
+        if (button == MouseButton.Right && CancelInventoryDrag()) return true;
+        if (button == MouseButton.Right && !OverHud(p) && WallCancel()) return true;
         if (button == MouseButton.Left)
         {
-            if (HudButtonAt(p) is { } index)
-            {
-                PressButton(index);
-                return true;
-            }
+            if (UiMouseDown(p)) return true;
+            if (CloseContextMenu()) return true;   // a click beside the open menu only closes it
             if (OverHud(p)) return true;
+            if (BuildClick()) return true;
             dragFrom = p;
             dragging = false;
             return true;
         }
+        if (button == MouseButton.Right && InventoryRightClick(p)) return true;
+        if (button == MouseButton.Right && CloseContextMenu()) return true;
+        if (button == MouseButton.Right && MapRightDown(p)) return true;
+        if (button == MouseButton.Middle && UiVisible && MapPointerDown(p)) return true;
+        if (button == MouseButton.Right && !OverHud(p) && SitePress(p)) return true;
         if (button == MouseButton.Right && !OverHud(p))
         {
-            if (PickTarget(p) is { } victim && SelectedIds() is { Count: > 0 } attackers)
-                Say(new Meitou.Simulation.Combat.AttackOrder(attackers, victim) { Tick = session.World.Tick });
-            else if (Ray(p) is { } ray && GroundHit(ray.Origin, ray.Direction) is { } hit) Move(hit, shift);
+            // Alt + right click on a downed or dead character: the nearest selected loots it (take all). Ctrl + right click: picks it up, or puts it down when a selected
+            // character carries it. A plain right click on one of your own downed characters that needs no first aid picks it up too (the original's quick right click).
+            var downed = alt || ctrl ? PickDowned(p) : null;
+            if (alt && downed is { } loot && SelectedIds() is { Count: > 0 })
+                Say(new Meitou.Simulation.Carrying.LootOrder([], loot) { Tick = session.World.Tick });
+            else if (ctrl && downed is { } body && Selected().Where(c => c.Carrying == body).Select(c => c.Id).ToArray() is { Length: > 0 } carriers)
+                Say(new Meitou.Simulation.Carrying.PutDownOrder(carriers) { Tick = session.World.Tick });
+            else if (ctrl && downed is { } lift && SelectedIds() is { Count: > 0 })
+                Say(new Meitou.Simulation.Carrying.PickUpOrder([], lift) { Tick = session.World.Tick });
+            // On a character: the quick order (trade with a trader, attack anyone else, treat a hurt ally, pick up a downed one of yours) is given when the button comes up
+            // before the context menu's hold time; held longer, the menu opens instead (PlayerInterface.ContextMenu.cs).
+            else if (QuickOrder(p)?.Do is var quick && ContextPress(p, quick)) { }
+            else if (quick is not null) quick();
+            else if (Ray(p) is { } ray && GroundHit(ray.Origin, ray.Direction) is { } hit)
+            {
+                Move(hit, shift);
+                PlaceMarker(hit);
+                (steering, steerTarget, steerTick) = (!shift, hit, session.World.Tick);
+            }
             return true;
         }
-        return false;
+        return OverHud(p);
+    }
+
+    /// <summary>
+    /// The order a quick right click on a character gives and the mouse pointer that shows it (PlayerInterface.Pointer.cs), or null when there is none (the ground
+    /// under it is then a move).
+    /// </summary>
+    (string Pointer, CharacterId Target, Action Do)? QuickOrder(Vector2 p)
+    {
+        if (SelectedIds() is not { Count: > 0 } selection) return null;
+        if (PickTrader(p) is { } trader) return ("talk", trader, () => Say(new Meitou.Simulation.Trading.OpenTrade(selection[0], trader) { Tick = session.World.Tick }));
+        // While sneaking, a right click on an NPC is a stealth knock-out (the original's tutorial: "right click on an NPC while sneaking").
+        if (PickTarget(p) is { } mark && session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == mark) is { StealthKoChance: not null })
+            return ("attk", mark, () => Say(new Meitou.Simulation.Carrying.StealthKoOrder(selection, mark) { Tick = session.World.Tick }));
+        if (PickTarget(p) is { } victim) return ("attk", victim, () => Say(new Meitou.Simulation.Combat.AttackOrder(selection, victim) { Tick = session.World.Tick }));
+        if (PickHurtAlly(p) is { } patient) return ("med", patient, () => Say(new Meitou.Simulation.FirstAid.TreatOrder(selection, patient) { Tick = session.World.Tick }));
+        if (PickDowned(p, ownOnly: true) is { } ally) return ("lift", ally, () => Say(new Meitou.Simulation.Carrying.PickUpOrder([], ally) { Tick = session.World.Tick }));
+        return null;
     }
 
     public void MouseMove(Vector2 p)
     {
         mouse = p;
+        if (ScrollThumbMove(p)) return;
+        if (MapPointerMove(p)) return;
+        if (UiVisible && faithfulScreens.PointerMove(p)) return;
         if (dragFrom is { } from && !dragging && Vector2.Distance(from, p) >= DragThreshold) dragging = true;
     }
 
     public void MouseUp(MouseButton button, Vector2 p, bool shift)
     {
         mouse = p;
+        if (button == MouseButton.Left) { InventoryPointerUp(p); faithfulScreens.PointerUp(); mapDrag = null; }
+        if (button == MouseButton.Middle) mapDrag = null;
+        if (button == MouseButton.Right && MapRightUp(p)) return;
+        if (button == MouseButton.Right) { ContextRelease(); SiteRelease(); }
+        if (button == MouseButton.Right && steering)
+        {
+            Steer(final: true);
+            steering = false;
+        }
         if (button != MouseButton.Left || dragFrom is not { } from) return;
         dragFrom = null;
         if (dragging)
         {
             dragging = false;
-            Select(InBox(from, p), shift);
+            var boxed = InBox(from, p);
+            Select(boxed, shift);
+            if (boxed.Count > 0) Inspect(CharacterId.None);
         }
         else
         {
+            // A click on another faction's character shows it in the information and medical panels and drops the squad's selection (docs/game/ui-screens.md section 4). Shift keeps the selection, a click on your own or on the ground clears the inspection.
             var hit = Pick(p);
+            var other = hit is null && !shift ? PickWhere(p, c => !c.IsPlayer) : null;
             Select(hit is { } id ? new[] { id } : [], shift);
+            if (other is { } stranger) Inspect(stranger);
+            else if (!shift || hit is not null) Inspect(CharacterId.None);
         }
+    }
+
+    /// <summary>Shows <paramref name="target"/> (another faction's character; <see cref="CharacterId.None"/> for nobody) in the HUD panels.</summary>
+    void Inspect(CharacterId target) => Say(new InspectCommand(target) { Tick = session.World.Tick });
+
+    /// <summary>
+    /// Once a frame: while the right button is held after a move order, the order is given again at the ground point under the cursor once every world
+    /// tick (also when the camera moves and the cursor does not). <paramref name="final"/> (the button is let go) gives the last point unless this tick
+    /// already has the same one.
+    /// </summary>
+    public void Steer(bool final = false)
+    {
+        UpdateContextMenu();
+        UpdateMap();
+        if (!final) UpdateBuild();
+        if (!steering || OverHud(mouse)) return;
+        if (Ray(mouse) is not { } ray || GroundHit(ray.Origin, ray.Direction) is not { } hit) return;
+        PlaceMarker(hit);   // the marker follows the cursor every frame; the order only once a tick
+        if (!final && session.World.Tick == steerTick) return;
+        if (final && session.World.Tick == steerTick && hit == steerTarget) return;
+        Move(hit, queued: false);
+        (steerTarget, steerTick) = (hit, session.World.Tick);
+    }
+
+    /// <summary>The character the strategy camera follows (a double tap of its number key, F, or a double click on its squad button); panning the camera lets go.</summary>
+    public CharacterId? Follow { get; set; }
+    // The last number key and when it was pressed: the same key again within DoubleTapSeconds centres on the character (docs/game/ui-input.md, events 100..120).
+    Key lastSelectKey;
+    long lastSelectAt;
+    const double DoubleTapSeconds = 0.5;
+
+    /// <summary>Selects the squad's <paramref name="index"/>th member (<paramref name="shift"/> adds); the second press within half a second centres the camera on it and follows.</summary>
+    void SelectMember(int index, bool shift, bool doubleTap)
+    {
+        var members = PlayerCharacters();
+        if (index < 0 || index >= members.Count) return;
+        Select([members[index]], shift);
+        if (doubleTap) CentreOn(members[index]);
+    }
+
+    void CentreOn(CharacterId id)
+    {
+        if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is not { } c) return;
+        var view = session.Camera.Current;
+        session.Camera.Place(new Vector2(c.Position.X, c.Position.Z), view.Yaw, view.Pitch, view.Distance);
+        Follow = id;
     }
 
     public void Key(Key key, bool shift)
     {
         if (key >= Meitou.Engine.Input.Key.D1 && key <= Meitou.Engine.Input.Key.D9)
         {
-            var members = PlayerCharacters();
-            int n = key - Meitou.Engine.Input.Key.D1;
-            if (n < members.Count) Select([members[n]], shift);
+            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+            bool doubleTap = key == lastSelectKey && System.Diagnostics.Stopwatch.GetElapsedTime(lastSelectAt, now).TotalSeconds <= DoubleTapSeconds;
+            (lastSelectKey, lastSelectAt) = (doubleTap ? default : key, now);
+            SelectMember(key - Meitou.Engine.Input.Key.D1, shift, doubleTap);
         }
+        // focus_char (F): centre on the lead selected character and follow it (the free camera's F is its down key).
+        else if (key == Meitou.Engine.Input.Key.F && !session.Camera.IsFree && Selected().FirstOrDefault() is { } lead) CentreOn(lead.Id);
         else if (key == Meitou.Engine.Input.Key.Grave) Select(PlayerCharacters(), shift);
         else if (key == Meitou.Engine.Input.Key.R && !session.Camera.IsFree) Say(new StopCommand(SelectedIds()) { Tick = session.World.Tick });
+        else if (key == Meitou.Engine.Input.Key.H && !session.Camera.IsFree) Say(new Meitou.Simulation.FirstAid.MedicJobCommand(SelectedIds()) { Tick = session.World.Tick });
+        else if (key == Meitou.Engine.Input.Key.L && !session.Camera.IsFree) Say(new Meitou.Simulation.FirstAid.RestOrder(SelectedIds()) { Tick = session.World.Tick });
+        // Rescue job (the original's NUM8 rescue toggle; the numpad is the cinema camera's) and put down (the original's context menu verb "Put Down").
+        else if (key == Meitou.Engine.Input.Key.J && !session.Camera.IsFree) Say(new Meitou.Simulation.Carrying.RescueJobCommand(SelectedIds()) { Tick = session.World.Tick });
+        else if (key == Meitou.Engine.Input.Key.K && !session.Camera.IsFree) Say(new Meitou.Simulation.Carrying.PutDownOrder(SelectedIds()) { Tick = session.World.Tick });
     }
 }

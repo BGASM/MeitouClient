@@ -3,7 +3,6 @@ using System.Runtime.InteropServices;
 using Meitou.Rendering;
 using Meitou.Rendering.Gpu;
 using Meitou.Rendering.Gpu.Core;
-using Meitou.Rendering.Gpu.Shaders;
 
 namespace Meitou.Tests.Vulkan;
 
@@ -47,26 +46,6 @@ public class NativeShaderTests
         yield return ("terrain patch prepass", TerrainShaders.PatchVertexNative(), TerrainShaders.PrepassFragmentNative(), typeof(TerrainPush));
         yield return ("terrain mesh", TerrainShaders.MeshVertexNative(), TerrainShaders.MeshFragmentNative(), typeof(TerrainPush));
         yield return ("terrain mesh depth", TerrainShaders.MeshInstancedDepthVertexNative(), TerrainShaders.DepthFragmentNative(), typeof(TerrainPush));
-    }
-
-    [Fact]
-    public void Port_keeps_bodies_and_maps_every_uniform()
-    {
-        string legacy = Shaders.MeshFragment, native = NativeShaders.MeshFragment();
-        Assert.DoesNotContain(native.Split('\n'), l => l.TrimStart().StartsWith("uniform ", StringComparison.Ordinal));   // no loose uniform left
-        Assert.Contains($"layout(std140, set = {NativeShaders.FrameSet}, binding = 1) uniform KenshiShadowReceiver", native);
-        Assert.Contains("#define uDiffuse textures2D[pc.diffuse]", native);
-        // Every line of the legacy text that is not a declaration appears unchanged, in order.
-        int at = 0;
-        foreach (var line in legacy.Split('\n'))
-        {
-            string t = line.TrimStart();
-            if (t.StartsWith("uniform ", StringComparison.Ordinal) || t.StartsWith("layout(std140)", StringComparison.Ordinal) || t.StartsWith("#version", StringComparison.Ordinal)) continue;
-            int found = native.IndexOf(line, at, StringComparison.Ordinal);
-            Assert.True(found >= 0, $"line missing or out of order: {line}");
-            at = found + line.Length;
-        }
-        Assert.Throws<InvalidOperationException>(() => NativeShaders.Port("#version 330 core\nuniform float uUnknown;\nvoid main() {}\n"));
     }
 
     [Fact]

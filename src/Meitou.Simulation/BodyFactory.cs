@@ -22,8 +22,12 @@ public sealed class BodyFactory(GameDatabase db)
     /// <summary>The data of a RACE record (cached).</summary>
     public RaceData Race(GameRecord race) => races.GetOrAdd(race.StringId, _ => RaceData.From(race, Db));
 
-    /// <summary>The stats and the medical state of a character of <paramref name="race"/>, made from the CHARACTER record <paramref name="character"/> (null: defaults).</summary>
-    public (RaceData Race, CharacterStats Stats, MedicalState Medical) Create(GameRecord race, GameRecord? character, ulong worldSeed, ulong characterKey)
+    /// <summary>
+    /// The stats and the medical state of a character of <paramref name="race"/>, made from the CHARACTER record <paramref name="character"/> (null: defaults). An ANIMAL_CHARACTER
+    /// (docs/game/animals.md) reads its stats the same way; its stat multiplier is its <paramref name="age"/>, it has no humanoid stats object, its parts' HP multiplier is its size
+    /// lerp(age, scale min, scale max) and their body scale its <c>HP mult</c>.
+    /// </summary>
+    public (RaceData Race, CharacterStats Stats, MedicalState Medical) Create(GameRecord race, GameRecord? character, ulong worldSeed, ulong characterKey, float age = 1)
     {
         var data = Race(race);
         float[] values;
@@ -38,6 +42,11 @@ public sealed class BodyFactory(GameDatabase db)
         else values = new float[StatsInfo.Count];
         if (character is not null) randomise = character.GetFloat("stats randomise");
         var stats = CharacterStats.Create(values, data, randomise, worldSeed, characterKey);
+        if (AnimalData.From(character) is { } animal)
+        {
+            stats.Scale = age;
+            return (data, stats, MedicalState.Create(data, stats.Strength, hasStats: false, hpMultiplier: animal.Scale(age), bodyScale: animal.HpMult));
+        }
         return (data, stats, MedicalState.Create(data, stats.Strength));
     }
 }

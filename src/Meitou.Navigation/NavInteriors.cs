@@ -64,6 +64,8 @@ internal static class NavInteriors
             ZoneX = exterior.ZoneX, ZoneZ = exterior.ZoneZ, Vertices = [.. vertices], Polygons = [.. polygons], Neighbours = [.. neighbours], Areas = [.. areas],
             Links = links.Select(l => l is { Count: > 0 } ? l.ToArray() : null).ToArray(), Kept = [.. kept], BoundsMin = lo, BoundsMax = hi,
             DoorIds = doorIds.Count > 0 ? [.. doorIds] : null, DoorOf = doorIds.Count > 0 ? [.. doorOf] : null,
+            Surfaces = new NavSurfaces([.. (exterior.Surfaces?.Corners ?? []).Concat(interiors.SelectMany(m => m.Surfaces?.Corners ?? []))]),
+            Terrain = exterior.Terrain,
         };
     }
 

@@ -24,7 +24,7 @@ sealed partial class GameHost
     CharacterId sandboxHero = CharacterId.None, sandboxFoe = CharacterId.None;
     byte? sandboxMode;
     float sandboxSpeed;
-    bool sandboxPatrol, sandboxFollow = true;
+    bool sandboxPatrol, sandboxFollow;   // follow off: the camera stays on the middle of the floor until moved (Y follows the pair)
     float patrolTarget;
     long patrolIssued = -1;
 
@@ -33,8 +33,9 @@ sealed partial class GameHost
     {
         if (g.SandboxCharacter is { } want)
             return db.Find(want)?.StringId
-                ?? db.OfType(FcsRecordType.CHARACTER).FirstOrDefault(r => string.Equals(r.Name, want, StringComparison.OrdinalIgnoreCase))?.StringId
-                ?? throw new ArgumentException($"--sandbox-character: no CHARACTER named '{want}'");
+                ?? db.Records.Values.Where(r => r.Type is FcsRecordType.CHARACTER or FcsRecordType.ANIMAL_CHARACTER).OrderBy(r => r.Type == FcsRecordType.ANIMAL_CHARACTER)
+                    .FirstOrDefault(r => string.Equals(r.Name, want, StringComparison.OrdinalIgnoreCase))?.StringId
+                ?? throw new ArgumentException($"--sandbox-character: no CHARACTER or ANIMAL_CHARACTER named '{want}'");
         var start = NewGameStart.Find(NewGameStart.LoadAll(db), NewGameStart.DefaultName);
         foreach (var link in start?.Squad ?? [])
         {
@@ -51,19 +52,67 @@ sealed partial class GameHost
     {
         var world = session.World;
         string record = SandboxRecord(scene.Database!);
-        float half = g.Sandbox == 2 ? 15 : 0;
+        float half = g.Sandbox >= 2 ? 15 : 0;
         sandboxHero = population!.SpawnSandbox(world, record, new Vector2(-half, 0), player: true, yaw: MathF.PI / 2);
-        if (g.Sandbox == 2) sandboxFoe = population.SpawnSandbox(world, record, new Vector2(half, 0), player: false, yaw: -MathF.PI / 2);
+        if (g.Sandbox >= 2) sandboxFoe = population.SpawnSandbox(world, record, new Vector2(half, 0), player: false, yaw: -MathF.PI / 2);
+        // n above 2: the rest stand idle in rings round the pair (the player's faction, so they keep out of the fight), 15 units apart, a look each.
+        for (int i = 0, ring = 1, placed = 0; i < g.Sandbox - 2; i++, placed++)
+        {
+            int perRing = (int)(2 * MathF.PI * (25 + 15 * ring) / 15);
+            if (placed == perRing) { ring++; placed = 0; perRing = (int)(2 * MathF.PI * (25 + 15 * ring) / 15); }
+            float r = 25 + 15 * ring, angle = 2 * MathF.PI * placed / perRing;
+            population.SpawnSandbox(world, record, new Vector2(r * MathF.Cos(angle), r * MathF.Sin(angle)), player: true, yaw: angle + MathF.PI, variant: i + 1);
+        }
         playerSquad = world.Squads.Find(world.Player.Squad);
         world.Commands.Enqueue(new SelectCommand([sandboxHero]) { Tick = world.Tick });
-        if (g.SandboxMode is { } modeName)
-            sandboxMode = modeName.ToLowerInvariant() switch { "walk" => SpeedMode.Walk, "run" => SpeedMode.Run, "free" => SpeedMode.Free, _ => throw new ArgumentException("--sandbox-mode: walk, run or free") };
-        sandboxSpeed = g.SandboxSpeed;
+        bool patrol = false, fight = false;
+        // --sandbox-mode: comma-separated walk, run or free, a fixed speed in units/s, patrol and fight.
+        foreach (string token in (g.SandboxMode ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (float.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out float speed)) sandboxSpeed = speed;
+            else
+                switch (token.ToLowerInvariant())
+                {
+                    case "walk": sandboxMode = SpeedMode.Walk; break;
+                    case "run": sandboxMode = SpeedMode.Run; break;
+                    case "free": sandboxMode = SpeedMode.Free; break;
+                    case "patrol": patrol = true; break;
+                    case "fight": fight = true; break;   // the G key at the start (pictures of a fight)
+                    default: throw new ArgumentException("--sandbox-mode: walk, run, free, a speed in units/s, patrol or fight (comma-separated)");
+                }
+        }
         SandboxSendMovement();
-        if (g.SandboxPatrol) SandboxTogglePatrol();
+        if (patrol) SandboxTogglePatrol();
+        if (fight) SandboxKey(EngineKey.G);
         session.Ticked += _ => SandboxTick();
-        Console.WriteLine($"sandbox   {record}{(g.Sandbox == 2 ? ", two facing each other 30 units apart (G fights)" : "")}; flat floor {2 * SandboxHalf:0} x {2 * SandboxHalf:0}, grid {SandboxMinor:0} / {SandboxMajor:0}");
+        Console.WriteLine($"sandbox   {record}{(g.Sandbox >= 2 ? ", two facing each other 30 units apart (G fights)" : "")}{(g.Sandbox > 2 ? $", {g.Sandbox - 2} more round them" : "")}; flat floor {2 * SandboxHalf:0} x {2 * SandboxHalf:0}, grid {SandboxMinor:0} / {SandboxMajor:0}");
         return new Vector3(0, scene.FlatHeight, 0);
+    }
+
+    int crowd;
+
+    /// <summary>
+    /// The game's <c>--crowd n</c> (a test of the character renderer and the simulation at scale): n idle characters of the sandbox's record, each with a look of its own, of the
+    /// player's faction but in squads of their own, in rings 15 units apart round <paramref name="around"/> on walkable ground (a spot that is not is skipped).
+    /// </summary>
+    void SpawnCrowd(Vector3 around, int count)
+    {
+        var world = session.World;
+        string record = SandboxRecord(scene.Database!);
+        int placed = 0;
+        for (int ring = 1; placed < count && ring < 200; ring++)
+        {
+            float r = 15 + 15 * ring;
+            int perRing = (int)(2 * MathF.PI * r / 15);
+            for (int k = 0; k < perRing && placed < count; k++)
+            {
+                float angle = 2 * MathF.PI * k / perRing;
+                var at = new Vector2(around.X + r * MathF.Cos(angle), around.Z + r * MathF.Sin(angle));
+                if (!world.Walkability.IsWalkable(at.X, at.Y)) continue;
+                population!.SpawnSandbox(world, record, at, player: true, yaw: angle + MathF.PI, variant: ++placed);
+            }
+        }
+        Console.WriteLine($"crowd     {placed} idle characters of {record} round {around.X:0}, {around.Z:0}");
     }
 
     void SandboxSendMovement()
@@ -125,20 +174,34 @@ sealed partial class GameHost
         }
     }
 
-    /// <summary>Keeps the camera on the hero (the middle of the pair while there is a foe), when following.</summary>
+    /// <summary>Keeps the camera on the hero (the middle of the pair while there is a foe), when following. Only the pivot moves: a cut every frame
+    /// (<see cref="CameraRig.Place"/>) would draw the rotation and zoom at the tick rate instead of interpolated.</summary>
+    /// <summary>The strategy camera on the character the player follows (<see cref="PlayerInterface.Follow"/>), as the sandbox's follow does; a gone character is let go.</summary>
+    void FollowCamera()
+    {
+        if (player.Follow is not { } id || session.Camera.IsFree) return;
+        if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is not { } followed) { player.Follow = null; return; }
+        session.Camera.MovePivot(new Vector2(followed.Position.X, followed.Position.Z));
+        camera.Target = DrawnPosition(followed);
+    }
+
     void SandboxFollowCamera()
     {
         if (!IsSandbox || !sandboxFollow || session.Camera.IsFree) return;
         var characters = session.CurrentSnapshot.Characters;
         if (characters.FirstOrDefault(c => c.Id == sandboxHero) is not { } hero) return;
-        var p = DrawnPosition(hero);
-        if (!sandboxFoe.IsNone && characters.FirstOrDefault(c => c.Id == sandboxFoe) is { } foe) p = (p + DrawnPosition(foe)) / 2;
-        var s = session.Camera.Current;
-        session.Camera.Place(new Vector2(p.X, p.Z), s.Yaw, s.Pitch, s.Distance);
-        camera.Target = p;
+        var drawn = DrawnPosition(hero);
+        var latest = hero.Position;
+        if (!sandboxFoe.IsNone && characters.FirstOrDefault(c => c.Id == sandboxFoe) is { } foe)
+        {
+            drawn = (drawn + DrawnPosition(foe)) / 2;
+            latest = (latest + foe.Position) / 2;
+        }
+        session.Camera.MovePivot(new Vector2(latest.X, latest.Z));
+        camera.Target = drawn;
     }
 
-    /// <summary>The debug panel, over the finished picture (the floor's grid is the terrain's: <see cref="WorldRenderOptions.Grid"/>).</summary>
+    /// <summary>The debug panel, over the finished picture and the HUD (the floor's grid is the terrain's: <see cref="WorldRenderOptions.Grid"/>).</summary>
     void DrawSandbox(DebugOverlay o, int width, int height)
     {
         var white = DebugOverlay.TextColour;
@@ -152,7 +215,7 @@ sealed partial class GameHost
         Add($"patrol {(sandboxPatrol ? $"ON: x {-PatrolHalf:0} <-> {PatrolHalf:0} (to {patrolTarget:0})" : "off")}   follow {(sandboxFollow ? "on" : "off")}", dim);
         Add("Z walk  X run  C free  [ ] fixed speed +-5  P patrol  G fight  Y follow  R stop", dim);
         float pad = 8, textW = lines.Max(l => l.Text.Length) * o.CharWidth, w = textW + 2 * pad, h = lines.Count * o.LineHeight + 2 * pad;
-        float x0 = width - w - 10, y0 = height - h - 10;   // bottom right: the character stands in the middle of the view
+        float x0 = width - w - 10, y0 = 10;   // top right: the HUD holds the bottom and the top left, the character stands in the middle
         o.Rect(x0, y0, x0 + w, y0 + h, DebugOverlay.PanelColour);
         for (int i = 0; i < lines.Count; i++) o.Text(lines[i].Text, x0 + pad, y0 + pad + i * o.LineHeight, lines[i].Colour);
         o.Flush(width, height);
@@ -169,7 +232,7 @@ sealed partial class GameHost
         if (session.PreviousSnapshot.Characters.FirstOrDefault(c => c.Id == id) is { } before)
             measured = Vector3.Distance(new Vector3(before.Position.X, 0, before.Position.Z), new Vector3(snapshot.Position.X, 0, snapshot.Position.Z)) / (float)session.Simulation.TickSeconds;
         byte mode = cold.ModeOverride ?? hot.Mode;
-        string modeText = mode switch { SpeedMode.Walk => $"WALK (cap {hot.WalkSpeed:0.#})", SpeedMode.Run => $"RUN (cap {SpeedMode.RunCap:0})", _ => "FREE (no cap)" };
+        string modeText = mode switch { SpeedMode.Walk => $"WALK (cap {hot.WalkSpeed:0.#})", SpeedMode.Run => $"RUN (cap {SpeedMode.RunCap:0})", SpeedMode.Group => "GROUP (squad's slowest)", _ => "FREE (no cap)" };
         add($"{label}: {snapshot.Name}   {(CharacterTask)hot.Task}", heading);
         add($"v {v,6:0.00} u/s   measured {measured,6:0.00}   speed chain {hot.MaxSpeed:0.0}", null);
         if (!detailed) { AddLayers(snapshot, cold, add); return; }
@@ -184,8 +247,10 @@ sealed partial class GameHost
         foreach (var layer in snapshot.Animations)
         {
             // Published by record name; the length is the clip's (a technique's record name differs from its clip).
-            string clip = animationLibrary is { } lib && lib.IndexOfAny(layer.Name) is var at and >= 0 ? lib.Definitions[at].Clip : layer.Name;
-            float length = animationLengths?.Of(clip) ?? 1;
+            // An animal publishes its clips by clip name (its techniques by record name) and has its own skeleton's lengths.
+            bool animal = cold.Fighter is { IsAnimal: true };
+            string clip = animationLibrary is { } lib && lib.IndexOfAny(layer.Name) is var at and >= 0 && (!animal || lib.Definitions[at].Technique) ? lib.Definitions[at].Clip : layer.Name;
+            float length = animationLengths?.For(animal ? cold.Race?.StringId : null).Of(clip) ?? 1;
             add($"  {layer.Name,-28} t {layer.Time,5:0.00}/{length,5:0.00}  w {layer.Weight:0.00}", null);
         }
     }

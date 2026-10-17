@@ -89,7 +89,7 @@ public sealed unsafe partial class PostProcess : IDisposable
     readonly ParticleDepthPass particleDepthPass;
     readonly ParticleCompositePass particleCompositePass;
     readonly ParticleCoveragePass particleCoveragePass;
-
+    AoApplyPass? aoApplyPass;   // made the first time the occlusion goes onto the scene before the particles (ApplySsao)
 
     /// <summary>One native full-screen program: the shared vertex shader with a fragment shader, and its resolved handles.</summary>
     abstract class FullscreenProgram
@@ -100,9 +100,17 @@ public sealed unsafe partial class PostProcess : IDisposable
 
     sealed class BlurPass : FullscreenProgram
     {
+        public readonly SamplerSlot Ao, Mask;
+        public readonly UniformHandle Step, CharacterAo;
+        public BlurPass(GpuContext gpu) : base(gpu, PostProcessShaders.SsaoBlur, "post ssao blur") =>
+            (Ao, Mask, Step, CharacterAo) = (P.Sampler("uAo"), P.Sampler("uMask"), P.Uniform("uStep"), P.Uniform("uCharacterAo"));
+    }
+
+    /// <summary>The finished occlusion multiplied into the scene colour (<see cref="PostProcessShaders.SsaoApply"/>).</summary>
+    sealed class AoApplyPass : FullscreenProgram
+    {
         public readonly SamplerSlot Ao;
-        public readonly UniformHandle Step;
-        public BlurPass(GpuContext gpu) : base(gpu, PostProcessShaders.SsaoBlur, "post ssao blur") => (Ao, Step) = (P.Sampler("uAo"), P.Uniform("uStep"));
+        public AoApplyPass(GpuContext gpu) : base(gpu, PostProcessShaders.SsaoApply, "post ssao apply") => Ao = P.Sampler("uAo");
     }
 
     sealed class LuminancePass : FullscreenProgram
@@ -125,14 +133,15 @@ public sealed unsafe partial class PostProcess : IDisposable
 
     sealed class CompositePass : FullscreenProgram
     {
-        public readonly SamplerSlot Scene, Ao, Adapted, Mask;
-        public readonly UniformHandle Auto, Exposure, UseAo, Dither, Debug, CharacterAo, SceneSize, Tone, ToneMix, Grade, Saturation, Contrast;
+        public readonly SamplerSlot Scene, Ao, Adapted;
+        public readonly UniformHandle Auto, Exposure, UseAo, Dither, SceneSize, Tone, ToneMix, Grade, Saturation, Contrast, Night, Balance;
         public CompositePass(GpuContext gpu) : base(gpu, PostProcessShaders.Composite, "post composite")
         {
-            (Scene, Ao, Adapted, Mask) = (P.Sampler("uScene"), P.Sampler("uAo"), P.Sampler("uAdapted"), P.Sampler("uMask"));
-            (CharacterAo, SceneSize) = (P.Uniform("uCharacterAo"), P.Uniform("uSceneSize"));
-            (Auto, Exposure, UseAo, Dither, Debug) = (P.Uniform("uAuto"), P.Uniform("uExposure"), P.Uniform("uUseAo"), P.Uniform("uDither"), P.Uniform("uDebug"));
+            (Scene, Ao, Adapted) = (P.Sampler("uScene"), P.Sampler("uAo"), P.Sampler("uAdapted"));
+            SceneSize = P.Uniform("uSceneSize");
+            (Auto, Exposure, UseAo, Dither) = (P.Uniform("uAuto"), P.Uniform("uExposure"), P.Uniform("uUseAo"), P.Uniform("uDither"));
             (Tone, ToneMix, Grade, Saturation, Contrast) = (P.Uniform("uTone"), P.Uniform("uToneMix"), P.Uniform("uGrade"), P.Uniform("uSaturation"), P.Uniform("uContrast"));
+            (Night, Balance) = (P.Uniform("uNight"), P.Uniform("uBalance"));
         }
     }
 
@@ -159,8 +168,10 @@ public sealed unsafe partial class PostProcess : IDisposable
     {
         public readonly SamplerSlot NearDepth, FarDepth;
         public readonly UniformHandle NearToPrev, FarToPrev, NearPlanes, FarPlanes, FullPlanes, JitterNdc, HasFar, Mode, Tan, Right, Up, Back, EyeY, WaterY, WaterReactive;
+        public readonly UniformHandle Sun, SunMotionUniform;
         public VelocityPass(GpuContext gpu) : base(gpu, UpscaleShaders.Velocity, "post velocity")
         {
+            (Sun, SunMotionUniform) = (P.Uniform("uSun"), P.Uniform("uSunMotion"));
             (NearDepth, FarDepth) = (P.Sampler("uNearDepth"), P.Sampler("uFarDepth"));
             (NearToPrev, FarToPrev, NearPlanes, FarPlanes, FullPlanes) = (P.Uniform("uNearToPrev"), P.Uniform("uFarToPrev"), P.Uniform("uNearPlanes"),
                 P.Uniform("uFarPlanes"), P.Uniform("uFullPlanes"));
@@ -183,11 +194,11 @@ public sealed unsafe partial class PostProcess : IDisposable
 
     sealed class SsaoPass : FullscreenProgram
     {
-        public readonly SamplerSlot Depth;
-        public readonly UniformHandle Tan, NearFar, Size, Radius, Strength, FadeStart, FadeEnd, Right, Up, Back, Eye;
+        public readonly SamplerSlot Depth, Mask;
+        public readonly UniformHandle Tan, NearFar, Size, Radius, Strength, FadeStart, FadeEnd, Right, Up, Back, Eye, CharacterOccluder;
         public SsaoPass(GpuContext gpu) : base(gpu, PostProcessShaders.Ssao, "post ssao")
         {
-            Depth = P.Sampler("uDepth");
+            (Depth, Mask, CharacterOccluder) = (P.Sampler("uDepth"), P.Sampler("uMask"), P.Uniform("uCharacterOccluder"));
             (Tan, NearFar, Size, Radius, Strength, FadeStart, FadeEnd) = (P.Uniform("uTan"), P.Uniform("uNearFar"), P.Uniform("uSize"),
                 P.Uniform("uRadius"), P.Uniform("uStrength"), P.Uniform("uFadeStart"), P.Uniform("uFadeEnd"));
             (Right, Up, Back, Eye) = (P.Uniform("uRight"), P.Uniform("uUp"), P.Uniform("uBack"), P.Uniform("uSsaoEye"));
@@ -478,7 +489,7 @@ public sealed unsafe partial class PostProcess : IDisposable
         stamps.Tag = CostTag;
         haveNearSlice = farSliceDrawn = false;
         foreach (var l in lowTargets) l.Drawn = false;
-        sceneMarked = false;
+        sceneMarked = aoApplied = false;
         Stamp("start");
         frameIndex++;
         JitterPixels = Temporal ? Jitter.Offset(frameIndex, JitterPhases) : Vector2.Zero;
@@ -598,7 +609,7 @@ public sealed unsafe partial class PostProcess : IDisposable
 
     /// <summary>One full-screen triangle with <paramref name="p"/> into <paramref name="target"/> (its uniforms and samplers set before), in a
     /// rendering of its own, followed by a full barrier (VkGl barriered before every pass).</summary>
-    readonly Dictionary<(LegacyProgram, Vk.Format), GraphicsPipeline> pipelines = [];
+    readonly Dictionary<(LegacyProgram, Vk.Format, Vk.Format, DrawState), GraphicsPipeline> pipelines = [];
 
     void Draw(LegacyProgram p, Target2D target) => Draw(p, target.Attachment, target.Format, target.Width, target.Height, target.Width, target.Height);
 
@@ -618,8 +629,8 @@ public sealed unsafe partial class PostProcess : IDisposable
         cmd.SetRaster(s.Cull, s.Front);
         cmd.SetDepth(s.DepthTest, s.DepthWrite, s.Compare);
         cmd.SetDepthBias(s.BiasEnable, s.BiasConstant, s.BiasSlope);
-        if (!pipelines.TryGetValue((p, format), out var pipeline))
-            pipelines[(p, format)] = pipeline = Gpu.Pipelines.Get(s.Pipeline(p.Program, p.VertexLayout([]), Vk.PrimitiveTopology.TriangleList,
+        if (!pipelines.TryGetValue((p, format, depthFormat, s), out var pipeline))
+            pipelines[(p, format, depthFormat, s)] = pipeline = Gpu.Pipelines.Get(s.Pipeline(p.Program, p.VertexLayout([]), Vk.PrimitiveTopology.TriangleList,
                 new AttachmentFormats(format, depthFormat), p.Name));
         cmd.BindPipeline(pipeline);
         p.Flush(cmd);
@@ -650,11 +661,11 @@ public sealed unsafe partial class PostProcess : IDisposable
         // The final passes draw into Target (the window's backbuffer, or the caller's texture) with a viewport of the display size.
         var final = PassTargets.Of(Target ?? throw new InvalidOperationException("PostProcess.Target is not set"), null);
         bool needDepth = o.Ssao && haveNearSlice;
+        if (shaftsPending || fogPending) ApplyLayers(false);   // a caller that drew the layers without ApplySsao: the occlusion stays the composite's
 
         bool ao = needDepth;
-        if (ao) RunSsao();
-        if (ao) Stamp("ssao");
-        bool mask = ao && Options.SsaoCharacterStrength < 1;   // the characters' pixels: the scene colour's alpha (only they write it)
+        if (ao && !aoApplied) RunSsao();
+        if (ao && !aoApplied) Stamp("ssao");
         // The upscaler: the scene at the render size becomes the display-size picture the rest of the chain reads.
         postColour = sceneColour!;
         if (Temporal) { postColour = RunUpscale(); Stamp("upscale"); }
@@ -670,21 +681,20 @@ public sealed unsafe partial class PostProcess : IDisposable
         Bind(c.P, c.Scene, postColour);
         Bind(c.P, c.Ao, aoB);
         Bind(c.P, c.Adapted, auto ? adaptB : null);
-        Bind(c.P, c.Mask, mask ? sceneColour : null);
-        c.P.Set(c.CharacterAo, mask ? Options.SsaoCharacterStrength : 1f);
         // Without an upscaler the scene may still be smaller than the display (the render scale): the composite then resamples it (Catmull-Rom).
         bool plainScaled = postColour.Width != displayWidth || postColour.Height != displayHeight;
         c.P.Set(c.SceneSize, plainScaled ? postColour.Width : 0f, plainScaled ? postColour.Height : 0f);
         c.P.Set(c.Auto, auto ? 1 : 0);
         c.P.Set(c.Exposure, o.Exposure);
-        c.P.Set(c.UseAo, ao ? 1 : 0);
+        c.P.Set(c.UseAo, ao && !aoApplied ? 1 : 0);   // applied before the particles: only the debug view still reads it
         c.P.Set(c.Dither, o.Dither ? 1 : 0);
-        c.P.Set(c.Debug, o.Debug);
         c.P.Set(c.Tone, (int)o.ToneMap);
         c.P.Set(c.ToneMix, Math.Clamp(o.ToneMix, 0, 1));
         c.P.Set(c.Grade, o.Grade ? 1 : 0);
-        c.P.Set(c.Saturation, o.Saturation);
-        c.P.Set(c.Contrast, o.Contrast);
+        c.P.Set(c.Saturation, PostOptions.Saturation);
+        c.P.Set(c.Contrast, PostOptions.Contrast);
+        c.P.Set(c.Night, auto ? Math.Clamp(o.NightGradeStrength, 0, 1) : 0f);
+        c.P.Set(c.Balance, o.Balance);
         if (fxaa || haze) Draw(c.P, ldr!); else DrawFinal(c.P, final);
         Stamp("composite");
         var picture = ldr;
@@ -753,6 +763,14 @@ public sealed unsafe partial class PostProcess : IDisposable
     {
         MarkScene();
         if (!volumes || sceneColour is null || !haveNearSlice) return;
+        if (MergeLayers)
+        {
+            PrepareFogLayer();
+            shaftFrame.Darkening = 0;
+            Stamp("fog");
+            CloseSegment();
+            return;
+        }
         var f = fogPass;
         Bind(f.P, f.NearDepth, sceneDepth);
         Bind(f.P, f.FarDepth, farSliceDrawn ? farDepth : null);
@@ -781,6 +799,36 @@ public sealed unsafe partial class PostProcess : IDisposable
         Draw(f.P, sceneColour.Attachment, sceneColour.Format, width, height, width, height, FogState);
         Stamp("fog");
         CloseSegment();
+    }
+
+    // ---- occlusion before the particles ----
+
+    bool aoApplied;
+
+    /// <summary>The occlusion multiplied in: the scene colour kept by the factor; red, green and blue only (the alpha is the characters' mask).</summary>
+    static readonly DrawState AoMultiplyState = PassState with { Blend = new BlendState(true, Vk.BlendFactor.Zero, Vk.BlendFactor.SrcColor), ColourMask = DrawState.Rgb };
+
+    /// <summary>
+    /// Runs the SSAO and multiplies it into the scene colour now, so what is drawn after (the weather's particles) is not darkened by the occlusion
+    /// of the surfaces behind it; <see cref="End"/> then leaves it out of the composite. Call after <see cref="RunFogVolumes"/>, before the particles.
+    /// Does nothing when the SSAO is off (End then does nothing either).
+    /// </summary>
+    public void ApplySsao()
+    {
+        MarkScene();
+        if (MergeLayers)
+        {
+            ApplyLayers(Options.Ssao && haveNearSlice && sceneColour is not null && aoA is not null);
+            return;
+        }
+        if (!Options.Ssao || !haveNearSlice || sceneColour is null || aoA is null) return;
+        RunSsao();
+        var p = aoApplyPass ??= new AoApplyPass(Gpu);
+        Bind(p.P, p.Ao, aoB);
+        Draw(p.P, sceneColour.Attachment, sceneColour.Format, width, height, width, height, AoMultiplyState);
+        Stamp("ssao");
+        CloseSegment();
+        aoApplied = true;
     }
 
     // ---- GI resolve (docs/render-gi.md "Resolve") ----
@@ -944,6 +992,7 @@ public sealed unsafe partial class PostProcess : IDisposable
         // post-merge: the motion, the upscalers' depth and the water's reactivity in one dispatch (the vendor upscalers take the last two; TAA only the motion target).
         var external = ExternalFor(Options.Upscale.Kind);
         bool merged = MergeVelocity && MergeSupported;
+        PrepareSunMotion();
         if (merged) VelocityMerged(motion!, external is null ? null : upscaleDepth!, external is null || WaterHeight is null ? null : reactive!);
         else Velocity(motion!, 0);
         if (ObjectMotion is { } objectMotion)
@@ -1044,6 +1093,8 @@ public sealed unsafe partial class PostProcess : IDisposable
         v.P.Set(v.EyeY, eyeNow.Y);
         v.P.Set(v.WaterY, WaterHeight ?? float.MinValue);
         v.P.Set(v.WaterReactive, WaterReactive);
+        v.P.Set(v.Sun, sunMotion.Sun);
+        v.P.Set(v.SunMotionUniform, sunMotion.Motion);
         Draw(v.P, target);
     }
 
@@ -1076,17 +1127,29 @@ public sealed unsafe partial class PostProcess : IDisposable
         CloseSegment();
     }
 
+    /// <summary>Whether any character was drawn into the scene this frame (set by the world frame after the near slice's characters): none means the scene colour's
+    /// alpha, the SSAO's character mask, is 0 everywhere, so with <see cref="MaskSkip"/> the blur does not read it.</summary>
+    public bool CharactersDrawn { get; set; } = true;
+    /// <summary>Meitou: the SSAO blur's read of the character mask left out when no character was drawn (<c>--ab ssao-mask-skip</c>).</summary>
+    public bool MaskSkip { get; set; } = true;
+
+    static readonly bool SsaoStamps = Environment.GetEnvironmentVariable("MEITOU_SSAO_STAMPS") == "1";
+
     void RunSsao()
     {
         var a = aoA!; var b = aoB!;
         float tanY = MathF.Tan(fovY * 0.5f);
         var s = ssao;
         Bind(s.P, s.Depth, sceneDepth);
+        // Characters count less as occluders (the mask, as the blur's below): a body lying on the ground darkened a halo round it as wide as itself.
+        bool characters = sceneColour is not null && (CharactersDrawn || !MaskSkip);
+        Bind(s.P, s.Mask, characters ? sceneColour : null);
+        s.P.Set(s.CharacterOccluder, characters ? PostOptions.SsaoCharacterOccluder : 1f);
         s.P.Set(s.Tan, tanY * aspect, tanY);
         s.P.Set(s.NearFar, nearPlane, farPlane);
         s.P.Set(s.Size, (float)width, (float)height);
-        s.P.Set(s.Radius, Options.SsaoRadius);
-        s.P.Set(s.Strength, Options.SsaoStrength);
+        s.P.Set(s.Radius, PostOptions.SsaoRadius);
+        s.P.Set(s.Strength, PostOptions.SsaoStrength);
         // Fade out with distance: the occlusion is a detail effect, and far geometry is hazy and has little depth precision.
         s.P.Set(s.FadeStart, 3000f);
         s.P.Set(s.FadeEnd, 10000f);
@@ -1098,14 +1161,23 @@ public sealed unsafe partial class PostProcess : IDisposable
         s.P.Set(s.Eye, eyeNow.X, eyeNow.Y, eyeNow.Z);
         s.P.ApplyGlobals();   // the atmosphere's and the fog volumes' uniforms, through the frame globals
         Draw(s.P, a);
+        if (SsaoStamps) Stamp("ssao gen");
 
         var bl = blur;
         Bind(bl.P, bl.Ao, a);
+        Bind(bl.P, bl.Mask, null);
         bl.P.Set(bl.Step, 1f / a.Width, 0f);
+        bl.P.Set(bl.CharacterAo, 1f);
         Draw(bl.P, b);
+        if (SsaoStamps) Stamp("ssao blur x");
+        // The second pass also takes the occlusion off the characters' pixels (the scene colour's alpha; only they write it), by SsaoCharacterStrength.
+        bool mask = sceneColour is not null && (CharactersDrawn || !MaskSkip);
         Bind(bl.P, bl.Ao, b);
+        Bind(bl.P, bl.Mask, mask ? sceneColour : null);
         bl.P.Set(bl.Step, 0f, 1f / a.Height);
+        bl.P.Set(bl.CharacterAo, mask ? PostOptions.SsaoCharacterStrength : 1f);
         Draw(bl.P, a);
+        if (SsaoStamps) Stamp("ssao blur y");
         // The composite reads aoB: swap so the finished result is there.
         (aoA, aoB) = (aoB, aoA);
     }
@@ -1207,7 +1279,7 @@ public sealed unsafe partial class PostProcess : IDisposable
     /// <summary>Skip the smoothing: the exposure settles at once (screenshots, benchmarks).</summary>
     public bool InstantAdaptation { get; set; }
 
-    /// <summary>The last frame's adapted luminance and measured mean (the composite's scale is 0.55 / adapted); waits for the GPU and reads it
+    /// <summary>The last frame's adapted luminance and measured mean (the composite's scale is 0.55 / adapted; the mean is smoothed at the same rate, without the band, and is the raw mean when adaptation is instant); waits for the GPU and reads it
     /// back (<see cref="GpuContext.ReadBack"/>), so for reports only, outside a frame.</summary>
     public (float Adapted, float Mean) ReadExposure()
     {
@@ -1255,11 +1327,13 @@ public sealed unsafe partial class PostProcess : IDisposable
         Free();
         DisposeShadingRate();
         DisposeShafts();
+        DisposeSceneLayers();
         DisposeMerged();
         Hiz?.Dispose();
         foreach (var p in new FullscreenProgram[] { ssao, blur, luminancePass, adaptPass, compositePass, fxaaPass, hazePass, velocityPass, taaPass, fogPass, particleDepthPass, particleCompositePass, particleCoveragePass }) p.P.Dispose();
         giResolvePass?.P.Dispose();
         giApplyPass?.P.Dispose();
+        aoApplyPass?.P.Dispose();
         flowTexture?.Dispose();
         perturbationTexture?.Dispose();
     }
