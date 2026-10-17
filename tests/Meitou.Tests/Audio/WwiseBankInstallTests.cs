@@ -41,7 +41,8 @@ public class WwiseBankInstallTests
     public void Every_version_112_object_of_a_decoded_type_uses_exactly_its_size()
     {
         WwiseObjectType[] decoded = [WwiseObjectType.Event, WwiseObjectType.Action, WwiseObjectType.Sound, WwiseObjectType.ActorMixer,
-            WwiseObjectType.RandomSequenceContainer, WwiseObjectType.SwitchContainer, WwiseObjectType.LayerContainer];
+            WwiseObjectType.RandomSequenceContainer, WwiseObjectType.SwitchContainer, WwiseObjectType.LayerContainer,
+            WwiseObjectType.MusicSegment, WwiseObjectType.MusicTrack, WwiseObjectType.MusicSwitch, WwiseObjectType.MusicRandomSequence];
         int count = 0;
         foreach (var (name, bank) in Banks().Where(b => b.Bank.Version == WwiseBank.DecodedVersion))
             foreach (var o in bank.Objects)
@@ -53,7 +54,7 @@ public class WwiseBankInstallTests
                 }
                 else count++;
             }
-        Assert.Equal(2503, count); // with the 11 buses (partly decoded)
+        Assert.Equal(3190, count); // with the 11 buses (partly decoded) and the 687 music objects
     }
 
     [Fact]
