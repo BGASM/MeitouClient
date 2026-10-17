@@ -115,6 +115,33 @@ public class WildTests(ITestOutputHelper output)
         foreach (var line in WildSquads(world, pop)) output.WriteLine(line);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Wild_squads_stay_as_themselves_while_their_area_is_unloaded_only_with_the_meitou_switch(bool keep)
+    {
+        var data = WildData();
+        var (world, pop) = WildWorld(data, 1);
+        using var _ = world;
+        pop.KeepWild = keep;
+        world.RunTicks(16);
+        var marked = world.Squads.Find(pop.WildSquadsOf(pop.WildSites.First(s => pop.WildSquadsOf(s.Index).Count > 0).Index)[0])!.Members[0];
+        world.Characters.Cold(marked.Slot)!.Name = "Marked";
+        int squads = pop.WildSites.Sum(s => pop.WildSquadsOf(s.Index).Count);
+
+        world.Commands.Enqueue(new FocusCommand(new Vector3(-90000, 0, -90000)) { Tick = world.Tick });
+        world.RunTicks(150);
+        Assert.Equal(0, world.Characters.Count);
+        Assert.Equal(keep ? squads : 0, pop.WildSites.Sum(s => pop.KeptWildOf(s.Index).Count));
+
+        // Back: Meitou makes the kept squads again (and no more), Faithful rolls them anew from the seed.
+        world.Commands.Enqueue(new FocusCommand(Origin) { Tick = world.Tick });
+        world.RunTicks(32);
+        Assert.Equal(squads, pop.WildSites.Sum(s => pop.WildSquadsOf(s.Index).Count));
+        Assert.Equal(keep, world.Squads.All.SelectMany(s => s.Members).Any(m => world.Characters.Cold(m.Slot)!.Name == "Marked"));
+        Assert.All(pop.WildSites, s => Assert.Empty(pop.KeptWildOf(s.Index)));
+    }
+
     [Fact]
     public void The_wild_agrees_at_one_four_and_sixteen_threads()
     {
