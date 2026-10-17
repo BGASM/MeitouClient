@@ -82,8 +82,8 @@ cleared of path, AI, carry, treatment, combat and stealth state, plus the squad'
 The town then holds squads and makes none of its own; the platoon is made of the same characters when the town's zone is
 active again and leaves with the town's grace. This is the original's model: residents are persistent platoons kept as their
 characters ([persistent platoons](game/factions-squads-towns.md#1-object-model)). Saves write stored squads as the town's platoons (`sqt` 1). Any platoon's
-activation waits for the navmesh gate of its town's zone (a traveller: its own). A town whose stored squads all died is made afresh on the
-next visit (engine gap: the original refills it only through its pools). `ActiveZones` is double-buffered. Zone loading/spawn planning stays off the
+activation waits for the navmesh gate of its town's zone (a traveller: its own). A town made once (its pools' `started`) makes no residents again; its
+badly hurt squads are made afresh within its pools (see "Off-screen tier"). `ActiveZones` is double-buffered. Zone loading/spawn planning stays off the
 simulation thread; publish results at boundaries.
 `World.PreparePopulation` queues nearby residents/wild squads, activates existing nearby roaming
 platoons and drains completed builds during loading. It publishes matching snapshots without advancing
@@ -125,20 +125,34 @@ Implemented (`PopulationRoaming.cs`):
 - **Cost** (**Observed**, headless, save 2 with 2000 extra travelling stand-ins, warm): the step 0.08-0.1 ms per look at 1 or 8 threads (too little
   work for the threads to pay), pools and fights 0.23-0.26 ms per look (fights run every 4th look), about 0.03 ms a tick in all; save 2 alone
   0.08-0.1 ms per look. Not measured in the viewer's bench harness, which does not run the population.
+- **Pools** (`PopulationPools.cs`): every town and nest has the original's two pools (residents `pop`/`popd`, roaming `pop2`/`popd2`),
+  read from the save's town and nest states and written back, with `started`, `ded`, `tod`; the hour they last grew is not saved (set at load,
+  as the original). Every 4 s they grow 0.21818 per game hour up to the desired max (roaming only once residents are within 1 of full), for all
+  towns and nests, loaded or not. Growth is not state-hashed (as the population's other site state).
+  - **Towns**: one made from its data counts its resident squads (those with a home; bar squads not, engine choice after the census) into `pop`
+    and `popd` and is `started`; a started town never makes residents again, even with every squad dead (it holds what is left). Town roaming
+    pools stay as loaded (0 in every base save) and `RoamingShare` still caps roaming squads (see the census conflict in
+    [off-screen world](game/factions-squads-towns.md#off-screen-world)).
+  - **Regeneration**: on a town's load, each of its resident squads of the town's faction (platoon id order) that lost ≥ 60 % of its spawn size,
+    while the losses fit `pop` less the living resident members so far, comes back made afresh from its template at its place and home, as a
+    new kept platoon (the old one's characters are dropped; a save's leaves the save). A template whose members are all by chance gets up to
+    8 rolls. **Observed** (headless): new game, Hub squatters 1 of 3 left → 2 fresh; save 2, Squin's Town Guard 2 of 5 → 4 fresh; both the
+    same after save and load.
+  - **Nests**: the pool starts at 0.7 × `nest resident population` (or the save's `pop2`); a load fills it to `floor(pop2)` members; every 4 s
+    a loaded nest with room makes one squad (rolls keyed after the load's), unless a player character is within 1250, then it only weighs.
+    A roll that finds no entry (all weights 0 or none fits the free budget) with no squad of the nest left alive sets `ded` for good, `tod`,
+    and posts "<nest> has been wiped out" (engine choice: "intact" = someone alive). A squad that lost someone takes its living out of `pop2`
+    when the nest unloads. Dead squads lying there still count against the template weights. **Observed** (headless): a swamp raptor nest
+    (N 20, pool 14) refills an 8-duck squad after its two squads die; drained to 1 with all dead it is wiped out and saved with `ded`, `tod`,
+    `pop2` 1.008, `popd2` 20.
 
 Proposed (awaiting review):
 
 - **Who**: campaign squads join the town and roaming squads. Wild and nest squads are dropped, as in the original.
 - **Jobs**: the original's destinations (the blackboard's target, GOHOME's home within 2000) and roads.
-- **Budgets**: towns' `pop`/`popd` (residents) and `pop2`/`popd2` (roaming) grow 0.21818 per game hour for every town, loaded or not, read from
-  and written to the town states; a roaming squad is made only within `floor(pop2) − living`; a loaded town marks squads that lost ≥ 60 % for a
-  fresh make; a town made once makes no residents again (this replaces "a town with no squads left is made afresh"). Nests start at 0.7 ×
-  `nest resident population`, spawn one squad per look while loaded and no player unit is within 1250, and are `ded` for good once wiped
-  (`tod` saved).
 - **Campaigns** (raids, wars): the war manager on its 6-hour roll, squads made at the source town, the phases and outcomes, WAR_SAVESTATE read
   and written exactly. Designed in detail after a survey of FACTION_CAMPAIGN data and the victory/defeat effects.
-- **Waves**: (2) budgets, regeneration, nests (`RoamingShare` gives way to the pools: a town's roaming pool starts at the faction's
-  `roaming population`, 0.7 is the nests' rule); (3) campaigns. Tests to propose then: the growth formula pin.
+- **Waves**: (3) campaigns. Tests to propose: the growth formula pin; a regeneration and a nest wipe-out case.
 
 ## Player
 

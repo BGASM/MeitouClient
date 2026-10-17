@@ -83,6 +83,8 @@ public sealed class SavedPopulation
     public List<SavedPlatoon> Platoons { get; } = [];
     /// <summary>The save's nests in list order: the wild layout takes them before rolling more (empty: none, e.g. a Meitou save from before nests were written).</summary>
     public List<SavedNest> Nests { get; } = [];
+    /// <summary>The save's town states (not nests) by their placement's instance id: the towns' pools come from them (<c>pop</c>, <c>popd</c>, <c>started</c>, ...).</summary>
+    public Dictionary<string, FcsRecord> TownStates { get; } = new(StringComparer.Ordinal);
     /// <summary>Platoon names to their entry.</summary>
     public Dictionary<string, SavedPlatoon> ByName { get; } = new(StringComparer.Ordinal);
     /// <summary>Lines for the host's log (each platoon made, characters left out); taken by <see cref="TakeLog"/>.</summary>

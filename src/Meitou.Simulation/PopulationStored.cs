@@ -130,6 +130,7 @@ public sealed partial class PopulationSystem
             squad.Members.Add(id);
             if (leads && squad.Leader.IsNone) squad.Leader = id;
         }
+        squad.SpawnSize = Math.Max(p.Size, squad.Members.Count);
         stored.Members.Clear();
         if (squad.Leader.IsNone) squad.Leader = squad.Members[0];
         var lead = table.Next[squad.Leader.Slot].Position;

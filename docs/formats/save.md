@@ -255,7 +255,7 @@ TOWN has `type` 0 becomes a nest at the entry's position; its handle is the `han
 `pop2` (≤ it), `popd`, `pop`, `tod` (0); some have `zzX0` / `zzY0`. The states sit before the list. A save holds only the nests made so far (save 1: 13; the original
 adds them as areas tick). Meitou takes a save's nests first and rolls the rest of each group's count from the world seed (CAMERA `meitou seed`, restored on load).
 A Meitou save likewise holds only the nests made so far: the save's own plus the rolled ones that have loaded (a squad made, or a saved one at it), at the spot they
-loaded at, with `popd2` = `pop2` = `nest resident population`, `started` true and the player's knowledge as `discovered` / `explored`. On load the roll runs in its
+loaded at, with its pool's `pop2` / `popd2` / `ded` / `tod` (a new nest: `popd2` = `nest resident population`, `pop2` 0.7 of it, grown since), `started` true and the player's knowledge as `discovered` / `explored`. On load the roll runs in its
 fixed order and leaves out each roll whose spot (or marker) a saved nest holds, without counting it against the group's count, so whichever subset was saved the
 unwritten nests come out at their old places and no nest is rolled twice (the saved one takes over that roll's key for its squads); a rolled nest's place uses a
 random stream apart from its TOWN pick. **Observed** (headless, base saves 1, 2, wade and a new game, the player sent to 3-4 nests): saved nests = base (13, 150,
@@ -335,6 +335,10 @@ towns' keys: `instance` = the entry id, `is nest` false, `building material`, `p
 `recently discovered`, `artifacts count`, the handle `hand*` (type 13 TOWN) and the population floats; plus int
 `override` (Town+0x51c, 0 when made, meaning **Unknown**), written only for a town whose faction is the player's.
 Buildings name it by their `town` handle. Whether the loader takes the name from the record name is **Unknown**.
+
+Meitou writes the level towns' pool keys (`pop`, `popd`, `pop2`, `popd2`, `tod`, `started`, `ded`) for every town it made or loaded pools for, and
+reads them back ([off-screen tier](../simulation.md#off-screen-tier)). `tod` is Meitou's game hours since the world began; the original's unit is
+**Unknown** (no sampled state has a nonzero `tod`).
 
 ### Cross-checks against base data (the sample vs `GameDatabase` of the four base files)
 

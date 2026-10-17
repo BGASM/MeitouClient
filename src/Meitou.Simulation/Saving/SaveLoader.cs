@@ -85,6 +85,8 @@ public static class SaveLoader
         };
         world.Saved = context;
         ReadNests(save, data, context);
+        foreach (var town in save.Towns)
+            if (!town.IsNest && town.Instance.Length > 0) context.TownStates.TryAdd(town.Instance, town.Record);
         foreach (var platoon in save.Platoons)
         {
             bool mine = playerFaction is not null && platoon.FactionId == playerFaction.Id;

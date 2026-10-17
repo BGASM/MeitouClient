@@ -81,6 +81,7 @@ public static partial class SaveCapture
 
         UpdateFactions(game, data, loaded);
         WriteTownKnowledge(builder, data, world.Player);
+        if (world.Systems.OfType<PopulationSystem>().FirstOrDefault() is { } pools) WriteTownPools(game, data, pools);
         // The zone files of the zones visited since (before the locks, the player's buildings and the home handles, which write into them).
         ZoneSave.WriteVisited(game, world, data, options.Levels);
         var buildings = HeldSave.BuildingStates(game);
@@ -158,6 +159,18 @@ public static partial class SaveCapture
             if ((flags & TownKnowledge.Explored) != 0) town.Record.Bools["explored"] = true;
             town.Record.Bools["recently discovered"] = (flags & TownKnowledge.Recent) != 0;
         }
+    }
+
+    /// <summary>The towns' pools (<c>pop</c>, <c>popd</c>, <c>pop2</c>, <c>popd2</c>, <c>started</c>, <c>ded</c>, <c>tod</c>) into their states, for each town made or loaded with pools.</summary>
+    static void WriteTownPools(SaveGame game, PopulationData data, PopulationSystem population)
+    {
+        var sites = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var s in data.Sites) if (s.InstanceId.Length > 0) sites.TryAdd(s.InstanceId, s.Index);
+        foreach (var town in game.Towns)
+            if (!town.IsNest && sites.TryGetValue(town.Instance, out int site) && population.PoolsOf(site) is { } pools) {
+                pools.Write(town.Record);
+                town.Record.Bools["started"] = pools.Started;
+            }
     }
 
     static void UpdateFactions(SaveGame game, PopulationData data, LoadedSave? loaded)

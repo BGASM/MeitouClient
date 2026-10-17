@@ -187,6 +187,10 @@ no path re-running the initial resident placement was found (**Unknown** whether
   time by themselves (only nests call the pool spawner). Once per town load (`0x14092a020`) a squad that lost ≥ 60 % of its spawn size, if
   the budget allows, is marked to be made afresh from its template on its next activation.
 - **Despawn cost**: a non-persistent squad that leaves while not intact is taken out of its pool, lowering `pop` by its living members.
+- **Town pools in saves** (**Observed**, saves 1, 2, wade): every town has `pop` = `popd`, `started` true when populated, `popd2` 0 (none of
+  304), while `read_roaming_population_n4` (`0x1408f98d0`) would set pool 2 to the faction's `roaming population` (no caller found:
+  **Unknown** when it runs). `pop` is near the living members of the town's resident platoons (`is resident`) of the town's own faction:
+  save 2 Squin 36 = 36, the Hub 12 vs 10, Stack 93 vs 95 (Squin without a Tech Hunters resident shop of 4).
 - **Town wipe** (**Observed**, `TownPopulationManager::vfunc_4`): roaming `pop` ≤ 3, ≤ 25 roaming living and no intact resident platoon
   sets `ded`.
 - **Nests** (`NestPopulationManager::vfunc_4`): pool 2 starts at 0.7 × `nest resident population` and grows as above. While the nest's

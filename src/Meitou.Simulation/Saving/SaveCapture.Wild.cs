@@ -92,6 +92,8 @@ public static partial class SaveCapture
             }
             // Loaded once: `started` (Observed: set on most nests near the player's path, meaning not decoded).
             if (population.WildCentreOf(site.Index) is not null) state.Bools["started"] = true;
+            // Its pool (docs/simulation.md "Off-screen tier"): grown, spent, or wiped out.
+            population.NestPoolsOf(site.Index)?.Write(state);
             if (known.TryGetValue(site.Index, out var camp))
             {
                 if ((camp.Known & TownKnowledge.Discovered) != 0) state.Bools["discovered"] = true;

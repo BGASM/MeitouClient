@@ -78,7 +78,9 @@ public sealed partial class PopulationSystem
         }
         if (world.Tick % settings.RoamCheckTicks == 0)
         {
+            GrowPools(world);
             FillPools(world);
+            TopUpNests(world);
             if (OffscreenFights) Fights(world);
         }
     }
@@ -357,6 +359,12 @@ public sealed partial class PopulationSystem
         ulong seed = world.Seed;
         var position = p.Position;
         int id = p.Id;
+        // A town's squad that lost too many: made afresh (its characters are gone).
+        if (p.Regenerate)
+        {
+            p.Regenerate = false;
+            if (Regenerate(world, p) is not null) return;   // else (the template plans no one now) it comes back as it is
+        }
         if (OffscreenHealing) Recover(world, p);
         // A stored squad: its own characters, at once (nothing to build).
         if (p.Stored is not null)
@@ -424,6 +432,7 @@ public sealed partial class PopulationSystem
             world.Platoons.Remove(p.Id);
             return;
         }
+        if (squad.SpawnSize == 0) squad.SpawnSize = p.Saved?.Members.Count ?? p.Size;
         squad.Money = p.Money;
         p.State = PlatoonState.Loaded;
         p.SquadId = squad.Id;

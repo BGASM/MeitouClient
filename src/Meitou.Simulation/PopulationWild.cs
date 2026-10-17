@@ -32,9 +32,9 @@ public sealed record WildSite(int Index, WildKind Kind, ZoneCoordinate Zone, int
 /// once from the world seed (engine choice; the end state is the same count): each nest's TOWN is a weighted pick from the group's <c>nests</c> (v0, 0 as
 /// 100, the TOWN's <c>world state</c> gate), its place a seeded cell of the group's area with candidate spots away from placed towns, or for groups with
 /// <c>nests at fixed markers only</c> one of the placed NEST_MARKER towns of the area. When its zone activates the nest fills its roaming pool to
-/// floor(0.7 x <c>nest resident population</c>) members from the TOWN's <c>roaming squads</c> (weight max(0, v0 - count), k = 1; an entry whose expected
-/// size passes the free capacity is skipped), the squads wandering round the nest. Squads are not replaced while the nest is loaded (the respawn delay is
-/// <b>Unknown</b>); a reload fills it again.</item>
+/// its pool's floor(<c>pop2</c>) members (0.7 x <c>nest resident population</c> at first; <c>PopulationPools.cs</c>) from the TOWN's <c>roaming squads</c> (weight max(0, v0 - count), k = 1; an entry whose expected
+/// size passes the free capacity is skipped), the squads wandering round the nest. While loaded it tops up one squad
+/// per look and can be wiped out for good (<c>PopulationPools.cs</c>).</item>
 /// <item><b>Saves</b> (docs/formats/save.md "Nests", "Wild and nest platoons"): a loaded save's nests are the layout's first (at their saved places), the
 /// seeded roll (with the seed the save restores) only tops each group up to its count, leaving out the rolls whose nests the save holds, so a Meitou save
 /// (which writes only the nests that have loaded) loads with its other nests where they were. The save's wild platoons stay as themselves: a nest's counts its members against the nest's pool, a
@@ -53,7 +53,11 @@ public sealed partial class PopulationSystem
     readonly SortedSet<int> wildLoaded = [];
     readonly List<int> wildBuffer = [];
 
-    sealed record BuiltWild(int Site, long LoadId, Vector2 Centre, List<BuiltSquad> Squads);
+    /// <summary>A wild site's squads, built. <paramref name="Rolls"/>: the nest rolls used (the next top-up's keys follow them); <paramref name="Exhausted"/>: a nest roll found no entry that fits or weighs anything.</summary>
+    sealed record BuiltWild(int Site, long LoadId, Vector2 Centre, List<BuiltSquad> Squads, int Rolls = 0, bool Exhausted = false, bool TopUp = false);
+
+    /// <summary>What a nest build may make: members up to <paramref name="Cap"/> with <paramref name="Members"/> there already, <paramref name="Counts"/> squads per entry, rolls keyed from <paramref name="First"/>, at most <paramref name="Rolls"/> of them and <paramref name="Squads"/> squads; <paramref name="Place"/> false only weighs (a player is near).</summary>
+    sealed record NestBudget(int Cap, int Members, int[] Counts, int First, int Rolls, int Squads, bool Place = true, Vector2? Centre = null);
 
     /// <summary>The wild sites (sectors and nests), made at the first look of a world with biomes; empty before or without.</summary>
     public IReadOnlyList<WildSite> WildSites => wildSites ?? [];
@@ -290,6 +294,7 @@ public sealed partial class PopulationSystem
             if (state.UnloadAtTick < 0) state.UnloadAtTick = world.Tick + grace;
             else if (world.Tick >= state.UnloadAtTick)
             {
+                PayNestDespawn(world, wildSites[i], state);
                 Drop(world, state);
                 wildLoaded.Remove(i);
             }
@@ -307,8 +312,20 @@ public sealed partial class PopulationSystem
         var walk = world.Walkability;
         var players = PlayerSpots(world);
         var hold = HoldOf(world, site.Index);
-        if (work is null) SpawnWild(world, BuildWild(site, loadId, seed, walk, players, hold));
-        else work.Add(() => builtWild.Enqueue(BuildWild(site, loadId, seed, walk, players, hold)));
+        if (site.Kind == WildKind.Nest)
+        {
+            // The nest's pool (docs/simulation.md "Off-screen tier"): up to its current max, less the save's members it holds; a wiped-out nest makes none.
+            var pools = NestPools(world, site);
+            int cap = pools.Ded ? 0 : (int)MathF.Floor(pools.Roaming.Current);
+            var counts = new int[site.Nest!.RoamingSquads.Count];
+            for (int i = 0; hold is not null && i < counts.Length; i++) counts[i] = hold.Templates.GetValueOrDefault(site.Nest.RoamingSquads[i].Id);
+            var budget = new NestBudget(cap, hold?.Members ?? 0, counts, 0, 64, 64);
+            if (work is null) SpawnWild(world, BuildNest(site, loadId, seed, walk, players, budget));
+            else work.Add(() => builtWild.Enqueue(BuildNest(site, loadId, seed, walk, players, budget)));
+            return;
+        }
+        if (work is null) SpawnWild(world, BuildSector(site, loadId, seed, walk, players, hold));
+        else work.Add(() => builtWild.Enqueue(BuildSector(site, loadId, seed, walk, players, hold)));
     }
 
     static Vector2[] PlayerSpots(World world)
@@ -332,7 +349,9 @@ public sealed partial class PopulationSystem
     void SpawnWild(World world, BuiltWild b)
     {
         var state = wildStates[b.Site];
-        if (state.Status != SiteStatus.Loading || state.LoadId != b.LoadId) return;   // unloaded meanwhile
+        if (state.LoadId != b.LoadId || state.Status != (b.TopUp ? SiteStatus.Loaded : SiteStatus.Loading)) return;   // unloaded meanwhile
+        state.Pending = false;
+        state.Made = (b.TopUp ? state.Made : 0) + b.Rolls;
         var site = wildSites![b.Site];
         if (site.Kind == WildKind.Nest && (b.Squads.Count > 0 || site.SaveInstance is not null)) wildCentres[b.Site] = b.Centre;
         foreach (var built in b.Squads)
@@ -348,15 +367,13 @@ public sealed partial class PopulationSystem
             if (wildLog.Count < 256) wildLog.Add(new WildSpawn(world.Tick, site.Kind, site.Kind == WildKind.Nest ? site.Nest!.Name : data.Biomes!.Groups[site.Group].Name, squad.Name, squad.Members.Count));
         }
         state.Status = SiteStatus.Loaded;
-        state.UnloadAtTick = -1;
+        if (!b.TopUp) state.UnloadAtTick = -1;
+        if (site.Kind == WildKind.Nest && b.Exhausted) CheckWipe(world, site, state);
     }
 
     static float NestRadius(TownData nest) => Math.Max(nest.SizeRadius * nest.TownRadiusMult, 100);
 
     // ---- building (pure given its arguments; any thread) ----
-
-    BuiltWild BuildWild(WildSite site, long loadId, ulong seed, IWalkability walk, Vector2[] players, WildHold? hold) =>
-        site.Kind == WildKind.Nest ? BuildNest(site, loadId, seed, walk, players, hold) : BuildSector(site, loadId, seed, walk, players, hold);
 
     /// <summary>The number of homeless squads a sector loaded on its own reaches (6.2): ceil(P x amount).</summary>
     public static int HomelessCount(BiomeGroupData group, float populationMultiplier) =>
@@ -473,33 +490,42 @@ public sealed partial class PopulationSystem
         return len < 1e-3f ? c + new Vector2(r, 0) : c + d / len * r;
     }
 
-    BuiltWild BuildNest(WildSite site, long loadId, ulong seed, IWalkability walk, Vector2[] players, WildHold? hold)
+    BuiltWild BuildNest(WildSite site, long loadId, ulong seed, IWalkability walk, Vector2[] players, NestBudget budget)
     {
         var squads = new List<BuiltSquad>();
         var nest = site.Nest!;
-        Vector2? centre = null;
-        foreach (var s in site.Spots)
-            if (walk.IsWalkable(s.X, s.Y)) { centre = s; break; }
-        if (centre is not { } c) return new BuiltWild(site.Index, loadId, site.Spots[0], squads);   // no walkable spot: the nest is dormant this load
-        int cap = (int)MathF.Floor(settings.NestShare * nest.NestResidentPopulation);
+        Vector2? centre = budget.Centre;
+        if (centre is null)
+            foreach (var s in site.Spots)
+                if (walk.IsWalkable(s.X, s.Y)) { centre = s; break; }
+        bool topUp = budget.Centre is not null;
+        if (centre is not { } c) return new BuiltWild(site.Index, loadId, site.Spots[0], squads, TopUp: topUp);   // no walkable spot: the nest is dormant this load
+        int cap = budget.Cap;
         var entries = nest.RoamingSquads;
-        var counts = new int[entries.Count];
+        var counts = (int[])budget.Counts.Clone();
         var templates = new SquadTemplate?[entries.Count];
         for (int i = 0; i < entries.Count; i++)
             if (entries[i].V0 > 0 && TemplateUsable(entries[i].Id)) templates[i] = SquadTemplate.From(data.Db.Find(entries[i].Id)!);
         float radius = NestRadius(nest);
-        // The save's squads of this nest are of its pool: their members against the cap, their templates against the weights.
-        int members = hold?.Members ?? 0;
-        for (int i = 0; hold is not null && i < counts.Length; i++) counts[i] = hold.Templates.GetValueOrDefault(entries[i].Id);
+        // The members already of its pool (the save's squads, or the nest's in the world) count against the cap, their templates against the weights.
+        int members = budget.Members;
         var weights = new float[entries.Count];
-        for (int s = 0; s < 64 && members < cap; s++)
+        bool exhausted = false;
+        int rolls = 0;
+        for (int s = 0; s < budget.Rolls && squads.Count < budget.Squads && (members < cap || topUp); s++)
         {
             for (int i = 0; i < entries.Count; i++)
                 weights[i] = templates[i] is { } t && SquadFactory.ExpectedSize(t, settings.SquadSizeMultiplier) <= cap - members
                     ? MathF.Max(0, entries[i].V0 - counts[i]) : 0;
-            ulong key = Rng.Mix(Rng.Mix(SeedSalts.NestSquad ^ site.Key) ^ (uint)s);
+            ulong key = Rng.Mix(Rng.Mix(SeedSalts.NestSquad ^ site.Key) ^ (uint)(budget.First + s));
+            rolls++;
             int e = Pick(weights, Rng.Hash(seed, key, RngPurpose.Spawn, SeedSalts.NestPick));
-            if (e < 0) break;
+            if (e < 0)
+            {
+                exhausted = true;
+                break;
+            }
+            if (!budget.Place) break;
             counts[e]++;
             var template = templates[e]!;
             int faction = template.Faction is { } tf && data.FactionIndex(tf) is var ti and >= 0 ? ti : site.Faction;
@@ -517,6 +543,6 @@ public sealed partial class PopulationSystem
             squads.Add(one);
             members += one.Plan.TotalMembers;
         }
-        return new BuiltWild(site.Index, loadId, c, squads);
+        return new BuiltWild(site.Index, loadId, c, squads, rolls, exhausted, topUp);
     }
 }

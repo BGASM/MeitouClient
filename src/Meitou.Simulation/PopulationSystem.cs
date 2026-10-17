@@ -46,6 +46,10 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         public long UnloadAtTick = -1;
         public long LoadId;
         public readonly List<int> Squads = [];
+        /// <summary>A nest's top-up is being built.</summary>
+        public bool Pending;
+        /// <summary>The nest rolls used since it loaded (a top-up's keys follow them).</summary>
+        public int Made;
     }
 
     public PopulationSystem(PopulationData data, PopulationSettings? settings = null)
@@ -200,7 +204,10 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         long loadId = state.LoadId;
         ulong seed = world.Seed;
         var walk = world.Walkability;
-        bool held = HoldsSquads(world, site.Index);
+        EnsurePools(world);
+        // A town made once (its pools say so) never makes residents again; its own squads that lost too many are made afresh (docs/simulation.md "Off-screen tier").
+        bool held = HoldsSquads(world, site.Index) || PoolsOf(site.Index) is { Started: true };
+        if (held) CheckRegeneration(world, site.Index);
         if (work is null)
         {
             Spawn(world, BuildTown(site, loadId, seed, walk, held));
@@ -227,7 +234,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
             if (stored.Members.Count == 0) continue;
             world.Platoons.Add(new Platoon
             {
-                Id = world.Platoons.NextId(), Origin = site, TemplateId = squad.TemplateId, Faction = squad.Faction, Key = 0, Size = stored.Members.Count,
+                Id = world.Platoons.NextId(), Origin = site, TemplateId = squad.TemplateId, Faction = squad.Faction, Key = 0, Size = Math.Max(squad.SpawnSize, stored.Members.Count),
                 Position = at, Money = squad.Money, Package = stored.Package, Stored = stored,
             });
         }
@@ -250,6 +257,8 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
     static void Reset(SiteState state)
     {
         state.Squads.Clear();
+        state.Pending = false;
+        state.Made = 0;
         state.Status = SiteStatus.Unloaded;
         state.UnloadAtTick = -1;
         state.LoadId++;   // a build still in flight is dropped when it arrives
@@ -283,6 +292,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
             var squad = SpawnSquad(world, built, site, radius);
             state.Squads.Add(squad.Id);   // slave squads are planned (built.Plan.Slaves) but not spawned yet
         }
+        if (town.Squads.Count > 0) MadeTown(world, town.Site, town.Squads.Where(s => s.Home is not null).Select(s => s.Members.Count));
         int housed = town.Squads.Count(s => s.Home is not null);
         if (townLog.Count >= 256) townLog.RemoveAt(0);   // nobody reads it in a headless world
         townLog.Add($"{site.Town.Name}: {town.Squads.Count} squad(s), {town.Squads.Sum(s => s.Members.Count)} characters; {housed} at home in " +
@@ -299,7 +309,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         return list;
     }
 
-    Squad SpawnSquad(World world, BuiltSquad built, TownSite? site, float radius, bool player = false, int platoonId = -1, bool idle = false, float yaw = 0)
+    Squad SpawnSquad(World world, BuiltSquad built, TownSite? site, float radius, bool player = false, int platoonId = -1, bool idle = false, float yaw = 0, bool pinned = false)
     {
         var table = world.Characters;
         var walk = world.Walkability;
@@ -311,6 +321,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
             Faction = built.Faction,
             Town = site?.Index ?? -1,
             PlatoonId = platoonId,
+            Pinned = pinned,
             Position = new Vector3(built.Position.X, Ground(walk, built.Position.X, built.Position.Y, built.NearY), built.Position.Y),
             HomeCentre = site is null ? built.Position : new Vector2(site.Position.X, site.Position.Z),
             HomeRadius = Math.Max(radius * 0.8f, 40),
@@ -356,6 +367,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
             squad.Members.Add(id);
             if (plan.Role == SquadRole.Leader && squad.Leader.IsNone) squad.Leader = id;
         }
+        squad.SpawnSize = squad.Members.Count;
         if (squad.Leader.IsNone && squad.Members.Count > 0) squad.Leader = squad.Members[0];
         world.Squads.Add(squad);
         return squad;

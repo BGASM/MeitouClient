@@ -63,6 +63,8 @@ public sealed class Platoon
     public bool Wild => Saved?.Wild is not null;
     /// <summary>Game seconds it has been a stand-in with no reason to be kept (the Faithful <see cref="PopulationSystem.KeepRoamers"/>: the original's orphan timer).</summary>
     public float OrphanSeconds { get; set; }
+    /// <summary>A town's own squad that lost so many that its town makes it afresh when it next comes into the world (<see cref="PopulationSystem"/> regeneration).</summary>
+    public bool Regenerate { get; set; }
 }
 
 /// <summary>

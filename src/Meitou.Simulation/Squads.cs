@@ -35,6 +35,8 @@ public sealed class Squad
     public bool Pinned { get; init; }
     /// <summary>One of its town's own squads: the town made it, or a save holds it as the town's.</summary>
     public bool TownOwn => Town >= 0 && (PlatoonId < 0 || Pinned);
+    /// <summary>How many it was made with (its town's regeneration measures losses against it; not part of the state).</summary>
+    public int SpawnSize { get; set; }
     public List<CharacterId> Members { get; } = [];
     /// <summary>The member the others follow (the role-2 leader, else the first member); <see cref="CharacterId.None"/> when none is alive.</summary>
     public CharacterId Leader { get; set; } = CharacterId.None;
