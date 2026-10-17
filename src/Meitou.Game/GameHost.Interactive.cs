@@ -154,6 +154,27 @@ sealed partial class GameHost
                     }
                     return;
                 }
+                // Ctrl+C copies the free camera's position as a viewer camera code, Ctrl+V flies the free camera to the code in the clipboard.
+                // Only in the free camera: elsewhere Ctrl+C and Ctrl+V keep their own meaning.
+                if (k is SilkKey.C or SilkKey.V && session.Camera.IsFree && (keyboard.IsKeyPressed(SilkKey.ControlLeft) || keyboard.IsKeyPressed(SilkKey.ControlRight)))
+                {
+                    if (k == SilkKey.C)
+                    {
+                        string code = WorldCameraCode.Encode(camera);
+                        keyboard.ClipboardText = code;
+                        Console.WriteLine($"camera    copied {code} ({WorldCameraCode.Describe(camera)})");
+                    }
+                    else if (WorldCameraCode.Decode(keyboard.ClipboardText) is { } pose)
+                    {
+                        // The code's orbit (target, yaw, pitch, distance) as the free camera's eye and look direction.
+                        Vector3 back = new(MathF.Cos(pose.Pitch) * MathF.Sin(pose.Yaw), MathF.Sin(pose.Pitch), MathF.Cos(pose.Pitch) * MathF.Cos(pose.Yaw));
+                        session.Camera.TakeOver(new CameraState(pose.Target + back * pose.Distance, -back, Vector3.UnitY, pose.Target, pose.Yaw, pose.Pitch, pose.Distance, true), strategy: false);
+                        player.Follow = null;
+                        Console.WriteLine("camera    moved to the clipboard's camera code");
+                    }
+                    else Console.WriteLine("camera    the clipboard holds no camera code (Ctrl+C in a viewer copies one)");
+                    return;
+                }
                 if (panel is not null && KeyMap.Map(k) is { } settingsToggle && session.Bindings.Get(InputAction.ToggleSettings).Contains(Binding.Of(settingsToggle)))
                 { panel.Visible = true; return; }
                 if (KeyMap.Map(k) is { } uiKey && player.UiKey(uiKey, keyboard.IsKeyPressed(SilkKey.ControlLeft) || keyboard.IsKeyPressed(SilkKey.ControlRight), shiftDown)) return;
