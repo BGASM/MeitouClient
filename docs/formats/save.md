@@ -181,11 +181,12 @@ The CAMERA's sky transition is written as finished (`sky updating` false, both t
 
 ### NPC platoons (Meitou mapping)
 
-Every saved NPC platoon with a `basetown` naming a placed town is restored; town-bound ones (template does not travel) are pinned to their town and replace
+Every saved NPC platoon with a `basetown` naming a placed town is restored (a characterless town-bound one is skipped); town-bound ones (template does not travel) are pinned to their town and replace
 that many of its resident/bar squads of the same template. Wild and nest platoons are kept in the file untouched. On save, a restored platoon is rewritten
 only once loaded (its characters from the world), otherwise only its position/package; a squad the population made is written as a new PLATOON with the
 `SaveBuilder` key set plus `basetown` (town id), `is resident` (false for a travelling template) and `currentPackage`. **Observed** (headless load of saves 1, 2,
-wade): NPCs within 5 units of their saved positions; a Meitou save → load restores them exactly with no fresh duplicates. **Unknown:** how the original
+wade): NPCs within 5 units of their saved positions (save 2: 4 of 107 differ in Y only, flat test ground); a Meitou save → load restores them
+exactly with no fresh squads for save 2 and a new game, one unexplained fresh town squad for wade. **Unknown:** how the original
 reuses a platoon's saved home and package (Meitou's AI picks the nearest home).
 
 ### Locks, cages and sentences
