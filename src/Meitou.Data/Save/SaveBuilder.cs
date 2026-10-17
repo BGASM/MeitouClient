@@ -205,7 +205,8 @@ public sealed class SaveBuilder
         var r = new FcsRecord { Type = (int)FcsRecordType.PLATOON, Name = name, StringId = name, Id = NextNumber(Game.Quick) };
         Game.Quick.Records.Add(r);
         Game.Quick.Data.NextId = Math.Max(Game.Quick.Data.NextId, r.Id);
-        foreach (var k in new[] { "intact", "is resident", "canref", "persistent" }) r.Bools[k] = k is "intact" or "canref";
+        // `persistent` with `sqt` 1 (every sqt-1 platoon of the samples is persistent): a caller writing another pool sets both.
+        foreach (var k in new[] { "intact", "is resident", "canref", "persistent" }) r.Bools[k] = k is "intact" or "canref" or "persistent";
         foreach (var k in new[] { "special", "dead", "never been activated", "imprisoned", "runningAwayMode", "homelok", "campaign" }) r.Bools[k] = false;
         r.Floats["towntime"] = 0;
         r.Floats["jobhr"] = 0;

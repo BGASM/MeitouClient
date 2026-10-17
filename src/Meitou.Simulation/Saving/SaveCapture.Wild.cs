@@ -128,6 +128,7 @@ public static partial class SaveCapture
                 var platoon = builder.AddPlatoon(FreshName(game, state, faction.Name), faction.Name, faction.Id, squad.TemplateId, at, (int)Math.Clamp(squad.Money, int.MinValue, int.MaxValue));
                 var record = platoon.Record;
                 record.Ints["sqt"] = 2;
+                record.Bools["persistent"] = false;
                 if (site.Kind == WildKind.Nest && site.Nest is { } nest && nests.TryGetValue(site.Index, out var hand))
                 {
                     record.Strings["basetown"] = nest.Id;

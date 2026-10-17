@@ -413,6 +413,8 @@ public static partial class SaveCapture
             int siteFaction = data.SiteFactions.Count > town ? data.SiteFactions[town] : -1;
             // `sqt` is the town pool it counts against: 1 residents (and bar squads), 2 roaming (docs/formats/save.md "NPC platoons").
             record.Ints["sqt"] = roaming ? 2 : 1;
+            // Residents and bar squads are persistent (the original keeps them off screen, docs/game/factions-squads-towns.md "Persistent platoons"), roaming ones not.
+            record.Bools["persistent"] = !roaming;
             // A squad with a home is a resident (every platoon of the samples with a `homebuilding` has `is resident`, and only those): a default resident too.
             record.Bools["is resident"] = !roaming && (homeBuilding is not null
                 || PopulationSystem.ResidentEntries(site.Town, siteFaction >= 0 ? data.Factions[siteFaction] : null).Any(e => e.Id == templateId));
