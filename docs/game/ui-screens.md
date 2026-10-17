@@ -259,6 +259,17 @@ decompile unless marked; Meitou's adapter is `PlayerInterface.Map.cs`.
     20 px wide 5 px off the right (arrows 12 px, track between, thumb `Kenshi_SmallBarSkin` at least `MinTrackSize` 10); the horizontal bar is off (`VisibleHScroll` false).
   - Placement (**Observed**, `FUN_1406e4960` decompile and the 2026-10-17 screenshot): margin = 5 % of the smaller screen side; inventory windows open at y = margin, the first at x = margin
     (a bag window first when attached), each next one where the previous ends: the character window at the top left, the trader directly right of it, same top.
+  - Stock grid size (**Observed**, `FUN_140953850`, the shop wrapper's constructor): the trader's `backpack_content` is one merged section, `columns` wide and `ceil(cells / columns)` high.
+    Columns start at 18. A shop run by a building takes the widest storage section among the building's containers (at least 18) and the sum of their cells; a squad trader, or a building
+    shop without cells, is 18 x 18 (the squad's backpack sections are collected but add no cells). The base game's buildings all store 18 x 18 (`storage size width/height`, the editor default;
+    367 records with a size, none wider; `gamedata.base`), its backpacks 8 x 8 to 20 x 20. Meitou's 20 x 20 squad stock is therefore already wider than a vanilla squad trader's 18; building shops
+    (more rows, scrolled) are not built. The 28 columns the 2026-10-17 screenshot seems to show are **Unknown** (a modded building, or a cell size other than 25 px).
+  - Right click (**Observed**, `FUN_140716a40` wires the section widgets, `FUN_1407169a0` the release, `FUN_140714a20` the right-button handler, `FUN_140713d20` the move): with a second inventory
+    window open it moves the item to the other window. First it tries to use the item (food, medkits: `FUN_14070d070`); a stolen item with a fence chance below 1 asks "Fence it anyway?" first
+    (`FUN_140715290`); otherwise one unit moves (a stack of 2 or more is split off, the unit's `+0x12c` quantity set to 1) into the first section of the item's slot type that has room, else any
+    grid, posting the `RClickAutoTrade` event (`Sell_Item` for a sale). Shift (**Verified**: scancodes 0x2a / 0x36 set `DAT_142133449`) repeats the move until one fails, so the whole stack.
+    Failures use the codes of the messages below (no room, can't afford). With no trade the same handler reads map items and uses consumables. Meitou: `PlayerInterface.InventoryRightClick`
+    buys or sells one unit (Shift all), into the first free cell; the slot-type placement, the use-first rule and the fencing confirmation are not built.
   - Reference screenshot (**Observed**, 2026-10-17, from a video): `Money:` label left and `c.442,269` right in the money box, stock icons at their footprints with plain counts bottom
     right, a vertical scrollbar, no other panels; the HUD stays. The character panel reads `Disguise: None`. Its text boxes and empty cells are dark, where the install's skins draw parchment; the cause (a UI mod or setting) is **Unknown**.
 - **Item tooltip** (**Observed**, decompile): name, then `Value` (`c.{1,num}` with ` (+N%)`/` (-N%)` when the price factor is not 1) and `Sell value` (`FUN_14079e7a0`); weight `{1,num} kg`,

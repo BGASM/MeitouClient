@@ -5,6 +5,7 @@ using Meitou.Data.Gameplay;
 using Meitou.Data.Ui;
 using Meitou.Simulation;
 using Meitou.Simulation.Items;
+using Meitou.Simulation.Trading;
 using Meitou.Ui;
 
 namespace Meitou.Game;
@@ -246,14 +247,32 @@ sealed partial class PlayerInterface
         return "[Right-click to learn new map locations]\nTowns:\n" + string.Join("\n", towns.GroupBy(t => t).Select(g => g.Count() > 1 ? $"{g.Key} x{g.Count()}" : g.Key));
     }
 
-    /// <summary>A right click on a map item in the shown inventory reads it (<see cref="ReadMapItem"/>).</summary>
-    bool InventoryRightClick(Vector2 p)
+    /// <summary>
+    /// A right click on an item of the shown inventory (the original's release handler <c>FUN_140714a20</c>, <b>Observed</b> by decompile): while a trade is open it moves one unit to the other
+    /// side, buying a stock item or selling the customer's own; with Shift all the units (the original repeats the move until one fails, here the sim's affordable and fits clamp ends it).
+    /// Without a trade a map item is read (<see cref="ReadMapItem"/>).
+    /// </summary>
+    bool InventoryRightClick(Vector2 p, bool shift)
     {
-        if (!UiVisible || faithfulScreens.HitTest(p) is not { } picked || !picked.Control.Properties.TryGetValue("InventoryItem", out var index)
-            || Selected().FirstOrDefault() is not { ItemGrid: { } grid } lead) return false;
+        if (!UiVisible || faithfulScreens.HitTest(p) is not { } picked || !picked.Control.Enabled) return false;
+        var trade = session.CurrentSnapshot.Trade;
+        if (trade is not null && picked.Control.Properties.TryGetValue("TradeItem", out var stockIndex))
+        {
+            if (trade.Stock.FirstOrDefault(i => i.Index == int.Parse(stockIndex, CultureInfo.InvariantCulture)) is not { } stock) return false;
+            Say(new BuyItem(stock.Token, shift ? stock.Quantity : 1) { Tick = session.World.Tick });
+            return true;
+        }
+        if (!picked.Control.Properties.TryGetValue("InventoryItem", out var index) || Selected().FirstOrDefault() is not { ItemGrid: { } grid } lead) return false;
         var item = grid.Items.FirstOrDefault(i => i.Index == int.Parse(index, CultureInfo.InvariantCulture));
-        if (item is null || MapItemTowns?.Invoke(item.Record) is null) return false;
-        Say(new ReadMapItem(lead.Id, new InventoryItemToken(item.Index, item.Record, item.Section, item.X, item.Y, item.Quantity, item.Quality)) { Tick = session.World.Tick });
+        if (item is null) return false;
+        var token = new InventoryItemToken(item.Index, item.Record, item.Section, item.X, item.Y, item.Quantity, item.Quality);
+        if (trade is not null && trade.Customer == lead.Id && InventoryCommands.IsMovableSection(item.Section))
+        {
+            Say(new SellItem(token, shift ? item.Quantity : 1) { Tick = session.World.Tick });
+            return true;
+        }
+        if (MapItemTowns?.Invoke(item.Record) is null) return false;
+        Say(new ReadMapItem(lead.Id, token) { Tick = session.World.Tick });
         return true;
     }
 }

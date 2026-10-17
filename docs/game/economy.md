@@ -50,6 +50,7 @@ money-item branches are scoped in the expressions/field tables and undecoded que
 
 - **Stock grid** (**Observed**): the trader window shows its trader's `backpack_content` section ([ui-screens](ui-screens.md#6-inventory-trade-dialogue-build)).
   The base game's CONTAINER `Shopkeepers Backpack` (`910-gamedata.base`) has storage 20 x 20 (raw read of `gamedata.base`); which characters wear it is not traced.
+  The window's grid is 18 x 18 for a squad trader and the building containers' merged size for a building shop (**Observed**, `FUN_140953850`; details in ui-screens).
   Meitou's squad shops hold one 20 x 20 stock (`Shop`). The 2026-10-17 reference screenshot's trader (Ronin Construction Trader) shows about 28 columns.
 
 ## Crimes, bounties and prisoners
