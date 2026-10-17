@@ -17,6 +17,9 @@ public interface IAppearanceSource
 
     /// <summary>The look of a CHARACTER record drawn from a given loadout (a saved character's appearance and worn items); nothing is rolled. Null: no look.</summary>
     CharacterAppearance? Create(string recordId, Loadout loadout) => null;
+
+    /// <summary>A proposed CHARACTER_APPEARANCE made valid for <paramref name="race"/> (<see cref="CharacterDraft.Sanitize"/>, which needs the install's editor limits). Null: not checked.</summary>
+    FcsRecord? Sanitize(FcsRecord proposed, GameRecord race) => null;
 }
 
 /// <summary><see cref="IAppearanceSource"/> over the game data and the install.</summary>
@@ -43,6 +46,8 @@ public sealed class GeneratedAppearances(GameDatabase db, string installRoot) : 
         }
     }
 
+
+    public FcsRecord? Sanitize(FcsRecord proposed, GameRecord race) => CharacterDraft.Sanitize(db, installRoot, proposed, race);
     public CharacterAppearance? Create(string recordId, Loadout loadout)
     {
         try
@@ -117,6 +122,9 @@ public sealed class PopulationData
     Meitou.Data.Gameplay.Ai.AiDatabase? ai;
     /// <summary>The AI_TASK and AI_PACKAGE records with their inheritance resolved (<see cref="Ai.AiSystem"/>).</summary>
     public Meitou.Data.Gameplay.Ai.AiDatabase Ai => LazyInitializer.EnsureInitialized(ref ai, () => new Meitou.Data.Gameplay.Ai.AiDatabase(Db));
+    Meitou.Data.Characters.SurgeonDialogues? surgeons;
+    /// <summary>The plastic surgeons' editor lines and costs (<see cref="Meitou.Data.Characters.SurgeonDialogues"/>).</summary>
+    public Meitou.Data.Characters.SurgeonDialogues Surgeons => LazyInitializer.EnsureInitialized(ref surgeons, () => new Meitou.Data.Characters.SurgeonDialogues(Db));
 
     /// <param name="buildings">The towns' buildings by placement id (<see cref="TownBuildings.Build"/>), for the AI's homes; null: none.</param>
     public static PopulationData Create(GameDatabase db, IEnumerable<TownPlacement> placements, IAppearanceSource? appearances = null, BodyOptions? bodyOptions = null, BiomeMap? biomes = null,

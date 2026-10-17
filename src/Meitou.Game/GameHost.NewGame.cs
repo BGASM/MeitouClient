@@ -63,6 +63,7 @@ sealed partial class GameHost
                 session.Camera.Place(new Vector2(lead.X, lead.Z), view.Yaw, view.Pitch, view.Distance);
                 SettleNewWorld();
                 player.Notice($"Started {chosen.Name}");
+                pendingCreation = [.. spawned.Members];   // the start's characters are made in the editor first (docs/characters.md "Character editor")
                 return null;
             }));
     }

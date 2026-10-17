@@ -1,0 +1,348 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Numerics;
+using Meitou.Data;
+using Meitou.Data.Characters;
+using Meitou.Data.Ui;
+using Meitou.Simulation;
+using Meitou.Simulation.Editing;
+using Meitou.Ui;
+
+namespace Meitou.Game;
+
+/// <summary>
+/// The character editor (<c>CharacterEditWindow</c>, layout <c>Kenshi_CharacterEditor</c>; docs/characters.md "Character editor"): the start's characters after a new
+/// game, or one character at a plastic surgeon. The window edits <see cref="CharacterDraft"/>s, shows them on the characters in the world (<see cref="EditorPreview"/>),
+/// and on CONFIRM sends each one as an <see cref="EditCharacter"/> command; nothing in the world changes before that.
+/// </summary>
+sealed partial class PlayerInterface
+{
+    sealed class EditorSession(EditKind kind, IReadOnlyList<CharacterId> characters, CharacterId surgeon)
+    {
+        public EditKind Kind { get; } = kind;
+        public IReadOnlyList<CharacterId> Characters { get; } = characters;
+        public CharacterId Surgeon { get; } = surgeon;
+        public int Index;
+        public EditorTab Tab = EditorTab.Body;
+        public bool Clothes = true;
+        public Dictionary<CharacterId, CharacterDraft> Drafts { get; } = [];
+        public Dictionary<CharacterId, string> StartNames { get; } = [];
+        public int Seed = Environment.TickCount;
+        public CharacterId Current => Characters[Index];
+    }
+
+    EditorSession? editor;
+    /// <summary>The game data and the install root the editor reads races and editor limits from (the host sets them).</summary>
+    public (GameDatabase Db, string InstallRoot)? EditorData { get; set; }
+    /// <summary>Builds a preview look from a record id and a loadout (the world's appearance source; the host sets it).</summary>
+    public Func<string, Loadout, CharacterAppearance?>? PreviewSource { get; set; }
+    readonly Dictionary<CharacterId, (int Version, bool Clothes, CharacterAppearance? Look)> previews = [];
+    readonly Stopwatch previewClock = Stopwatch.StartNew();
+    double lastPreviewBuild = double.NegativeInfinity;
+
+    public bool EditorOpen => editor is not null && faithfulScreens.IsOpen("editor");
+    /// <summary>The character the editor shows and its tab, for the host's camera; null while the editor is closed.</summary>
+    public (CharacterId Character, EditorTab Tab)? EditorFocus => EditorOpen ? (editor!.Current, editor.Tab) : null;
+
+    /// <summary>
+    /// Opens the editor for <paramref name="characters"/> (the start's squad at creation; one character at a surgeon). Characters without a person's look (animals) are
+    /// left out; nothing opens when none is left.
+    /// </summary>
+    public bool OpenEditor(EditKind kind, IReadOnlyList<CharacterId> characters, CharacterId surgeon = default)
+    {
+        if (EditorData is null) return false;
+        var people = characters.Where(id => session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is { Appearance: { Animal: null } look } && RecordOf(look) is not null).ToList();
+        if (people.Count == 0) return false;
+        editor = new EditorSession(kind, people, surgeon);
+        previews.Clear();
+        faithfulScreens.Open("editor");
+        ShowEditorCharacter();
+        UpdateMenuPause();
+        return true;
+    }
+
+    static Meitou.Data.Fcs.FcsRecord? RecordOf(CharacterAppearance look) => look.Loadout?.Appearance.Record ?? look.Body?.Record;
+
+    CharacterDraft? Draft(CharacterId id)
+    {
+        if (editor is null || EditorData is not { } data) return null;
+        if (editor.Drafts.TryGetValue(id, out var draft)) return draft;
+        if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is not { Appearance: { } look } snapshot || RecordOf(look) is not { } record) return null;
+        draft = new CharacterDraft(data.Db, data.InstallRoot, record, snapshot.Name);
+        editor.Drafts[id] = draft;
+        editor.StartNames[id] = snapshot.Name;
+        return draft;
+    }
+
+    void ShowEditorCharacter()
+    {
+        if (editor is null || Draft(editor.Current) is not { } draft) return;
+        faithfulScreens.SetText("editor", "NameText", draft.Name);
+        Select([editor.Current], false);
+    }
+
+    void CloseEditor()
+    {
+        faithfulScreens.Close("editor");
+        editor = null;
+        previews.Clear();
+        UpdateMenuPause();
+    }
+
+    /// <summary>The look to draw for a character while the editor has a draft of it (null: its own).</summary>
+    public CharacterAppearance? EditorPreview(CharacterId id, CharacterAppearance? own)
+    {
+        if (!EditorOpen || !editor!.Drafts.TryGetValue(id, out var draft) || own?.Loadout is not { } loadout || PreviewSource is null) return null;
+        bool clothes = editor.Clothes;
+        if (previews.TryGetValue(id, out var shown) && shown.Version == draft.Version && shown.Clothes == clothes) return shown.Look ?? own;
+        // A new asset per look: while a slider is dragged, at most a few a second (each one is kept by the renderer).
+        double now = previewClock.Elapsed.TotalSeconds;
+        if (previews.ContainsKey(id) && now - lastPreviewBuild < 0.12) return shown.Look ?? own;
+        lastPreviewBuild = now;
+        CharacterAppearance? look = null;
+        if (EditorData is { } data && Meitou.Simulation.Saving.SavedKit.Wear(loadout, draft.Record, data.Db) is { } worn)
+        {
+            if (!clothes) { worn.Clothing.Clear(); worn.Backpack = null; }
+            look = PreviewSource(own.Character?.StringId ?? "", worn);
+        }
+        previews[id] = (draft.Version, clothes, look);
+        return look ?? own;
+    }
+
+    void EditorAction(MyGuiEvent e)
+    {
+        if (editor is not { } s || Draft(s.Current) is not { } draft || EditorData is not { } data) return;
+        bool creation = s.Kind == EditKind.Creation;
+        switch (e.Widget)
+        {
+            case "BodyTabButton": s.Tab = EditorTab.Body; return;
+            case "FaceTabButton": s.Tab = EditorTab.Face; return;
+            case "HairTabButton": s.Tab = EditorTab.Hair; return;
+            case "NameText" when e.Action == "text": draft.Name = e.Text; return;
+            case "RandomiseButton": draft.Randomise(s.Tab, s.Seed++); return;
+            case "RandomiseAllButton": draft.Randomise(null, s.Seed++); return;
+            case "ResetButton": draft.Reset(); return;
+            case "ClothesButton": s.Clothes = !s.Clothes; return;
+            case "CharLeftArrow" or "CharRightArrow":
+                s.Index = (s.Index + (e.Widget == "CharLeftArrow" ? s.Characters.Count - 1 : 1)) % s.Characters.Count;
+                ShowEditorCharacter();
+                return;
+            case "RaceLeftButton" or "RaceRightButton" or "SubRaceLeftButton" or "SubRaceRightButton" when creation:
+            {
+                var groups = EditorRaces(data.Db);
+                if (groups.Count == 0) return;
+                int g = Math.Max(0, IndexOf(groups, draft.Race));
+                int r = Math.Max(0, groups[g].Races.ToList().FindIndex(x => x.StringId == draft.Race.StringId));
+                int step = e.Widget.Contains("Left", StringComparison.Ordinal) ? -1 : 1;
+                if (e.Widget.StartsWith("Race", StringComparison.Ordinal)) { g = (g + step + groups.Count) % groups.Count; r = 0; }
+                else r = (r + step + groups[g].Races.Count) % groups[g].Races.Count;
+                draft.SetRace(groups[g].Races[r], s.Seed++);
+                return;
+            }
+            case "GenderLeftButton" or "GenderRightButton" when creation:
+                draft.SetFemale(!draft.Female, s.Seed++);
+                return;
+            case "ConfirmButton":
+                ConfirmEditor();
+                return;
+        }
+        if (e.Action.StartsWith("editor-slider:", StringComparison.Ordinal) && Control(e.Action[14..]) is { } slider)
+            draft.Set(slider, CharacterGenerator.Round(slider.Min + e.Value * (slider.Max - slider.Min)));
+        else if (e.Action.StartsWith("editor-pick:", StringComparison.Ordinal))
+        {
+            var parts = e.Action.Split(':');
+            if (parts.Length == 3 && Control(parts[1]) is { IsPicker: true } picker) draft.Step(picker.Kind, int.Parse(parts[2], CultureInfo.InvariantCulture));
+        }
+
+        EditorControl? Control(string index) =>
+            int.TryParse(index, CultureInfo.InvariantCulture, out int i) ? draft.Controls(s.Tab).ElementAtOrDefault(i) : null;
+    }
+
+
+    /// <summary>
+    /// The surgeon verb: like the dialogue, it needs the patient beside the surgeon and more money than the price (DC_PLAYERMONEY &gt; cost); then the editor opens on the
+    /// patient in surgery mode. Payment happens when the editor is confirmed (<see cref="EditCharacter"/>).
+    /// </summary>
+    void AskSurgery(CharacterId patient, CharacterSnapshot surgeon, int cost)
+    {
+        if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == patient) is not { } p) return;
+        if (Vector3.Distance(p.Position, surgeon.Position) > CharacterEditing.SurgeonReach) { Notice($"{p.Name} has to walk up to {surgeon.Name} first.", true); return; }
+        if (cost > 0 && session.World.Player.Money <= cost) { Notice($"Surgery costs c.{cost.ToString("N0", CultureInfo.InvariantCulture)}: not enough money.", true); return; }
+        OpenEditor(EditKind.Surgery, [patient], surgeon.Id);
+    }
+    static int IndexOf(IReadOnlyList<EditorRaceGroup> groups, GameRecord race)
+    {
+        for (int i = 0; i < groups.Count; i++)
+            if (groups[i].Races.Any(r => r.StringId == race.StringId)) return i;
+        return -1;
+    }
+
+    /// <summary>The races this session offers: at creation the playable ones, limited to the start's <c>force race</c>; a surgeon offers none (race stays).</summary>
+    IReadOnlyList<EditorRaceGroup> EditorRaces(GameDatabase db) =>
+        editor?.Kind == EditKind.Creation ? CharacterDraft.PlayableRaces(db, [.. session.World.Player.CreationRaces]) : [];
+
+    /// <summary>
+    /// CONFIRM. Like the original (<c>FUN_1405e9f40</c>), a squad with characters never shown asks first ("There are other characters whose appearance haven't
+    /// been changed..."). Every changed character is sent to the world (a surgeon's patient always: the surgery is paid on confirming); at creation the creation then ends.
+    /// </summary>
+    void ConfirmEditor(bool asked = false)
+    {
+        if (editor is not { } s) return;
+        if (!asked && s.Drafts.Count < s.Characters.Count)
+        {
+            Confirm("CONFIRM", "There are other characters whose appearance haven't been changed. Are you sure you want to continue?", () => ConfirmEditor(true));
+            return;
+        }
+        long tick = session.World.Tick;
+        foreach (var (id, draft) in s.Drafts)
+            if (s.Kind == EditKind.Surgery || draft.Version > 0 || draft.Name != s.StartNames[id])
+                Say(new EditCharacter(id, CharacterDraft.Copy(draft.Record), draft.Name, s.Kind) { Tick = tick, Surgeon = s.Surgeon });
+        if (s.Kind == EditKind.Creation) Say(new FinishCreation { Tick = tick });
+        CloseEditor();
+    }
+
+
+    /// <summary>For the screenshot showcase: the open editor's character gets a new random look and name, and CONFIRM is pressed (the creation path end to end).</summary>
+    internal void ShowcaseEdit()
+    {
+        if (editor is not { } s || Draft(s.Current) is not { } draft) return;
+        draft.Randomise(null, 7);
+        draft.Name = "Edited " + draft.Name;
+        ConfirmEditor(asked: true);
+    }
+    /// <summary>Esc: a surgeon's editor is left without changes; the new game's has to be confirmed.</summary>
+    bool EditorEscape()
+    {
+        if (!EditorOpen) return false;
+        if (editor!.Kind == EditKind.Surgery) CloseEditor();
+        return true;
+    }
+
+    void BindEditor(UiBindings b)
+    {
+        if (editor is not { } s || Draft(s.Current) is not { } draft || EditorData is not { } data) return;
+        bool creation = s.Kind == EditKind.Creation;
+        foreach (string name in new[] { "BodyTabButton", "FaceTabButton", "HairTabButton", "RandomiseButton", "RandomiseAllButton", "ResetButton", "ClothesButton", "ConfirmButton" })
+        { b.Disabled.Remove(name); b.Actions[name] = name; }
+        // Race, subrace and gender arrows: only at creation, and only where there is a choice (FUN_1405ee0c0); hidden otherwise.
+        var groups = EditorRaces(data.Db);
+        int g = IndexOf(groups, draft.Race);
+        void Arrows(bool live, params string[] names)
+        {
+            foreach (string name in names)
+                if (live) { b.Disabled.Remove(name); b.Actions[name] = name; }
+                else b.Hidden.Add(name);
+        }
+        Arrows(creation && groups.Count > 1, "RaceLeftButton", "RaceRightButton");
+        Arrows(creation && g >= 0 && groups[g].Races.Count > 1, "SubRaceLeftButton", "SubRaceRightButton");
+        Arrows(creation && !draft.Race.GetBool("single gender"), "GenderLeftButton", "GenderRightButton");
+        if (s.Characters.Count > 1)
+            foreach (string name in new[] { "CharLeftArrow", "CharRightArrow" }) { b.Disabled.Remove(name); b.Actions[name] = name; }
+        else
+        {
+            foreach (string name in new[] { "CharLeftArrow", "CharRightArrow", "CharIndexText", "lbChangeCharacter" }) b.Hidden.Add(name);
+            foreach (var frame in faithfulScreens.Layout("editor").Widgets.Where(w => w.Children.Any(c => c.Name == "CharIndexText"))) b.HiddenWidgets.Add(frame);
+        }
+        // Import and export (.bod2 files through the file dialog) have no backend yet.
+        foreach (string name in new[] { "ImportButton", "ExportButton" }) b.Disabled.Add(name);
+        string tabButton = s.Tab switch { EditorTab.Face => "FaceTabButton", EditorTab.Hair => "HairTabButton", _ => "BodyTabButton" };
+        b.Properties[tabButton] = new Dictionary<string, string> { ["Checked"] = "true" };
+        b.Properties["ClothesButton"] = new Dictionary<string, string> { ["Checked"] = s.Clothes ? "true" : "false", ["StateSelected"] = s.Clothes ? "true" : "false" };
+        var everyRace = CharacterDraft.PlayableRaces(data.Db);
+        int shown = IndexOf(everyRace, draft.Race);
+        b.Text["RaceText"] = shown >= 0 ? everyRace[shown].Group.Name : draft.Race.Name;
+        b.Text["SubRaceText"] = draft.Race.Name;
+        b.Text["GenderText"] = draft.Race.GetBool("single gender") ? "" : draft.Female ? "Female" : "Male";
+        b.Text["CharIndexText"] = $"{s.Index + 1}/{s.Characters.Count}";
+        b.Text["DescriptionPanelText"] = draft.Race.GetString("description");
+        b.Properties["DescriptionPanelText"] = new Dictionary<string, string> { ["Static"] = "true", ["WordWrap"] = "true", ["TextAlign"] = "Left Top", ["TextColour"] = MyGuiColours.InkText };
+        b.Properties["NameText"] = new Dictionary<string, string> { ["DefaultAction"] = "false" };
+        b.Properties["ConfirmButton"] = new Dictionary<string, string> { ["DefaultAction"] = "true" };
+    }
+
+    void AddEditorContent(List<UiControl> controls)
+    {
+        if (editor is not { } s || Draft(s.Current) is not { } draft) return;
+        if (controls.FirstOrDefault(c => c.Name == "TabsPanelContent") is { } panel) AddEditorRows(controls, draft, s.Tab, panel.Bounds);
+        if (controls.FirstOrDefault(c => c.Name == "StatsPanelText") is { } stats) AddRaceStats(controls, draft.Race, stats.Bounds);
+    }
+
+    void AddEditorRows(List<UiControl> controls, CharacterDraft draft, EditorTab tab, UiRect area)
+    {
+        var rows = draft.Controls(tab);
+        if (rows.Count == 0) return;
+        float scale = Height / 1080f;
+        float row = Math.Min(44 * scale, area.Height / rows.Count), pad = 8 * scale;
+        float labelWidth = area.Width * 0.38f, trackX = area.X + labelWidth + pad, trackWidth = area.Width - labelWidth - 2 * pad;
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var c = rows[i];
+            float y = area.Y + i * row;
+            string index = i.ToString(CultureInfo.InvariantCulture);
+            controls.Add(new($"editor-label-{i}", "TextBox", new(area.X + pad, y, labelWidth - pad, row), c.Label, "", "", true,
+                new Dictionary<string, string> { ["FontName"] = "Kenshi_StandardFont_Medium", ["TextColour"] = MainColour, ["TextAlign"] = "Left VCenter" }, Vector4.Zero, Pickable: false));
+            if (c.IsPicker)
+            {
+                float arrow = Math.Min(row - 4 * scale, 30 * scale);
+                controls.Add(new($"editor-left-{i}", "Button", new(trackX, y + (row - arrow) / 2, arrow, arrow), "", $"editor-pick:{index}:-1", "Kenshi_SpeedArrowLeftSkin", true,
+                    new Dictionary<string, string>(), Vector4.Zero));
+                controls.Add(new($"editor-right-{i}", "Button", new(trackX + trackWidth - arrow, y + (row - arrow) / 2, arrow, arrow), "", $"editor-pick:{index}:1", "Kenshi_SpeedArrowRightSkin", true,
+                    new Dictionary<string, string>(), Vector4.Zero));
+                controls.Add(new($"editor-choice-{i}", "TextBox", new(trackX + arrow + 4 * scale, y + 3 * scale, trackWidth - 2 * arrow - 8 * scale, row - 6 * scale),
+                    draft.OptionName(c.Kind), "", "Kenshi_GenericTextBoxFlat", true,
+                    new Dictionary<string, string> { ["TextAlign"] = "Center", ["TextColour"] = MainColour }, Vector4.Zero, Pickable: false));
+                continue;
+            }
+            int value = draft.Value(c);
+            float t = c.Max > c.Min ? Math.Clamp((value - c.Min) / (float)(c.Max - c.Min), 0, 1) : 0;
+            float trackHeight = Math.Min(row * 0.6f, 24 * scale);
+            var track = new UiRect(trackX, y + (row - trackHeight) / 2, trackWidth, trackHeight);
+            controls.Add(new($"editor-track-{i}", "Widget", track, "", $"editor-slider:{index}", "Kenshi_SliderSkin", true,
+                new Dictionary<string, string> { ["Slider"] = "true" }, Vector4.Zero, Pickable: true, Argument: index));
+            float knobHeight = Math.Min(row * 0.95f, 36 * scale), knobWidth = knobHeight * 27 / 57f;
+            controls.Add(new($"editor-knob-{i}", "Button", new(track.X + t * track.Width - knobWidth / 2, y + (row - knobHeight) / 2, knobWidth, knobHeight), "", "", "Kenshi_SliderButtonSkin", true,
+                new Dictionary<string, string>(), Vector4.Zero, Pickable: false));
+        }
+    }
+
+    /// <summary>
+    /// The RACE STATS panel (<see cref="RaceStatLines"/>), one line each, the value right-aligned. Built in code by the original too
+    /// (its fonts and spacing are <b>Unknown</b>).
+    /// </summary>
+    void AddRaceStats(List<UiControl> controls, GameRecord race, UiRect area)
+    {
+        var lines = RaceStatLines(race);
+        float scale = Height / 1080f, row = Math.Min(22 * scale, area.Height / Math.Max(1, lines.Count));
+        for (int i = 0; i < lines.Count; i++)
+        {
+            var (label, value, good) = lines[i];
+            var bounds = new UiRect(area.X + 10 * scale, area.Y + i * row, area.Width - 20 * scale, row);
+            controls.Add(new($"editor-stat-{i}", "TextBox", bounds, label, "", "", true,
+                new Dictionary<string, string> { ["FontName"] = "Kenshi_StandardFont_Medium", ["TextColour"] = MyGuiColours.InkText, ["TextAlign"] = "Left VCenter" }, Vector4.Zero, Pickable: false));
+            controls.Add(new($"editor-stat-value-{i}", "TextBox", bounds, value, "", "", true,
+                new Dictionary<string, string> { ["FontName"] = "Kenshi_StandardFont_Medium", ["TextColour"] = good ? GoodColour : BadColour, ["TextAlign"] = "Right VCenter" }, Vector4.Zero, Pickable: false));
+        }
+    }
+
+    readonly Dictionary<string, IReadOnlyList<(string, string, bool)>> raceStatCache = [];
+
+    IReadOnlyList<(string Label, string Value, bool Good)> RaceStatLines(GameRecord race)
+    {
+        if (raceStatCache.TryGetValue(race.StringId, out var cached)) return cached;
+        var lines = new List<(string, string, bool)>();
+        if (EditorData is { } data)
+        {
+            // As the original's "Character_Editor_Race_Stats" table (FUN_1405ebd50 area, Observed): "No bleeding" below a bleed rate of 0.1, then each stat multiplier
+            // that is not 1 (RACE stats good / bad, strength, dexterity: RaceData.StatMultipliers) as (m - 1) x 100 %. Its first line, the character's hit points, is left out.
+            var r = Meitou.Data.Gameplay.Bodies.RaceData.From(race, data.Db);
+            if (race.GetFloat("bleed rate", 1) < 0.1f) lines.Add(("No bleeding", "", true));
+            for (int i = 1; i < r.StatMultipliers.Length; i++)
+            {
+                float m = r.StatMultipliers[i];
+                if (Math.Abs(m - 1) < 0.001f || m <= 0) continue;
+                lines.Add((StatLabel((Meitou.Data.Gameplay.Bodies.StatsEnumerated)i) + ":", ((m - 1) * 100).ToString("+0;-0", CultureInfo.InvariantCulture) + "%", m > 1));
+            }
+        }
+        return raceStatCache[race.StringId] = lines;
+    }
+}

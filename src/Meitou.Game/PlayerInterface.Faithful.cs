@@ -23,6 +23,7 @@ sealed partial class PlayerInterface
         if (key == Meitou.Engine.Input.Key.Escape)
         {
             if (faithfulScreens.IsOpen("title") && faithfulScreens.OpenScreens.Count == 1) return true;
+            if (EditorOpen && faithfulScreens.OpenScreens[^1] == "editor") { EditorEscape(); UpdateMenuPause(); return true; }
             // Esc presses the last button of the top message box (Return the first, docs/game/ui-input.md section 5).
             if (faithfulScreens.IsOpen("message")) HandleFrontendAction(new("message", CancelButton, CancelButton));
             else if (!faithfulScreens.Escape()) faithfulScreens.Open("menu");
@@ -68,7 +69,8 @@ sealed partial class PlayerInterface
     {
         if (e.Action.StartsWith("inventory-scroll:", StringComparison.Ordinal))
         { ScrollInventory(e.Screen, float.Parse(e.Action[17..], CultureInfo.InvariantCulture)); return; }
-        if (HandleFrontendAction(e)) UpdateMenuPause();
+        if (e.Screen == "editor") EditorAction(e);
+        else if (HandleFrontendAction(e)) UpdateMenuPause();
         else if (e.Screen == "stats" && e.Action == "select") selectedStat = e.Text;
         else if (e.Screen == "stats" && e.Action.StartsWith("stat:", StringComparison.Ordinal)) selectedStat = e.Action[5..];
         else if (e.Screen == "build") BuildAction(e);
@@ -87,6 +89,7 @@ sealed partial class PlayerInterface
         var lead = Selected().FirstOrDefault();
         foreach (var button in layout.Widgets.Where(w => w.Type == "Button" && !w.Properties.ContainsKey("TemplateEvent"))) b.Disabled.Add(button.Name);
         if (BindFrontend(id, b)) return b;
+        if (id == "editor") { BindEditor(b); return b; }
         else if (id == "trader") BindTraderScreen(b);
         else if (id == "build") BindBuildScreen(b);
         else if (id is "inventory" or "stats" or "bag" or "limbs")
@@ -160,6 +163,7 @@ sealed partial class PlayerInterface
     {
         if (id == "title" && UiMode == UiMode.Meitou) { MeitouTitleMenu(controls); return; }
         if (id == "stats") { AddStatsContent(controls); return; }
+        if (id == "editor") { AddEditorContent(controls); return; }
         if (id == "build") { AddBuildContent(controls); return; }
         AddMapContent(id, controls);
         if (id == "trader") { ArrangeContainerGrid(id, controls, session.CurrentSnapshot.Trade?.StockWidth ?? 0, session.CurrentSnapshot.Trade?.StockHeight ?? 0); AddTraderContent(controls); return; }

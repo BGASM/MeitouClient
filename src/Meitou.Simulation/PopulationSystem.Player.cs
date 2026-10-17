@@ -84,6 +84,8 @@ public sealed partial class PopulationSystem
         world.Player.Money = start.Money;
         world.Research.Set(data.Db, Meitou.Data.Gameplay.Construction.ResearchGate.StartResearch(data.Db, start));
         world.Player.Squad = squad.Id;
+        world.Player.CreationRaces = [.. start.ForceRace.Select(r => r.Id)];
+        world.Player.InCreation = true;   // the character editor may remake them until it is confirmed (docs/characters.md "Character editor")
         world.Player.Selection.Clear();
         if (squad.Members.Count > 0) world.Player.Selection.Add(squad.Members[0]);
         return squad;

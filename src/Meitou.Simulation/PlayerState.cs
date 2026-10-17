@@ -16,6 +16,10 @@ public sealed class PlayerState
     public List<CharacterId> Selection { get; } = [];
     /// <summary>The player's squad (the one the start created).</summary>
     public int Squad { get; set; } = -1;
+    /// <summary>The new game's character editor is open: the start's characters may still be remade, race and gender too (<see cref="Editing.EditCharacter"/>). Not saved.</summary>
+    public bool InCreation { get; set; }
+    /// <summary>The start's <c>force race</c> RACE ids the creation is limited to (empty: every playable race).</summary>
+    public IReadOnlyList<string> CreationRaces { get; set; } = [];
     /// <summary>The character of another faction the HUD shows (<see cref="InspectCommand"/>), or <see cref="CharacterId.None"/>. Display only: not hashed and not saved.</summary>
     public CharacterId Inspected { get; set; } = CharacterId.None;
     /// <summary>
@@ -83,6 +87,7 @@ public sealed class PlayerState
 public sealed class PlayerSystem(PopulationData? data = null) : ITickSystem
 {
     readonly CharacterAssembly? assembly = data is null ? null : new(data);
+    internal PopulationData? Data => data;
     public void Inputs(World world, IReadOnlyList<SimCommand> commands)
     {
         var table = world.Characters;
@@ -127,6 +132,12 @@ public sealed class PlayerSystem(PopulationData? data = null) : ITickSystem
                     break;
                 case OrdersCommand or RunSpeedCommand:
                     Orders.Apply(world, command);
+                    break;
+                case Editing.EditCharacter edit:
+                    if (data is not null) Editing.CharacterEditing.Apply(world, data, edit);
+                    break;
+                case Editing.FinishCreation:
+                    player.InCreation = false;
                     break;
                 case Items.ArrangeInventory arrange:
                     if (table.TryResolveNext(arrange.Character, out int character) && table.Cold(character) is { IsPlayer: true, Inventory: { } carried } &&

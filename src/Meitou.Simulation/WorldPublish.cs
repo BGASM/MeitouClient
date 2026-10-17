@@ -19,6 +19,7 @@ public sealed partial class World
             if (table.TryResolveNext(s, out int k) && table.Cold(k) is { } c && Carrying.CarrySystem.CanKnockOut(c)) { koSlot = k; break; }
         var aggro = koSlot >= 0 ? systems.OfType<AggroSystem>().FirstOrDefault() : null;
         var arrest = systems.OfType<Crime.ArrestSystem>().FirstOrDefault();
+        var surgeons = systems.OfType<PlayerSystem>().FirstOrDefault()?.Data?.Surgeons;
         for (int i = 0; i < state.Length; i++)
         {
             if (!state[i].Alive) continue;
@@ -37,6 +38,7 @@ public sealed partial class World
                 SquadId = cold?.SquadId ?? -1,
                 IsPlayer = cold?.IsPlayer ?? false,
                 IsTrader = cold is { IsPlayer: false, SquadId: >= 0 } && Squads.Find(cold.SquadId)?.Shop is not null,
+                SurgeryCost = cold is { IsPlayer: false } && surgeons is not null ? Editing.CharacterEditing.SurgeryCost(this, surgeons, id, cold) : null,
                 Selected = selected,
                 Inspected = inspected,
                 Skills = detailed && cold!.Stats is { } sk ? new SkillSummary(sk[StatsEnumerated.MeleeAttack], sk[StatsEnumerated.MeleeDefence], sk[StatsEnumerated.Dodge], sk.Toughness, sk.Strength, sk.Athletics) : null,

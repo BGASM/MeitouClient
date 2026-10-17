@@ -351,6 +351,8 @@ sealed partial class GameHost
             SendFocus(cinemaHolds ? camera.Target : null);
             if (!cinemaHolds) SandboxFollowCamera();
             if (!cinemaHolds) FollowCamera();
+            if (!cinemaHolds) EditorCamera();
+            OpenPendingEditor();
             if (!cinemaHolds) ApplyTitleCamera();
             if (TitleVisible && !warming) titleBattle?.Advance(frameDt);
             if (skyArrival is not null)

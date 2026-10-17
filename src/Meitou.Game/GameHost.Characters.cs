@@ -112,7 +112,7 @@ sealed partial class GameHost
                         }
                 poses[i] = new CharacterPose(layer.Name, time, weight);
             }
-            list.Add(new CharacterInstance(DrawKey(c.Id), c.Appearance, position, yaw, poses)
+            list.Add(new CharacterInstance(DrawKey(c.Id), player.EditorPreview(c.Id, c.Appearance) ?? c.Appearance, position, yaw, poses)
             {
                 WeaponDrawn = c.WeaponDrawn, Scale = c.Scale, Hidden = aboveFloor.Contains(c.Id), FullRateAnimation = c.IsPlayer,
                 Bones = Blend(before?.Ragdoll, c.Ragdoll, alpha),

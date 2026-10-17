@@ -27,10 +27,12 @@ public sealed class MyGuiScreenHost(MyGuiResources resources)
     (string Screen, string Widget)? focus;
     UiTextBuffer? edit;
     (string Screen, Vector2 At, Vector2 Offset)? drag;
+    /// <summary>The slider being dragged: its screen, widget, action, argument and track (a control with the property <c>Slider</c>).</summary>
+    (string Screen, string Widget, string Action, string Argument, UiRect Track)? slide;
     public event Action<MyGuiEvent>? Activated;
     public bool HasWindows => open.Count > 0;
     public bool HasModal => open.Any(id => screens[id].Modal);
-    public bool CapturesPointer => drag is not null;
+    public bool CapturesPointer => drag is not null || slide is not null;
     public bool HasKeyboardFocus => focus is not null;
     public IReadOnlyList<string> Registered => screens.Keys.ToArray();
     public IReadOnlyList<string> OpenScreens => open.ToArray();
@@ -49,6 +51,7 @@ public sealed class MyGuiScreenHost(MyGuiResources resources)
         open.Remove(id);
         if (focus?.Screen == id) { focus = null; edit = null; }
         if (drag?.Screen == id) drag = null;
+        if (slide?.Screen == id) slide = null;
         frame = frame.Where(f => f.Id != id).ToArray();
     }
     public void CloseAll() { foreach (string id in open.ToArray()) Close(id); }
@@ -138,6 +141,12 @@ public sealed class MyGuiScreenHost(MyGuiResources resources)
             return true;
         }
         focus = null; edit = null;
+        if (c.Properties.GetValueOrDefault("Slider") == "true")
+        {
+            slide = (id, c.Name, c.Action, c.Argument, c.Bounds);
+            Slide(p);
+            return true;
+        }
         if (c.Type == "Button") { Activated?.Invoke(new(id, c.Name, c.Action)); return true; }
         var root = frame.First(f => f.Id == id).Controls.FirstOrDefault(n => n.Type == "Window");
         if (root is not null && p.Y < root.Bounds.Y + 38 && !s.Pinned) drag = (id, p, s.Offset);
@@ -145,11 +154,20 @@ public sealed class MyGuiScreenHost(MyGuiResources resources)
     }
     public bool PointerMove(Vector2 p)
     {
+        if (slide is not null) { Slide(p); return true; }
         if (drag is not { } d) return false;
         screens[d.Screen].Offset = d.Offset + p - d.At;
         return true;
     }
-    public void PointerUp() => drag = null;
+    public void PointerUp() { drag = null; slide = null; }
+
+    /// <summary>A slider drag at <paramref name="p"/>: the event carries the slider's argument and where along its track the pointer is (0 at the left, 1 at the right).</summary>
+    void Slide(Vector2 p)
+    {
+        if (slide is not { } s) return;
+        float t = s.Track.Width > 0 ? Math.Clamp((p.X - s.Track.X) / s.Track.Width, 0, 1) : 0;
+        Activated?.Invoke(new(s.Screen, s.Widget, s.Action, s.Argument, t));
+    }
     public bool Wheel(Vector2 p, float steps)
     {
         if (Pick(p) is not { } picked) return false;

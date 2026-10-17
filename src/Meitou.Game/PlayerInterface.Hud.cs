@@ -97,7 +97,7 @@ sealed partial class PlayerInterface
         // Rings under the selected characters.
         foreach (var c in session.CurrentSnapshot.Characters)
         {
-            if (!c.Selected) continue;
+            if (!c.Selected || EditorOpen) continue;
             var centre = where(c);
             Vector2? previous = null, first = null;
             for (int i = 0; i <= 24; i++)

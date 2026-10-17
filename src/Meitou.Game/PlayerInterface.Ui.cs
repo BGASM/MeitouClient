@@ -4,6 +4,8 @@ using Meitou.Data.Ui;
 using Meitou.Rendering;
 using Meitou.Rendering.Ui;
 using Meitou.Simulation;
+using Meitou.Simulation.Editing;
+using Meitou.Data.Characters;
 using Meitou.Ui;
 
 namespace Meitou.Game;
@@ -59,7 +61,7 @@ sealed partial class PlayerInterface
         ("advanced", "Kenshi_AdvancedOptionsWindow", true), ("save", "Kenshi_SaveGamePanel", true),
         ("load", "Kenshi_LoadGamePanel", true), ("message", "Kenshi_MessageBox", true),
         ("bag", "Kenshi_InventoryGenericWindow", false), ("limbs", "Kenshi_LimbReplacementWindow", false), ("trader", "Kenshi_InventoryTraderWindow", false),
-        ("build", "Kenshi_BuildWindow", false),
+        ("build", "Kenshi_BuildWindow", false), ("editor", "Kenshi_CharacterEditor", true),
     ];
 
     /// <summary>The expanded layout and the current bindings of the HUD (<c>"hud"</c>) or of a faithful screen, for the layout audit test.</summary>
@@ -170,7 +172,7 @@ sealed partial class PlayerInterface
         SyncTradeScreens();
         ValidateInventoryDrag();
         var b = BindUi();
-        var controls = !TitleOpen ? MyGuiPresentation.Arrange(faithfulHud, Width, Height, b, uiResources.Layers).ToList() : [];
+        var controls = !TitleOpen && !EditorOpen ? MyGuiPresentation.Arrange(faithfulHud, Width, Height, b, uiResources.Layers).ToList() : [];
         UiRect FaithfulSlot(string name) => controls.FirstOrDefault(c => c.Name == name)?.Bounds ?? default;
         var slots = new Dictionary<string, UiRect>
         {
@@ -179,7 +181,7 @@ sealed partial class PlayerInterface
             [UiSlots.Selection] = FaithfulSlot("InformationPanel"),
             [UiSlots.Squad] = FaithfulSlot("SquadPanel"),
         };
-        if (!TitleOpen) controls.AddRange(uiHost.Arrange(UiMode, Width, Height, b, slots));
+        if (!TitleOpen && !EditorOpen) controls.AddRange(uiHost.Arrange(UiMode, Width, Height, b, slots));
         if (controls.FirstOrDefault(c => c.Name == "SquadPanel") is { } squadPanel) AddSquadPortraits(controls, squadPanel.Bounds);
         AddHudText(controls);
         AddJobRemoveButtons(controls);
@@ -272,6 +274,13 @@ sealed partial class PlayerInterface
     public void ShowUiPanel(string? panel, bool? expandInformation = null)
     {
         if (expandInformation is { } expanded) infoExpanded = expanded;
+        if (panel?.StartsWith("editor", StringComparison.Ordinal) == true)
+        {
+            var tab = panel == "editor-face" ? EditorTab.Face : panel == "editor-hair" ? EditorTab.Hair : EditorTab.Body;
+            if (!EditorOpen) { faithfulScreens.CloseAll(); if (buildMode) SetBuildMode(false); if (!OpenEditor(EditKind.Creation, PlayerCharacters())) return; }
+            editor!.Tab = tab;
+            return;
+        }
         faithfulScreens.CloseAll();
         UpdateMenuPause();
         if (panel is null) return;

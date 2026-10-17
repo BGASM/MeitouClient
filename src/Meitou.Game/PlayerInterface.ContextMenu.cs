@@ -40,6 +40,8 @@ sealed partial class PlayerInterface
         if (!down && !target.IsPlayer)
         {
             if (target.IsTrader) verbs.Add(("Trade", () => Say(new Meitou.Simulation.Trading.OpenTrade(selection[0], id) { Tick = session.World.Tick })));
+            // Meitou's stand-in for a plastic surgeon's dialogue line (DA_CHARACTER_EDITOR, docs/characters.md "Plastic surgeons"): the editor on the first selected character.
+            if (target.SurgeryCost is { } cost) verbs.Add((cost > 0 ? $"Plastic Surgery (c.{cost.ToString("N0", CultureInfo.InvariantCulture)})" : "Plastic Surgery", () => AskSurgery(selection[0], target, cost)));
             verbs.Add(("Attack Target", () => Say(new Meitou.Simulation.Combat.AttackOrder(selection, id) { Tick = session.World.Tick })));
             // The original's "Stealth KO" (order 228), offered while a selected character sneaks; the chance is in the caption (the original shows it at the pointer).
             if (target.StealthKoChance is { } chance)

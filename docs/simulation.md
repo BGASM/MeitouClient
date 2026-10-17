@@ -86,8 +86,9 @@ ticks, game hours, AI, movement or roaming timers; readiness includes navmesh-ga
 
 `PlayerSystem` / Orders: selection, stop, move/queued move, attack, treat/rest/medic, carry/rescue,
 loot, stances and squad toggles are commands. Resolve empty-ID orders against current selection.
-New-game start data seeds squad/appearance/gear/money; original start relation/research/force-race
-semantics remain partly unknown. Picking/HUD are host responsibilities, never simulation input.
+New-game start data seeds squad/appearance/gear/money; the start's characters are then remade in the
+character editor while `PlayerState.InCreation` ([characters](characters.md#character-editor)); original start
+relation/research semantics remain partly unknown. Picking/HUD are host responsibilities, never simulation input.
 
 ### Order toggles
 

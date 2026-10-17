@@ -97,6 +97,50 @@ checks `human_male.mesh`):
 | CONTAINER backpacks | 2 levels at 400 |
 | LIMB_REPLACEMENT, WEAPON (`mesh`, `bare sword`, `sheath`) | none |
 
+## Character editor
+
+`CharacterEditWindow` (constructor `FUN_1405f4dd0(chars, mode, forceRaces)`, layout `Kenshi_CharacterEditor`). Facts **Observed** from the
+exe decompile unless marked; Meitou: `CharacterDraft` (data), `EditCharacter` / `FinishCreation` commands (`Simulation/Editing`), `PlayerInterface.Editor`.
+
+- **Modes**: 0 new game (`FUN_140872e00`: every player character after the start's `squad` spawns, with the start's `force race`), 1 in play
+  (dialogue `DA_CHARACTER_EDITOR` on the talking player character; `DA_JOIN_SQUAD_WITH_EDIT` and slave purchases on the recruits). Mode 1
+  hides the race, subrace and gender arrows; they are also hidden when there is no choice. Everything else works in both modes.
+- **Races**: RACE_GROUP name on RACE, RACE name on SUBRACE; a race is listed if not an animal, in a group, has its editor limits XML, `playable`
+  (mode 0) and, with a `force race` list, in it (none left: "Game start has no valid races", the list is unrestricted). Base data: Human
+  {Greenlander, Scorchlander}, Shek, Hive {Prince, Soldier Drone, Worker Drone}, Skeleton (**Verified** by probe). Group order **Unknown**
+  (Meitou: data order). Gender blank for single-gender races. Description = RACE `description`. Stats panel: "Hit Points:", "No bleeding"
+  below `bleed rate` 0.1, then each stat multiplier as (m-1)x100 % (Meitou omits the hit points line).
+- **Tabs** (`FUN_1405ebd50`, Body first): FACE = head list (if more than one) + XML Face ranges; BODY = "Idle stance" list slider, XML Body
+  ranges, `Skin Tone` colour slider (vec3 interpolated; only with more than one colour); HAIR = Hair (attach slot 2) and Beard (13) lists with
+  "None" (if more than one entry), hair colour multi-slider `Hair Colour` / `Hair Saturation` / `Hair Brightness` 0..100. No Personality tab, no
+  Age. Plain ranges store the integer as the float key; target ranges store value x 0.01 in `target`, a negative value x -0.01 in
+  `target_opposite` (the editor shows the reverse). Meitou: no idle stance slider yet; women get no beard list (generator rule).
+- **Buttons**: RANDOMISE = current tab only; RANDOMISE ALL = every randomiser; RESET ALL = the appearance template's defaults (hair, beard,
+  colours, `Posture`, idle stance `idle_stand_normal`; slider values **Unknown**, Meitou: XML mid, poses 0, Posture 20); CLOTHES toggles worn
+  clothing in the preview; IMPORT/EXPORT a `.bod2` in `data/character/bodies/export/` (Meitou: not yet). CONFIRM asks first when some
+  characters were never shown, closes, unpauses at speed 1; it charges nothing. No cancel widget; Esc **Unknown** (Meitou: Esc leaves a
+  surgeon's editor unchanged and unpaid; the new game's must be confirmed).
+- **Preview**: own compositor workspace and a stage under the world (y -3000), HUD hidden; Body frames the whole body, Face/Hair the
+  `Bip01 Head`; angles **Unknown**. Meitou shows the character where it stands, the camera framing it between the panels; the draft is drawn
+  in place of its look (a new asset at most every 0.12 s while dragging).
+- **Keys**: `in editor` true while open; a mode 0 character without a body file is randomised on open (Meitou's start characters are already
+  rolled). Closing in mode 0 also sets health from the race's `starting health` (Meitou: a new race at creation gets a new body).
+- **Meitou validation** (`CharacterEditing.Apply`, `CharacterDraft.Sanitize`): player character with a person's look; creation only while
+  `PlayerState.InCreation` (new game until CONFIRM) and within the start's force races; surgery needs the surgeon alive within 60 units
+  (engine choice), the same race and gender, money > price, and takes the price. Head/hair/beard must be the race's, sliders and poses are
+  clamped to the limits, the name to 30 characters. **Verified** by a scratch round trip on save 2: edit, capture, load gives the edited
+  values with the original key set.
+
+### Plastic surgeons
+
+**Verified** by probe of the merged data: 9 dialogue lines carry `DA_CHARACTER_EDITOR` (11); the price is a `DA_TAKE_MONEY` (8) effect on the
+same line (val0), gated by `DC_PLAYERMONEY` (2) strictly greater. "plastic surgeon" (CHARACTER 2132 Plastic Surgeon, leader of the bar squads
+"bar plastic surgeon" / "plastic surgeon": Holy Nation, Empire Peasants, United Cities, Deadcat, Waystation, Bark, Sho-Battai...) 200;
+"doctor shop" (hospital squads' `dialog leader` package) 500; Doctor Chung (Mud Town) 200, no money check; Thieves Guild surgeon free
+behind `DC_FACTION_RANK`; Grey free for escaped slaves. Meitou has no dialogue: an NPC whose dialogue offers such a line gated only by money or
+`DC_IS_RECRUITABLE` (`SurgeonDialogues`) gets the context menu verb "Plastic Surgery (c.price)", which opens the editor in mode 1 on the
+first selected character beside it.
+
 ## Open questions
 
 - ~~Body-shape slider formulas~~, ~~`hide parts` bits~~, ~~`hide stump`~~, ~~`muscleBlend`~~: answered (animation.md

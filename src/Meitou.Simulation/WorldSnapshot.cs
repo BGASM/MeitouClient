@@ -53,6 +53,8 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     public bool IsPlayer { get; init; }
     /// <summary>A member of a squad with a shop (right click trades).</summary>
     public bool IsTrader { get; init; }
+    /// <summary>What this NPC's plastic surgery costs (its dialogue's character editor line, <see cref="Meitou.Data.Characters.SurgeonDialogues"/>); null: not a surgeon.</summary>
+    public int? SurgeryCost { get; init; }
     public bool Selected { get; init; }
     /// <summary>Another faction's character the HUD shows (<see cref="InspectCommand"/>): it carries the same HUD details as a selected one but is not selected.</summary>
     public bool Inspected { get; init; }
