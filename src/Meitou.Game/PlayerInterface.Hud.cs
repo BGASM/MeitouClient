@@ -81,8 +81,8 @@ sealed partial class PlayerInterface
     IReadOnlyList<CharacterSnapshot> selected = [];
     CharacterSnapshot? inspected;
 
-    /// <summary>The character the HUD panels describe: the first selected one, else the other faction's character last clicked (docs/game/ui-screens.md section 4).</summary>
-    CharacterSnapshot? Lead() => Selected().FirstOrDefault() ?? inspected;
+    /// <summary>The character the HUD panels describe: the other faction's character last clicked, else the first selected one (docs/game/ui-screens.md section 4). The selection stays whoever is inspected.</summary>
+    CharacterSnapshot? Lead() => Selected().FirstOrDefault() is { } first ? inspected ?? first : inspected;
 
     /// <summary>The HUD, the selection rings and the drag box, over the finished picture.</summary>
     public void Draw(DebugOverlay o, int width, int height)

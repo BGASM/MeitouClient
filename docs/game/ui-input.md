@@ -25,7 +25,7 @@ choose verbs based on target type/state, faction, carrying and available interac
 
 Meitou selection commands retain the current selection when no valid player characters are
 targeted (empty ground or an empty drag box). Selecting valid members replaces or adds to it;
-inspecting another faction explicitly clears order selection (see [UI screens](ui-screens.md#4-hud-mainbargui)).
+inspecting another faction keeps the selection and shows that character in the panels (see [UI screens](ui-screens.md#4-hud-mainbargui)).
 While a selected character sneaks, an NPC that is up gets the verb "Stealth KO (N%)" and a quick right click on it gives
 that instead of an attack ([combat](combat.md#stealth-knock-out)); the first sneaking selected character goes.
 

@@ -30,8 +30,7 @@ and their placements does not establish that every differently named ruin has be
 Main menu → start selection/character creation → HUD, with save/load/import/options and pause
 state handled separately. Layout/widget resources do not imply all controls are implemented.
 HUD consumes selection/inspection, medical/stats/skills/extended values, faction/state and squad
-portraits; inspecting another faction clears order selection and displays its information only
-(**Observed original behaviour**, not fully traced). Player commands must still target own squad.
+portraits; inspecting another faction fills the panels with its information only (the player's selection stays: a player character is always selected in the original per playtest notes, **Observed** only; whether it is dropped for a moment is **Unknown**). Player commands must still target own squad.
 Overview separates squad/faction/map/AI/jobs/research; inventory/trade needs footprint/quantity/
 charge/prices/ownership/fit validation; dialogue/build/tutorials have distinct state/controllers.
 
@@ -132,7 +131,7 @@ to Jobs, independent of the saved `chase mode` flag whose relationship is **Unkn
 - Information panel: `ExtendingPanel` starts collapsed, its bottom moved onto the panel's bottom (behind the Overlapped `StatsPanel`), and slides over
   0.5 s to its layout place when `ExtendedStatsButton` is pressed (**Verified**). `BountyPanel` shows only for one selected character with a bounty or
   a status line (Imprisoned, Slave, Escaped slave, Committing Crime!, Leader...; **Verified**).
-- Inspecting another faction's character (**Observed** in the original, not traced in the code): a left click on a character that is not yours drops your selection and fills the information and medical panels with that character (name, faction, state, stats, extended stats, medical rows). Meitou keeps this as display state, `PlayerState.Inspected` set by `InspectCommand` (not hashed, not saved); a click on your own character or the ground clears it, shift keeps your selection.
+- Inspecting another faction's character (**Observed** in the original, not traced in the code): a left click on a character that is not yours fills the information and medical panels with that character (name, faction, state, stats, extended stats, medical rows). Meitou keeps this as display state, `PlayerState.Inspected` set by `InspectCommand` (not hashed, not saved); your selection is kept (Meitou: someone is always selected, `PlayerState.Prune` picks the first living character of yours when every selected one is gone or dead); a click on your own character or the ground clears the inspection.
 - Money panel: `MoneyLabelText` is set to "Money" (without the layout's colon; 25 % opacity when the amount would overlap it), `DayText` "Day: {1,num}", `TimeText` HH:MM (**Verified**). A "1x"
   seen next to the clock in a player's screenshot is not written by the vanilla code (**Observed**; most likely a mod).
 - Squad tabs: one per player squad with members, captioned with the squad's name unchanged (**Verified**); the first player squad reads `Nameless_0`

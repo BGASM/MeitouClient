@@ -66,7 +66,17 @@ public sealed class PlayerState
     /// <summary>Drops characters that are gone (serial phases, after the commit).</summary>
     internal void Prune(CharacterTable table)
     {
+        bool hadSelection = Selection.Count > 0;
         Selection.RemoveAll(c => !table.TryResolveNext(c, out _));
+        // Somebody stays selected (the original keeps one of the player's characters selected): when every selected one is gone or dead, the first living one is.
+        if (hadSelection && Exists && !Selection.Any(c => table.TryResolveNext(c, out int slot) && table.Cold(slot) is { DiedTick: < 0 }))
+            for (int i = 0; i < table.HighWater; i++)
+                if (table.Next[i].Alive && table.Cold(i) is { IsPlayer: true, DiedTick: < 0 })
+                {
+                    Selection.Clear();
+                    Selection.Add(new CharacterId(i, table.Next[i].Generation));
+                    break;
+                }
         if (!Inspected.IsNone && !table.TryResolveNext(Inspected, out _)) Inspected = CharacterId.None;
     }
 
@@ -108,7 +118,6 @@ public sealed class PlayerSystem(PopulationData? data = null) : ITickSystem
                     player.SeeDiscoveries();
                     break;
                 case InspectCommand inspect:
-                    if (!inspect.Target.IsNone) player.Selection.Clear();
                     player.Inspected = inspect.Target;
                     break;
                 case StopCommand stop:
