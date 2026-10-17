@@ -47,6 +47,12 @@ public sealed record SquadTemplate
     /// <summary><c>building</c>: the home building a resident squad uses (first entry); <c>building designation</c> is the editor's BuildingDesignation.</summary>
     public RecordLink? Building { get; init; }
     public int BuildingDesignation { get; init; }
+    /// <summary>Every <c>building</c> entry (the preferred homes of a resident entry, docs/game/factions-squads-towns.md "Town residents") and <c>building dislike</c>.</summary>
+    public IReadOnlyList<RecordLink> Buildings { get; init; } = [];
+    public IReadOnlyList<RecordLink> BuildingDislike { get; init; } = [];
+    /// <summary><c>layout interior</c> / <c>layout exterior</c>: the layout names the home building is given (empty: none).</summary>
+    public string LayoutInterior { get; init; } = "";
+    public string LayoutExterior { get; init; } = "";
     /// <summary><c>initial door state</c> (DoorState: 0 CLOSED, 1 OPEN, 2 LOCKED, 3 BROKEN), applied to the home building when it is assigned (docs/game/locks.md "Doors").</summary>
     public int InitialDoorState { get; init; }
     /// <summary><c>nest</c> links.</summary>
@@ -106,6 +112,10 @@ public sealed record SquadTemplate
             PatrolApproachesTowns = r.GetBool("patrol approaches towns"),
             ForceSpeed = r.GetInt("force speed"),
             Building = building.Count > 0 ? RecordLink.From(building[0]) : null,
+            Buildings = Links("building"),
+            BuildingDislike = Links("building dislike"),
+            LayoutInterior = r.GetString("layout interior"),
+            LayoutExterior = r.GetString("layout exterior"),
             BuildingDesignation = r.GetInt("building designation"),
             InitialDoorState = r.GetInt("initial door state"),
             Nest = Links("nest"),

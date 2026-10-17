@@ -45,6 +45,8 @@ sealed partial class GameHost
             if (g.TitlePreview) titleBattle?.Advance(session.Ticks.TickSeconds);
         }
         PrintSavedLog();
+        if (population is not null)
+            foreach (var line in population.TakeTownLog()) Console.WriteLine($"town      {line}");
         SandboxFollowCamera();
         ApplyCamera(session.Camera.Current);
         if (g.TitlePreview) ApplyTitleCamera();

@@ -24,6 +24,11 @@ public sealed class Squad
     /// <summary>The place and radius the squad wanders in when it has no orders (the town's centre and radius for residents).</summary>
     public Vector2 HomeCentre { get; set; }
     public float HomeRadius { get; set; }
+    /// <summary>
+    /// The building the town gave it as its home (docs/game/factions-squads-towns.md "Town residents"), or the one a save names; the AI takes it as the squad's own
+    /// home. Null: none (the AI picks one).
+    /// </summary>
+    public Meitou.Data.World.TownBuilding? HomeBuilding { get; set; }
     /// <summary>The roaming platoon this loaded squad is the active half of (-1: a resident or other squad).</summary>
     public int PlatoonId { get; init; } = -1;
     /// <summary>The active half of a pinned saved platoon (<see cref="Platoon.Pinned"/>): a town's own squad from a save, treated as the town's squads are (AI, guards).</summary>

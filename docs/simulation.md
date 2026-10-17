@@ -74,7 +74,8 @@ around focus, gate spawning on navmesh readiness, create residents/bar/roaming/w
 and assemble race appearance, gear, stats and bodies. Counts, roles, offsets, caps, spawn weights
 and world-state gating follow [population research](game/factions-squads-towns.md).
 Missing references become `SquadPlan.Problems`; world states initially false are an engine
-choice, not a verified original default. Prisoners/cages, housemates and unique replacements
+choice, not a verified original default. Residents are housed by the original's building rules with housemates and
+default residents ([town residents](game/factions-squads-towns.md#town-residents)); prisoners/cages and unique replacements
 remain incomplete. `ActiveZones` is double-buffered. Zone loading/spawn planning stays off the
 simulation thread; publish results at boundaries.
 `World.PreparePopulation` queues nearby residents/wild squads, activates existing nearby roaming
@@ -507,7 +508,7 @@ handles and original saved/derived/regenerated state.
 F5/F9 and named save menus share mapping. Restore clock, player money/faction, relation/prosperity,
 player squads, character transforms/names/roles, stats/medical parts, appearance, inventories,
 bounties, bed/cage state and sentence, and registered buildings' locks and doors (into existing zone records only; a
-new save has none, [save.md](formats/save.md#locks-cages-and-sentences)) and selection; the host restores and writes every region's season, weather, strength and wind ([BIOMES](formats/save.md#biomes-type-28-quicksave-weather-per-region)). NPC platoons whose `basetown` is a placed town load as their saved characters at their saved positions: town-bound ones (not travellers) are pinned to the town (no trips, AI-run, homed at the site) and the town's population counts them per template, so no duplicates spawn; travellers become roaming stand-ins made from the saved characters on activation. A platoon that unloads keeps its members' state. Meitou saves write them back and the population's own squads as new platoons ([save.md](formats/save.md#npc-platoons-meitou-mapping)). Wild and nest platoons stay in the file but are not restored. Orders/paths, animation,
+new save has none, [save.md](formats/save.md#locks-cages-and-sentences)) and selection; the host restores and writes every region's season, weather, strength and wind ([BIOMES](formats/save.md#biomes-type-28-quicksave-weather-per-region)). NPC platoons whose `basetown` is a placed town load as their saved characters at their saved positions: town-bound ones (not travellers) are pinned to the town (no trips, AI-run, homed in the building their `homebuilding` handle names, else at the site) and the town's population counts them per template, so no duplicates spawn; travellers become roaming stand-ins made from the saved characters on activation. A platoon that unloads keeps its members' state. Meitou saves write them back and the population's own squads as new platoons ([save.md](formats/save.md#npc-platoons-meitou-mapping)). Wild and nest platoons stay in the file but are not restored. Orders/paths, animation,
 combat engagement, wound-list/pain, base-game building state, ground items, camera/speed are not
 fully restored. Loaded hashes need not match captured hashes: compare carried fields and agreement
 between repeated loads. QuickSaveTests checks carried fields and repeatable loading.

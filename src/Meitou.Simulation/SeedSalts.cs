@@ -45,4 +45,8 @@ internal static class SeedSalts
     public const ulong AiPatrol = 0x5041UL;
     /// <summary>A platoon's short-range patrol point off screen (<see cref="Ai.PlatoonJobs"/>).</summary>
     public const ulong PlatoonPatrol = 0x5050UL;
+
+    /// <summary>Town residents in their buildings (<c>PopulationHomes.cs</c>): counter base of the shuffle of a town's buildings, the counter of the node a squad is
+    /// made at, counter base of the housemate counts, and the salt XORed into a housed squad's key.</summary>
+    public const ulong HomeOrder = 0x40DE00UL, HomeSpot = 0x40DE5UL, Housemates = 0x40A7E00UL, ResidentHome = 0x2E51DUL;
 }

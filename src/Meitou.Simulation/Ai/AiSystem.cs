@@ -420,12 +420,14 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
     }
 
     /// <summary>
-    /// The squad's own building (<b>engine choice</b>: how the original picks a home is <b>Unknown</b>, docs/game/factions-squads-towns.md 6.4): among its town's
+    /// The squad's own building: the one its town gave it (<see cref="Squad.HomeBuilding"/>, docs/game/factions-squads-towns.md "Town residents"); for a squad without
+    /// one (made without building data, or a save's without a home) an <b>engine choice</b>: among its town's
     /// buildings no other squad has, the nearest of the template's <c>building</c>; else by <c>building designation</c> a shop (SHOP) or the bar (BAR, shared);
     /// else the nearest with beds, else the nearest at all. None for a squad without a town or a town without building data.
     /// </summary>
     TownBuilding? AssignHome(World world, Squad squad, SquadTemplate? template)
     {
+        if (squad.HomeBuilding is { } given) return given;
         if (squad.Town < 0 || data.Sites[squad.Town].Buildings is not { Count: > 0 } buildings) return null;
         var taken = new HashSet<TownBuilding>(ReferenceEqualityComparer.Instance);
         foreach (var other in world.Squads.All)

@@ -205,6 +205,23 @@ internal static class SavedCharacters
 
     // ---- NPC platoons ----
 
+    /// <summary>
+    /// The building of <paramref name="site"/> a saved platoon lives in: its <c>homebuilding</c> handle resolved to the zone's building state (<c>&lt;instance&gt;-S23</c>),
+    /// matched by zone and instance id (docs/formats/save.md "NPC platoons"). Null when the platoon names none or it is not one of the town's buildings.
+    /// </summary>
+    public static Meitou.Data.World.TownBuilding? SavedHome(World world, SavedPlatoon sp, TownSite site)
+    {
+        if (world.Saved is not { } context || site.Buildings.Count == 0) return null;
+        var h = Hand.Read(sp.Source.Record, "homebuilding");
+        if (h.IsNull || context.Handles.Building(h) is not { } state || !state.StringId.EndsWith("-S23", StringComparison.Ordinal)) return null;
+        string instance = state.StringId[..^4];
+        int c = h.C - 1;
+        var zone = new Meitou.Data.World.ZoneCoordinate(c % Meitou.Data.World.WorldLayout.ZoneCount, c / Meitou.Data.World.WorldLayout.ZoneCount);
+        foreach (var b in site.Buildings)
+            if (b.Zone == zone && b.InstanceId == instance) return b;
+        return null;
+    }
+
     /// <summary>What making a saved platoon needs from the records, read on any thread: each member to make with its parts (members gone or dead are left out).</summary>
     public static List<(SavedMember Member, SavedParts Parts)> Prepare(SavedPlatoon sp, PopulationData data, IAppearanceSource? appearances, SavedPopulation context)
     {
@@ -246,6 +263,7 @@ internal static class SavedCharacters
             Position = new Vector3(platoon.Position.X, walk.GroundHeight(platoon.Position.X, platoon.Position.Y), platoon.Position.Y),
             HomeCentre = homeCentre,
             HomeRadius = homeRadius,
+            HomeBuilding = sp.Pinned && platoon.Origin >= 0 ? SavedHome(world, sp, data.Sites[platoon.Origin]) : null,
         };
         var notes = new List<string>();
         var made = new List<(SavedMember Member, int Role)>();

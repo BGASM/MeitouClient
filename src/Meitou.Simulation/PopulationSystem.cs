@@ -20,10 +20,9 @@ namespace Meitou.Simulation;
 /// its characters are removed (the original turns the squads into abstract "unloaded" ones, which the AI stage will do). The
 /// characters are built on a background thread when <see cref="PopulationSettings.Background"/> is set and taken in at the first tick
 /// after they are ready.
-/// <para>Resident lists (6.4, Observed): the town's own <c>residents</c>, plus the faction's unless the town has <c>residents override</c>
-/// with a list of its own; an entry makes v0 squads (v0 = 0 is dropped). Squads are placed at random spots within
-/// <see cref="PopulationSettings.PlacementRadiusShare"/> of the town radius round its placed position, on dry ground: how resident
-/// squads pick a home building is Unknown, so this is an engine choice. Bar squads, the roaming squads (<c>PopulationRoaming.cs</c>) and the wild, homeless squads and nests (<c>PopulationWild.cs</c>), are made here too; default residents come later.</para>
+/// <para>Residents (docs/game/factions-squads-towns.md "Town residents"): the resident table (<see cref="ResidentEntries"/>) is housed in the town's buildings
+/// and each squad made at a node of its home (<c>PopulationHomes.cs</c>); a town without building data puts each entry's v0 squads at random spots within
+/// <see cref="PopulationSettings.PlacementRadiusShare"/> of the town radius round its placed position, on dry ground (engine choice). Bar squads, the roaming squads (<c>PopulationRoaming.cs</c>) and the wild, homeless squads and nests (<c>PopulationWild.cs</c>), are made here too.</para>
 /// </summary>
 public sealed partial class PopulationSystem : ITickSystem, IDisposable
 {
@@ -218,16 +217,17 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
 
     /// <summary>
     /// The town's own squads a loaded save already holds (pinned saved platoons of the site, whether made now or not), by template: the town makes that many fewer of
-    /// each resident and bar squad entry (docs/simulation.md "Saves"). Null when there are none.
+    /// each resident and bar squad entry (docs/simulation.md "Saves"), and the buildings they live in are not given to fresh squads. Null when there are none.
     /// </summary>
-    static Dictionary<string, int>? SavedSquadsOf(World world, int site)
+    SavedHold? SavedSquadsOf(World world, int site)
     {
-        Dictionary<string, int>? have = null;
+        SavedHold? have = null;
         foreach (var p in world.Platoons.All)
             if (p.Pinned && p.Origin == site)
             {
-                have ??= new Dictionary<string, int>(StringComparer.Ordinal);
-                have[p.TemplateId] = have.GetValueOrDefault(p.TemplateId) + 1;
+                have ??= new SavedHold(new Dictionary<string, int>(StringComparer.Ordinal), new HashSet<TownBuilding>(ReferenceEqualityComparer.Instance));
+                have.Templates[p.TemplateId] = have.Templates.GetValueOrDefault(p.TemplateId) + 1;
+                if (p.Saved is { } sp && Saving.SavedCharacters.SavedHome(world, sp, data.Sites[site]) is { } home) have.Homes.Add(home);
             }
         return have;
     }
@@ -245,6 +245,20 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
             var squad = SpawnSquad(world, built, site, radius);
             state.Squads.Add(squad.Id);   // slave squads are planned (built.Plan.Slaves) but not spawned yet
         }
+        int housed = town.Squads.Count(s => s.Home is not null);
+        if (townLog.Count >= 256) townLog.RemoveAt(0);   // nobody reads it in a headless world
+        townLog.Add($"{site.Town.Name}: {town.Squads.Count} squad(s), {town.Squads.Sum(s => s.Members.Count)} characters; {housed} at home in " +
+            $"{town.Squads.Where(s => s.Home is not null).Select(s => s.Home).Distinct().Count()} of {site.Buildings.Count(b => b.CanHouse)} houses, {town.Squads.Count - housed} elsewhere" +
+            (housed < town.Squads.Count ? $" ({string.Join(", ", town.Squads.Where(s => s.Home is null).Select(s => s.Plan.Template.Name))})" : ""));
+    }
+
+    readonly List<string> townLog = [];
+    /// <summary>A line for each town whose squads were made since the last call (for the host's log; not part of the state).</summary>
+    public List<string> TakeTownLog()
+    {
+        var list = new List<string>(townLog);
+        townLog.Clear();
+        return list;
     }
 
     Squad SpawnSquad(World world, BuiltSquad built, TownSite? site, float radius, bool player = false, int platoonId = -1, bool idle = false, float yaw = 0)
@@ -259,9 +273,10 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
             Faction = built.Faction,
             Town = site?.Index ?? -1,
             PlatoonId = platoonId,
-            Position = new Vector3(built.Position.X, walk.GroundHeight(built.Position.X, built.Position.Y), built.Position.Y),
+            Position = new Vector3(built.Position.X, Ground(walk, built.Position.X, built.Position.Y, built.NearY), built.Position.Y),
             HomeCentre = site is null ? built.Position : new Vector2(site.Position.X, site.Position.Z),
             HomeRadius = Math.Max(radius * 0.8f, 40),
+            HomeBuilding = built.Home,
         };
         var leaderPlan = built.Members.FirstOrDefault(m => m.Plan.Role == SquadRole.Leader)?.Plan;
         bool hasLeader = leaderPlan is not null;
@@ -269,12 +284,12 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         {
             var plan = member.Plan;
             float x = built.Position.X + plan.Offset.X, z = built.Position.Y + plan.Offset.Y;
-            if (!walk.IsWalkable(x, z)) (x, z) = (built.Position.X, built.Position.Y);
+            if (!(built.NearY is { } nearY ? walk.IsWalkable(x, z, nearY) : walk.IsWalkable(x, z))) (x, z) = (built.Position.X, built.Position.Y);
             var race = assembly.RaceOf(plan.RecordId, member.Appearance);
             var record = data.Db.Find(plan.RecordId);
             var hot = new CharacterHot
             {
-                Position = new Vector3(x, walk.GroundHeight(x, z), z),
+                Position = new Vector3(x, Ground(walk, x, z, built.NearY), z),
                 Yaw = yaw,
                 Health = 100,
                 Task = (byte)(player || idle ? CharacterTask.Idle : plan.Role == SquadRole.Leader || !hasLeader ? CharacterTask.Wander : CharacterTask.Follow),
@@ -308,6 +323,9 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         return squad;
     }
 
+
+    /// <summary>The floor at X/Z: the one under <paramref name="nearY"/> inside a building, else the ground.</summary>
+    static float Ground(IWalkability walk, float x, float z, float? nearY) => nearY is { } y ? walk.GroundHeight(x, z, y) : walk.GroundHeight(x, z);
 
     bool disposed;
 

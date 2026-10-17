@@ -61,6 +61,14 @@ public sealed class BuildingLayouts
         return null;
     }
 
+    /// <summary>The names of the layouts <see cref="Find"/> can return for <paramref name="building"/> (its own and those of the buildings it shares interiors with).</summary>
+    public IEnumerable<string> Names(GameRecord building, bool exterior)
+    {
+        foreach (var id in building.GetReferences("shares interiors with").Select(r => r.TargetStringId).Prepend(building.StringId))
+            if (byBuilding.TryGetValue((exterior, id), out var list))
+                foreach (var r in list) yield return r.Name;
+    }
+
     /// <summary>The layout's objects whose target is a BUILDING of the game data, in instance id order.</summary>
     public IEnumerable<LayoutItem> Items(GameRecord layout)
     {

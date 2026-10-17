@@ -20,7 +20,11 @@ public enum HomeSpotKind : byte
 }
 
 /// <summary>A spot inside a building in world space; <paramref name="Yaw"/> as the simulation measures it (0 along +Z, turning towards +X).</summary>
-public readonly record struct HomeSpot(HomeSpotKind Kind, Vector3 Position, float Yaw);
+public readonly record struct HomeSpot(HomeSpotKind Kind, Vector3 Position, float Yaw)
+{
+    /// <summary>A node's BUILDING <c>node type</c> (NodeType: 0 NODE_SHOPKEEPER, 1 NODE_GENERAL, 2 NODE_GUARD_POST, 3 NODE_TURRET, 4 NODE_USE, 5 NODE_LIGHT); -1 for a bed.</summary>
+    public int NodeType { get; init; } = -1;
+}
 
 /// <summary>
 /// A placed building of a town that squads can live in, with the beds and nodes of its interior layout (docs/formats/zones.md "Building layouts") and the shop and
@@ -34,6 +38,24 @@ public sealed record TownBuilding(string InstanceId, string BuildingId, string N
     public string? OwnerFactionId { get; init; }
     /// <summary>The cages and lockable containers of its interior layout (docs/game/locks.md "Data"), in layout order.</summary>
     public IReadOnlyList<TownFixture> Fixtures { get; init; } = [];
+    /// <summary>The zone whose building list places it (instance ids repeat between zones).</summary>
+    public ZoneCoordinate Zone { get; init; }
+    /// <summary>
+    /// Whether residents can be housed in it (docs/game/factions-squads-towns.md "Town residents"): a BUILDING with <c>interior</c> parts that does not
+    /// <c>links together</c> (a wall), or an <c>is wall gate</c> gate.
+    /// </summary>
+    public bool CanHouse { get; init; }
+    /// <summary><c>is wall gate</c>: a town gate, housing only resident entries that name it in <c>building</c>.</summary>
+    public bool IsGate { get; init; }
+    /// <summary>The level data's <c>residents template</c> of its state (a SQUAD_TEMPLATE id; empty when none).</summary>
+    public string ResidentsTemplate { get; init; } = "";
+    /// <summary>The state's <c>interior layout name</c> (the one its <see cref="Spots"/> come from); empty when none.</summary>
+    public string InteriorLayout { get; init; } = "";
+    /// <summary>The names of the interior and exterior layouts its record can take (its own and those of <c>shares interiors with</c>), case ignored.</summary>
+    public IReadOnlySet<string> InteriorLayouts { get; init; } = EmptyNames;
+    public IReadOnlySet<string> ExteriorLayouts { get; init; } = EmptyNames;
+
+    static readonly IReadOnlySet<string> EmptyNames = new HashSet<string>();
 }
 
 /// <summary>
@@ -44,11 +66,11 @@ public sealed record TownFixture(string Id, string RecordId, bool IsCage, Vector
 
 /// <summary>
 /// The buildings of each placed town, for the AI's homes, beds and nodes (docs/simulation.md "AI", Homes). A placed building belongs to the town its state's
-/// <c>town</c> handle names, else the nearest one (<see cref="BuildingTowns"/>), and is kept when it stands within 1.5 x that town's radius (<b>engine choice</b>:
-/// the nearest-town fallback would otherwise hand every lone building in the world to some town). Destroyed buildings, node markers and resource buildings
+/// <c>town</c> handle names (at any distance: Squin's reach 4.5 x its radius), else the nearest one (<see cref="BuildingTowns"/>) when it stands within 1.5 x that
+/// town's radius (<b>engine choice</b>: the nearest-town fallback would otherwise hand every lone building in the world to some town). Buildings the level data marks destroyed are kept (the game rebuilds a non-player building on import: <c>FUN_140552b70</c> keeps <c>destroyed</c> only for the player's; the Hub's ruins house its squatters); node markers and resource buildings
 /// (<c>is foliage</c>) are left out. Beds are interior-layout objects with a BED or SKELETON_BED functionality (docs/game/buildings-production.md, BuildingFunction 6
-/// and 25, found by the type of the referenced records rather than a field name); nodes are its <c>is node</c> objects, their kind read from the record name
-/// (<b>engine reading</b>: the layouts name them like "Node Shopkeeper"; a node-type field is not known).
+/// and 25, found by the type of the referenced records rather than a field name); nodes are its <c>is node</c> objects, their <c>node type</c> kept and their kind read
+/// from it (0 shopkeeper, 2 guard post), else from the record name (<see cref="NodeKind(string)"/>).
 /// </summary>
 public static class TownBuildings
 {
@@ -66,16 +88,18 @@ public static class TownBuildings
                 radius[t.InstanceId] = MathF.Max(town.SizeRadius * town.TownRadiusMult, 1);
         var beds = new Dictionary<string, bool>(StringComparer.Ordinal);
         var functions = new Dictionary<string, GameRecord?>(StringComparer.Ordinal);
+        var names = new Dictionary<(string, bool), IReadOnlySet<string>>();
         List<TownFixture>? fixtures = null;
         var result = new Dictionary<string, List<TownBuilding>>(StringComparer.Ordinal);
         foreach (var b in levels.Buildings())
         {
-            if (BuildingPlacements.Resolve(b, db, levels, terrainHeight) is not { Destroyed: false } resolved) continue;
+            if (BuildingPlacements.Resolve(b, db, levels, terrainHeight) is not { } resolved) continue;
             var record = resolved.Record;
             if (record.GetBool("is node") || record.GetBool("is foliage")) continue;
             var state = b.StateId is not null && levels.Zones.TryGetValue(b.Zone, out var zoneDb) ? zoneDb.Find(b.StateId) : null;
-            if (towns.TownOf(state, resolved.Position) is not { } town || !radius.TryGetValue(town.InstanceId, out float r)) continue;
-            if (Vector2.Distance(new Vector2(town.Position.X, town.Position.Z), new Vector2(resolved.Position.X, resolved.Position.Z)) > r * 1.5f) continue;
+            var linked = towns.TownByHandle(state);
+            if ((linked ?? towns.NearestTown(resolved.Position)) is not { } town || !radius.TryGetValue(town.InstanceId, out float r)) continue;
+            if (linked is null && Vector2.Distance(new Vector2(town.Position.X, town.Position.Z), new Vector2(resolved.Position.X, resolved.Position.Z)) > r * 1.5f) continue;
             var spots = new List<HomeSpot>();
             bool shop = false, bar = false;
             if (layouts is not null && state is not null)
@@ -91,9 +115,9 @@ public static class TownBuildings
                     foreach (var item in layouts.Items(interior))
                     {
                         var (at, rotation) = BuildingLayouts.Place(resolved.Position, b.Rotation, item);
-                        HomeSpotKind? kind = item.Building.GetBool("is node") ? NodeKind(item.Building.Name)
-                            : IsBed(db, item.Building, beds) ? HomeSpotKind.Bed : null;
-                        if (kind is { } k) spots.Add(new HomeSpot(k, at, YawOf(rotation)));
+                        bool node = item.Building.GetBool("is node");
+                        HomeSpotKind? kind = node ? NodeKind(item.Building) : IsBed(db, item.Building, beds) ? HomeSpotKind.Bed : null;
+                        if (kind is { } k) spots.Add(new HomeSpot(k, at, YawOf(rotation)) { NodeType = node ? item.Building.GetInt("node type") : -1 });
                         else if (FunctionOf(db, item.Building, functions)?.GetInt("function") == CageFunction || item.Building.GetBool("has lock"))
                             (fixtures ??= []).Add(new TownFixture($"{b.InstanceId}/{index}", item.Building.StringId,
                                 FunctionOf(db, item.Building, functions)?.GetInt("function") == CageFunction, at, YawOf(rotation)));
@@ -105,11 +129,34 @@ public static class TownBuildings
             string? owner = state?.GetString("owner faction ID") is { Length: > 0 } o ? o : null;
             list.Add(new TownBuilding(b.InstanceId, record.StringId, record.Name, resolved.Position, YawOf(b.Rotation), shop, bar, spots)
             {
-                OwnerFactionId = owner, Fixtures = fixtures ?? [],
+                OwnerFactionId = owner, Fixtures = fixtures ?? [], Zone = b.Zone,
+                CanHouse = record.GetBool("is wall gate") || record.GetReferences("interior").Count > 0 && !record.GetBool("links together"),
+                IsGate = record.GetBool("is wall gate"),
+                ResidentsTemplate = state?.GetString("residents template") ?? "",
+                InteriorLayout = state?.GetString("interior layout name") ?? "",
+                InteriorLayouts = LayoutNames(layouts, record, exterior: false, names),
+                ExteriorLayouts = LayoutNames(layouts, record, exterior: true, names),
             });
             fixtures = null;
         }
         return result;
+    }
+
+    /// <summary>The kind of a node: by its <c>node type</c> (0 shopkeeper, 2 guard post), else by its record's name.</summary>
+    public static HomeSpotKind NodeKind(GameRecord node) => node.GetInt("node type") switch
+    {
+        0 => HomeSpotKind.Shopkeeper,
+        2 => HomeSpotKind.Guard,
+        _ => NodeKind(node.Name),
+    };
+
+    /// <summary>The layout names a building record can take (case ignored), cached by record and side; empty without layouts.</summary>
+    static IReadOnlySet<string> LayoutNames(BuildingLayouts? layouts, GameRecord record, bool exterior, Dictionary<(string, bool), IReadOnlySet<string>> cache)
+    {
+        if (layouts is null) return new HashSet<string>();
+        if (!cache.TryGetValue((record.StringId, exterior), out var set))
+            cache[(record.StringId, exterior)] = set = new HashSet<string>(layouts.Names(record, exterior), StringComparer.OrdinalIgnoreCase);
+        return set;
     }
 
     /// <summary>The kind of a node from its record's name (case ignored).</summary>

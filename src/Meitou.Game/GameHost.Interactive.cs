@@ -582,6 +582,8 @@ sealed partial class GameHost
                 if (world.Characters.IsAlive(k.Attacker) && world.Characters.Cold(k.Attacker.Slot) is { IsPlayer: true } attacker)
                     player.Notice($"{attacker.Name}: {(k.Success ? "*Thunk*" : "Failed!")} ({Math.Clamp(k.Chance, 0, 100):0}%)", !k.Success);
         if (population is not null)
+            foreach (var line in population.TakeTownLog()) Console.WriteLine($"town      {line}");
+        if (population is not null)
             foreach (var w in population.TakeWildLog())
                 Console.WriteLine($"wild      tick {w.Tick}: {w.Squad} ({w.Members}) from the {(w.Kind == Meitou.Simulation.WildKind.Nest ? "nest" : "sector of")} {w.Place}");
         if (aggro is null || aggro.Log.Count == 0) return;

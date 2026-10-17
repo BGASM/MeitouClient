@@ -115,6 +115,38 @@ not decoded behaviour. Off-screen town lifecycle and full campaigns remain incom
 | `building`, `building dislike`, `building designation`, `layout interior/exterior`, `public day/night`, `public beds`, `bed usage cost`, `sell home`, `building ruined`, `initial door state` | how the squad's home building is chosen and set up (resident squads) |
 | `vendors`, `is trader`, `vendor money`, `vendors fill total amount`, `vendors refresh time`, `buy mult`, `buys stolen`, `buys illegal`, `special items`, `special map items`, `*artifacts base value`, `regenerates` | shop and contents (section 8 for loot; the trading economy is in [economy.md](economy.md#shops-and-transactions)) |
 
+### Town residents
+
+**Observed** (kenshi-named dump) unless marked; Meitou: `PopulationHomes.cs`.
+
+- **Table** (`FUN_140935d10`, `FUN_140936e60`): the faction's `residents` then the town's; with `residents override` the
+  town's only. A template already listed is skipped (first wins). Per entry: v0 = count, v1 = priority (100 counts as 0,
+  outside 0..5 an error box). `default resident`: the town's, else (no override) the faction's. `bar squads`: the
+  faction's (TownType 2 only, no override) then the town's; with override the town's only.
+- **When**: at zone populate (`FUN_140a0e760`) per non-player town, the zone's buildings sorted by handle serial (random-looking).
+- **Candidates**: buildings of the town with an `interior` reference, not player-owned, holding no residents template
+  or the default one; walls (`links together`, a vfunc override) never, gates (`is wall gate`) only for entries naming
+  `building`s. Level data agrees: 1946 walls, none with a resident.
+- **Driver** (`FUN_1409370d0`): re-owns the buildings to the town's faction; priority 5 down to 0, each entry with count
+  left gets one building per pass, passes repeat while one placed and has more. An entry with no building left makes
+  no more squads (Stack: civilians v0 9, 2 made). Then every free building whose interiors take the default resident's
+  `layout interior` gets it (`FUN_14092e4b0`).
+- **Chooser** (`FUN_14092e870`): a template with `layout interior` needs a building offering it (own layouts or
+  `shares interiors with`; gates exempt); without one, an entry naming buildings takes only those. Weight 1, x 0.4 when
+  `layout exterior` is not offered, x 10 named in `building`, x 0.05 in `building dislike`; highest wins, first on a tie.
+- **Squads** (`FUN_14057f820`): `housemates` (v0, or Rand(v0, v1) when v1 > 0) first, then the squad. Platoon point: a
+  random free node of NodeType 0 (SHOPKEEPER), else 2 (GUARD_POST), else 1 (GENERAL), else the building. Characters
+  (`FUN_140583a10`): a GENERAL node, else SHOPKEEPER, at node + (0, 10, 0), else the platoon point. The squad's home is the building.
+- **Bar squads** (`FUN_1409fcd20`): n = v0 > 2 ? (int)(v1 x 0.005 x v0) : 0, then +1 per Rand(0, 100) <= v1, stopping
+  at the first failure, at most v0. Each at a random node of the town's node map (`FUN_14038b000`), else the town
+  position; no home. Which nodes that map holds is **Unknown** (Meitou: GENERAL nodes of its bars).
+- **New game vs level data**: level-data building states carry `residents template` / `squad template`; save 2 against
+  them has the same multiset per town but shuffled across buildings (223 same, 125 moved), so a new game rerolls homes
+  (**Observed**). Destroyed buildings stay candidates (the Hub's ruins house squatters).
+- **Meitou engine choices**: the level data's assignment is kept where it fits the rules (interiors are drawn from it,
+  not relaid to the template's layout); on a tie a building already laid out as the template wants wins; bar squads
+  stand in the town's bars; a loaded town keeps its saved squads, homes and bar squads and rolls no new bar squads.
+
 ### 9. Settings and constants that matter
 
 | Name | Value | Effect |
@@ -130,8 +162,7 @@ not decoded behaviour. Off-screen town lifecycle and full campaigns remain incom
 
 - What sets relation event kinds 1..12 (call sites of `FactionRelations::vfunc_5`), and what the allied byte (+0) and the
   `trust` floats feed (dialogue conditions, "trustworthy" behaviour).
-- When and where a town's initial resident squads are created (zone activation), how resident squads choose a home
-  building (`building`, `building dislike`, `building designation`), housemates timing, and `bar squads` spawn.
+- What `building designation` changes beyond the bar (it does not enter the chooser); the town node map bar squads use.
 - Nest respawn delay after "wiped out", the default of `DAT_142133588` (the Number of nests multiplier option; **Unknown**, the exe image holds zeros there), the rule that makes `TownPopulationManager::vfunc_4`
   declare a town wiped out (**Observed** gates: roaming pool cap <= 3 and <= 25 roaming members).
 - Faction campaigns (FACTION_CAMPAIGN), raids and assaults (`raidSizeMult`, `raidFrequencyMult`), the unique squad
