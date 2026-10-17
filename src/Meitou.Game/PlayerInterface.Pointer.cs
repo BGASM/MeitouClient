@@ -25,12 +25,21 @@ sealed partial class PlayerInterface
     /// </summary>
     public (CharacterId Id, Vector4 Colour)? HoverTarget => Point() is { Target: { } id } p ? (id, p.Name switch
     {
+        "attk" when !Hostile(id) => WhiteOutline,
         "attk" => new Vector4(1f, 0.3f, 0.22f, 1),
         "med" => new Vector4(0.4f, 1f, 0.5f, 1),
         "talk" => new Vector4(1f, 0.82f, 0.4f, 1),
         "lift" or "search" => new Vector4(0.45f, 0.75f, 1f, 1),
-        _ => new Vector4(0.95f, 0.93f, 0.85f, 0.85f),
+        _ => WhiteOutline,
     }) : null;
+
+    static readonly Vector4 WhiteOutline = new(0.95f, 0.93f, 0.85f, 0.85f);
+
+    /// <summary>Whether a faction is hostile to the player's (the world's relations); set by the host. Without it every other faction counts as hostile.</summary>
+    public Func<int, bool>? HostileFaction { get; set; }
+
+    /// <summary>Whether the character's faction is hostile to the player's: only that one is outlined red, the quick right click is an attack on a neutral too.</summary>
+    bool Hostile(CharacterId id) => session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is not { } c || HostileFaction?.Invoke(c.Faction) != false;
 
     (long Tick, Vector2 Mouse, bool Ctrl, bool Alt, string Name, CharacterId? Target) Point()
     {
