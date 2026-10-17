@@ -134,7 +134,8 @@ public sealed partial class DialogueSystem
         if (node.IsCharacter.Count > 0 && !node.IsCharacter.Contains(mc.RecordId)) return false;
         if (node.TargetCarryingCharacter.Count > 0 && !SquadOf(world, other).Any(m => Cold(world, m) is { Carrying.IsNone: false } carrier
             && Cold(world, carrier.Carrying) is { } body && node.TargetCarryingCharacter.Contains(body.RecordId))) return false;
-        foreach (var (state, value) in node.WorldStates) if (data.States.IsTrue(state) != value) return false;
+        var states = population?.States ?? data.States;
+        foreach (var (state, value) in node.WorldStates) if (!IWorldStates.Passes(states, data.Db, state, value ? 1 : 0)) return false;
         if (node.TargetHasItemFunction.Count > 0 && !SquadOf(world, other).Any(m => Cold(world, m)?.Inventory?.All()
             .Any(i => node.TargetHasItemFunction.Contains(data.Db.Find(i.Record)?.GetInt("item function") ?? -1)) == true)) return false;
         if (node.TargetHasItem.Count > 0 && !SquadOf(world, other).Any(m => Cold(world, m)?.Inventory?.All().Any(i => node.TargetHasItem.Contains(i.Record)) == true)) return false;

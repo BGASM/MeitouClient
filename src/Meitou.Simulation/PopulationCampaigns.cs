@@ -554,14 +554,45 @@ public sealed partial class PopulationSystem : IStateHashed
     }
 
     /// <summary>
-    /// The entry point of a DIALOGUE_LINE <c>trigger campaign</c> (the dialogue system is not built yet): queues <paramref name="campaignId"/> with <paramref name="faction"/> against
-    /// <paramref name="target"/>, due after uniform[min, max) hours. Returns whether it was queued (the original queues nothing when the player owns no town to aim at).
+    /// A DIALOGUE_LINE's <c>trigger campaign</c> list (<c>FUN_140680560</c>, docs/game/dialogue.md "Effects"), said by <paramref name="speaker"/> to <paramref name="target"/>: nothing
+    /// when the speaker's squad is in a campaign; the target town is the player-faction town nearest the speaker when the target is of the player's faction (none: nothing, so a
+    /// homeless player gets no dialogue campaign), else the town of the target's platoon. One weighted draw queues an entry for the speaker's faction, due after uniform[V0, V1) hours.
+    /// Returns whether one was queued.
     /// </summary>
-    public bool RequestCampaign(World world, int faction, string campaignId, CampaignTown target, CampaignTown home, float minHours, float maxHours)
+    public bool TriggerFromDialogue(World world, CharacterId speaker, CharacterId target, IReadOnlyList<CampaignLink> list)
     {
+        var table = world.Characters;
+        if (list.Count == 0 || !table.TryResolveNext(speaker, out int s) || table.Cold(s) is not { } sc) return false;
+        if (sc.SquadId >= 0 && world.Platoons.All.Any(p => p.SquadId == sc.SquadId && p.State == PlatoonState.Loaded && p.Campaign is not null)) return false;
         EnsureWars(world);
-        if (target.IsNone || !Exists(world, target) || WarOf(faction) is not { } m || CampaignOf(campaignId) is not { } c) return false;
-        return Queue(world, m, c, target, home, FactionOfTown(world, target), minHours, maxHours, world.GameHours, callerFlag: true);
+        if (WarOf(sc.Faction) is not { } m) return false;
+        var at = new Vector2(table.Next[s].Position.X, table.Next[s].Position.Z);
+        var town = CampaignTown.None;
+        var tc = table.TryResolveNext(target, out int t) ? table.Cold(t) : null;
+        if (tc is not null && (tc.IsPlayer || tc.Faction == world.Player.Faction))
+        {
+            float best = float.MaxValue;
+            foreach (var pt in world.Buildings.Towns)
+            {
+                if (pt.Owner != world.Player.Faction) continue;
+                float d = Vector2.DistanceSquared(at, new Vector2(pt.Position.X, pt.Position.Z));
+                if (d < best) (best, town) = (d, CampaignTown.OfPlayer(pt.Number));
+            }
+        }
+        else if (tc is { SquadId: >= 0 } && world.Platoons.All.FirstOrDefault(p => p.SquadId == tc.SquadId && p.State == PlatoonState.Loaded) is { Origin: >= 0 } tp)
+            town = CampaignTown.OfSite(tp.Origin);
+        if (town.IsNone || !Exists(world, town)) return false;
+
+        ulong key = (ulong)speaker.Slot << 32 | (uint)world.Tick;
+        float r = Rng.Float(Rng.Hash(world.Seed, key, RngPurpose.Campaign, SeedSalts.CampaignDialogue)) * 100;
+        foreach (var e in list)
+        {
+            if ((r -= e.V2) >= 0) continue;
+            if (CampaignOf(e.Id) is not { } c) return false;
+            float delay = e.V0 + Rng.Float(Rng.Hash(world.Seed, key, RngPurpose.Campaign, SeedSalts.CampaignDialogue + 1)) * Math.Max(0, e.V1 - e.V0);
+            return Queue(world, m, c, town, CampaignTown.None, FactionOfTown(world, town), delay, delay, world.GameHours, callerFlag: true);
+        }
+        return false;
     }
 
     /// <summary>

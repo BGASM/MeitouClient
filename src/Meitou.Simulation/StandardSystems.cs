@@ -197,7 +197,7 @@ public static class StandardSystems
             trade.Crimes = crime;
         }
         Meitou.Simulation.Dialogue.DialogueSystem? talk = null;
-        if (Has(StandardParts.Dialogue)) systems.Add(talk = new Meitou.Simulation.Dialogue.DialogueSystem(data, o.Dialogue));
+        if (Has(StandardParts.Dialogue)) systems.Add(talk = new Meitou.Simulation.Dialogue.DialogueSystem(data, o.Dialogue, population));
         return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime, Arrest = arrest, Locks = locks, Trade = trade, Ai = ai, Construction = construction, Ragdolls = ragdolls, Dialogue = talk };
     }
 }

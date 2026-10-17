@@ -69,9 +69,12 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
     ConversationView? view;
     DialogueRequest? request;
 
-    public DialogueSystem(PopulationData data, DialogueSettings? settings = null)
+    readonly PopulationSystem? population;
+
+    public DialogueSystem(PopulationData data, DialogueSettings? settings = null, PopulationSystem? population = null)
     {
         this.data = data;
+        this.population = population;
         dialogue = data.Dialogue;
         Settings = settings ?? new DialogueSettings();
     }

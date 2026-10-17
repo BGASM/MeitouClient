@@ -176,7 +176,7 @@ the player has one; requests (victory/loss chains, ally help) can follow.
 - **War manager** (serial, in faction order at the population look; every rule reads the game clock, so the cadence does not matter): the
   6 h roll, the chance with the linear falloff and `raidFrequencyMult`, targets among `World.Buildings.Towns` (biome groups, no-go zones;
   slot 70 and Town +0x128 taken as passing, tech level as 0: engine choices), requests with due times, redirects and retries, the
-  `trigger player ally` help. `RequestCampaign` is the DIALOGUE_LINE `trigger campaign` entry point, waiting for the dialogue system. Rolls
+  `trigger player ally` help, and DIALOGUE_LINE `trigger campaign` (`TriggerFromDialogue`, keyed off the speaker and tick). Rolls
   are keyed off the world seed, faction and roll hour, so a run repeats. The state hash includes the managers only once one has started or
   queued something, so worlds without a campaign hash as before.
 - **Squads**: required men = int(`num forces` × `raidSizeMult`); the `special leader`'s platoon (or the template it leads, made near the
@@ -621,7 +621,8 @@ modal, which pauses the game; `DialogueChoice` and `EndConversation` apply betwe
 to the next tick. A hostile target is attacked instead.
 
 - **Effects built**: locks, interrupts, `change relations`, trade, relations, the three attacks, take and give money, the surgeon's editor
-  (paid by the line, `EditCharacter.Paid`), assign and clear bounty, lock this dialogue. Recruiting posts that it is not built; the rest is
+  (paid by the line, `EditCharacter.Paid`), assign and clear bounty, lock this dialogue, `trigger campaign` (`PopulationSystem.TriggerFromDialogue`: the rules in
+  [campaigns](game/factions-squads-towns.md#campaigns); `world state` conditions read the live states). Recruiting posts that it is not built; the rest is
   listed in [dialogue](game/dialogue.md#meitou-design).
 - **Conditions**: most DCs are computed; those needing state Meitou lacks (squad memory flags beyond "met", building locks, slavery, walls,
   missions, the personality functions, tech level, ranks) compute "no". `met` and "last seen" come from finished conversations (per squad). IN_MY_BUILDING uses the squad's home building and the lock rounds' extent.

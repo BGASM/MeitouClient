@@ -9,7 +9,7 @@ public sealed partial class DialogueSystem
 {
     /// <summary>
     /// A line's effects (<c>FUN_140680560</c>, docs/game/dialogue.md "Effects"), run as it is said or clicked, with <paramref name="me"/> the NPC-side speaker and the player character the
-    /// target, in the original's order: locks, interrupt, relation changes, then the DA effects in data order. Not built yet: crowd triggers, items given, campaigns, AI changes and
+    /// target, in the original's order: locks, interrupt, relation changes, then the DA effects in data order. Not built yet: crowd triggers, items given, AI changes and
     /// contracts, recruiting, arrests and the slavery effects.
     /// </summary>
     void RunEffects(World world, Conversation c, DialogueNode line, CharacterId me)
@@ -30,6 +30,8 @@ public sealed partial class DialogueSystem
             ChangeRelation(world, f, world.Player.Faction, amount);
             world.Post(amount > 0 ? $"Relations with {data.Factions[f].Name} improved by {amount}" : $"Relations with {data.Factions[f].Name} decreased by {-amount}");
         }
+        // Crowd triggers and items given are not built yet; then the campaign trigger.
+        if (line.TriggerCampaigns.Count > 0) population?.TriggerFromDialogue(world, me, c.Player, line.TriggerCampaigns);
         var target = c.Player;
         var tc = Cold(world, target);
         foreach (var effect in line.Effects)

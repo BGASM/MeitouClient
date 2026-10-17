@@ -80,6 +80,8 @@ public sealed class DialogueNode
     public IReadOnlyList<string> Locks { get; internal set; } = [];
     public string? Interrupt { get; internal set; }
     public string? CrowdTrigger { get; internal set; }
+    /// <summary><c>trigger campaign</c>: FACTION_CAMPAIGNs, V0..V1 hours of delay and V2 percent (one weighted draw).</summary>
+    public IReadOnlyList<CampaignLink> TriggerCampaigns { get; internal set; } = [];
     public IReadOnlyList<DialogueNode> Children { get; internal set; } = [];
 
     /// <summary>The val0 of the line's first DA_TAKE_MONEY or DA_GIVE_MONEY effect, else of its first DC_PLAYERMONEY condition (the <c>/COST/</c> token); null: none.</summary>
@@ -278,6 +280,7 @@ public sealed class DialogueDatabase(GameDatabase db)
         node.Locks = [.. record.GetReferences("locks").Select(r => r.TargetStringId)];
         node.Interrupt = record.GetReferences("interrupt").FirstOrDefault().TargetStringId;
         node.CrowdTrigger = record.GetReferences("crowd trigger").FirstOrDefault().TargetStringId;
+        node.TriggerCampaigns = [.. record.GetReferences("trigger campaign").Select(r => new CampaignLink(r.TargetStringId, r.Values.Value0, r.Values.Value1, r.Values.Value2))];
 
         // The specificity score (FUN_14067b070, docs/game/dialogue.md "Score").
         int score = record.GetInt("score bonus");
