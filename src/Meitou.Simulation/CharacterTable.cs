@@ -103,6 +103,8 @@ public sealed class CharacterCold
     public long DiedTick { get; set; } = -1;
     /// <summary>Where the character came from in a loaded save, with the saved stats and medical state (null for a character the game made itself); see <c>Meitou.Simulation.Saving</c>.</summary>
     public Saving.SavedCharacterLink? Save { get; set; }
+    /// <summary>The look was changed in the character editor (<see cref="Editing.EditCharacter"/>): a save writes its CHARACTER_APPEARANCE back.</summary>
+    public bool LookEdited { get; set; }
     /// <summary>RACE <c>pathfind footprint radius</c> (0: not known, paths use the default human); what the navmesh keeps clear.</summary>
     public float FootprintRadius { get; set; }
     /// <summary>The character is in a fight (set by the combat system): the animation stance takes the combat clips.</summary>

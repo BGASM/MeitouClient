@@ -179,6 +179,17 @@ The CAMERA's sky transition is written as finished (`sky updating` false, both t
 | Zones never loaded | nothing | **Observed**: absent from the `zones` list; the game loads them from the data files and generates their interiors and populations when first visited (`FUN_1409ffad0`) |
 | Population of unvisited areas | nothing | **Observed**: 56 platoons for the start area only |
 
+### Character appearance (CHARACTER_APPEARANCE in `.platoon`)
+
+**Verified** (dump of save 2's `Nameless_0.platoon`): the same key set as a `.bod2` body file ([characters](../characters.md#body-files-bod2)):
+bools `sex female`, `in editor`; ints `Age`, `body version` (2); floats: every body/face slider of the race's editor limits (`Height`, `Waist`...), the template's
+other sliders at 100 (`Brow height`, `Cheekbone`... not in the human XML), face pose weights by pose name (`wide_nose` 0.02, `close_eyes` -0.64...), `Hair Colour`,
+`Hair Saturation`, `Hair Brightness` (HSB x 100), `Posture`, a float `Age` besides the int; vec3 `Skin Tone`; strings `head` (HEAD), `hair style`, `beard`
+(ATTACHMENTs, mod records allowed), `idle stance`; reference `race`. Meitou (`Saving/SavedKit`) draws every loaded character (player and NPC) from it: the record
+is the look's appearance, worn items its clothes; a character with no saved items keeps clothes rolled from its serial but the saved body and face. A record
+with only race and flags (no head, no floats) is not a look and the look is rolled. The record is written back only for a new character (the generated look) or
+one changed in the character editor (its keys replaced by the edited copy's, so the key set and order stay the original's).
+
 ### NPC platoons (Meitou mapping)
 
 Every saved NPC platoon with a `basetown` naming a placed town is restored (a characterless town-bound one is skipped); town-bound ones (template does not travel) are pinned to their town and replace

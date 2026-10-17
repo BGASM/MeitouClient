@@ -295,7 +295,7 @@ public static class SaveCapture
         stats ??= cold.Stats ?? link?.Stats;
         medical ??= cold.Medical ?? link?.Medical;
         WriteBody(sc, cold.RecordId, stats, medical, isNew, data, races);
-        if (isNew) WriteAppearance(sc, cold, data.Db, races);
+        if (isNew || cold.LookEdited) WriteAppearance(sc, cold, data.Db, races, replace: !isNew);
         // What it carries and wears, as it is now; items read from a save keep their records' other keys.
         if (cold.Inventory is { } inventory) builder.SetInventory(platoon, sc, SavedKit.FromInventory(inventory));
         return sc;
@@ -429,14 +429,20 @@ public static class SaveCapture
 
     /// <summary>
     /// The CHARACTER_APPEARANCE of a new character: the generated one when the character has a look (its sliders, head, hair, skin tone), else only the race and the
-    /// editor flags. (Reading the saved look back into a drawable one is not done yet.)
+    /// editor flags. With <paramref name="replace"/> (a loaded character edited in the character editor) the record's keys become the look's exactly: the editor starts
+    /// from a copy of the saved record, so the original's key set and order are kept. The loader reads the record back into the look (<see cref="SavedKit"/>).
     /// </summary>
-    static void WriteAppearance(SaveCharacter sc, CharacterCold cold, GameDatabase db, Dictionary<string, RaceData?> races)
+    static void WriteAppearance(SaveCharacter sc, CharacterCold cold, GameDatabase db, Dictionary<string, RaceData?> races, bool replace = false)
     {
         var target = sc.Appearance;
         if (target is null) return;
         if (cold.Appearance?.Loadout?.Appearance.Record is { } source)
         {
+            if (ReferenceEquals(source, target)) return;
+            if (replace)
+            {
+                target.Bools.Clear(); target.Floats.Clear(); target.Ints.Clear(); target.Vector3s.Clear(); target.Strings.Clear(); target.References.Clear();
+            }
             foreach (var (k, v) in source.Bools) target.Bools[k] = v;
             foreach (var (k, v) in source.Floats) target.Floats[k] = v;
             foreach (var (k, v) in source.Ints) target.Ints[k] = v;

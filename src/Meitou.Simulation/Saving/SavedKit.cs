@@ -62,6 +62,31 @@ public static class SavedKit
     };
 
     /// <summary>
+    /// Whether a CHARACTER_APPEARANCE holds a look (a head or any slider), not just the race and flags that a character without a rolled look is saved with.
+    /// </summary>
+    public static bool HasLook(FcsRecord? appearance) =>
+        appearance is not null && (appearance.Floats.Count > 0 || appearance.Strings.TryGetValue("head", out var head) && head.Length > 0);
+
+    /// <summary>
+    /// <paramref name="rolled"/>'s clothes and weapons on the body of <paramref name="appearance"/> (its race, sex, head, hair, colours, sliders). Null when the record holds no
+    /// look (<see cref="HasLook"/>) or its race is not in the data.
+    /// </summary>
+    public static Loadout? Wear(Loadout rolled, FcsRecord? appearance, GameDatabase db)
+    {
+        if (!HasLook(appearance)) return null;
+        var file = new AppearanceFile { Record = appearance! };
+        if (file.RaceId is not { } raceId || db.Find(raceId) is not { } race) return null;
+        var loadout = new Loadout
+        {
+            Seed = rolled.Seed, Character = rolled.Character, Race = race, Female = file.Female, Appearance = file, Generated = true,
+            MorphIndex = appearance!.Ints.GetValueOrDefault("morph index", -1), Backpack = rolled.Backpack, Crossbow = rolled.Crossbow,
+        };
+        loadout.Clothing.AddRange(rolled.Clothing);
+        loadout.Weapons.AddRange(rolled.Weapons);
+        return loadout;
+    }
+
+    /// <summary>
     /// The loadout a saved character is drawn from: its CHARACTER_APPEARANCE (race, sex, head, hair, beard, skin, sliders: the body-file keys) and what it wears: ARMOUR in the
     /// clothing sections, the backpack, the weapons and crossbow at <c>hip</c> and <c>back</c> (company = manufacturer, material = model). Null without an appearance record
     /// or a race. <paramref name="seed"/> only names it (nothing is rolled).
