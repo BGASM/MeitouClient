@@ -150,9 +150,36 @@ Proposed (awaiting review):
 
 - **Who**: campaign squads join the town and roaming squads. Wild and nest squads are dropped, as in the original.
 - **Jobs**: the original's destinations (the blackboard's target, GOHOME's home within 2000) and roads.
-- **Campaigns** (raids, wars): the war manager on its 6-hour roll, squads made at the source town, the phases and outcomes, WAR_SAVESTATE read
-  and written exactly. Designed in detail after a survey of FACTION_CAMPAIGN data and the victory/defeat effects.
-- **Waves**: (3) campaigns. Tests to propose: the growth formula pin; a regeneration and a nest wipe-out case.
+- **Campaigns** ([original rules](game/factions-squads-towns.md#campaigns), [save](formats/save.md#war_savestate-type-9-faction-campaigns)).
+  Almost all are aimed at player towns (outposts), so nothing rolls until the player has one; requests (victory/loss chains, ally help)
+  can follow.
+  - **Data** (`Meitou.Data`, `CampaignData` from FACTION_CAMPAIGN): ranges × 10, `repeat limit` × 24, weighted trigger lists, phase
+    packages; inheritance applied twice as the original (doubled weights and chances). Decision for the owner: keep that or apply once.
+  - **War manager** (`PopulationCampaigns.cs`, serial, in faction order at the population look; every rule reads the game clock, so the
+    cadence does not matter): `updatetime` roll, chance with the linear falloff and `raidFrequencyMult`, target among `World.Buildings.Towns`
+    (biome groups, no-go zones; slot 70 and Town +0x128 taken as passing, engine choice), requests with due times and retries. Rolls keyed
+    off the world seed, faction and roll time, so a run repeats.
+  - **Squads**: required men = int(`num forces` × `raidSizeMult`); draft the faction's idle homeless and town platoons (Meitou keeps them
+    as `StoredSquad`s), then make squads from `squads to use` within 700 of the up-to-4 nearest own towns as unloaded stand-ins. A
+    campaign platoon is pinned until the campaign ends (both modes, as the original). Afterwards Faithful: the normal despawn; Meitou
+    (`KeepRoamers`): the squad keeps its people, goes home and stays a roaming squad.
+  - **Phases** off screen exactly as the original (arrival radii, 4 / 12 / 1 h, the 20 % rule, 3 h removal, redirect); the leader travels
+    to the target and the others to the leader at the MoveSpeed speeds. With `OffscreenFights` (Meitou) campaign stand-ins fight like other
+    travellers, and their losses feed the 20 % rule (the original only updates it while loaded); Faithful: no fights, an unloaded assault
+    wins at 4 h. End effects: the messages (message log, as the nest wipe-out) and the trigger roll or 40-96 h retry; nothing else changes.
+  - **Loaded**: the pt1 / pt2 / retreat packages (`Package_WarBase`, `Package_WarAssault`, signals 19, 20, 32) are not built
+    (`PackageClass.Unbuilt`). Until they are, a loaded campaign squad runs the engine's travel stand-in towards its target and fights through
+    the normal aggro; arrival, timers and the 20 % rule still run. The packages and the army column are wave 4.
+  - **Dependencies**: `world state` queries (120 of 179 campaigns; Meitou has `IWorldStates`, saves write an empty world state), so until
+    world states are tracked a campaign with queries uses their initial values; unique-NPC state for `special leader` (37: a leader not in
+    the world counts as alive, the original's default); DIALOGUE_LINE `trigger campaign` (86) waits for the dialogue system, the request
+    entry point is ready for it; the ally test uses the relation table.
+  - **Save**: WAR_SAVESTATE read and written with the original's keys (unknown keys kept), `p<i>`/`forces<i>` naming the campaign
+    platoons; phase timers restart at load as the original. A `SaveBuilder` world keeps `updatetime` 40 and zero counts.
+  - **Cost**: 103 managers, a roll every 6 game hours and a handful of instances: negligible next to the stand-in step.
+- **Waves**: (3) campaign data, war manager, off-screen phases, saves, messages; (4) the loaded war packages and army formation. Tests to
+  propose: the chance and falloff pin, a WAR_SAVESTATE round-trip of the owner's saves (keys and values unchanged), a headless raid on a
+  sandbox outpost (roll, travel, 4 h victory, removal, a save and load in phase 1).
 
 ## Player
 

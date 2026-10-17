@@ -176,7 +176,7 @@ The CAMERA's sky transition is written as finished (`sky updating` false, both t
 | Content | Where | Status |
 | --- | --- | --- |
 | Game time, clock, sky transition, weather and season per region | `quick.save` CAMERA, BIOMES | **Verified** present |
-| Factions: relations, trust, prosperity, war campaigns | `quick.save` | **Verified** (present in the sample) |
+| Factions: relations, trust, prosperity, war campaigns | `quick.save` | **Verified** (present in the sample); campaigns: [WAR_SAVESTATE](#war_savestate-type-9-faction-campaigns) |
 | Town state (discovery, population, trade goods, artifacts, nests) | `quick.save` | **Verified** (present in the sample); town placements, names and shop lists come from `leveldata.level` |
 | Squads and all character state (stats, wounds, inventory, appearance, AI) | `.platoon` | **Verified** (present in the sample) |
 | Buildings' state, generated interiors, loose items, item placement groups | `.zone` | **Verified** for visited zones |
@@ -339,6 +339,34 @@ Buildings name it by their `town` handle. Whether the loader takes the name from
 Meitou writes the level towns' pool keys (`pop`, `popd`, `pop2`, `popd2`, `tod`, `started`, `ded`) for every town it made or loaded pools for, and
 reads them back ([off-screen tier](../simulation.md#off-screen-tier)). `tod` is Meitou's game hours since the world was started or loaded (a loaded save restarts at 0); the original's unit is
 **Unknown** (no sampled state has a nonzero `tod`).
+
+### WAR_SAVESTATE (type 9): faction campaigns
+
+One per faction in `quick.save` (103 of 103 in every owner save), name "0", tied to its faction only by the string `faction` (FACTION
+StringId). Writer `FUN_1409c6890`, reader `FUN_1409c9dc0`; meanings in [campaigns](../game/factions-squads-towns.md#campaigns).
+Numbered keys append the index with no separator (`req sid3`, `p2`); handles as in [object handles](#object-handles-and-slot-lists).
+**Verified** by code (both functions, same keys) and the saves' key sets.
+
+| Key | Kind | Meaning |
+| --- | --- | --- |
+| `faction` | string | FACTION StringId |
+| `fwc id` | int | next campaign id; on load raised to the largest `id c<i>` + 1 |
+| `updatetime` | float | next roll, absolute game hours (day × 24 + hour); read only when present |
+| `num actives`; `dat c<i>` string (FACTION_CAMPAIGN), `target c<i>` handle, `enemy c<i>` string (FACTION, may be ""), `leader c<i>` handle, `home c<i>` handle, `phase c<i>` int (0 travel, 1 at target, 2 ended), `id c<i>` int, `rd c<i>` bool (leader has been in the target town), `trig c<i>` bool (follow-up queued) | | running campaigns |
+| `num requests`; `req sid<i>` string, `req enemysid<i>` string (FACTION), `req time<i>` float (absolute due hour), `req targ<i>` handle, `req home<i>` handle | | queued campaigns |
+| `num poss`; `poss sid<i>` string, `poss time<i>` float | | every campaign the faction knows with its last start (the `repeat limit` clock) |
+| `num plats`; `p<i>` handle, `forces<i>` int | | campaign platoons; `forces` = the campaign's `id c` |
+
+Reader rules (**Verified** by code): a running campaign whose `dat c` does not resolve is skipped; an unknown campaign joins the faction's
+list; phase 1 becomes 2 when the campaign has no `pt2 AI leader`; **phase timers are not saved** (the phase starts again at load, so the
+4 / 12 / 1 / 3 h windows restart); men count, target position and speeds come from the data. A request whose `req sid` or `req enemysid`
+does not resolve is skipped. All `poss time` are zeroed, then set by `poss sid`. `p<i>` is taken only for TYPE 1 or 34 and when it
+resolves. Missing keys read as 0 / "" / false (**Observed**).
+
+**Observed** (owner saves 1, 2, 3, wade, quicksave, autosave0-2, new; up to day 8): no running campaign, request or platoon in any;
+every `fwc id` and all 77 `poss time` are 0 (no campaign ever started; no save has a player outpost, which rolls need). Each faction's
+`poss` list is its merged FACTION `campaigns` list in order (103 of 103). `updatetime` lies in (clock, clock + 6], spread over about
+0.6 h (all 40 in the two day-1 saves). Meitou's `SaveBuilder` writes `updatetime` 40 and zero counts, as a new game.
 
 ### Cross-checks against base data (the sample vs `GameDatabase` of the four base files)
 

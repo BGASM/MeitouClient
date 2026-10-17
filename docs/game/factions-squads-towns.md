@@ -41,8 +41,8 @@ of platoons whose `hometown` is it, by `sqt` (1 residents, 2 roaming), counted i
 
 Loot/building inventories, artifacts, shop stock, prisoners/slaves and placed debris derive
 from different reference lists. Preserve slot/count/quality/owner fields and forbidden-item
-rules rather than treating every list as uniform random loot. Unique/campaign survey is data,
-not decoded behaviour. Off-screen town lifecycle and full campaigns remain incomplete in Meitou.
+rules rather than treating every list as uniform random loot. The unique-squad survey is data,
+not decoded behaviour; campaigns: [campaigns](#campaigns).
 
 ### 1. Object model
 
@@ -56,7 +56,7 @@ not decoded behaviour. Off-screen town lifecycle and full campaigns remain incom
 | `SpawnInfoList` | the weighted list of squad templates a pool or biome group may spawn | section 6.1 |
 | `AreaSector`, `AreaBiomeGroup` | one cell of a 64 x 64 grid of 4608-unit cells, and the BIOME_GROUP data it belongs to | section 6.2 |
 | `BuildingItemGroup` | an ITEM_PLACEMENT_GROUP placed in a building: one item slot with a respawn timer | section 9 |
-| `FactionWarMgr`, `CampaignData`/`CampaignInstance` | faction campaigns (FACTION_CAMPAIGN, DIPLOMATIC_ASSAULTS) | out of scope; only listed |
+| `FactionWarMgr`, `CampaignData` (always `StartInvasionData`) / `CampaignInstance` (always `GatherAndMove`) | faction campaigns (FACTION_CAMPAIGN) | [campaigns](#campaigns); DIPLOMATIC_ASSAULTS not decoded |
 
 **Persistent platoons** (**Verified** by code): a zone's unload (`ZoneMapContent::deactivate`, `FUN_1409fe980`) touches no platoon; each platoon checks
 itself (`FUN_1404febd0`) and after 4 s outside every loaded zone (`FUN_1406bab60`, `FUN_1407ec570`) becomes an `UnloadedPlatoon` (`FUN_1407ef4b0`, its characters
@@ -175,8 +175,8 @@ no path re-running the initial resident placement was found (**Unknown** whether
   ([ai.md](ai.md)); job 0 becomes 2 for a non-persistent platoon and 4 (GOHOME) for a persistent one. No character data is read or changed:
   no healing, needs or fights (**Observed**).
   - GOHOME: to the home only once within 2000, else to the object of a platoon handle (+0xb8, meaning **Unknown**) at 55.
-  - TRAVEL_TARGET / _FAST: to the blackboard's mission target; speed by campaign class 0/1/2 = 25/55/90, else FAST 60 (90 beyond 25000),
-    TRAVEL_TARGET 25. The mover caps speed at 70 (**Observed**: no other writer of the cap).
+  - TRAVEL_TARGET / _FAST: to the blackboard's mission target; a campaign's `travel speed unloaded` WALK / JOG / RUN gives 25 / 55 / 90;
+    otherwise (GROUPED, NO_SPEED_CHANGE, no campaign) FAST 60 (90 beyond 25000), TRAVEL_TARGET 25. The mover caps speed at 70 (**Observed**: no other writer of the cap).
   - PATROL_SHORTRANGE: picks a point in a neighbouring 4608 sector of the same biome group (sometimes a town, `patrol approaches towns`)
     but sets no speed, so it does not move (**Observed**). PATROL_TOWN, PATROL_LONGRANGE: no branch, no movement.
   - Movement is a straight line; a destination over 10000 away takes the road network when the faction's `road preference` > 0 and the
@@ -201,13 +201,89 @@ no path re-running the initial resident placement was found (**Unknown** whether
 - **Traders**: restocked only while active, when the clock passes the platoon's `inventory refresh time`; an unloaded one catches up at
   its first active tick.
 - **Prisoners** (**Observed**): frozen with their platoon; sentences are absolute timestamps and release is a loaded AI task.
-- **Campaigns** (raids, wars; `FactionWarMgr`): every 6 game hours a faction with none running rolls each FACTION_CAMPAIGN with
-  `territorial triggers`: chance = `chance per day` × 0.25 × range falloff (shape **Unknown**; 0 beyond `range far` × 10) ×
-  `raidFrequencyMult`, gated by target population, tech level, `repeat limit` and world states; one is drawn by chance. Its squads are made
-  fresh (not persistent, kept while the campaign lives) within 700 of the source town and travel at `travel speed unloaded`. Phases: travel
-  (arrived within 0.8-0.9 town radius or 400), at target (victory 0.2 h after no player character is present in the first 4 h; defeat
-  when under 20 % of its platoons are intact), ended (removed 3 h later). It all runs with everything unloaded (**Observed**: an empty
-  outpost falls without a fight). Effects of victory/defeat and `raidSizeMult` are **Unknown**. Saved in WAR_SAVESTATE.
+- **Campaigns**: [below](#campaigns); they run whether loaded or not.
+
+### Campaigns
+
+Raids, assaults, tax/tribute and trader visits, ally reinforcements: one `FactionWarMgr` per faction (Faction +0x88), stepped in the round
+robin above. **Verified** by code (kenshi-named dump; disassembly where noted) unless marked. Save layout: [WAR_SAVESTATE](../formats/save.md#war_savestate-type-9-faction-campaigns).
+
+**Data** (**Verified**: merged base files, 179 FACTION_CAMPAIGN records). Content is aimed at the player: raids and assaults on player
+towns, hunts after story kills, visits, ally help; chains via victory/loss triggers. No NPC-town-against-NPC-town campaign exists.
+- Rolled ones: a FACTION's `campaigns` list (77 links, 24 factions; ref values ignored) with `territorial triggers` (60 of them).
+  `chance per day` 0.05-2 (mostly 0.1-0.5); `range near`/`range far` in tenths of a unit (e.g. 2500/9000; 50000/90000 = the whole map).
+- `key` = the editor's `WarCampaignEnum`: 0 ASSAULT_TOWN (159), 1 CONQUER_TOWN (none), 2 DEFEND_TOWN (13: "Ally ... (trigger)"),
+  3 TRADER_VISIT (7: merchant visits, crab champion).
+- `travel speed loaded/unloaded` = `MoveSpeed`: WALK 0, JOG 1, RUN 2, GROUPED 3, NO_SPEED_CHANGE 4 (data mostly 4/1).
+- `num forces` 2-80 (characters); `repeat limit` days (4 typical, 9999+ = once); `target population min` 0 (163) or 1-6.
+- `repetition limit` (33 records) belongs to dialogue and is unread here; `lock campaign` (one DIALOGUE_LINE) is unread by the exe
+  (**Observed**: no such string). `victory AI leader/others` (13) are unread: the loader builds only `pt1 AI`, `pt2 AI`, `retreat AI`.
+- `inherits from` (144 records, up to 2 parents; AI packages live on BASE parents): every ancestor is applied twice, by the loader
+  and again by the record reader (**Observed**). Appended lists (`squads to use`, `special leader`, victory/loss triggers) thus count an
+  ancestor's entries twice (double weight); AI packages and `trigger player ally` are inherited (the child wins where set); `world state`
+  merges by query. Own-record only: scalars and bools, ranges, chance, `key`, `num forces`, `faction override`, speeds, `dialog announcement`.
+
+**Roll** (`FUN_1409cb310`): each run updates every active campaign, then the requests, then, when the clock passes `updatetime`, sets it
+to now + 6 h and, only if the faction has no active campaign and no pending request, rolls (**Verified** +6; gate **Observed**).
+- Each `territorial triggers` campaign of the list with a target gets chance c; it passes when c > uniform[0,1); one passer is drawn,
+  weighted by c (**Verified** by disassembly).
+- c (`CampaignData::vfunc_1`), 0 on any failure: player's living characters ≥ `target population min`; a TOWN target's level (+0x388,
+  **Unknown**) ≥ `target tech level >=`; now > last start + `repeat limit` × 24 h; world states and special leader (below); d = XZ
+  distance from the faction's nearest own town to the target: f = 1 when `range far` ≤ 0 or d ≤ near × 10, 0 beyond far × 10, else
+  linear from 1 to 0 between; f × `raidFrequencyMult` unless `ignores chance mults`; c = `chance per day` × 0.25 × f (**Verified**).
+- Target (`CampaignData::vfunc_0`): only towns of the player faction, those in the faction's `biomes` (BIOME_GROUP), else any player town;
+  dropped when TownBase slot 70 is false (terrain/navmesh tile flags, meaning **Unknown**), when Town +0x128 is set (**Unknown**) and the
+  campaign is not hostile, or in the faction's `no-go zones` unless `ignores nogo zones`. Sources: own towns except nests (and, for
+  factions with `fundamental type` 1 or `offers bounties`, villages, points of interest, prisons, slave camps); the first source in list
+  order with one of its 5 nearest candidates within `range far` is the home (**Observed**).
+- World states (`vfunc_2`): every `world state` query equals its val0, and no `special leader` or one with unique state 1 (**Observed**).
+
+**Start** (`FUN_1409c9830`): home missing or disabled → the nearest own town to the target. Required men = int(`num forces` ×
+`raidSizeMult`) (**Verified** by disassembly). Gathering stops once men > required (each platoon adds its living members):
+1. the `special leader`'s platoon; if not spawned, the squad template naming it `leader`, spawned within 700 of the nearest own town;
+2. the faction's free, idle, intact homeless platoons (of a `squads to use` template when the list is set);
+3. for each of the 4 own towns nearest the target: such platoons homed there, then new squads drawn from `squads to use` by val0, within
+   700 of the town (at the leader once there is one), up to 100 per town; none when the list is empty.
+
+Too few: "Assault to {1} canceled due to faction weakness" (when the target is the player's), nothing else. Success: "{1} on the way to
+{2}" (not hostile) or "Warning: {1} moving towards {2}", last start = now, and each `trigger player ally` campaign (needs a `faction
+override`) whose faction is the player's ally (allied flag or relation ≥ 50) is requested there with no delay. No relation, war or world
+state change. Drafted and new platoons stay kept while the campaign is not ended (`FUN_1407ec570`); whether new ones are `persistent` is
+**Unknown**.
+
+**Requests** (`FUN_1409c9410`): victory/loss trigger rolls, retries, ally help and DIALOGUE_LINE `trigger campaign` (to the speaker's
+faction; target: the player town nearest the speaker, or the other party's town) queue a campaign with a due time, target, home and
+target faction. A weighted list [v0, v1, v2] fires one entry when uniform[0,100) < Σ v2 (v2 = percent), due after uniform[v0, v1) hours
+(**Verified** for dialogue by disassembly, **Observed** for the rest). `faction override` hands the request to that faction; a duplicate
+(same campaign and target) pending or active is dropped. Due requests check only world states and the leader (no chance, range, cooldown
+or population); a failed start retries each run, up to 100 times; a gone target is redirected or delayed 5-10 h, at most 10 times
+(**Observed**). Requests can aim at NPC towns. A requested campaign joins the receiving faction's list for good.
+
+**Phases** (`CampaignInstance::vfunc_10`, every war-manager run, loaded or not; times are game hours since the phase began):
+- Any phase but ended: the leader platoon loaded with every member down → defeat.
+- 0 travel: arrived within 0.8 × town radius (XZ) or 400 of a non-town target; then the `dialog announcement` waits, "{1} has arrived at
+  {2}", and phase 1, or straight to ended without victory or defeat when there is no `pt2 AI leader`. A loaded, non-hostile, non-DEFEND
+  campaign within 1.8 × radius of a town with +0x128 set is defeated at once (purpose **Unknown**).
+- 1 at target: victory when the leader is back in its home town (two null towns compare equal); else by `key`: ASSAULT_TOWN wins after
+  4 h, earlier 0.2 h after its first fight once the fight or the standing player characters are gone and the town's buildings test passes;
+  while > 2 player characters hold the town, more than half up, nothing else is checked; DEFEND_TOWN after 12 h when no hostile campaign
+  against the player runs; TRADER_VISIT after 1 h unless trading (**Observed**). Then any key: defeat when < 20 % of its platoons are
+  intact (the flag is recomputed only while loaded).
+- 2 ended: removed after 3 h (platoons unmapped).
+- Unloaded no fight starts, so an unloaded assault always wins at 4 h: a message and its follow-up, nothing happens to the town (the
+  earlier "an empty outpost falls" reading was this).
+- Redirect (`FUN_1409d62f0`): every 0.2 h, a target town gone (or a player town failing slot 70) is replaced by a new target: "{1} has
+  redirected to {2}".
+- Packages: phase 0 `pt1 AI`, 1 `pt2 AI`, 2 `retreat AI`; the leader platoon uses `... leader`, others `... others` (else the leader's).
+  How fast a loaded squad switches is **Unknown**.
+- Moving: unloaded, the leader travels to the target (TRAVEL_TARGET), the others to the leader (TRAVEL_TARGET_FAST), speeds as the
+  unloaded step above. Loaded, followers march on the leader's recorded trail; the leader uses `travel speed loaded` only while all intact
+  platoons are within 6000, else waits (what the mover does with RUN/GROUPED/NO_SPEED_CHANGE: **Unknown**).
+
+**End effects** (the only callees): victory: "{1} against {2} has ended" (hostile) and one `victory trigger` roll. Defeat: "{1} was defeated
+on their way to {2}" (not hostile), "{1} against {2} has been defeated" (its leader fought a player squad) or "{1} to {2} has failed"; a
+`loss trigger` roll when it reached the town or fought the player, else a hostile one is requested again in uniform[40, 96) h. No relation,
+world state, ownership, building or town state changes; looting or occupation are only what the loaded `pt2` packages do.
 
 ### 9. Settings and constants that matter
 
@@ -216,6 +292,7 @@ no path re-running the initial resident placement was found (**Unknown** whether
 | `Squad size multiplier` (`settings.cfg`) | 1 | M in 5.1 |
 | `Global population multiplier` | 1 | P in 6.2 |
 | `npc range` | settings.cfg value | relevance range, see [game-loop.md](game-loop.md) |
+| `raidFrequencyMult` / `raidSizeMult` (`settings.cfg`; options "Town raid events: frequency" 0.25-3, "size" 0.25-4) | 1 | campaign roll chance; required men = int(`num forces` × size) ([campaigns](#campaigns)) |
 | CONSTANTS `max squads` / `max squad size` / `max faction size` | 10 / 20 / 30 | stored by the constants loader (`FUN_14086b2b0`); **the code that enforces them was not found**, but the Squads tab shows "Maximum number of squads reached." ([ui-screens.md](ui-screens.md#flow-and-data)), so the squad cap is at least checked in the UI (**Observed**) |
 | area tick | 2 s scaled | 6.2 |
 | min distance of a homeless spawn from the player | 1382.4 | 6.2 |
@@ -227,8 +304,9 @@ no path re-running the initial resident placement was found (**Unknown** whether
 - What `building designation` changes beyond the bar (it does not enter the chooser); the town node map bar squads use.
 - Nest respawn delay after "wiped out", the default of `DAT_142133588` (the Number of nests multiplier option; **Unknown**, the exe image holds zeros there), the rule that makes `TownPopulationManager::vfunc_4`
   declare a town wiped out (**Observed** gates: roaming pool cap <= 3 and <= 25 roaming members).
-- Faction campaigns (FACTION_CAMPAIGN), raids and assaults (`raidSizeMult`, `raidFrequencyMult`), the unique squad
-  replacement logic, `faction gen` at game start, `NEW_GAME_STARTOFF.faction relations`.
+- Campaigns: Town +0x128, Town +0x388 (tech level), TownBase slots 70 / 92 / 96, the disabled-town flag, unique-NPC state values,
+  the "fought a player squad" test, the announcement wait, whether spawned campaign squads are `persistent`, DIPLOMATIC_ASSAULTS.
+- The unique squad replacement logic, `faction gen` at game start, `NEW_GAME_STARTOFF.faction relations`.
 - Who enforces CONSTANTS `max squads`, `max squad size`, `max faction size`.
 - Which override town wins among several qualifying candidates; what exactly repopulating a town from its override does.
 - Whether the 1250 radius of the proximity helper is squared.
@@ -249,3 +327,7 @@ Evidence scopes below apply only to their named sources/checks.
 - 3.4 Changing relations (**Observed**; the event table cross-checked with the dialogue action numbers)
 - 5.1 Counts and layout (**Observed**; two functions share the count rules, see the sentinel note)
 - 5.2 Procedural squads from a FACTION_TEMPLATE (**Observed**)
+- Campaigns: `FUN_1409cb310` (roll), `CampaignData::vfunc_0/1/2` (`1409c5e80`, `1409c5740`, `1409c4ed0`), loaders `read_chance_per_day_n9`
+  `1409c8bd0` / `read_is_hostile_n11` `1409c7e40` / `read_campaigns_n3` `1409cabd0`, start `FUN_1409c9830` with `uses_leader` `1409c5040` and
+  `FUN_1409c4150`, requests `FUN_1409c9410` / `FUN_1409d27a0`, instance update `CampaignInstance::vfunc_10` `1409c70f0`, end `vfunc_2` / `vfunc_3`,
+  redirect `FUN_1409d62f0`; enum names from the editor (`WarCampaignEnum`, `MoveSpeed`); data census with a throwaway tool over the merged base files

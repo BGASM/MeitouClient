@@ -45,7 +45,7 @@ mode3 follows group's slowest. The HUD sets them as character orders 2/1/0/0x10 
 (Walk/Jog/Run/Group; **Verified**, character vtable slot 0x308 FUN_1405caa50, [ui-screens.md](ui-screens.md)). Whether
 "group" is the squad or the selection is **Unknown** (the Group choice also calls a selection-wide FUN_1407faa70); Meitou
 uses the squad members walking in mode3. FCS force-speed3 means NO_SPEED_CHANGE and remaps to4, not runtime
-mode3. Follow/avoidance/formation use character footprint and previous neighbour state.
+mode3. FCS `MoveSpeed` (editor enum, **Verified**): WALK 0, JOG 1, RUN 2, GROUPED 3, NO_SPEED_CHANGE 4. Follow/avoidance/formation use character footprint and previous neighbour state.
 Original formation details and off-screen arrival remain partly unknown.
 
 ## Own builder
@@ -210,7 +210,7 @@ re-asked; its zones within `Lookahead` load early. **Observed**: Hub→(-36000,-
   building flag at +0x1f0 → +0x2c that gates carvers and part of the WALKABLE rule; the global seed list DAT_14212f470;
   the ray-hit kind that still allows a ground seed; whether OverrideSettings material −1 means "any material".
 - Whether the path request converts the footprint radius to Havok units.
-- FCS MoveSpeed enum names other than NO_SPEED_CHANGE; steering rules for formation slots and the full avoidance parameters
+- Steering rules for formation slots and the full avoidance parameters
   (the repulsion's absolute magnitude).
 - Whether face data values other than 3, 4, 5 and the gate nibble exist; how building construction and destruction
   update faces (path mode switches at runtime).
