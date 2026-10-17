@@ -330,7 +330,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
             HomeRadius = Math.Max(radius * 0.8f, 40),
             HomeBuilding = built.Home,
         };
-        var builtMembers = player || idle ? built.Members : GateUniques(world, built);
+        var builtMembers = player || idle ? built.Members : GateUniques(world, built, squad.Id);
         var leaderPlan = builtMembers.FirstOrDefault(m => m.Plan.Role == SquadRole.Leader)?.Plan;
         bool hasLeader = leaderPlan is not null;
         foreach (var member in builtMembers)
@@ -384,7 +384,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
     /// phase so two squads planned at once cannot both make one: a free unique is claimed and made; a claimed one (made elsewhere, dead) is replaced by its first
     /// <c>unique replacement spawn</c> (not gated, with a look rolled now) or by nobody. Animals are not gated. When the leader is gone the first member left leads.
     /// </summary>
-    List<BuiltMember> GateUniques(World world, BuiltSquad built)
+    List<BuiltMember> GateUniques(World world, BuiltSquad built, int squadId)
     {
         List<BuiltMember>? gated = null;
         for (int i = 0; i < built.Members.Count; i++)
@@ -401,7 +401,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
             if (replacements.Count == 0 || data.Db.Find(replacements[0].TargetStringId) is null) continue;
             string replacement = replacements[0].TargetStringId;
             string? faction = built.Faction >= 0 && built.Faction < data.Factions.Count ? data.Factions[built.Faction].Id : null;
-            var look = data.Appearances?.Create(replacement, faction, (int)(Rng.Hash(world.Seed, Rng.StableHash(replacement) ^ (ulong)world.Tick, RngPurpose.Spawn, SeedSalts.MemberLook + (ulong)i) & 0x7FFFFFFF));
+            var look = data.Appearances?.Create(replacement, faction, (int)(Rng.Hash(world.Seed, Rng.StableHash(replacement) ^ (ulong)squadId << 32, RngPurpose.Spawn, SeedSalts.MemberLook + (ulong)i) & 0x7FFFFFFF));
             gated.Add(new BuiltMember(member.Plan with { RecordId = replacement }, look));
         }
         if (gated is null) return built.Members;
