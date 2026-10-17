@@ -82,7 +82,9 @@ public static class Orders
     public static void Write(FcsRecord state, CharacterCold cold)
     {
         foreach (var (order, key) in SaveKeys) state.Bools[key] = (cold.Orders & order) != 0;
-        state.Bools[JobsKey] = Has(cold, CharacterOrders.Jobs);
+        // Meitou's own key only when it says something: jobs off, or a save that has it (absent reads as the default, on).
+        bool jobs = Has(cold, CharacterOrders.Jobs);
+        if (!jobs || state.Bools.ContainsKey(JobsKey)) state.Bools[JobsKey] = jobs;
         state.Ints[SpeedModeKey] = cold.RunSpeed;
     }
 
