@@ -1,5 +1,6 @@
 using System.Numerics;
 using Meitou.Data.Characters;
+using Meitou.Rendering.Characters;
 using Meitou.Simulation;
 using Meitou.Simulation.Editing;
 
@@ -7,7 +8,7 @@ namespace Meitou.Game;
 
 /// <summary>
 /// The character editor's host side (docs/characters.md "Character editor"): its data and preview source, opening it for a new game's squad once the world is shown,
-/// and the camera that frames the edited character while it is open.
+/// and its scene, which replaces the world while the editor is open.
 /// </summary>
 sealed partial class GameHost
 {
@@ -32,21 +33,31 @@ sealed partial class GameHost
     }
 
     /// <summary>
-    /// While the editor is open the camera looks at the edited character from the front, a little turned: the whole body on the BODY tab, the head on FACE and HAIR
-    /// (engine choice: the original's editor camera is <b>Unknown</b>), the target moved right so the character stands in the space between the editor's panels.
+    /// While the editor is open the world camera stays on the edited character, so the world around it is there when the editor closes; what the editor shows is its own scene
+    /// (<see cref="DrawEditorStage"/>).
     /// </summary>
     void EditorCamera()
     {
         if (player.EditorFocus is not { } focus || session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == focus.Character) is not { } c) return;
-        bool body = focus.Tab == EditorTab.Body;
-        float height = body ? 10 : 19.5f, distance = body ? 46 : 15;
-        float yaw = c.Yaw + 0.35f;
-        var at = DrawnPosition(c) + new Vector3(0, height, 0);
-        var toEye = new Vector3(MathF.Sin(yaw), 0, MathF.Cos(yaw));
-        var right = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, toEye));
-        camera.Target = at + right * distance * 0.12f;
-        camera.Yaw = yaw;
-        camera.Pitch = 0.12f;
-        camera.Distance = distance;
+        camera.Target = DrawnPosition(c) + new Vector3(0, 10, 0);
+    }
+
+    /// <summary>Where the character stands on the picture, in normalised device units: the middle of the space between the editor's two panels (the left one ends at 16 % of the width, the right one starts at 70 %), not of the window.</summary>
+    const float EditorStageShift = (0.5f * (0.161458f + 0.7f)) * 2 - 1;
+
+    /// <summary>
+    /// The frame of the character editor, in place of the world's: the original draws the edited character alone, lit plainly, over the plain ground texture
+    /// (compositor <c>Kenshi_Character_Editor</c>, docs/characters.md). The renderer draws the character into the stage picture from the editor's orbit; the interface puts
+    /// <c>SandyGround.dds</c> and the picture behind its panels (<c>PlayerInterface.EditorBackdrop</c>).
+    /// </summary>
+    void DrawEditorStage(int width, int height)
+    {
+        if (gpu.Characters is not { } characters) return;
+        if (player.EditorView() is not { } view || session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == view.Character) is not { } c) { characters.StageRequest = null; return; }
+        characters.StageRequest = new EditorStageRequest(DrawKey(view.Character), width, height, view.Yaw, view.Elevation, view.Distance, view.Head, camera.FieldOfView, EditorStageShift);
+        characters.SetView(width, height, camera.FieldOfView);
+        characters.Update(DrawnPosition(c));
+        characters.DrawStage();
+        if (characters.StageTexture is { } stage) player.SetUiTexture(PlayerInterface.StageTexture, stage.Texture, stage.Sampled);
     }
 }

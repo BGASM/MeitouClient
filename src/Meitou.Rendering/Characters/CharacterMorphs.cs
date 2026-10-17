@@ -94,8 +94,37 @@ internal sealed class MorphArena : IDisposable
     public uint Add(string key, Vector4[] deltas)
     {
         if (known.TryGetValue(key, out uint existing)) return existing;
+        int first = Reserve(deltas.Length);
+        Write(first, deltas);
+        uint baseIndex = (uint)(first - 1);   // slot 1 is entry `first`
+        known[key] = baseIndex;
+        return baseIndex;
+    }
+
+    /// <summary>Three regions of <see cref="scratchSlots"/> entries (the frames in flight and one more) that <see cref="Scratch"/> rewrites in turn.</summary>
+    int scratchFirst, scratchSlots, scratchTurn;
+
+    /// <summary>
+    /// The base for a morph that changes every frame (the character editor's blend between two looks): <paramref name="deltas"/> written into the next of three
+    /// regions that are reused, so a frame in flight never reads the entries this one writes and the arena does not grow with every frame. Once per frame.
+    /// </summary>
+    public uint Scratch(Vector4[] deltas)
+    {
+        if (deltas.Length > scratchSlots)
+        {
+            scratchFirst = Reserve(3 * deltas.Length);
+            scratchSlots = deltas.Length;
+        }
+        int first = scratchFirst + scratchTurn++ % 3 * scratchSlots;
+        Write(first, deltas);
+        return (uint)(first - 1);
+    }
+
+    /// <summary>Makes room for <paramref name="count"/> entries at the end and returns where they start; growing makes a new buffer and rewrites every set from the host copy.</summary>
+    int Reserve(int count)
+    {
         int first = used;
-        used += deltas.Length;
+        used += count;
         if (used > host.Length)
         {
             Array.Resize(ref host, Math.Max(host.Length * 2, used));
@@ -104,12 +133,14 @@ internal sealed class MorphArena : IDisposable
             gpu.EnsureFrame();
             gpu.Uploads.Write(buffer, 0, MemoryMarshal.AsBytes(host.AsSpan(0, first)));
         }
+        return first;
+    }
+
+    void Write(int first, Vector4[] deltas)
+    {
         deltas.CopyTo(host, first);
         gpu.EnsureFrame();
         gpu.Uploads.Write(buffer, (ulong)first * 16, MemoryMarshal.AsBytes(deltas.AsSpan()));
-        uint baseIndex = (uint)(first - 1);   // slot 1 is entry `first`
-        known[key] = baseIndex;
-        return baseIndex;
     }
 
     public BufferBinding Binding(GpuFrame frame) => buffer.Binding(frame);

@@ -200,6 +200,8 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
                 built++;
             }
             if (asset is null) continue;
+            if (inst.BlendFrom is { } blendFrom && inst.Blend < 1 && assets.TryGetValue(blendFrom, out var fromAsset) && fromAsset is not null) ApplyBlend(asset, fromAsset, inst.Blend);
+            else RestoreBlend(asset);
             float scale = inst.Scale > 0 ? inst.Scale : 1;
             var centre = inst.Position + new Vector3(0, asset.Height * 0.5f * scale, 0);
             bool far = inst.Hidden || Vector3.Distance(eye, centre) - asset.Radius * scale > DrawDistance;
@@ -414,6 +416,7 @@ internal sealed unsafe partial class CharacterRenderer : IDisposable
         nativeFrame.Dispose();
         content.Dispose();
         DisposePortraits();
+        DisposeStage();
         DisposeHover();
         DisposeIcons();
     }

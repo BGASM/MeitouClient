@@ -55,6 +55,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     public bool MouseDown(MouseButton button, Vector2 p, bool shift, bool ctrl = false, bool alt = false)
     {
         mouse = p;
+        if (EditorPointerDown(button, p)) return true;
         if (button == MouseButton.Right && CancelInventoryDrag()) return true;
         if (button == MouseButton.Right && !OverHud(p) && WallCancel()) return true;
         if (button == MouseButton.Left)
@@ -118,6 +119,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     public void MouseMove(Vector2 p)
     {
         mouse = p;
+        if (EditorPointerMove(p)) return;
         if (ScrollThumbMove(p)) return;
         if (MapPointerMove(p)) return;
         if (UiVisible && faithfulScreens.PointerMove(p)) return;
@@ -127,6 +129,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     public void MouseUp(MouseButton button, Vector2 p, bool shift)
     {
         mouse = p;
+        EditorPointerUp(button);
         if (button == MouseButton.Left) { InventoryPointerUp(p); faithfulScreens.PointerUp(); mapDrag = null; }
         if (button == MouseButton.Middle) mapDrag = null;
         if (button == MouseButton.Right && MapRightUp(p)) return;

@@ -100,6 +100,24 @@ internal sealed class CharacterAsset
     public int HeadBone = -1;
     /// <summary>An item's inventory icon (<see cref="CharacterContent.BuildIcon"/>): one unskinned part, no body (<see cref="Appearance"/> and <see cref="Rig"/> are null) and nothing to pose.</summary>
     public bool IsIcon;
+    /// <summary>The body mesh's poses and the weights this appearance sets them to, for <see cref="CharacterRenderer"/>'s blend between two looks (null: the body has no poses).</summary>
+    public MorphSource? Morph;
+    /// <summary>What a blend between looks changes, as it was built (null until the asset is first blended); <see cref="Blending"/> while the fields hold a mix.</summary>
+    public AssetRest? Rest;
+    public bool Blending;
+}
+
+/// <summary>An appearance's face and body morph: the body mesh's poses, the weights set on them and whether the horns are cut.</summary>
+internal sealed record MorphSource(MeshMorphs Poses, IReadOnlyDictionary<string, float> Weights, bool CutHorns);
+
+/// <summary>An asset's blendable values as built: the body shape, the lift of the feet, the posture times, the colours of every part and the morph base.</summary>
+internal sealed class AssetRest
+{
+    public BodyShapeData? Shape;
+    public float GroundOffset;
+    public (LayerDef Def, float Time)[] Fixed = [];
+    public (Vector3 Skin, Vector3 Hair)[] Colours = [];
+    public uint MorphBase;
 }
 
 /// <summary>
@@ -355,10 +373,14 @@ internal sealed class CharacterContent : IDisposable
         asset.Shape = setup?.Shape;
         asset.GroundOffset = setup?.GroundOffset ?? 0;
         asset.HeadBone = rig.Handle("Bip01 Head") ?? -1;
-        if (body.Morphs is { } bodyMorphs && bodyMorphs.Deltas(c.PoseWeights, c.Character?.GetBool("shaved") == true && bodyMorphs.HasCuttableHorns) is { } deltas)
+        if (body.Morphs is { } bodyMorphs)
         {
-            var key = string.Join(';', c.PoseWeights.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => FormattableString.Invariant($"{p.Key}={p.Value}"))) + "@" + bodyPath + (c.Character?.GetBool("shaved") == true);
-            asset.MorphBase = Morphs.Add(key, deltas);
+            asset.Morph = new MorphSource(bodyMorphs, c.PoseWeights, c.Character?.GetBool("shaved") == true && bodyMorphs.HasCuttableHorns);
+            if (bodyMorphs.Deltas(c.PoseWeights, asset.Morph.CutHorns) is { } deltas)
+            {
+                var key = string.Join(';', c.PoseWeights.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => FormattableString.Invariant($"{p.Key}={p.Value}"))) + "@" + bodyPath + (c.Character?.GetBool("shaved") == true);
+                asset.MorphBase = Morphs.Add(key, deltas);
+            }
         }
         asset.Parts.Add(new AssetPart
         {

@@ -64,7 +64,7 @@ sealed partial class PlayerInterface
         ArrangeUi();
         if (InventoryWheel(p, steps)) return true;
         if (MapWheel(p, steps)) return true;
-        return faithfulScreens.Wheel(p, steps);
+        return EditorWheel(p, steps) || faithfulScreens.Wheel(p, steps);
     }
     void FaithfulAction(MyGuiEvent e)
     {

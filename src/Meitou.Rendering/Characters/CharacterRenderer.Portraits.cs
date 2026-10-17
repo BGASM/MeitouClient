@@ -53,6 +53,7 @@ internal sealed unsafe partial class CharacterRenderer
     {
         portraitKeys.Clear();
         foreach (var r in PortraitRequests) portraitKeys.Add(r.Key);
+        if (StageRequest is { } stage) portraitKeys.Add(stage.Key);
     }
 
     sealed record ShownPortrait(long Key, uint Serial, CharacterAsset Asset, float Radius,

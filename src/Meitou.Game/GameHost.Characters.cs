@@ -83,9 +83,11 @@ sealed partial class GameHost
         var current = session.CurrentSnapshot;
         IndexPrevious();
         float alpha = session.SimulationAlpha;
+        // The character editor is a scene of its own (GameHost.Editor.cs): only the character being edited is posed and drawn.
+        var editing = player.EditorFocus?.Character;
         foreach (var c in current.Characters)
         {
-            if (c.Appearance is null) continue;
+            if (c.Appearance is null || editing is { } edited && c.Id != edited) continue;
             var position = c.Position;
             float yaw = c.Yaw;
             CharacterSnapshot? before = null;
@@ -112,10 +114,13 @@ sealed partial class GameHost
                         }
                 poses[i] = new CharacterPose(layer.Name, time, weight);
             }
-            list.Add(new CharacterInstance(DrawKey(c.Id), player.EditorPreview(c.Id, c.Appearance) ?? c.Appearance, position, yaw, poses)
+            var look = player.EditorPreview(c.Id, c.Appearance) ?? c.Appearance;
+            var glide = player.EditorBlend(c.Id);   // after the preview, which may just have swapped the look
+            list.Add(new CharacterInstance(DrawKey(c.Id), look, position, yaw, poses)
             {
                 WeaponDrawn = c.WeaponDrawn, Scale = c.Scale, Hidden = aboveFloor.Contains(c.Id), FullRateAnimation = c.IsPlayer,
                 Bones = Blend(before?.Ragdoll, c.Ragdoll, alpha),
+                BlendFrom = glide?.From, Blend = glide?.Blend ?? 0,
             });
             // The editor's next preview look, listed hidden so the renderer prepares it while the last one is still shown.
             if (player.EditorPending(c.Id) is { } pending)

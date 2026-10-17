@@ -31,6 +31,10 @@ sealed partial class PlayerInterface
         public Dictionary<CharacterId, string> StartNames { get; } = [];
         public int Seed = Environment.TickCount;
         public CharacterId Current => Characters[Index];
+        /// <summary>The camera's orbit, the character it was last set for, and the button dragging it (with where the pointer was last).</summary>
+        public EditorOrbit Orbit { get; } = new();
+        public CharacterId OrbitCharacter;
+        public (Meitou.Engine.Input.MouseButton Button, Vector2 Last)? Drag;
     }
 
     EditorSession? editor;
@@ -38,7 +42,11 @@ sealed partial class PlayerInterface
     public (GameDatabase Db, string InstallRoot)? EditorData { get; set; }
     /// <summary>Builds a preview look from a record id and a loadout (the world's appearance source; the host sets it).</summary>
     public Func<string, Loadout, CharacterAppearance?>? PreviewSource { get; set; }
-    readonly Dictionary<CharacterId, (int Version, bool Clothes, CharacterAppearance? Shown, CharacterAppearance? Pending)> previews = [];
+    /// <summary>What the editor shows of a character: the draft version and clothes it was made for, the look on screen, the one being prepared, and the look the shown one replaced since when (the glide).</summary>
+    sealed record Preview(int Version, bool Clothes, CharacterAppearance? Shown, CharacterAppearance? Pending, CharacterAppearance? From = null, double Started = 0);
+    readonly Dictionary<CharacterId, Preview> previews = [];
+    /// <summary>How long the character glides from one look to the next: about the time between two looks while a slider is dragged, so the movement is continuous.</summary>
+    const double BlendSeconds = 0.12;
     /// <summary>Whether the renderer has prepared a look (the host sets it); a preview is shown only once it is.</summary>
     public Func<CharacterAppearance, bool>? PreviewReady { get; set; }
     readonly Stopwatch previewClock = Stopwatch.StartNew();
@@ -102,9 +110,9 @@ sealed partial class PlayerInterface
         if (!EditorOpen || !editor!.Drafts.TryGetValue(id, out var draft) || own?.Loadout is not { } loadout || PreviewSource is null) return null;
         bool clothes = editor.Clothes;
         if (draft.Version == 0 && clothes) { previews.Remove(id); return null; }
-        var entry = previews.TryGetValue(id, out var found) ? found : (Version: -1, Clothes: true, Shown: own, Pending: (CharacterAppearance?)null);
-        if (entry.Pending is { } pending && (PreviewReady?.Invoke(pending) ?? true)) entry = entry with { Shown = pending, Pending = null };
+        var entry = previews.TryGetValue(id, out var found) ? found : new Preview(-1, true, own, null);
         double now = previewClock.Elapsed.TotalSeconds;
+        if (entry.Pending is { } pending && (PreviewReady?.Invoke(pending) ?? true)) entry = entry with { Shown = pending, Pending = null, From = entry.Shown ?? own, Started = now };
         if ((entry.Version != draft.Version || entry.Clothes != clothes) && now - lastPreviewBuild >= 0.12)
         {
             lastPreviewBuild = now;
@@ -121,6 +129,82 @@ sealed partial class PlayerInterface
 
     /// <summary>The preview look being prepared for a character (the host lists it hidden, so the renderer builds it), or null.</summary>
     public CharacterAppearance? EditorPending(CharacterId id) => EditorOpen && previews.TryGetValue(id, out var entry) ? entry.Pending : null;
+
+    /// <summary>The ImageBox texture name of the renderer's stage picture (<see cref="Meitou.Rendering.Characters.CharacterRenderer.StageTexture"/>).</summary>
+    public const string StageTexture = "meitou:stage";
+    Func<string, string?>? findAsset;
+    string? groundFile;
+
+    /// <summary>
+    /// The editor's scene behind its panels (the original's compositor <c>Kenshi_Character_Editor</c>): <c>SandyGround.dds</c> over the whole window, stretched as the original's full-screen
+    /// quad is, and the character's picture on it. First in the screen's controls, so the panels draw over both.
+    /// </summary>
+    List<UiControl> EditorBackdrop()
+    {
+        var backdrop = new List<UiControl>();
+        if (uiPainter is not { } painter) return backdrop;
+        groundFile ??= findAsset?.Invoke("SandyGround.dds") ?? "";
+        var all = new UiRect(0, 0, Width, Height);
+        // A sand colour first, so the window is covered before the ground texture is decoded.
+        backdrop.Add(new("editor-base", "Widget", all, "", "", "", true, new Dictionary<string, string>(), new Vector4(0.42f, 0.40f, 0.34f, 1), Pickable: false));
+        if (groundFile.Length > 0 && painter.IconReady(groundFile))
+            backdrop.Add(new("editor-ground", "ImageBox", all, "", "", "", true, new Dictionary<string, string> { ["ImageTexture"] = Meitou.Rendering.Ui.UiPainter.IconTexture(groundFile) }, Vector4.Zero, Pickable: false));
+        if (painter.HasTexture(StageTexture))
+            backdrop.Add(new("editor-stage", "ImageBox", all, "", "", "", true, new Dictionary<string, string> { ["ImageTexture"] = StageTexture, ["ImageFlipV"] = "true" }, Vector4.Zero, Pickable: false));
+        return backdrop;
+    }
+
+    /// <summary>The look the character's shown one has just replaced and how far the glide to the shown one is (0..1), or null once it has arrived (the renderer mixes the two).</summary>
+    public (CharacterAppearance From, float Blend)? EditorBlend(CharacterId id)
+    {
+        if (!EditorOpen || !previews.TryGetValue(id, out var entry) || entry.From is not { } from) return null;
+        double t = (previewClock.Elapsed.TotalSeconds - entry.Started) / BlendSeconds;
+        return t >= 1 ? null : (from, (float)Math.Max(t, 0));
+    }
+
+    /// <summary>
+    /// The editor's camera for the host: the character, the orbit and whether it is on the head. The orbit starts over when the tab changes between the body and the
+    /// head (FACE and HAIR share one view) or the character changes, as the original's camera resets then.
+    /// </summary>
+    public (CharacterId Character, float Yaw, float Elevation, float Distance, bool Head)? EditorView()
+    {
+        if (!EditorOpen || editor is not { } s) return null;
+        bool head = s.Tab != EditorTab.Body;
+        if (s.Orbit.Head != head || s.OrbitCharacter != s.Current) { s.Orbit.Reset(head); s.OrbitCharacter = s.Current; s.Drag = null; }
+        return (s.Current, s.Orbit.Yaw, s.Orbit.Elevation, s.Orbit.Distance, head);
+    }
+
+    /// <summary>Whether <paramref name="p"/> is on the editor's scene rather than on one of its panels or a window above it (the editor's screen is modal: what no widget of it covers counts as the scene).</summary>
+    bool OverEditorScene(Vector2 p) => faithfulScreens.OpenScreens[^1] == "editor" && faithfulScreens.HitTest(p) is { Control.Name: "modal" };
+
+    /// <summary>A mouse button pressed away from the editor's panels starts turning the camera; false when the press belongs to a panel.</summary>
+    bool EditorPointerDown(Meitou.Engine.Input.MouseButton button, Vector2 p)
+    {
+        if (!EditorOpen || !UiVisible || editor is not { } s || !OverEditorScene(p)) return false;
+        s.Drag = (button, p);
+        return true;
+    }
+
+    bool EditorPointerMove(Vector2 p)
+    {
+        if (editor?.Drag is not { } drag) return false;
+        editor.Orbit.Drag(p.X - drag.Last.X, p.Y - drag.Last.Y);
+        editor.Drag = (drag.Button, p);
+        return true;
+    }
+
+    void EditorPointerUp(Meitou.Engine.Input.MouseButton button)
+    {
+        if (editor?.Drag is { } drag && drag.Button == button) editor.Drag = null;
+    }
+
+    /// <summary>The wheel away from the panels zooms the camera.</summary>
+    bool EditorWheel(Vector2 p, float steps)
+    {
+        if (!EditorOpen || editor is not { } s || !OverEditorScene(p)) return false;
+        s.Orbit.Zoom(steps);
+        return true;
+    }
 
     void EditorAction(MyGuiEvent e)
     {

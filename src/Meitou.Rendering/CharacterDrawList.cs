@@ -23,6 +23,10 @@ public readonly record struct CharacterInstance(long Key, CharacterAppearance Ap
     public bool FullRateAnimation { get; init; }
     /// <summary>The ragdoll's bones in model space, set over the animation (null: none); the host interpolates them between ticks.</summary>
     public BonePose? Bones { get; init; }
+    /// <summary>The character editor's glide between two looks: the look being left (null: none) and how far the way to <see cref="Appearance"/> is, 0..1. Only the body shape, the
+    /// feet's lift, the posture sliders, the face and body poses and the skin and hair colours are mixed; looks that differ in other ways switch at once.</summary>
+    public CharacterAppearance? BlendFrom { get; init; }
+    public float Blend { get; init; }
 }
 
 /// <summary>

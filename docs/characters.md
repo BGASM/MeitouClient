@@ -120,9 +120,22 @@ exe decompile unless marked; Meitou: `CharacterDraft` (data), `EditCharacter` / 
   clothing in the preview; IMPORT/EXPORT a `.bod2` in `data/character/bodies/export/` (Meitou: not yet). CONFIRM asks first when some
   characters were never shown, closes, unpauses at speed 1; it charges nothing. No cancel widget; Esc **Unknown** (Meitou: Esc leaves a
   surgeon's editor unchanged and unpaid; the new game's must be confirmed).
-- **Preview**: own compositor workspace and a stage under the world (y -3000), HUD hidden; Body frames the whole body, Face/Hair the
-  `Bip01 Head`; angles **Unknown**. Meitou shows the character where it stands, the camera framing it between the panels; the draft is drawn
-  in place of its look (a new asset at most every 0.12 s while dragging).
+- **Preview**: a separate scene. **Verified** (install's compositor files): workspace `Kenshi_Character_Editor` = `GBuffer_Minimal` (characters only,
+  render queues 50-70) then a `Character_Editor` node, then the GUI. The background is a full-screen `render_quad` of
+  `data/gui/gfx/SandyGround.dds` (1920x1080 DXT1, no depth). Lighting is `Deferred_RTT` / `rtt.hlsl`: one directional light (-3, 2, -3), colour
+  0.6, exposure 0.5, IBL from `mp_irradiance` / `mp_specularity`; no fog, sky or shadows (light sign convention **Unknown**). The stage sits at
+  y -3000 (**Verified**, editor ctor in the RE dump). Camera rig (**Verified**, same dump): a pivot node takes yaw (about Y) and pitch (about X);
+  the camera is its child at (-3, 0, -30) + normalize(-3, 0, -30) x zoom. Mode flag 1 = body (fixed pivot, zoom clamp -9..7), 0 = head (pivot at
+  the head bone y - 12, default zoom -21, clamp -23..-17). Any of three mouse buttons drags (yaw/pitch += delta x sens x dt x -0.1); the wheel
+  zooms (zoom -= wheel x sens x dt x 0.6, clamped). **Observed**: FACE and HAIR tabs give head mode, BODY the body mode; changing mode or
+  character resets angles and zoom. **Unknown**: default angles, pitch limits, speeds, body default zoom (set at run time).
+  Meitou (`EditorOrbit`, `CharacterRenderer.Editor`, `PlayerInterface.EditorBackdrop`): while the editor is open the world is not drawn; the
+  renderer draws the edited character alone into a stage texture (transparent, key light), the interface puts `SandyGround.dds` and the
+  texture behind the panels, centred between them. Drag with any button orbits, wheel zooms, mode/character change resets; limits, speeds and
+  start angles are engine choices (`EditorOrbit`). **Blend**: a slider moves the character along: when a new preview look is ready it is drawn
+  as the mix of the old and new values over 0.12 s, the interval of the throttled rebuild (`CharacterRenderer.Blend`): body shape, posture
+  layers, face/body pose weights (morph set recomputed per frame in a scratch ring of `MorphArena`) and skin/hair colours; a look with another
+  head, hair or clothes swaps at once. The original's own slider behaviour is **Unknown**.
 - **Keys**: `in editor` true while open; a mode 0 character without a body file is randomised on open (Meitou's start characters are already
   rolled). Closing in mode 0 also sets health from the race's `starting health` (Meitou: a new race at creation gets a new body).
 - **Meitou validation** (`CharacterEditing.Apply`, `CharacterDraft.Sanitize`): player character with a person's look; creation only while

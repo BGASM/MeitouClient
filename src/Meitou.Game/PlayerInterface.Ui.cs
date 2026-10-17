@@ -68,7 +68,7 @@ sealed partial class PlayerInterface
     internal (MyGuiLayout Layout, UiBindings Bindings) FaithfulBindings(string id) =>
         id == "hud" ? (faithfulHud, BindUi()) : (faithfulScreens.Layout(id), BindFaithfulScreen(id));
 
-    public void CreateUiPainter(DebugOverlay overlay, Func<string, string?> resolve) => uiPainter = new(overlay, uiResources, resolve);
+    public void CreateUiPainter(DebugOverlay overlay, Func<string, string?> resolve) { uiPainter = new(overlay, uiResources, resolve); findAsset = resolve; }
     public void DisposeUi() { uiPainter?.Dispose(); uiPainter = null; uiRegistration?.Dispose(); uiRegistration = null; }
     /// <summary>Future code-mod loader entry point; disposal removes the extension's owned registrations.</summary>
     public IDisposable RegisterUiExtension(IUiExtension extension) => uiHost.Register(extension);
@@ -189,6 +189,7 @@ sealed partial class PlayerInterface
         AddJobRemoveButtons(controls);
         foreach (var screen in faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent))
         {
+            if (screen.Id == "editor") controls.AddRange(EditorBackdrop());
             controls.AddRange(screen.Controls.Where(c => UiMode == UiMode.Faithful ||
                 !c.Properties.TryGetValue("ImageResource", out var resource) || resource != "Kenshi_TitleScreen"));
             if (screen.Id == "title" && UiMode == UiMode.Meitou && !showCredits && TitleLogoReady())

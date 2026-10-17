@@ -318,6 +318,8 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         double seconds = animClock ? animSeconds : realTime.Elapsed.TotalSeconds;
         if (gpu.Foliage is { } foliage && o.Screenshot is null) foliage.SwaySeconds = seconds;
         // The heat haze's gameTime: game hours since the start (it stops while paused, as in the game).
+        if (player.EditorOpen) { DrawEditorStage(width, height); return; }
+        if (gpu.Characters is { StageRequest: not null } staged) staged.StageRequest = null;
         gpu.GameHours = session.Clock.HoursSinceStart;
         // The weather's three time bases: the game day and time of day (the hour below), the game speed (the last non-zero one while paused) and the paused flag.
         if (gpu.Weather is { } weather)
