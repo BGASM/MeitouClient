@@ -12,6 +12,9 @@ sealed partial class PlayerInterface
     /// <summary>The source of the item icons the inventory and trader grids draw (null: only names).</summary>
     public void SetItemIcons(ItemIcons? icons) => itemIcons = icons;
 
+    /// <summary>Item icon files the interface asked for that are not on the GPU yet (for pictures that wait for them).</summary>
+    public int PendingIconFiles => uiPainter?.PendingIconFiles ?? 0;
+
     /// <summary>The records' names with the item icons the renderer is drawing (<see cref="UiPainter.RenderedIcons"/>): the host connects it to the character renderer.</summary>
     public void SetRenderedIcons(Func<string, (Meitou.Rendering.Gpu.Texture Texture, Meitou.Rendering.Gpu.SampledTexture Sampled)?>? lookup) { if (uiPainter is not null) uiPainter.RenderedIcons = lookup; }
 

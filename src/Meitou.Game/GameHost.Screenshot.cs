@@ -22,6 +22,34 @@ namespace Meitou.Game;
 
 sealed partial class GameHost
 {
+    /// <summary>The showcase's trade: the leader opens a trade with the nearest trader and walks up to it (false: no trader, or it never opened).</summary>
+    bool ShowcaseTrade()
+    {
+        player.ShowUiPanel(null);
+        var characters = session.CurrentSnapshot.Characters;
+        if (playerSquad is null || characters.FirstOrDefault(c => c.Id == playerSquad.Leader) is not { } leader) return false;
+        var trader = characters.Where(c => c.IsTrader && c.Body is not { Dead: true } and not { Unconscious: true })
+            .OrderBy(c => Vector3.DistanceSquared(c.Position, leader.Position)).FirstOrDefault();
+        if (trader is null) { Console.WriteLine("showcase  no trader in the world"); return false; }
+        session.World.Commands.Enqueue(new Meitou.Simulation.Trading.OpenTrade(leader.Id, trader.Id) { Tick = session.World.Tick });
+        for (int i = 0; i < 4000 && session.CurrentSnapshot.Trade is null; i++)
+        {
+            // A long walk outlasts the approach time: ask again now and then.
+            if (i > 0 && i % 400 == 0) session.World.Commands.Enqueue(new Meitou.Simulation.Trading.OpenTrade(leader.Id, trader.Id) { Tick = session.World.Tick });
+            session.Tick();
+            session.AdvanceSimulation(session.Ticks.TickSeconds);
+            UpdateNav(wait: true);
+        }
+        Console.WriteLine(session.CurrentSnapshot.Trade is { } t ? $"showcase  trading with {t.TraderName}: {t.Stock.Count} stock items" : "showcase  the trade did not open");
+        if (session.CurrentSnapshot.Trade is null) return false;
+        if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == leader.Id) is { } walker)
+        {
+            session.Camera.MovePivot(new Vector2(walker.Position.X, walker.Position.Z));
+            ApplyCamera(session.Camera.Current);
+        }
+        return true;
+    }
+
     unsafe int Screenshot()
     {
         VulkanDisplay.RayTracing = o.WantsRayTracing;
@@ -75,18 +103,23 @@ sealed partial class GameHost
         if (overlay is not null) { player.CreateUiPainter(overlay, assets.Find); ConnectItemIcons(); }
         if (gpu.Characters is { } portraits) { var (atlas, sampled) = portraits.PortraitAtlas; player.SetUiTexture(PlayerInterface.PortraitTexture, atlas, sampled); }
         string?[] panels = g.UiShowcase
-            ? [null, "hud-expanded", "inventory", "stats", "overview", "menu", "new-game", "save", "load", "title", "build", "editor", "editor-face", "editor-hair", "edited"] : [null];
+            ? [null, "hud-expanded", "inventory", "stats", "overview", "menu", "new-game", "save", "load", "title", "build", "editor", "editor-face", "editor-hair", "edited", "trade"] : [null];
         foreach (string? panelName in panels)
         {
+            if (panelName == "trade" && !ShowcaseTrade()) continue;
+            // The trade picture shows a stock item's tooltip: the pointer rests on the first item.
+            if (panelName == "trade" && player.UiFrame.FirstOrDefault(c => c.Name.StartsWith("trade-item-", StringComparison.Ordinal) && !c.Name.EndsWith("-background", StringComparison.Ordinal) && !c.Name.EndsWith("-icon", StringComparison.Ordinal)) is { } item)
+                player.MouseMove(new Vector2(item.Bounds.X + item.Bounds.Width / 2, item.Bounds.Y + item.Bounds.Height / 2));
+            bool showPanel = panelName != "trade";   // the trade opens its own windows; closing them would end it
             if (panelName?.StartsWith("editor", StringComparison.Ordinal) == true) { player.ShowUiPanel(panelName); EditorCamera(); }
             if (panelName == "edited") { player.ShowcaseEdit(); session.AdvanceSimulation(session.Ticks.TickSeconds); }
             // Item icons are drawn from the frame after a cell asks for them, and their textures stream in: show the panel until they are done.
-            for (int frames = 0; panelName is not null && overlay is not null && frames < 400 && (frames < 3 || gpu.Characters is { PendingIcons: > 0 }); frames++)
+            for (int frames = 0; panelName is not null && overlay is not null && frames < 400 && (frames < 3 || gpu.Characters is { PendingIcons: > 0 } || player.PendingIconFiles > 0); frames++)
             {
                 DrawWorld(w, h);
                 overlay.Target = target;
                 UpdateView(w, h);
-                if (g.TitlePreview) player.ShowTitle(); else player.ShowUiPanel(panelName is "hud-expanded" or "edited" ? null : panelName, panelName == "hud-expanded");
+                if (g.TitlePreview) player.ShowTitle(); else if (showPanel) player.ShowUiPanel(panelName is "hud-expanded" or "edited" ? null : panelName, panelName == "hud-expanded");
                 player.Draw(overlay, w, h);
                 display.EndFrame();
                 Thread.Sleep(5);
@@ -96,7 +129,7 @@ sealed partial class GameHost
             {
                 overlay.Target = target;
                 UpdateView(w, h);
-                if (g.TitlePreview) player.ShowTitle(); else player.ShowUiPanel(panelName is "hud-expanded" or "edited" ? null : panelName, panelName == "hud-expanded");
+                if (g.TitlePreview) player.ShowTitle(); else if (showPanel) player.ShowUiPanel(panelName is "hud-expanded" or "edited" ? null : panelName, panelName == "hud-expanded");
                 player.Draw(overlay, w, h);
                 if (IsSandbox && !g.UiShowcase) DrawSandbox(overlay, w, h);
                 if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.IsPlayer) is { } me && player.Project(DrawnPosition(me) + new Vector3(0, 1, 0)) is { } px)
