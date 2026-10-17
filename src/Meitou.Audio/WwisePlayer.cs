@@ -14,7 +14,7 @@ namespace Meitou.Audio;
 /// <see cref="LoadBank"/> may be called from any thread; they queue commands that <see cref="Mix"/> (the audio thread) runs first.
 /// </para>
 /// </summary>
-public sealed class WwisePlayer : IDisposable
+public sealed partial class WwisePlayer : IDisposable
 {
     readonly WwiseCodebookLibrary library;
     readonly string bankDirectory;
@@ -34,13 +34,25 @@ public sealed class WwisePlayer : IDisposable
     readonly List<SoundInstance> sounds = [];
     readonly List<(double At, uint EventId, double Expires)> pending = [];
     readonly List<(double At, WwiseAction Action)> delayed = [];
-    double time;
+    readonly Dictionary<string, (WwiseObject[] Objects, uint[] Media)> bankContents = new(StringComparer.OrdinalIgnoreCase);
+    // The block being mixed covers [blockStart, time); runTime is when the action being run takes effect (music starts at that point).
+    double time, blockStart, runTime;
 
     /// <summary>Overall gain, linear (the ambience slider's).</summary>
     public float Gain { get; set; } = 1;
 
     /// <summary>Instances and voices last mixed, banks loaded (for the overlay).</summary>
     public (int Instances, int Voices, int Banks, int Clips) Stats { get; private set; }
+
+    /// <summary>The voices of music clips last mixed (part of <see cref="Stats"/>' voices).</summary>
+    public int MusicVoices { get; private set; }
+
+    /// <summary>True once the bank has been read and handed to the audio thread (and not unloaded since).</summary>
+    public bool IsBankLoaded(string name) => loadedBanks.ContainsKey(Normalize(name));
+
+    readonly ConcurrentDictionary<string, bool> loadedBanks = new(StringComparer.OrdinalIgnoreCase);
+
+    static string Normalize(string name) => name.EndsWith(".bnk", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
 
     /// <summary>
     /// <paramref name="bankDirectory"/>: the install's <c>data/audio</c>. Reads <c>Init.bnk</c> at once for the game parameter defaults and
@@ -64,9 +76,9 @@ public sealed class WwisePlayer : IDisposable
     /// Reads a bank and converts its WEMs on a worker thread, then hands the objects and clips to the audio thread. Loading a bank that is
     /// loaded or loading returns the same task.
     /// </summary>
-    public Task LoadBank(string name) => loading.GetOrAdd(name, n => Task.Run(() =>
+    public Task LoadBank(string name) => loading.GetOrAdd(Normalize(name), n => Task.Run(() =>
     {
-        var bank = WwiseBank.ReadFile(Path.Combine(bankDirectory, n.EndsWith(".bnk", StringComparison.OrdinalIgnoreCase) ? n : n + ".bnk"));
+        var bank = WwiseBank.ReadFile(Path.Combine(bankDirectory, n + ".bnk"));
         var clips = new ConcurrentBag<MediaClip>();
         Parallel.ForEach(bank.Media, m =>
         {
@@ -77,9 +89,36 @@ public sealed class WwisePlayer : IDisposable
         {
             foreach (var o in bank.Objects) objects.TryAdd(o.Id, o);
             foreach (var c in clips) media.TryAdd(c.Id, c);
+            bankContents[n] = ([.. bank.Objects], [.. clips.Select(c => c.Id)]);
+            loadedBanks[n] = true;
             RetryPending();
         });
     }));
+
+    /// <summary>
+    /// Unloads a loaded bank (nothing for one that is not loaded or still loading): what is playing from it is cut, its recordings are
+    /// dropped and a later <see cref="LoadBank"/> reads it again. Objects of the same id in another loaded bank (the music banks' shared
+    /// upper switches) stay in use.
+    /// </summary>
+    public void UnloadBank(string name)
+    {
+        var n = Normalize(name);
+        // At once, so that a load or a check right after sees the bank gone; the audio thread then drops what it holds, before any new load adds.
+        if (!loadedBanks.TryRemove(n, out _)) return;
+        loading.TryRemove(n, out _);
+        commands.Enqueue(() =>
+        {
+            if (!bankContents.Remove(n, out var contents)) return;
+            var own = new HashSet<WwiseObject>(contents.Objects, ReferenceEqualityComparer.Instance);
+            foreach (var r in roots)
+                if (own.Contains(r.Node)) r.End();
+            foreach (var o in contents.Objects)
+                if (objects.TryGetValue(o.Id, out var held) && own.Contains(held)) objects.Remove(o.Id);
+            foreach (var other in bankContents.Values)
+                foreach (var o in other.Objects) objects.TryAdd(o.Id, o);
+            foreach (var id in contents.Media) media.Remove(id);
+        });
+    }
 
     public void Post(string eventName) => Post(WwiseHash.Id(eventName));
     public void Post(uint eventId) => commands.Enqueue(() => PostNow(eventId, expires: time + 10));
@@ -88,9 +127,13 @@ public sealed class WwisePlayer : IDisposable
     public void SetState(string group, string state) => SetState(WwiseHash.Id(group), WwiseHash.Id(state));
     public void SetState(uint group, uint state) => commands.Enqueue(() => ChangeState(group, state));
 
+    /// <summary>Sets a switch group (<c>Biomes</c>, <c>General</c>): switches and states share the ids of their groups, so it is a state change.</summary>
+    public void SetSwitch(string group, string value) => SetState(group, value);
+
     /// <summary>Called by the output: runs the queued commands, advances every instance and adds the voices to <paramref name="mix"/>.</summary>
     public void Mix(float[] mix, int frames)
     {
+        blockStart = runTime = time;
         while (commands.TryDequeue(out var command)) command();
         double dt = (double)frames / outputRate;
         time += dt;
@@ -98,15 +141,17 @@ public sealed class WwisePlayer : IDisposable
             if (delayed[i].At <= time)
             {
                 var action = delayed[i].Action;
+                runTime = Math.Max(delayed[i].At, blockStart);
                 delayed.RemoveAt(i);
                 Run(action);
             }
+        runTime = blockStart;
         for (int i = roots.Count - 1; i >= 0; i--)
         {
             roots[i].Advance(dt);
             if (roots[i].Done) roots.RemoveAt(i);
         }
-        int voices = 0;
+        int voices = 0, music = 0;
         for (int i = sounds.Count - 1; i >= 0; i--)
         {
             var s = sounds[i];
@@ -118,8 +163,10 @@ public sealed class WwisePlayer : IDisposable
             }
             s.Mix(mix, frames, Gain);
             voices++;
+            if (s.IsMusic) music++;
         }
         Stats = (roots.Count, voices, loading.Count, media.Count);
+        MusicVoices = music;
     }
 
     void RetryPending()
@@ -188,6 +235,9 @@ public sealed class WwisePlayer : IDisposable
         WwiseLayerContainer l => new GroupInstance(this, l, l.Children, parent),
         WwiseActorMixer m => new GroupInstance(this, m, m.Children, parent),
         WwiseSwitchContainer w => new SwitchInstance(this, w, parent),
+        WwiseMusicSwitch ms => new MusicSwitchInstance(this, ms, parent),
+        WwiseMusicPlaylist mp => new MusicPlaylistInstance(this, mp, parent),
+        WwiseMusicSegment seg => new MusicSegmentInstance(this, seg, parent),
         _ => null,
     };
 
@@ -198,6 +248,10 @@ public sealed class WwisePlayer : IDisposable
         WwiseRandomSequence r => r.Node,
         WwiseSwitchContainer s => s.Node,
         WwiseLayerContainer l => l.Node,
+        WwiseMusicTrack t => t.Node,
+        WwiseMusicSegment s => s.Music.Node,
+        WwiseMusicSwitch s => s.Music.Node,
+        WwiseMusicPlaylist p => p.Music.Node,
         _ => null,
     };
 
@@ -231,6 +285,11 @@ public sealed class WwisePlayer : IDisposable
         bool stopping;
 
         public bool Done { get; protected set; }
+
+        /// <summary>When this instance starts (player time, seconds): the point in the block being mixed that music aligns to.</summary>
+        public double StartTime = player.runTime;
+
+        protected bool Stopping => stopping;
 
         /// <summary>This instance's fade times its parents'.</summary>
         public float Fade => fade * (Parent?.Fade ?? 1);
@@ -440,10 +499,12 @@ public sealed class WwisePlayer : IDisposable
         protected override void ChildEnded(Instance child) { }
     }
 
-    /// <summary>A sound: one voice, its gains from the node chain, and its position on a 3D path when a parent positions it so.</summary>
+    /// <summary>
+    /// A sound: one voice, its gains from the node chain, and its position on a 3D path when a parent positions it so. Also a clip of a
+    /// music track (<see cref="IsMusic"/>), which starts at <see cref="Instance.StartTime"/>, inside a block when that falls in it.
+    /// </summary>
     sealed class SoundInstance : Instance, IDisposable
     {
-        readonly WwiseSound sound;
         readonly Voice? voice;
         readonly WwiseObject[] chain;
         readonly float rolledVolume, rolledPitch, rolledLowPass;
@@ -451,11 +512,27 @@ public sealed class WwisePlayer : IDisposable
         readonly int pathIndex;
         readonly uint outputBus;
         double age;
+        double delayFrames;
 
-        public SoundInstance(WwisePlayer player, WwiseSound sound, Instance? parent) : base(player, sound, parent)
+        public bool IsMusic { get; }
+
+        public SoundInstance(WwisePlayer player, WwiseSound sound, Instance? parent) : this(player, sound, parent, sound.Source,
+            sound.Node.Properties.Values.ContainsKey(WwisePropertyId.Loop) ? sound.Node.Properties.Int(WwisePropertyId.Loop) : 1, null, 0)
         {
-            this.sound = sound;
-            chain = [.. player.Chain(sound)];
+        }
+
+        /// <summary>A clip of <paramref name="track"/> beginning at <paramref name="startTime"/> (player seconds).</summary>
+        public SoundInstance(WwisePlayer player, WwiseMusicTrack track, WwiseMusicClip clip, WwiseSource source, double startTime, Instance parent)
+            : this(player, track, parent, source, 1, clip, startTime)
+        {
+        }
+
+        SoundInstance(WwisePlayer player, WwiseObject node, Instance? parent, WwiseSource source, int plays, WwiseMusicClip? musicClip, double startTime)
+            : base(player, node, parent)
+        {
+            IsMusic = musicClip is not null;
+            if (musicClip is not null) StartTime = startTime;
+            chain = [.. player.Chain(node)];
             outputBus = chain.Select(n => NodeOf(n)!.OverrideBusId).FirstOrDefault(b => b != 0);
             foreach (var n in chain)
             {
@@ -470,11 +547,22 @@ public sealed class WwisePlayer : IDisposable
                 path = positioning;
                 pathIndex = player.random.Next(positioning.Paths.Length);
             }
-            if (sound.Source.IsVorbis && player.media.TryGetValue(sound.Source.SourceId, out var clip))
+            if (source.IsVorbis && player.media.TryGetValue(source.SourceId, out var clip))
             {
-                // Loop: 0 = forever, n = n times; absent = once.
-                int plays = sound.Node.Properties.Values.ContainsKey(WwisePropertyId.Loop) ? sound.Node.Properties.Int(WwisePropertyId.Loop) : 1;
-                voice = new Voice(clip, plays);
+                // Plays: 0 = forever, n = n times; absent = once. A music clip plays from its begin trim to its end trim.
+                long skip = 0, limit = -1;
+                double phase = 0;
+                if (musicClip is not null)
+                {
+                    skip = (long)Math.Round(Math.Max(0, musicClip.BeginTrim) / 1000 * clip.SampleRate);
+                    if (musicClip.BeginTrim > 0.5 || musicClip.EndTrim < -0.5)
+                        limit = (long)Math.Round(Math.Max(0, musicClip.SourceDuration + musicClip.EndTrim - musicClip.BeginTrim) / 1000 * clip.SampleRate);
+                    // Starts at the first output frame at or after the start time; the clip's position there is the part of a frame the start is early.
+                    double at = Math.Max(0, (StartTime - player.blockStart) * player.outputRate);
+                    delayFrames = Math.Ceiling(at - 1e-6);
+                    phase = Math.Max(0, delayFrames - at) * clip.SampleRate / player.outputRate;
+                }
+                voice = new Voice(clip, plays, skip, limit, phase);
             }
         }
 
@@ -499,6 +587,17 @@ public sealed class WwisePlayer : IDisposable
         public void Mix(float[] mix, int frames, float masterGain)
         {
             if (voice is null || Done) return;
+            int first = 0;
+            if (delayFrames > 0)
+            {
+                if (delayFrames >= frames)
+                {
+                    delayFrames -= frames;
+                    return;
+                }
+                first = (int)delayFrames;
+                delayFrames = 0;
+            }
             float db = rolledVolume, cents = rolledPitch, lowPass = rolledLowPass, linear = 1;
             WwiseObject? child = null;
             foreach (var n in chain)
@@ -540,7 +639,7 @@ public sealed class WwisePlayer : IDisposable
                 right *= Math.Min(1, MathF.Sqrt(2) * MathF.Sin(angle));
             }
             double rate = (double)voice.Clip.SampleRate / Player.outputRate * Math.Pow(2, cents / 1200.0);
-            voice.Mix(mix, frames, rate, left, right, LowPassCoefficient(lowPass));
+            voice.Mix(mix, frames, rate, left, right, LowPassCoefficient(lowPass), first);
         }
 
         /// <summary>

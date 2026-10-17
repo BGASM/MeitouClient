@@ -1,8 +1,8 @@
 # Audio
 
 How Kenshi drives its sound, and how Meitou plays it. The bank and WEM formats are in [formats/wwise-bnk.md](formats/wwise-bnk.md); this
-page is the runtime: what the game sends to Wwise, and Meitou's player (`src/Meitou.Audio`). Only the ambience (biome beds, weather beds)
-plays so far; music, interiors, effects' and objects' emitters, footsteps, combat, UI and voices do not.
+page is the runtime: what the game sends to Wwise, and Meitou's player (`src/Meitou.Audio`). Only the ambience (biome beds, weather beds) and the music
+play so far; interiors, effects' and objects' emitters, footsteps, combat, UI and voices do not.
 
 The facts about the exe come from its decompiled camera update and audio manager, traced 2026-10-10 (functions named per claim). Facts
 about the banks are checked against the 24 banks of the Steam install.
@@ -37,7 +37,53 @@ of the pivot at the zoom distance).
   current (`FUN_140258e30`).
 - Events go to one game object (100); the listener is the camera **eye** (with a broken orientation: the camera's up vector ends in the
   front slot, so 3D panning in the game is not what the camera faces; Verified by disassembly).
-- The weather bank, the interior bank, Init, the main theme, the general sounds and the voices are loaded at start.
+- The banks loaded at start are listed under [Music](#music).
+
+### Music
+
+Traced 2026-10-17 from the audio manager (`AudioSystemGlobal`: biome music `FUN_1402587a0`, bank pass `vfunc_2` `140259130`, tick
+`vfunc_4` `140258e30`, init `FUN_140259620`). Event and node ids checked by hashing the names against the banks' events.
+
+- **Which music.** In the same camera step as the ambience (only when a region is found under the pivot) the region's `music` index goes
+  to `FUN_1402587a0`; an index outside 0..4 counts as 4. The names come from the exe's own table (`FUN_14025e170`): 0 `Dunes`, 1
+  `Savannah`, 2 `Swamplands`, 3 `Tarsands`, 4 = no music (the FCS labels `Savanah` / `Swamp` play no part). Day and night do not matter.
+- **On a change** (nothing happens if the index is the same): if the old index was −1 (the first call after start), `MT_Music_Bank` is
+  **unloaded**. For 0..3 with the bank `<Name>_Music_Bank` loaded: switch `Biomes` = `<Name>` on object 100, and the id of
+  `Music_<Name>_Play` is remembered. Bank not loaded: it is queued for loading, and when it is loaded the switch is set and the id
+  remembered. Index 4: the id is cleared. **Nothing is posted on a change**: no `_Play`, and the game never posts `Music_<Name>_Stop` (the
+  exe only ever builds `Music_` + name + `_Play`; the four `_Stop` events in the banks are unused).
+- **Only a timer starts music** (`vfunc_4`, every frame, skipped entirely while the title screen exists, `DAT_142133320`): when the clock
+  passes the deadline, the next deadline is now + F × (0.8 + 0.6 × u), u = `rand()` / 32768 in [0, 1), F = `Music frequency` × 60 s;
+  then, if an id is remembered **and** `Music volume` > 0, it posts `Music_<Name>_Play` on object 100. The deadline moves on even when
+  nothing is posted (no music biome, volume 0, bank still loading), and nothing checks whether music is still playing, so `_Play` is posted
+  again every 0.8-1.4 F. The first deadline is audio init + F (not randomised). Changing the setting moves the deadline earlier if
+  now + new F is sooner (`FUN_140258200`), never later.
+- **The clock** is a wall-clock stopwatch (`FUN_14025b3b0` on `DAT_1421349b0`, QueryPerformanceCounter, never stopped by anything), so game
+  speed, pause, the title screen and loading do not slow it. A deadline that passes during the title screen fires on the first tick after
+  it, usually before the camera has picked a biome, so that interval is spent silent: nothing plays music at once when a game starts.
+- **`Music frequency`** (settings.cfg, minutes, default 5, slider "Music Frequency (minutes)" 1..20; `FUN_1403e84f0`, `FUN_1403f0260`): at
+  the default, music starts every 4-7 real minutes. `Music volume` (default 0.5) → `User_Volume_Music` × 100 (`FUN_140257d80`), at init and
+  when the options close (`FUN_1403e7290`).
+- **Banks.** At start (bank pass after `Init.bnk`): `MT_Music_Bank`, `SFX_General_Bank`, `SFX_Amb_Weather_Bank`, `SFX_Amb_Indoors_Bank`,
+  `VO_Bank`, then `Boot_Up_Game` (`7D68E3F0`, plays the main theme `3A626E51`) on object 100. Biome music banks load on demand, in the
+  audio manager's background bank pass (a ThreadWannabe slot; Observed). A biome music bank is unloaded 60 s after it was last current
+  (kept alive only while its `_Play` id is the remembered one, and only when no load is pending), which cuts whatever of it still plays
+  (Observed: Wwise stops a bank's content on unload). `Radio_Music_Bank`, `SFX_Bank` and the reverb banks are never loaded.
+- **Main theme.** Plays from `Boot_Up_Game` on the title screen and is never restarted: the audio manager is built once (`FUN_140259d10`
+  from `FUN_14086a960`) and the title screen only by the start-up loading loop (`Main_LoadingStateLoop` `14082b370`); whether a return to
+  the menu exists is Unknown. Stopped by `Create_or_Load_Game` (`6455137B`, in `MT_Music_Bank` and `SFX_General_Bank`: a click sound plus
+  stop `3A626E51` with a 5 s fade, global scope) posted on the **GUI object 110** when a new game, load or import starts (`FUN_140917400`,
+  `FUN_14047b210`, `FUN_14047b2f0`); by every ambience `Enter_` event; and finally by the bank unload above.
+- **What `_Play` does** (Observed, banks): plays the biome's three layers directly, no `Biomes` switch involved; what they are, how long
+  they last and how the day/night switch behaves: [wwise-bnk.md Music](formats/wwise-bnk.md#music).
+- **Pause and speed.** `Pause_Game` / `Resume_Game` (`FUN_140787d40`, on object 100, when paused or speed 0 flips) duck the SFX bus
+  `59927CD0` to −96 dB and the ambience bus `95836E4C` by −9 dB (1 s), and reset both (3 s); the music bus `BA70EAC8` (child of the master
+  bus, −4 dB) is not touched, so music plays on through pause. Game speed sets the state `Game_Speed` (`C2E2475B`) to `Normal` / `x2` /
+  `x4` at speeds 1 / 2 / 5 (`FUN_140787e40`, `FUN_140787fb0`); only `SFX_Bank` and `SFX_General_Bank` use it, so speed does not affect music.
+- **Not in the game:** combat or danger music, stingers, intensity parameters, indoor rules for music, focus-loss muting
+  (`MuteBackgroundMusic` is never called): no such strings or calls in the exe. **Radio:** `Radio_On` (`D272B88E`: stops the biome music
+  root `00DBE1E6` over 10 s, plays a click and the radio playlist `34220ED8`), `Radio_Off` (`D0987A94`) and `FCC71927` (name Unknown, stops
+  both) are in `Radio_Music_Bank` and `SFX_General_Bank`, but the exe has no "Radio" string and never loads the bank: unused content.
 
 ### Game parameters and states
 
@@ -96,6 +142,32 @@ host running without sound.
 - `AmbienceDirector` is the game's rules above: biome under the pivot, day/night, `Camera_Zoom`, `Time_in_Game`, rain and wind. Two
   differences from the game: the delayed-load suffix bug is not copied (the right event always plays), and the wind is stopped with
   `Weather_Wind_End`.
+- **Music engine** (`WwisePlayer.Music.cs`; the layouts and meanings are in [wwise-bnk.md](formats/wwise-bnk.md#music)). Music nodes are
+  instances in the same tree as the sounds, so fades, stop actions (also on an ancestor, across banks), the gain chain up to the music bus
+  (`BA70EAC8`: −4 dB, the `User_Volume_Music` curve) and the voices are the same code.
+  - **Switch** (`MusicSwitchInstance`): the decision tree is read with the current values of its groups (the child keyed with the value,
+    else the one keyed 0; `SetSwitch` shares the state table). When a value changes during playback the playlist playing is held after its
+    current segment and the new pick starts at that segment's exit cue (**Unknown**: the other candidate is the rule that crossfades at once,
+    ~10 s); a change back before the cue cancels it; once the last segment's cue has passed (only its tail left) a change does nothing.
+  - **Playlist**: the tree is walked lazily, the next segment pulled at each exit cue and started there, the old one's tail sounding on.
+    Segment items repeat by loop count (0 forever); groups make loop-count passes of one child (step) or all (continuous), in order
+    (sequence) or by weight (random; shuffle = weighted without replacement). Avoid-repeat history and sequence positions are kept per
+    playlist group across plays. A segment whose bank is not loaded is skipped.
+  - **Segment**: one voice per clip at segment time `PlayAt + BeginTrim`, played from the begin trim to the end trim; silences hold the time.
+  - **Timing.** A start is placed at the output frame at or after the exact time inside the block being mixed, with the fractional part as
+    the clip's starting phase, and a clip fades into silence over its last frame, so a segment that follows another at its cue leaves no
+    gap and no overlap: the main theme's 281.7 s loop, 12,423,326.475 output frames long, repeats without a missing or doubled frame.
+  - Plays are not exclusive: a `_Play` posted while the last still sounds (a short `Music frequency`) starts a second instance (**Unknown**
+    whether Wwise limits music nodes). Not done, since no Kenshi bank needs it: stingers, transition segments, special track types, clip
+    automation, the transition rules' fades, `continue playback`, the radio's 3D attenuation. `UnloadBank` cuts what plays from the bank,
+    drops its recordings and objects (those of the same id in another loaded bank stay).
+- `MusicDirector` is the game's music rules above. `Update(music)` each frame takes the `music` of the region under the pivot (null when
+  none): on a change it sets the `Biomes` switch and remembers `Music_<Name>_Play` (when the bank is loaded, else after loading it; the
+  first change unloads `MT_Music_Bank`); a real-time stopwatch timer (first deadline construction + F, then now + F × (0.8 + 0.6 r)) posts
+  the remembered event when set and `Music volume` is above 0, moving the deadline either way; no `_Stop` is ever posted; a biome bank
+  not current for 60 s is unloaded. `StartMainTheme` (loads `MT_Music_Bank`, posts `Boot_Up_Game`, pauses the timer) and
+  `OnCreateOrLoadGame` (posts `Create_or_Load_Game`, resumes it) are for a host with a title screen; the viewer has none and does not call
+  them. `Music frequency` (minutes, default 5) and `Music volume` (default 0.5, sent as `User_Volume_Music` × 100) come from `settings.cfg`.
 
 ### Volume curves (Observed)
 
@@ -110,16 +182,22 @@ The ambience is quiet: the Desert bed is mastered at −45 dBFS RMS (the general
 12 dB, the slider's default another 8.5, so the desert by day mixes at about −66 dBFS RMS. That is what the banks say; whether the game
 sounds the same was not measured. The viewer's `--audio-gain <dB>` raises the whole mix.
 
+The music at `Music volume` 0.5 (`User_Volume_Music=50`): the main theme's loudest second is about −29 dBFS RMS, a biome play's about −37 to −45
+(one segment per layer, so seconds of silence between pieces). `Init.bnk` defaults the parameter to 100 (the curve is half at 50, so +6 dB),
+which is what the offline render uses unless told.
+
 ### Not done
 
-Music (`Music_<Biome>_Play`, music segments, tracks and switches are not decoded), interiors (needs the building raycast), point emitters
+Interiors (needs the building raycast), point emitters
 (`Start_Emitter` / `Stop_Emitter` with the `Emitters` switch, AMBIENT_SOUND records), effects and reverb (aux buses), attenuation curves,
-voice limits, and unloading banks left behind (they stay loaded: about 5 to 14 MB of Ogg each).
+voice limits, the radio's 3D attenuation (type 14 is not decoded), the main theme in the viewer (no title screen), and unloading ambience banks left behind (they stay loaded: about 5
+to 14 MB of Ogg each; the music banks unload as above).
 
 ## In the viewer
 
 On by default; `--no-audio` turns it off, `--audio-gain <dB>` raises or lowers everything. The console prints the device; F11's
-statistics show the biome, day or night, rain, wind and the number of voices. Ambient volume comes from the install's `settings.cfg`.
+statistics show the biome, day or night, rain, wind and the number of voices, and the music: the remembered biome music, seconds until the timer
+next posts it, music voices. Ambient and music volume and `Music frequency` come from the install's `settings.cfg`.
 
 ## Tools
 
@@ -127,4 +205,5 @@ statistics show the biome, day or night, rain, wind and the number of voices. Am
   writes them as WAV.
 - `meitou-tools audio render <seconds> <out.wav> [Bank.bnk …] [Event …] [Parameter=value …] [Group:State …]` mixes events offline (no
   sound card) and prints the level each second, e.g.
-  `audio render 60 desert.wav SFX_Amb_Desert.bnk Camera_Zoom=5 Time_in_Game:Day Enter_Desert_Day`.
+  `audio render 60 desert.wav SFX_Amb_Desert.bnk Camera_Zoom=5 Time_in_Game:Day Enter_Desert_Day`. A word of eight hex digits is an event
+  id (`audio render 290 mt.wav MT_Music_Bank.bnk User_Volume_Music=50 7D68E3F0`); music: `… Dunes_Music_Bank.bnk Time_in_Game:Day Music_Dunes_Play`.

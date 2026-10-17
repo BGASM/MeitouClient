@@ -44,6 +44,10 @@ static class WwiseHierarchyReader
                 WwiseObjectType.RandomSequenceContainer => RandomSequence(ref r, id),
                 WwiseObjectType.SwitchContainer => Switch(ref r, id),
                 WwiseObjectType.LayerContainer => Layer(ref r, id),
+                WwiseObjectType.MusicSegment => MusicSegment(ref r, id),
+                WwiseObjectType.MusicTrack => MusicTrack(ref r, id),
+                WwiseObjectType.MusicSwitch => MusicSwitch(ref r, id),
+                WwiseObjectType.MusicRandomSequence => MusicPlaylist(ref r, id),
                 _ => null,
             };
             if (o is null) return new WwiseRawObject(type, id, body.ToArray(), null);
@@ -294,6 +298,133 @@ static class WwiseHierarchyReader
         return new WwiseLayerContainer(id, node, children, layers);
     }
 
+    /// <summary>
+    /// What all four music types share after their own leading fields: u8 flags, node base, child ids, grid (f64 period, f64 offset,
+    /// f32 tempo, u8 beats, u8 beat unit, u8 flags) and stingers (none in Kenshi; not decoded).
+    /// </summary>
+    static WwiseMusicNode MusicNode(ref Reader r)
+    {
+        byte flags = r.U8();
+        var node = NodeBase(ref r);
+        var children = r.Ids(r.U32());
+        var meter = new WwiseMeter(r.F64(), r.F64(), r.F32(), r.U8(), r.U8(), r.U8());
+        uint stingers = r.U32();
+        if (stingers != 0) throw new InvalidDataException($"{stingers} stingers, not decoded");
+        return new WwiseMusicNode(flags, node, children, meter);
+    }
+
+    static WwiseFade Fade(ref Reader r) => new(r.I32(), r.U32(), r.I32());
+
+    /// <summary>Transition rules of a music switch or playlist. A rule with a transition segment is not decoded (none in Kenshi).</summary>
+    static WwiseMusicTransition[] Transitions(ref Reader r)
+    {
+        var rules = new WwiseMusicTransition[r.Count(r.U32(), 64)];
+        for (int i = 0; i < rules.Length; i++)
+        {
+            var sources = r.Ids(r.U32());
+            var destinations = r.Ids(r.U32());
+            var source = new WwiseTransitionSource(Fade(ref r), r.U32(), r.U32(), r.U8() != 0);
+            var destination = new WwiseTransitionDestination(Fade(ref r), r.U32(), r.U32(), r.U16(), r.U8() != 0, r.U8() != 0);
+            if (r.U8() != 0) throw new InvalidDataException("Transition segment not decoded");
+            rules[i] = new WwiseMusicTransition(sources, destinations, source, destination);
+        }
+        return rules;
+    }
+
+    static WwiseMusicSegment MusicSegment(ref Reader r, uint id)
+    {
+        var music = MusicNode(ref r);
+        double duration = r.F64();
+        var markers = new WwiseMarker[r.Count(r.U32(), 16)];
+        for (int i = 0; i < markers.Length; i++)
+        {
+            uint markerId = r.U32();
+            double position = r.F64();
+            markers[i] = new WwiseMarker(markerId, position, System.Text.Encoding.ASCII.GetString(r.Bytes(r.Count(r.U32(), 1))));
+        }
+        return new WwiseMusicSegment(id, music, duration, markers);
+    }
+
+    /// <summary>A music track. Track types other than 0 (random, sequence, switch tracks) are not decoded (none in Kenshi).</summary>
+    static WwiseMusicTrack MusicTrack(ref Reader r, uint id)
+    {
+        byte flags = r.U8();
+        var sources = new WwiseSource[r.Count(r.U32(), 15)];
+        for (int i = 0; i < sources.Length; i++) sources[i] = Source(ref r);
+        var clips = new WwiseMusicClip[r.Count(r.U32(), 40)];
+        for (int i = 0; i < clips.Length; i++) clips[i] = new WwiseMusicClip(r.U32(), r.U32(), r.F64(), r.F64(), r.F64(), r.F64());
+        uint subTracks = r.U32();
+        var automation = new WwiseClipAutomation[r.Count(r.U32(), 12)];
+        for (int i = 0; i < automation.Length; i++) automation[i] = new WwiseClipAutomation(r.U32(), r.U32(), Points(ref r, r.U32()));
+        var node = NodeBase(ref r);
+        byte trackType = r.U8();
+        if (trackType != 0) throw new InvalidDataException($"Track type {trackType} not decoded");
+        return new WwiseMusicTrack(id, flags, sources, clips, subTracks, automation, node, trackType, r.I32());
+    }
+
+    static WwiseMusicSwitch MusicSwitch(ref Reader r, uint id)
+    {
+        var music = MusicNode(ref r);
+        var transitions = Transitions(ref r);
+        bool continuePlayback = r.U8() != 0;
+        int depth = r.Count(r.U32(), 5);
+        var groups = r.Ids((uint)depth);
+        var arguments = new (uint, byte)[depth];
+        for (int i = 0; i < depth; i++) arguments[i] = (groups[i], r.U8());
+        int treeSize = r.Count(r.U32(), 1);
+        byte mode = r.U8();
+        if (treeSize % 12 != 0 || treeSize == 0) throw new InvalidDataException($"Decision tree of {treeSize} bytes");
+        var flat = new (uint Key, uint Value, ushort Weight, ushort Probability)[treeSize / 12];
+        for (int i = 0; i < flat.Length; i++) flat[i] = (r.U32(), r.U32(), r.U16(), r.U16());
+        return new WwiseMusicSwitch(id, music, transitions, continuePlayback, arguments, mode, DecisionNode(flat, 0, 0, depth));
+    }
+
+    /// <summary>
+    /// The decision tree is stored flat, 12 bytes a node: u32 key, then at the last depth u32 audio node id, above it u16 first child index and
+    /// u16 child count; then u16 weight, u16 probability. The root (index 0) is above the first depth.
+    /// </summary>
+    static WwiseDecisionNode DecisionNode((uint Key, uint Value, ushort Weight, ushort Probability)[] flat, int index, int level, int depth)
+    {
+        var (key, value, weight, probability) = flat[index];
+        if (level == depth) return new WwiseDecisionNode(key, value, weight, probability, []);
+        int first = (int)(value & 0xFFFF), count = (int)(value >> 16);
+        if (first + count > flat.Length || first <= index) throw new InvalidDataException($"Decision node {index} children {first}+{count} out of range");
+        var children = new WwiseDecisionNode[count];
+        for (int i = 0; i < count; i++) children[i] = DecisionNode(flat, first + i, level + 1, depth);
+        return new WwiseDecisionNode(key, 0, weight, probability, children);
+    }
+
+    static WwiseMusicPlaylist MusicPlaylist(ref Reader r, uint id)
+    {
+        var music = MusicNode(ref r);
+        var transitions = Transitions(ref r);
+        int count = r.Count(r.U32(), 30);
+        int read = 0;
+        var root = PlaylistItem(ref r, ref read, count);
+        if (read != count) throw new InvalidDataException($"Playlist tree holds {read} of {count} items");
+        return new WwiseMusicPlaylist(id, music, transitions, root);
+    }
+
+    /// <summary>
+    /// The playlist is stored depth-first: per item u32 segment id (0 for a group), u32 item id, u32 child count, u32 playlist type,
+    /// s16 loop count, u16, u16, u32 weight, u16 avoid-repeat count, u8 using weight, u8 shuffle; then its children.
+    /// </summary>
+    static WwisePlaylistItem PlaylistItem(ref Reader r, ref int read, int count)
+    {
+        if (++read > count) throw new InvalidDataException("Playlist tree holds more items than its count");
+        uint segment = r.U32(), itemId = r.U32();
+        uint childCount = r.U32(), type = r.U32();
+        short loop = (short)r.U16();
+        ushort loopMin = r.U16(), loopMax = r.U16();
+        uint weight = r.U32();
+        ushort avoid = r.U16();
+        bool usingWeight = r.U8() != 0, shuffle = r.U8() != 0;
+        if (childCount > count - read) throw new InvalidDataException($"Playlist item {itemId:X8} has {childCount} children, more than the count");
+        var children = new WwisePlaylistItem[childCount];
+        for (int i = 0; i < children.Length; i++) children[i] = PlaylistItem(ref r, ref read, count);
+        return new WwisePlaylistItem(segment, itemId, type, loop, loopMin, loopMax, weight, avoid, usingWeight, shuffle, children);
+    }
+
     ref struct Reader(ReadOnlySpan<byte> span)
     {
         readonly ReadOnlySpan<byte> span = span;
@@ -314,6 +445,7 @@ static class WwiseHierarchyReader
         public uint U32() => BinaryPrimitives.ReadUInt32LittleEndian(Take(4));
         public int I32() => BinaryPrimitives.ReadInt32LittleEndian(Take(4));
         public float F32() => BinaryPrimitives.ReadSingleLittleEndian(Take(4));
+        public double F64() => BinaryPrimitives.ReadDoubleLittleEndian(Take(8));
         public byte[] Bytes(int n) => Take(n).ToArray();
 
         /// <summary>A count, checked against what is left (each element at least <paramref name="minSize"/> bytes).</summary>

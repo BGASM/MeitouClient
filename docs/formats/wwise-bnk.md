@@ -15,7 +15,7 @@ code was used. Reader: `Meitou.Data.Audio.WwiseBank`. Dump tool: `meitou-tools a
 | `SFX_Amb_<Biome>` ×10 | 112 | Ambience beds of Ashlands, Boneyard, Canyons, Coast, Desert, Forest, Jungle, Plains, Swamplands, Tarsands |
 | `SFX_Amb_Indoors_Bank` | 112 | Interior ambience (`Enter_Building`, `Enter_Building_Big`, `Leave_Building`) |
 | `SFX_Amb_Weather_Bank` | 112 | Rain and wind beds |
-| `<Biome>_Music_Bank` ×5, `MT_Music_Bank`, `Radio_Music_Bank` | 112 | Interactive music (Dunes, Savannah, Swamplands, Tarsands; the main theme; the radio) |
+| `<Biome>_Music_Bank` ×4, `MT_Music_Bank`, `Radio_Music_Bank` | 112 | Interactive music (Dunes, Savannah, Swamplands, Tarsands; the main theme; the radio), see [Music](#music) |
 | `SFX_General_Bank` | 112 | UI, footsteps, combat, building (855 sounds, 88 events) |
 | `VO_Bank` | 112 | Voice (465 sounds) |
 | `SFX_Bank` | **88** | An older bank (981 sounds, 130 events) in an older layout; only its sections and object headers are read |
@@ -52,8 +52,13 @@ Names found (from the exe's strings, combined as the exe's fragments suggest; **
 - Weather: `Weather_Rain_Start`, `Weather_Rain_End`, `Weather_Wind_Start`, and **`Weather_Wind_End`**. The exe's string table holds
   `Weather_Wind_Stop`, which is no event in any bank (**Verified** by hash); if the game posts that name ([weather.md](weather.md#sounds-verified-decompiled-fun_1409e8f70-names-only)),
   the wind bed is never stopped by it. **Observed**, not tested in the game.
-- Music: `Music_<Biome>_Play` / `Music_<Biome>_Stop` (Dunes, Savannah, Swamplands, Tarsands), `Create_or_Load_Game`.
-- State group `Time_in_Game` with states `Day`, `night`, `none` (used by switch containers in Ashlands and Coast); interior switch `Wicker`.
+- Music: `Music_<Biome>_Play` / `Music_<Biome>_Stop` (Dunes, Savannah, Swamplands, Tarsands), `Boot_Up_Game` (`7D68E3F0`, plays the main theme; **Verified** by hash 2026-10-17), `Create_or_Load_Game`, `Radio_On`,
+  `Radio_Off`; switch groups `General` (`07F737F7`: `menu`, `In_Game`, `Radio`) and `Biomes` (`3A1DA55A`: `Dunes`, `Savannah`,
+  `Swamplands`, `Tarsands`, `Ashlands`); group `80FF233D` (values `Beds`, `Frames`, `6CF968BD`). Not matched: event
+  `FCC71927` (stops radio and biome music), group `80FF233D`, state `6CF968BD`, `Biomes` values `56E982E5`,
+  `A36D90EE`, `AE786C6D` (**Verified** by hash against every string in `kenshi_x64.exe`; whether the exe uses `General` / `Biomes` is not checked).
+- State group `Time_in_Game` (`5DBE7335`) with states `Day`, `night`, `none` (used by switch containers in Ashlands and Coast, and by the
+  biome music); interior switch `Wicker`.
 - General: `Start_Emitter`, `Stop_Emitter`, `Footsteps`, `Door_Open`, `Map_Open`, UI clicks and many more in `SFX_General_Bank`.
 - Game parameters (the 24 in `STMG`): `Camera_Zoom` (`5FE07BCE`, the one RTPC and layer-crossfade parameter of every ambience and weather
   bank), `Time_in_Game`, `User_Volume_Ambient_SFX`, `User_Volume_Music`, `User_Volume_SFX`, `User_Volume_VO`, `User_Volume_UI`,
@@ -67,10 +72,10 @@ the objects tile the section exactly.
 
 Types (the format's numbers): 1 state, 2 sound, 3 action, 4 event, 5 random/sequence container, 6 switch container, 7 actor-mixer,
 8 bus, 9 layer (blend) container, 10 music segment, 11 music track, 12 music switch, 13 music random/sequence, 14 attenuation,
-18 effect share set, 19 effect, 20 aux bus. The reader decodes 2, 3, 4, 5, 6, 7 and 9 in version 112 banks, buses (8) in part ([below](#buses)), and keeps the rest raw.
+18 effect share set, 19 effect, 20 aux bus. The reader decodes 2-7, 9 and 10-13 ([Music](#music)) in version 112 banks, buses (8) in part ([below](#buses)), and keeps the rest raw.
 
 **Verified** (`Every_version_112_object_of_a_decoded_type_uses_exactly_its_size`): with the layouts below, all 2,492 objects of types 2-7
-and 9 in the 22 version-112 banks decode to exactly their size (the test also counts the 11 buses, which are decoded only in part). The field order is certain; the meaning of a field is **Observed** unless
+and 9 and all 687 music objects in the 22 version-112 banks decode to exactly their size (3,190 with the 11 buses, which are decoded only in part). The field order is certain; the meaning of a field is **Observed** unless
 said otherwise.
 
 ### Shared pieces
@@ -112,7 +117,7 @@ Action properties seen: `0x0F` (int ms, 1000 to 10000 on stops and plays: the fa
   u8 stream type (0 in every sound: embedded), u32 source id (the `DIDX` id), u32 file id (the bank's id), u32 offset, u32 size,
   u8 source bits (0). A source plugin (type nibble 2) adds u32 parameter size and the parameters (size 0 for every silence source).
   **Verified**: the offset is the WEM's offset **in the bank file** (not in `DATA`), and offset and size equal its `DIDX` entry; every
-  Vorbis sound's media is in its own bank.
+  Vorbis sound's media is in its own bank. Music tracks use the same source layout (all 239 likewise).
 - Then the node base (below).
 
 ### Node base (sounds and containers)
@@ -145,6 +150,98 @@ Action properties seen: `0x0F` (int ms, 1000 to 10000 on stops and plays: the fa
   s32 fade out, s32 fade in.
 - **Layer (9)**: node base, u32 child count and ids, u32 layer count, per layer u32 layer id, RTPC list, u32 crossfade game parameter,
   u8 its type, u32 association count, per association u32 child id, u32 point count, points (f32, f32, u32).
+
+## Music
+
+Types 10-13, in the six music banks only: 402 segments, 239 tracks, 27 switches, 19 playlists. Reader: `WwiseMusicSegment`,
+`WwiseMusicTrack`, `WwiseMusicSwitch`, `WwiseMusicPlaylist`; `meitou-tools audio <X>_Music_Bank` prints the tree. The layouts are
+**Verified** by size (all 687 decode exactly). Fields marked *const* hold one value in every object, so their meaning is a guess
+(**Unknown**); a non-zero stinger count, transition segment or track type is rejected (kept raw), since no Kenshi object has one.
+
+### Layouts
+
+- **Music node** (start of 10, 12, 13): u8 flags (*const* 0, but 6 on the top switch), node base, u32 child count and ids, the grid
+  (f64 grid period ms, f64 grid offset ms, f32 tempo bpm, u8 beats per bar, u8 beat unit, u8 flags: 0 = inherited, 1 or `FF` = set
+  here), u32 stinger count (*const* 0). **Verified**: every grid that is set is exactly 16 beats (8000 ms at 120 bpm, 9600 at 100,
+  10666.7 at 90, 13714.3 at 70); unset ones read 1000 ms, 120, 4/4.
+- **Segment (10)**: music node (children = tracks), f64 duration ms, u32 marker count, markers (u32 id, f64 position ms, u32 name length,
+  ASCII name; names all empty). Every segment has two markers: `0298DF12` at 0 (entry cue) and `5BBBD648` (exit cue) at the duration,
+  except five radio jingles whose exit cue is 210-325 ms before the end (Observed). 163 segments have no track: silences of 5-60 s.
+- **Track (11)**: u8 flags (*const* 0), u32 source count, sources (the [sound source](#sound-2) layout), u32 clip count, clips (u32 sub-track,
+  u32 source id, f64 play-at ms, f64 begin trim ms, f64 end trim ms, f64 source duration ms), u32 sub-track count (*const* 1), u32 clip
+  automation count (*const* 0; per item u32 clip index, u32 type, u32 point count, points as RTPC, a guess), node base, u8 track type
+  (*const* 0), s32 look-ahead ms (*const* 0). Kenshi: one source, one untrimmed clip at 0 per track. **Verified**: each clip's source
+  duration equals its WEM's decoded length (239 of 239) and the segment's duration ends where the clip does.
+- **Transition rules** (12, 13): u32 rule count; per rule u32 count + source ids, u32 count + destination ids (`FFFFFFFF` = any); exit:
+  s32 fade-out ms, u32 fade curve, s32 fade-out offset ms, u32 sync type, u32 cue filter (*const* 0), u8 play post-exit; entry: s32
+  fade-in ms, u32 curve, s32 fade-in offset ms, u32 cue filter (*const* 0), u32 jump-to playlist item, u16 entry type (*const* 0), u8 play
+  pre-entry, u8 match source cue name (*const* 0); u8 has a transition segment (*const* 0). Observed: the first rule of every container
+  is any → any, sync 7, no fades, post-exit and pre-entry on (the default rule). Sync types seen: 7 (exit cue), 0 (immediate, the
+  crossfade rules) and 2 (on the layer switches, which set a grid: probably next bar). Curves 1, 2, 4 (linear), 6: the
+  [RTPC interpolation](#shared-pieces) numbers. Jump-to `09EA0775` is the main theme playlist's root item (the id resolves).
+- **Switch (12)**: music node, rules, u8 continue playback, u32 depth, depth × u32 group id, depth × u8 group type (0 switch, 1 state;
+  depth is 1 everywhere, so the order of these two lists is Unknown), u32 tree size in bytes, u8 mode (*const* 0), then the decision
+  tree: 12-byte nodes, u32 key (0 = any), then on the last level u32 music object id, above it u16 first child index and u16 child count,
+  then u16 weight and u16 probability (*const* 50, 100). The root is node 0. **Verified**: every tree parses and every leaf resolves.
+- **Playlist (13)** (music random/sequence): music node, rules, u32 item count, the items depth-first: u32 segment id (0 = group), u32
+  item id, u32 child count, u32 play type (`FFFFFFFF` on segments; groups 0, 2, 3), s16 loop count (0 forever, 1 once), u16, u16 (*const*
+  0), u32 weight (50000 = 1), u16 avoid-repeat count, u8 use weights (1 on groups), u8 shuffle. Play types read as Wwise's four group
+  types: 0 sequence continuous, 1 sequence step, 2 random continuous, 3 random step (Observed: 2 appears only on the radio, with shuffle
+  and loop forever; 0 only on the main theme's one-item loop).
+
+### How Kenshi's music is built (Observed)
+
+- **Hierarchy.** The top switch `18B6E6A0` (switch group `General`, bus `BA70EAC8` = the music bus of `Init.bnk`, −4 dB with the user
+  slider) maps `menu` → the main theme playlist `3A626E51`, `In_Game` → switch `00DBE1E6`, `Radio` → nothing. `00DBE1E6` (group
+  `80FF233D`) maps `Beds` → `38CE2D16` (−3 dB), `Frames` → `3DD92503` (−9 dB), `6CF968BD` → `1E46D584` (−6 dB), and each of these
+  switches on `Biomes` to the biome's layer (`Ashlands` and three unnamed values: nothing). Every music bank carries its own copy of
+  the upper switches under the same ids: `18B6E6A0` and `00DBE1E6` are byte-identical in the four biome banks; the copies differ only in
+  their child lists (each lists the children in its own bank); the decision trees are the same.
+- **Biome music.** `Music_<Biome>_Play` plays the biome's three layers **directly** (bed with a 1000 ms fade, the other two 5000 ms), so
+  the upper switches only lend their volumes; `Music_<Biome>_Stop` stops all three (6000 ms). The bed layer is a state switch on
+  `Time_in_Game` (`Day` / `Night`) between two playlists; Swamplands' second layer is one too. Every biome playlist is a root group
+  *random step, loop once* over subgroups (each random step, loop once) of music segments or of silences, so **one play gives one segment
+  (or one silence) per layer and then ends**; continuous music needs the game to post the event again (the exe's `Music frequency`
+  setting is the lead, see [audio.md](../audio.md)). Avoid-repeat (1 to 6) only matters if the random history outlives one play.
+
+| Bank | Beds (`Time_in_Game` switch) | `6CF968BD` layer | `Frames` layer | Media, tempo |
+|---|---|---|---|---|
+| Dunes | 6 pieces 62-83 s (7.4 min), 14 silences | 27 pieces 8-37 s (8.4 min), 18 silences | 21 pieces 6-35 s (6.5 min), 16 silences | 54 WEMs, 22.2 min, 100 bpm |
+| Savannah | 6, 71-100 s (8.6 min), 14 | 32, 12-37 s (12.2 min), 18 | 34, 6-51 s (9.6 min), 16 | 72, 30.4 min, 120 bpm |
+| Swamplands | 3 (night only; day is silences), 78-85 s (4.1 min), 9 | 23, 10-103 s (15.6 min), 24; day/night switch | 29, 6-17 s (5.0 min), 16 | 55, 24.7 min, 90 bpm |
+| Tarsands | 6, 85-94 s (8.8 min), 6 | 13, 30-64 s (9.4 min), 6 | 29, 6-69 s (8.1 min), 6 | 48, 26.3 min, 70 bpm |
+
+Silences are 15-60 s in the beds, 5-60 s in the other layers. Segment volumes range −8..+6 dB; the bed switches add −3 (Dunes) or −2 dB (Savannah, Swamplands).
+
+- **Main theme** (`MT_Music_Bank`). Event `Boot_Up_Game` (`7D68E3F0`) plays `3A626E51`: a sequence-continuous group looping forever over one item, itself
+  looping forever, of one 281.7 s segment (−6 dB). Its second rule (any → any at the exit cue, fade-out 10100 ms offset +3200, fade-in
+  3200 ms offset −600) would crossfade the loop. `Create_or_Load_Game` stops it (5000 ms), as do the ambience enter events.
+- **Radio** (`Radio_Music_Bank`). `Radio_On` stops `00DBE1E6` (all biome music, by ancestor; 10 s) and plays `34220ED8` (−9 dB,
+  positioned 3D with attenuation `2791811A`, type 14 not decoded): random continuous, shuffle, avoid 4, looping forever over 9 items,
+  4 songs of 152-267 s and 5 jingles of 5.5-11.3 s (−6 dB; three items weigh 0.6, one 0.5). `Radio_Off` stops it without a fade;
+  `FCC71927` stops radio and biome music (5000 ms). `Radio_On` and `Radio_Off` also play a sound in `SFX_General_Bank`.
+- **Media.** Music WEMs are the same Wwise Vorbis as the ambience, all embedded (source stream type 0 in all 239; no streaming, prefetch
+  or loose `.wem`), 44.1 kHz stereo except the radio's 9 mono WEMs and the main theme's 48 kHz one. They decode with the rest ([below](#wwise-vorbis)).
+
+### Playback semantics
+
+The Wwise music model as it applies to these banks; the field meanings are Observed, the timing rules **Unknown** until heard against the
+original.
+
+- **Segment.** Segment time 0 is its start. A clip sounds its source from `BeginTrim` at segment time `PlayAt + BeginTrim` until
+  `PlayAt + SourceDuration + EndTrim` (in Kenshi: the whole WEM from 0). The entry cue is where the segment counts as started (0 here),
+  the exit cue where the next segment is aligned; audio after the exit cue is the post-exit tail (the radio jingles), before the entry
+  cue the pre-entry (none here).
+- **Playlist.** When the playing segment reaches its exit cue (sync 7), the next item's entry cue starts there; with post-exit on, the
+  old tail keeps sounding over it. Groups: *step* plays one child per pass of the group, *continuous* plays all children (in random
+  order for random, shuffled without replacement with shuffle); weights set the odds; avoid-repeat excludes the last N picks; the loop
+  count repeats the group (0 forever) and a segment item (MT: forever = sample-exact repeat at 281,708.1 ms).
+- **Rules.** The rule with the best (source, destination) match applies. With two any → any rules (the bed switches, the main theme)
+  which one wins is **Unknown**: the first means switching `Day` ↔ `Night` waits for the current piece's exit cue (up to ~100 s) and cuts,
+  the second crossfades at once (fade-out ~10.4 s, fade-in ~10 s). Which reference point the fade offsets shift is **Unknown**; the
+  values (+3200 out, −3200 in) suggest a crossfade that straddles the sync point.
+- **Stop.** A stop action fades the playing instance over its fade time and ends it; a stop on an ancestor (`00DBE1E6`) ends everything
+  under it, in any bank.
 
 ## Global settings (`STMG`)
 

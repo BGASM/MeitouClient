@@ -28,7 +28,7 @@ public enum WwiseObjectType : byte
 /// <summary>One HIRC object. Types the reader does not decode are kept as <see cref="WwiseRawObject"/>.</summary>
 public abstract record WwiseObject(WwiseObjectType Type, uint Id);
 
-/// <summary>An object kept undecoded: its type is not parsed (music, buses, effects), or its body did not match the documented layout.</summary>
+/// <summary>An object kept undecoded: its type is not parsed (buses, effects, attenuations), or its body did not match the documented layout.</summary>
 public sealed record WwiseRawObject(WwiseObjectType Type, uint Id, byte[] Body, string? Error) : WwiseObject(Type, Id);
 
 /// <summary>An event: the actions it runs, in order. Its id is the hash of its name (<see cref="WwiseHash"/>).</summary>
@@ -181,3 +181,81 @@ public sealed record WwiseLayerContainer(uint Id, WwiseNodeBase Node, uint[] Chi
 /// shape in the undecoded rest (<see cref="Body"/>).
 /// </summary>
 public sealed record WwiseBus(uint Id, uint ParentBusId, WwiseProperties Properties, WwiseRtpc[] Rtpcs, byte[] Body) : WwiseObject(WwiseObjectType.Bus, Id);
+
+/// <summary>A fade: its length (ms), the curve shape, and its offset (ms) from the point it is aligned to (negative = earlier).</summary>
+public readonly record struct WwiseFade(int Time, uint Curve, int Offset);
+
+/// <summary>
+/// The musical grid of a music node: grid period and offset (ms), tempo (beats per minute) and time signature. <see cref="Flags"/> nonzero =
+/// the node sets its own grid instead of inheriting it (Observed).
+/// </summary>
+public readonly record struct WwiseMeter(double GridPeriod, double GridOffset, float Tempo, byte Beats, byte BeatUnit, byte Flags);
+
+/// <summary>What every music object (segment, track, switch, playlist) shares: node base, children and grid (docs/formats/wwise-bnk.md#music).</summary>
+public sealed record WwiseMusicNode(byte Flags, WwiseNodeBase Node, uint[] Children, WwiseMeter Meter);
+
+/// <summary>Where a music transition leaves the playing segment: fade-out, when (sync type), which cue, and whether its post-exit plays.</summary>
+public sealed record WwiseTransitionSource(WwiseFade FadeOut, uint SyncType, uint CueFilter, bool PlayPostExit);
+
+/// <summary>Where a music transition enters the next segment: fade-in, cue filter, the playlist item to jump to, entry type, pre-entry.</summary>
+public sealed record WwiseTransitionDestination(WwiseFade FadeIn, uint CueFilter, uint JumpToId, ushort EntryType, bool PlayPreEntry, bool MatchSourceCueName);
+
+/// <summary>A transition rule between music objects (<c>0xFFFFFFFF</c> = any) in a music switch or playlist.</summary>
+public sealed record WwiseMusicTransition(uint[] Sources, uint[] Destinations, WwiseTransitionSource Source, WwiseTransitionDestination Destination)
+{
+    public const uint Any = 0xFFFFFFFF;
+}
+
+/// <summary>A marker (cue) of a music segment: id, position (ms) and optional name.</summary>
+public sealed record WwiseMarker(uint Id, double Position, string Name)
+{
+    /// <summary>The marker id of a segment's entry cue (always first, Observed).</summary>
+    public const uint Entry = 0x0298DF12;
+    /// <summary>The marker id of a segment's exit cue (always last, Observed).</summary>
+    public const uint Exit = 0x5BBBD648;
+}
+
+/// <summary>A music segment: its tracks (<see cref="WwiseMusicNode.Children"/>), length (ms) and markers (entry cue, exit cue, custom cues).</summary>
+public sealed record WwiseMusicSegment(uint Id, WwiseMusicNode Music, double Duration, WwiseMarker[] Markers) : WwiseObject(WwiseObjectType.MusicSegment, Id)
+{
+    public double EntryCue => Markers.FirstOrDefault(m => m.Id == WwiseMarker.Entry)?.Position ?? 0;
+    public double ExitCue => Markers.FirstOrDefault(m => m.Id == WwiseMarker.Exit)?.Position ?? Duration;
+}
+
+/// <summary>
+/// A clip of a music track: <see cref="SourceId"/> placed at <see cref="PlayAt"/> (ms, segment time of the source's start), trimmed by
+/// <see cref="BeginTrim"/> and <see cref="EndTrim"/> (ms; end trim ≤ 0), <see cref="SourceDuration"/> the source's full length (ms).
+/// </summary>
+public sealed record WwiseMusicClip(uint SubTrack, uint SourceId, double PlayAt, double BeginTrim, double EndTrim, double SourceDuration);
+
+/// <summary>An automation curve on a clip (volume or fades) by clip index.</summary>
+public sealed record WwiseClipAutomation(uint ClipIndex, uint AutomationType, WwiseCurvePoint[] Points);
+
+/// <summary>A music track: its sources (WEMs) and their clips in the segment. <see cref="TrackType"/> 0 = normal.</summary>
+public sealed record WwiseMusicTrack(uint Id, byte Flags, WwiseSource[] Sources, WwiseMusicClip[] Clips, uint SubTrackCount, WwiseClipAutomation[] Automation,
+    WwiseNodeBase Node, byte TrackType, int LookAheadTime) : WwiseObject(WwiseObjectType.MusicTrack, Id);
+
+/// <summary>
+/// A node of a music switch's decision tree: the switch or state <see cref="Key"/> (0 = any, the fallback) at its depth; at the last depth
+/// <see cref="AudioNodeId"/> is the music object it plays.
+/// </summary>
+public sealed record WwiseDecisionNode(uint Key, uint AudioNodeId, ushort Weight, ushort Probability, WwiseDecisionNode[] Children);
+
+/// <summary>A music switch: plays the child the decision tree picks for the current values of <see cref="Arguments"/>.</summary>
+public sealed record WwiseMusicSwitch(uint Id, WwiseMusicNode Music, WwiseMusicTransition[] Transitions, bool ContinuePlayback,
+    (uint GroupId, byte GroupType)[] Arguments, byte Mode, WwiseDecisionNode Tree) : WwiseObject(WwiseObjectType.MusicSwitch, Id);
+
+/// <summary>
+/// An item of a music playlist: a group (<see cref="SegmentId"/> 0, <see cref="Children"/> played as <see cref="PlaylistType"/>: 0 sequence
+/// continuous, 1 sequence step, 2 random continuous, 3 random step; Observed) or a segment (type <c>0xFFFFFFFF</c>).
+/// <see cref="LoopCount"/> 0 = forever; <see cref="Weight"/> out of 50000 = 1.0.
+/// </summary>
+public sealed record WwisePlaylistItem(uint SegmentId, uint ItemId, uint PlaylistType, short LoopCount, ushort LoopModMin, ushort LoopModMax, uint Weight,
+    ushort AvoidRepeatCount, bool UsingWeight, bool Shuffle, WwisePlaylistItem[] Children)
+{
+    public bool IsGroup => Children.Length > 0 || SegmentId == 0;
+}
+
+/// <summary>A music playlist (music random/sequence container): plays its segments in the order of the playlist tree.</summary>
+public sealed record WwiseMusicPlaylist(uint Id, WwiseMusicNode Music, WwiseMusicTransition[] Transitions, WwisePlaylistItem Playlist)
+    : WwiseObject(WwiseObjectType.MusicRandomSequence, Id);

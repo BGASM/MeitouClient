@@ -34,7 +34,7 @@ static class AudioTool
     {
         if (args.Length < 2 || !double.TryParse(args[0], System.Globalization.CultureInfo.InvariantCulture, out double seconds))
         {
-            Console.Error.WriteLine("audio render <seconds> <out.wav> [Bank.bnk ...] [Event ...] [Parameter=value ...] [Group:State ...]");
+            Console.Error.WriteLine("audio render <seconds> <out.wav> [Bank.bnk ...] [Event or 8-digit hex id ...] [Parameter=value ...] [Group:State ...]");
             return 2;
         }
         if (Library(install) is not { } library) return 1;
@@ -49,7 +49,12 @@ static class AudioTool
         }
         Task.WaitAll([.. loads]);
         foreach (var a in args[2..])
-            if (!a.EndsWith(".bnk", StringComparison.OrdinalIgnoreCase) && !a.Contains('=') && !a.Contains(':')) player.Post(a);
+            if (!a.EndsWith(".bnk", StringComparison.OrdinalIgnoreCase) && !a.Contains('=') && !a.Contains(':'))
+            {
+                // An event by name, or by its id when it has no name we know (eight hex digits).
+                if (a.Length == 8 && uint.TryParse(a, System.Globalization.NumberStyles.AllowHexSpecifier, null, out var id)) player.Post(id);
+                else player.Post(a);
+            }
         int total = (int)(seconds * rate);
         var all = new float[total * 2];
         var block = new float[Meitou.Audio.AudioOutput.BlockFrames * 2];
@@ -71,7 +76,7 @@ static class AudioTool
                     peak = Math.Max(peak, Math.Abs(all[i]));
                 }
                 rms = to > from ? Math.Sqrt(rms / (to - from)) : 0;
-                Console.WriteLine($"{(double)at / rate,6:0.0} s  instances {instances,2} voices {voices,2} clips {clips,3}  last second: rms {20 * Math.Log10(rms + 1e-9),6:0.0} dBFS peak {peak:0.000}");
+                Console.WriteLine($"{(double)at / rate,6:0.0} s  instances {instances,2} voices {voices,2} (music {player.MusicVoices,2}) clips {clips,3}  last second: rms {20 * Math.Log10(rms + 1e-9),6:0.0} dBFS peak {peak:0.000}");
             }
         }
         WriteWav(args[1], all, 2, rate);
@@ -211,17 +216,37 @@ static class AudioTool
         WwiseRandomSequence r => r.Node,
         WwiseSwitchContainer s => s.Node,
         WwiseLayerContainer l => l.Node,
+        WwiseMusicTrack t => t.Node,
+        _ => Music(o)?.Node,
+    };
+
+    public static WwiseMusicNode? Music(WwiseObject o) => o switch
+    {
+        WwiseMusicSegment s => s.Music,
+        WwiseMusicSwitch s => s.Music,
+        WwiseMusicPlaylist p => p.Music,
         _ => null,
     };
 
+    /// <summary>Child ids stored in the bank. A music switch's decision tree may also name objects of other banks (the shared top switches).</summary>
     public static uint[] Children(WwiseObject o) => o switch
     {
         WwiseActorMixer m => m.Children,
         WwiseRandomSequence r => r.Children,
         WwiseSwitchContainer s => s.Children,
         WwiseLayerContainer l => l.Children,
-        _ => [],
+        _ => Music(o)?.Children ?? [],
     };
+
+    /// <summary>Names of the music banks' events, groups and states that match the exe's strings by hash (docs/formats/wwise-bnk.md#music).</summary>
+    static readonly Dictionary<uint, string> KnownNames = new[]
+    {
+        "Biomes", "General", "Time_in_Game", "Day", "Night", "Radio", "menu", "In_Game", "Beds", "Frames",
+        "Dunes", "Savannah", "Swamplands", "Tarsands", "Ashlands", "Create_or_Load_Game", "Boot_Up_Game", "Radio_On", "Radio_Off",
+    }.Concat(new[] { "Dunes", "Savannah", "Swamplands", "Tarsands" }.SelectMany(b => new[] { $"Music_{b}_Play", $"Music_{b}_Stop" }))
+        .ToDictionary(WwiseHash.Id);
+
+    static string Name(uint id) => KnownNames.TryGetValue(id, out var n) ? $"{id:X8} ({n})" : id.ToString("X8");
 
     static void Dump(WwiseBank bank, bool media)
     {
@@ -232,7 +257,7 @@ static class AudioTool
         var printed = new HashSet<uint>();
         foreach (var e in bank.Objects.OfType<WwiseEvent>())
         {
-            Console.WriteLine($"event {e.Id:X8}");
+            Console.WriteLine($"event {Name(e.Id)}");
             foreach (var a in e.Actions)
             {
                 if (bank.Find<WwiseAction>(a) is not { } action)
@@ -295,8 +320,31 @@ static class AudioTool
             case WwiseLayerContainer l:
                 foreach (var layer in l.Layers) sb.Append($" layer {layer.Id:X8} x-fade {layer.CrossfadeParameterId:X8}[{layer.Associations.Length}]");
                 break;
+            case WwiseMusicSegment s:
+                sb.Append($" {s.Duration:0.#} ms entry {s.EntryCue:0.#} exit {s.ExitCue:0.#}{(s.Music.Children.Length == 0 ? " (silent)" : "")}");
+                break;
+            case WwiseMusicTrack t:
+                foreach (var c in t.Clips)
+                    sb.Append($" clip wem {c.SourceId:X8} at {c.PlayAt:0.#} trim {c.BeginTrim:0.#}/{c.EndTrim:0.#} of {c.SourceDuration:0.#} ms");
+                break;
+            case WwiseMusicSwitch w:
+                sb.Append($" on {string.Join(", ", w.Arguments.Select(a => $"{(a.GroupType == 1 ? "state" : "switch")} {Name(a.GroupId)}"))}{(w.ContinuePlayback ? " continue" : "")}");
+                break;
         }
+        if (Music(o) is { } music && music.Meter.Flags != 0) sb.Append($" grid {music.Meter.GridPeriod:0.#} ms {music.Meter.Tempo} bpm {music.Meter.Beats}/{music.Meter.BeatUnit}");
         Console.WriteLine(sb);
+        var rules = o switch { WwiseMusicSwitch w => w.Transitions, WwiseMusicPlaylist p => p.Transitions, _ => [] };
+        foreach (var t in rules) Console.WriteLine($"{pad}  {Transition(t)}");
+        if (o is WwiseMusicSwitch ms)
+        {
+            foreach (var d in ms.Tree.Children) Decision(bank, d, depth + 1, printed);
+            return;
+        }
+        if (o is WwiseMusicPlaylist pl)
+        {
+            PlaylistItem(bank, pl.Playlist, depth + 1, printed);
+            return;
+        }
         if (o is WwiseSwitchContainer sw)
             foreach (var (switchId, nodes) in sw.Switches)
             {
@@ -304,6 +352,51 @@ static class AudioTool
                 foreach (var n in nodes) Tree(bank, n, depth + 2, printed);
             }
         foreach (var c in Children(o)) if (o is not WwiseSwitchContainer || !printed.Contains(c)) Tree(bank, c, depth + 1, printed);
+    }
+
+    static string Fade(WwiseFade f) => f.Time == 0 && f.Offset == 0 ? "cut" : $"{f.Time} ms curve {f.Curve} offset {f.Offset}";
+
+    static string Transition(WwiseMusicTransition t)
+    {
+        static string Ids(uint[] ids) => string.Join("|", ids.Select(i => i == WwiseMusicTransition.Any ? "any" : i.ToString("X8")));
+        var (s, d) = (t.Source, t.Destination);
+        return $"rule {Ids(t.Sources)} -> {Ids(t.Destinations)}: exit sync {s.SyncType} fade-out {Fade(s.FadeOut)}{(s.PlayPostExit ? " post-exit" : "")}"
+            + $"; enter fade-in {Fade(d.FadeIn)}{(d.PlayPreEntry ? " pre-entry" : "")}{(d.JumpToId != 0 ? $" jump to item {d.JumpToId:X8}" : "")}"
+            + $"{(d.EntryType != 0 ? $" entry {d.EntryType}" : "")}{(s.CueFilter != 0 || d.CueFilter != 0 ? $" cues {s.CueFilter:X8}/{d.CueFilter:X8}" : "")}";
+    }
+
+    static void Decision(WwiseBank bank, WwiseDecisionNode d, int depth, HashSet<uint> printed)
+    {
+        var pad = new string(' ', depth * 2);
+        string key = d.Key == 0 ? "any" : Name(d.Key);
+        if (d.Children.Length > 0)
+        {
+            Console.WriteLine($"{pad}when {key}:");
+            foreach (var c in d.Children) Decision(bank, c, depth + 1, printed);
+        }
+        else if (d.AudioNodeId == 0) Console.WriteLine($"{pad}when {key}: nothing");
+        else if (bank.Find(d.AudioNodeId) is null) Console.WriteLine($"{pad}when {key}: {d.AudioNodeId:X8} (in another bank)");
+        else
+        {
+            Console.WriteLine($"{pad}when {key}:");
+            Tree(bank, d.AudioNodeId, depth + 1, printed);
+        }
+    }
+
+    static void PlaylistItem(WwiseBank bank, WwisePlaylistItem item, int depth, HashSet<uint> printed)
+    {
+        var pad = new string(' ', depth * 2);
+        string loop = item.LoopCount == 0 ? " loop forever" : item.LoopCount == 1 ? "" : $" loop {item.LoopCount}";
+        string weight = item.Weight == 50000 ? "" : $" weight {item.Weight / 50000.0:0.##}";
+        if (item.IsGroup)
+        {
+            string type = item.PlaylistType switch { 0 => "sequence (continuous)", 1 => "sequence (step)", 2 => "random (continuous)", 3 => "random (step)", _ => $"type {item.PlaylistType}" };
+            Console.WriteLine($"{pad}group {item.ItemId:X8} {type}{loop}{weight}{(item.AvoidRepeatCount > 0 && item.PlaylistType >= 2 ? $" avoid {item.AvoidRepeatCount}" : "")}{(item.Shuffle ? " shuffle" : "")}, {item.Children.Length} items");
+            foreach (var c in item.Children) PlaylistItem(bank, c, depth + 1, printed);
+            return;
+        }
+        Console.WriteLine($"{pad}item {item.ItemId:X8}{loop}{weight}:");
+        Tree(bank, item.SegmentId, depth + 1, printed);
     }
 
     static string Props(WwiseProperties p)
