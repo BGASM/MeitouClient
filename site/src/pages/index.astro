@@ -52,11 +52,11 @@ const roadmap = [
 const roadmapItems = roadmap.flatMap((g) => g.items);
 const roadmapDone = roadmapItems.filter((i) => i.done).length;
 
-// Placeholder pairs: the same frame twice, the left side filtered. Swap in real before/after images.
+// Before/after pairs for the comparison slider: Faithful on the left, Meitou on the right.
 const pairs = [
-  { name: 'Pair 1', before: '/bgvideo.jpg', after: '/bgvideo.jpg', beforeFilter: 'grayscale(1)' },
-  { name: 'Pair 2', before: '/bgvideo.jpg', after: '/bgvideo.jpg', beforeFilter: 'sepia(1) brightness(.8)' },
-  { name: 'Pair 3', before: '/bgvideo.jpg', after: '/bgvideo.jpg', beforeFilter: 'blur(6px) saturate(.5)' },
+  { name: 'Lighting', before: '/compare/lighting-before.webp', after: '/compare/lighting-after.webp' },
+  { name: 'Render distance', before: '/compare/distance-before.webp', after: '/compare/distance-after.webp' },
+  { name: 'Weather', before: '/compare/weather-before.webp', after: '/compare/weather-after.webp' },
 ];
 ---
 <Base title="Meitou · Kenshi engine reimplementation" video>
@@ -141,7 +141,7 @@ const pairs = [
     <div class="cmp-stage">
       {pairs.map((p, i) => (
         <div class="cmp" role="tabpanel" hidden={i > 0}>
-          <img class="cmp-img" src={p.before} style={`filter: ${p.beforeFilter}`} alt="" loading="lazy" />
+          <img class="cmp-img" src={p.before} alt="" loading="lazy" />
           <img class="cmp-img cmp-after" src={p.after} alt="" loading="lazy" />
           <span class="cmp-label cmp-left">Before</span>
           <span class="cmp-label cmp-right">After</span>
@@ -156,7 +156,7 @@ const pairs = [
     <div class="perf">
       <div class="perf-text">
         <h2>Improved loading times and performance</h2>
-        <p>Placeholder text for this section.</p>
+        <p>The game uses advanced streaming and optimization techniques to achieve minimal pop-in and no loading screens after loading a save.</p>
       </div>
       <video class="perf-video" controls muted loop playsinline preload="metadata" poster="/bgvideo.jpg">
         <source src={performanceVideo} type="video/webm" />
