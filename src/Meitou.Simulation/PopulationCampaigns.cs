@@ -54,6 +54,8 @@ public sealed class CampaignInstance
     public CharacterId Announcer { get; set; } = CharacterId.None;
     public double AnnouncedAt { get; set; } = -1;
     public double ArrivedAt { get; set; } = -1;
+    /// <summary>The game hour a member of a cannibal assault (Package_WarAssault_Cannibal) was first seen carrying someone (-1: none yet); starts its retreat. Not saved.</summary>
+    public double CarryStart { get; set; } = -1;
 }
 
 /// <summary>A queued campaign (<c>req*</c> of the save): due at a game hour against a target.</summary>
@@ -718,6 +720,13 @@ public sealed partial class PopulationSystem : IStateHashed
                     Victory(world, m, c, inst, now);
                     return false;
                 }
+                // The cannibals' own rule (package class 32, Observed): the retreat starts when three of them carry someone or 15 game minutes after the first did.
+                if (c.LeaderPackages[1] is { } pt2 && data.Ai.Package(pt2) is { Signal: 32 } && CannibalsLoaded(world, inst, now))
+                {
+                    inst.Phase = 2;
+                    inst.PhaseStart = now;
+                    return false;
+                }
                 bool won = false;
                 switch (c.Key)
                 {
@@ -742,6 +751,44 @@ public sealed partial class PopulationSystem : IStateHashed
                 if (inst.Platoons.Count == 0 || intact < 0.2f * (inst.Platoons.Count + inst.Lost)) Defeat(world, m, c, inst, now);
                 return false;
         }
+        return false;
+    }
+
+    /// <summary>Whether the loaded members of a cannibal assault carry enough to retreat: three carriers, or <see cref="CannibalCarryHours"/> after the first one (<see cref="CampaignInstance.CarryStart"/>).</summary>
+    bool CannibalsLoaded(World world, CampaignInstance inst, double now)
+    {
+        int carriers = 0;
+        var table = world.Characters;
+        foreach (int id in inst.Platoons)
+        {
+            if (world.Platoons.Find(id) is not { State: PlatoonState.Loaded } p || world.Squads.Find(p.SquadId) is not { } squad) continue;
+            foreach (var member in squad.Members)
+                if (table.TryResolveNext(member, out int slot) && !table.Cold(slot)!.Carrying.IsNone) carriers++;
+        }
+        if (carriers > 0 && inst.CarryStart < 0) inst.CarryStart = now;
+        return carriers >= 3 || inst.CarryStart >= 0 && now - inst.CarryStart >= CannibalCarryHours;
+    }
+
+    /// <summary>Game hours after the first cannibal carrier that end the assault (15 game minutes, <b>Observed</b>).</summary>
+    public const double CannibalCarryHours = 0.25;
+
+    /// <summary>
+    /// Whether the members of a squad run the "find, kidnap and put in a cage" goal now (task 254, <see cref="Meitou.Data.Gameplay.Ai.TaskType.FINAL_KIDNAPPER_CAGE_JOB"/>): the goals of
+    /// <paramref name="role"/> in the package their campaign is in the phase of (a loaded campaign squad is driven by the campaign, not the AI), or in the squad's running AI package, in the hour's window.
+    /// </summary>
+    public bool KidnapDuty(World world, Squad squad, Meitou.Data.Gameplay.Ai.AiRole role)
+    {
+        IReadOnlyList<Meitou.Data.Gameplay.Ai.AiGoal>? goals = null;
+        if (squad.PlatoonId >= 0 && world.Platoons.Find(squad.PlatoonId) is { Campaign: { } inst } p)
+        {
+            if (inst.Phase > 2 || CampaignOf(inst.CampaignId)?.PackageOf(inst.Phase, inst.Leader == p.Id) is not { } id) return false;
+            goals = data.Ai.Package(id)?.Goals(role);
+        }
+        else if (squad.Ai is { Roles: { } roles }) goals = roles[(int)role];
+        if (goals is null) return false;
+        int hour = world.Hour;
+        for (int k = 0; k < goals.Count; k++)
+            if (goals[k].Task.Type == Meitou.Data.Gameplay.Ai.TaskType.FINAL_KIDNAPPER_CAGE_JOB && goals[k].InWindow(hour)) return true;
         return false;
     }
 
@@ -1001,7 +1048,7 @@ public sealed partial class PopulationSystem : IStateHashed
         squad.War = AssaultTargets(world, p.Campaign!, p.Campaign!.Leader == p.Id);
         if (p.CampaignGoal is not { } goal || !table.TryResolveNext(squad.Leader, out int slot)) return;
         if (p.Campaign!.Leader == p.Id) TryAnnounce(world, p.Campaign, squad.Leader, table.Next[slot].Position);
-        if (table.Next[slot].Task == (byte)CharacterTask.Attack) return;
+        if (table.Next[slot].Task is (byte)CharacterTask.Attack or (byte)CharacterTask.PickUp or (byte)CharacterTask.PutDown) return;   // a fight or a lift (a kidnapper) is left to itself
         bool leads = p.Campaign!.Leader == p.Id;
         float arrive = leads ? settings.RoamArrivalRadius : CampaignFollowDistance;
         ref var n = ref table.Next[slot];

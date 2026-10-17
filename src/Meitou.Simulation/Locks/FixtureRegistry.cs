@@ -341,7 +341,7 @@ public sealed class FixtureRegistry
         bounty > LifeBounty ? LifeSentence : (float)Math.Truncate(bounty * 0.02 * prisonTime);
 
     /// <summary>The sentence is served (start + length not after <paramref name="nowHours"/>; one without a sentence always is).</summary>
-    public static bool SentenceServed(CharacterCold c, double nowHours) => c.SentenceLength <= 0 || c.SentenceStart + c.SentenceLength <= nowHours;
+    public static bool SentenceServed(CharacterCold c, double nowHours) => !c.Kidnapped && (c.SentenceLength <= 0 || c.SentenceStart + c.SentenceLength <= nowHours);
 
     /// <summary>
     /// Puts a character in a free cage (the original's enter, locks.md "Cages and beds"): imprisoned state, held at the cage's position and facing, orders and path dropped, the cage
@@ -451,7 +451,7 @@ public sealed class FixtureRegistry
         if (!table.TryResolveNext(prisoner, out int s) || table.Cold(s) is not { IsImprisoned: true } c) return false;
         var cage = c.InWhat is { } id ? Find(id) : null;
         if (cage?.Lock is { EffectivelyLocked: true }) return false;
-        bool escape = cage is not null && !SentenceServed(c, world.GameHours);
+        bool escape = cage is not null && !c.Kidnapped && !SentenceServed(c, world.GameHours);   // a kidnap victim getting out is no escape
         if (escape) crimes?.SetPending(world, s, CrimeCode.EscapingPrison, cage!.Owner, CharacterId.None, CrimeSystem.MinTimer);
         bool escaped = escape || cage is not null && crimes is not null && crimes.Factions.Lawless(cage.Owner);
         if (cage is not null && cage.Occupant == prisoner) cage.Occupant = CharacterId.None;
@@ -490,6 +490,7 @@ public sealed class FixtureRegistry
         c.InWhat = null;
         c.SentenceStart = 0;
         c.SentenceLength = 0;
+        c.Kidnapped = false;
     }
 
     // ------------------------------------------------------------------ saves

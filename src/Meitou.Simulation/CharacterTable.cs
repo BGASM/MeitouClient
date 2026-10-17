@@ -189,6 +189,8 @@ public sealed class CharacterCold
     public float Recognition { get; set; }
     /// <summary>The escaped-prisoner flag (status <c>+0xe8</c>, docs/game/locks.md "Cages and beds"): left a cage before the sentence was served. Hashed only while set.</summary>
     public bool Escaped { get; set; }
+    /// <summary>Held in a cage by a kidnapper (<see cref="Kidnap.KidnapSystem"/>), not sentenced: no sentence is ever served, no bail is offered, getting out is no crime. Saved as <c>meitou kidnapped</c>. Hashed only while set.</summary>
+    public bool Kidnapped { get; set; }
     /// <summary>The fixture this character is picking the lock of (<see cref="Locks.LockSystem"/>; null: none). Hashed only while set.</summary>
     public string? PickingLock { get; set; }
     /// <summary>The building site the <see cref="CharacterTask.Build"/>, <see cref="CharacterTask.Dismantle"/> or <see cref="CharacterTask.DeliverMaterials"/> task works (<see cref="Construction.BuildSite.Id"/>; null: none). Serial phases only. Hashed only while set.</summary>
@@ -415,6 +417,7 @@ public sealed class CharacterTable
             if (k.RecentlyWanted > 0) { hasher.Add(0x52576E74); hasher.Add(k.RecentlyWanted); }
             if (k.Recognition > 0) { hasher.Add(0x5265636F); hasher.Add(k.Recognition); }
             if (k.Escaped) hasher.Add(0x45736361);
+            if (k.Kidnapped) hasher.Add(0x4B64706E);
             if (k.PickingLock is { } pick) { hasher.Add(0x5069636B); hasher.Add(Rng.StableHash(pick)); }
             // A builder's site, bar and the task it goes back to add to the hash only while it works one, so worlds without sites hash as before.
             if (k.BuildSite is { } site) { hasher.Add(0x4275696C); hasher.Add(Rng.StableHash(site)); hasher.Add(k.BuildBar); hasher.Add((int)k.ResumeTask); }

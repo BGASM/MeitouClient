@@ -68,7 +68,7 @@ public sealed partial class ArrestSystem
     /// </summary>
     public int? BailFor(World world, CharacterCold c)
     {
-        if (!c.IsImprisoned || c.InWhat is not { } id || world.Fixtures.Find(id) is not { Kind: FixtureKind.Cage } cage) return null;
+        if (!c.IsImprisoned || c.Kidnapped || c.InWhat is not { } id || world.Fixtures.Find(id) is not { Kind: FixtureKind.Cage } cage) return null;
         int owner = cage.Owner;
         if (owner < 0 || owner == world.Player.Faction || Crimes.Factions.Lawless(owner)) return null;
         long price = 2L * (c.Bounties?.AmountFor(owner) ?? 0);

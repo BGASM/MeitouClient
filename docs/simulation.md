@@ -207,8 +207,8 @@ the player has one; requests (victory/loss chains, ally help) can follow.
   arrival, timers and the 20 % rule run. **Observed** (headless, Dust Bandits, 4 squads of 49 at `raidSizeMult` 4, camera on the leader): the
   followers keep 190, 380 and 470 behind a walking leader (the rule's 187, 375, 562).
 - **Assault**: in phase 1 a loaded campaign squad also fights (`Squad.War`, read by the aggro) everyone not of its faction in the target town when its
-  `pt2` package is a Package_WarAssault (20, 32), else the target faction when the campaign is hostile. Looting, kidnapping and the cannibals'
-  carrier rule (nothing carries yet) are not built.
+  `pt2` package is a Package_WarAssault (20, 32), else the target faction when the campaign is hostile. Looting is not built. A cannibal assault (class 32) goes to phase 2
+  when three of its members carry someone or 15 game minutes after the first did (`CampaignInstance.CarryStart`, not saved); kidnapping: [below](#kidnapping).
 - **Announcement**: a loaded leader in phase 0 says `dialog announcement` once (camera and a target-faction member within 2500): its lines are said as speech bubbles 2 + 0.12 × length seconds apart, or DA 12's wait, and their `interrupt` makes the next talk
   with it the negotiation, also when its faction is hostile. After arriving it waits for the announcement and then while the negotiation is
   pending, at most 1 game hour (engine choice for the Unknown event-2 state); off screen it goes on. Dialogue DA 37 sets phase 1 (2 without a
@@ -461,7 +461,32 @@ Arrests, the recognition meter and the marker are hashed only while set. What a 
   (`Engaged`), re-ordered while the target is up and within 3000. When it is down, carried, caged or out of reach the hunt
   ends: no cage (11.8), and that hunter leaves that target alone for 600 game seconds (engine). Hunts and cagings are
   hashed only while any exist; restarted after a load ([Saves](#saves)).
-- Not built: slaves, shackles, jailed NPCs from spawn data (template `prisoners`, `SquadFactory`).
+- Not built: slaves, shackles (kidnapped captives: [Kidnapping](#kidnapping)), jailed NPCs from spawn data (template `prisoners`, `SquadFactory`).
+
+
+## Kidnapping
+
+`Kidnap/KidnapSystem` (serial `SlowWorld`, right after Carry; needs the population). Facts: [carry-loot 3.2](game/carry-loot.md#32-goals-and-their-target-finders)
+(the finder), [campaigns](game/factions-squads-towns.md#campaigns) (which packages). The goal-254 rule, per member, every 15 ticks, while any downed character exists:
+- **Duty** (`PopulationSystem.KidnapDuty`): the member's role list in its campaign's package for the current phase (a loaded campaign squad is driven by the campaign, so its phase,
+  not the AI, names the package: the retreat of the cannibal-type raids, the cannibal assault), or in its AI squad's running package (cannibals on patrol and at home), in the hour's window.
+- **Victim** (`IsVictim`): the nearest within sight (`RangeOf`, the rescue range; the sensed list's size is **Unknown**) that is alive, down, of a carriable race, not carried, caged or in a bed,
+  not an animal, not already someone's pick, and not of the kidnapper's faction or an ally (engine reading of the **Unknown** class bits). Player characters included; sleepers in beds are not taken.
+- **Lift**: the free member (awake, not fighting, fleeing or held, able to carry, not a player character) lifts it with `CarrySystem.BeginPickUp`, then goes back to following its leader.
+  An AI squad's member starts only when a free cage of its faction is in range (the original's "all cages full" stops the goal); a campaign member always does.
+- **Carry**: a campaign carrier marches home with its squad. Within 1.5 x the radius of a town of its faction it registers the town's fixtures (`RegisterSite`, no spawn needed) and
+  takes the best free cage of its faction in range (`FindCage`, the original's weights; other carriers' cages reserved), walks there and within `use range` + 15 lets go and imprisons
+  the victim (`Imprison`, `CharacterCold.Kidnapped`). Home with no free cage, three failed walks, or an AI carrier waiting 60 s: it drops the victim, who is then left alone for 2 game hours
+  (engine choices; the original's give-up rule is **Unknown**). A carrier that goes down drops its load (Carry). Zones follow a carried player character, so its platoon stays loaded all the way.
+- **Prisoner**: `Kidnapped` = held without a sentence: it is never served (no release round), no bail is offered, and getting out is no escape crime. The cage is locked; rescue is the usual
+  lock work, or a lift out of an unlocked cage ([Cages](#cages-beds-and-locks)). Messages for player victims ("is carrying X away", "has been kidnapped by F").
+- **Save**: the cage state is the existing `in something` / `in what` (Meitou keys for interior cages), and `meitou kidnapped` ([save](formats/save.md)). Carry links are not saved: a save mid-journey
+  leaves the victim down where it was and the raiders (retreating campaign squads) lift it again. The kidnap records themselves are not saved. Hashed only while one runs.
+- **Not built**: eating, killing or enslaving a captive (goals 139, 135, 220, slaves), lifting sleepers from beds, kidnapping as a crime for witnesses, a carrier's platoon unloading with an NPC victim
+  (the carry is dropped when the platoon is stored). A campaign carrier cages in the first town of its faction it reaches, not necessarily the campaign's home; the leader keeps marching to the home.
+- **Observed** (headless, real data, `raidFrequencyMult` 1000): the Skin Bandits' "skin bandit standard raid small" against an outpost with four weak player characters: all four are lifted once down (the
+  cannibal rule sends phase 2 at the third carrier), three are caged at the faction's Skinhouse HQ (it has three cages), the fourth, on the leader, is carried towards the campaign's far home and put down
+  at the first own town without a free cage. A save and load keeps the three caged and `Kidnapped`; a second capture writes the same keys. Cannibal AI squads at home lift and cage a downed player character in about two seconds.
 
 ## Buildings
 

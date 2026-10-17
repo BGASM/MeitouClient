@@ -315,7 +315,7 @@ carry the rest and win on load. Unchanged held state keeps the original keys as 
 and the null handle. `sentence`/`psts` are written while a sentence is set or the save had them; Meitou's start equals `World.GameHours` (day x 24 + hour).
 
 Meitou-only crime keys (`Saving/CrimeSave`, `LockSystem`, `FixtureRegistry`; the original's keys for these facts are **Unknown**), each written only while set and removed otherwise:
-- GAMESTATE_CHARACTER `meitou escaped` (bool, escaped-prisoner flag), `meitou recently wanted` (float, game seconds left), `meitou recognition` (float 0..1, bounty recognition meter).
+- GAMESTATE_CHARACTER `meitou escaped` (bool, escaped-prisoner flag), `meitou kidnapped` (bool, held by a kidnapper: no sentence, no bail), `meitou recently wanted` (float, game seconds left), `meitou recognition` (float 0..1, bounty recognition meter).
 - GAMESTATE_BUILDING `meitou house locked` (bool, a lock-up round locked this home and nothing unlocked it since).
 - GAMESTATE_BUILDING `meitou lock <layout index>` (int level x 4 + broken x 2 + locked) for each interior cage or container whose lock is locked or broken (their ids are not mapped, see above).
 

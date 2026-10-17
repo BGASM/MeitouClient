@@ -65,6 +65,7 @@ public sealed class StandardSystemOptions
     public Meitou.Simulation.Carrying.CarrySettings? Carry { get; init; }
     public Meitou.Simulation.Crime.CrimeSettings? Crime { get; init; }
     public Meitou.Simulation.Crime.ArrestSettings? Arrest { get; init; }
+    public Meitou.Simulation.Kidnap.KidnapSettings? Kidnap { get; init; }
     public Meitou.Simulation.Trading.TradeSettings? Trade { get; init; }
     public Meitou.Simulation.Ai.AiSettings? Ai { get; init; }
     public Meitou.Simulation.Construction.ConstructionSettings? Construction { get; init; }
@@ -86,6 +87,7 @@ public sealed class StandardSystemSet
     public Meitou.Simulation.Carrying.CarrySystem? Carry { get; init; }
     public Meitou.Simulation.Crime.CrimeSystem? Crime { get; init; }
     public Meitou.Simulation.Crime.ArrestSystem? Arrest { get; init; }
+    public Meitou.Simulation.Kidnap.KidnapSystem? Kidnap { get; init; }
     public Meitou.Simulation.Locks.LockSystem? Locks { get; init; }
     public Meitou.Simulation.Trading.TradeSystem? Trade { get; init; }
     public Meitou.Simulation.Ai.AiSystem? Ai { get; init; }
@@ -113,6 +115,7 @@ public sealed class StandardSystemSet
 /// (animation is placed after combat in the game's order, and the golden hashes pin it). Moving the swap to a separate end-of-tick hook would change what retaliation reads.</item>
 /// <item><b>Carry after body, before combat</b>: its <c>SlowWorld</c> sees the knock-outs of this tick's medical step and the corpses the body system removed, so a carrier that went down
 /// drops its load in the same tick; its <c>Inputs</c> come before combat's, so a carrier ordered to attack lets go of the body first. Everything it does is serial.</item>
+/// <item><b>Kidnap right after carry</b>: it lifts with the carry system and cages with the fixtures, in the same serial step order; it adds nothing to the hash until a kidnapping runs.</item>
 /// <item><b>Construction after carry, before combat</b>: its walks and work (all serial) see the characters the body and carry systems left this tick, and a builder ordered to attack lets go of its site before combat's <c>Inputs</c> run; it adds nothing to the hash until the player has a site.</item>
 /// <item><b>Feed after body</b>: the game's order; eating reads hunger the body system advanced in the same tick.</item>
 /// <item><b>Retaliation, then aggro, last</b>: both defer <c>AttackOrder</c>s for the next tick (<see cref="World.Defer"/>) after combat has swapped its arrays; aggro's
@@ -148,6 +151,7 @@ public static class StandardSystems
         if (Has(StandardParts.FirstAid)) systems.Add(new FirstAid.FirstAidSystem(data.Bodies.Constants, data.BodyOptions, data.Items, o.FirstAid));
         if (Has(StandardParts.Body)) systems.Add(new BodySystem(data.Bodies.Constants, data.BodyOptions, o.BodyTimeScale));
         Meitou.Simulation.Carrying.CarrySystem? carry = null;
+        Meitou.Simulation.Kidnap.KidnapSystem? kidnap = null;
         Meitou.Simulation.Ragdolls.RagdollSystem? ragdolls = null;
         if (Has(StandardParts.Carry))
         {
@@ -155,6 +159,8 @@ public static class StandardSystems
             carry = new Meitou.Simulation.Carrying.CarrySystem(data.Bodies.Constants, data.BodyOptions, o.AnimationLengths?.Of(Meitou.Simulation.Carrying.CarrySystem.LiftClip) ?? 1, o.Carry);
             if (Has(StandardParts.Aggro)) carry.Relations = data.Relations;
             systems.Add(carry);
+            // Raiders lifting the downed and carrying them to a cage of their faction: right after the carry system, whose lift and links it uses; it adds nothing to the hash until one runs.
+            if (population is not null) systems.Add(kidnap = new Meitou.Simulation.Kidnap.KidnapSystem(data, population, carry, o.Kidnap));
         }
         Meitou.Simulation.Construction.ConstructionSystem? construction = null;
         if (Has(StandardParts.Construction)) systems.Add(construction = new Meitou.Simulation.Construction.ConstructionSystem(data, o.Construction));
@@ -199,6 +205,6 @@ public static class StandardSystems
         Meitou.Simulation.Dialogue.DialogueSystem? talk = null;
         if (Has(StandardParts.Dialogue)) systems.Add(talk = new Meitou.Simulation.Dialogue.DialogueSystem(data, o.Dialogue, population));
         if (talk is not null && population is not null) (population.Announcer, population.PendingTalk) = (talk.Announce, talk.HasInterrupt);
-        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Crime = crime, Arrest = arrest, Locks = locks, Trade = trade, Ai = ai, Construction = construction, Ragdolls = ragdolls, Dialogue = talk };
+        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Kidnap = kidnap, Crime = crime, Arrest = arrest, Locks = locks, Trade = trade, Ai = ai, Construction = construction, Ragdolls = ragdolls, Dialogue = talk };
     }
 }

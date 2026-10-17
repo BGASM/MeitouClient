@@ -363,10 +363,12 @@ or population); a failed start retries each run, up to 100 times; a gone target 
     base package): the leader goal list of `Cannibal Raid Retreat` (the `retreat AI leader` of "BASE Basic Invasion", "slave raider silent", its
     "non slave trade" copy and "BASE- standard cannibal raid"), `Cannibal raid assault town` (the pt2 leader of the cannibal raid), `Cannibals at home`, the squad
     goals of `Cannibal patrol map (short range)` and `Assault and kidnap` (a DIALOGUE_LINE's `delivery AI package`). So raiders (bandit invasions, slave
-    raiders, cannibals) kidnap when their leader retreats from a raid, cannibals also on patrol and at home. The task (254, final state 153 got a
-    victim, then 154 put the carried one in a cage) needs a free squad member to lift a downed one and a cage of its faction;
-    what makes a target eligible is **Unknown** (the "innocent victim" flag of the status object, [carry-loot](carry-loot.md#unknowns)). Meitou builds none of it:
-    loaded campaign squads run no AI goals, nothing but guards and rescuers carries, and there is no prisoner state beyond jail ([arrest](../simulation.md#arrest-and-jail)).
+    raiders, cannibals) kidnap when their leader retreats from a raid, cannibals also during their assault, on patrol and at home. The task (254, final state 153 got a
+    victim, then 154 put the carried one in a cage) needs a free squad member to lift a downed one and a cage of its faction. The target is the nearest
+    down, uncarried, uncaged, non-animal character of the sensed classes (and, unlike rescue, a sleeper in a bed); the class bits are **Unknown**
+    ([finder](carry-loot.md#32-goals-and-their-target-finders)). Not every raid kidnaps: the Dust Bandit "Invasion with demands" and the Hive, Ninja and Crab
+    raids retreat with other packages (**Verified**, same query). Meitou builds the lift, the carry home and the cage, not the sleepers, eating or slaves:
+    [kidnapping](../simulation.md#kidnapping).
   - Enemies: the base package, in a hostile campaign's phase 1, tags each seen target-faction character with squad memory 4 (TEMP_ENEMY,
     as DA 21); WarAssault tags every seen character except those of another town, with an engine flag (slot 0x248), or of factions with
     +0x1d0 or +0x34 == 8 set (meanings **Unknown**).

@@ -156,12 +156,12 @@ public sealed partial class CarrySystem(GameConstants constants, BodyOptions opt
         }
     }
 
-    /// <summary>Starts a pick-up of <paramref name="body"/> by the character in <paramref name="carrier"/> (serial phases; the arrest system's lift): false when it cannot carry or the body cannot be lifted.</summary>
-    public bool BeginPickUp(World world, int carrier, CharacterId body)
+    /// <summary>Starts a pick-up of <paramref name="body"/> by the character in <paramref name="carrier"/> (serial phases; the arrest and kidnap systems' lift), going back to <paramref name="resume"/> afterwards: false when it cannot carry or the body cannot be lifted.</summary>
+    public bool BeginPickUp(World world, int carrier, CharacterId body, CharacterTask resume = CharacterTask.Idle)
     {
         var table = world.Characters;
         if (!table.TryResolveNext(body, out int b) || b == carrier || table.Cold(carrier) is not { } c || !CanCarry(c) || !CanBeLifted(table.Cold(b)!)) return false;
-        Begin(table, carrier, body, CharacterTask.PickUp, CharacterTask.Idle);
+        Begin(table, carrier, body, CharacterTask.PickUp, resume);
         return true;
     }
 

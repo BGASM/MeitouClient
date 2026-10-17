@@ -78,11 +78,22 @@ finders resolved from the thunks in the exe's bytes):
 | `FIND_AND_RESCUE_LEADER` 142 | - | `FUN_140598540`: the squad leader (`platoon +0xa0`) when it is not the character itself and not dead | - |
 | `FIND_BED_AND_PUT_IN` 106 | `FUN_1405a0d50`: 2 while carrying a body the carrier regards as friendly, whose slot `0x248` is null, that (for a police carrier, `FUN_140599600`) has no bounty with the carrier's faction, whose faction is not hostile to the carrier's (`FUN_1406b26d0`) and not in its town's list `FUN_140599390`; else 0 | none | - |
 | `CARRY_WOUNDED_SLAVES` 168 | - | `FUN_1408cdf50` | - |
-| `FIND_AND_KIDNAP` 132 | - | `FUN_1408cd5c0` | - |
+| `FIND_AND_KIDNAP` 132 | - | `FUN_1408cd5c0` (the character finder below, masks 0x4008 / 0x811, beds allowed) | - |
 | `FIND_A_DEAD_GUY` 138 / 230 | - | `FUN_1408cfb00` / `FUN_1408ce170` (the nearest dead, ragdolled, uncarried body; `carriable` when asked) | - |
 | `LOOT_THE_DEAD` 177 | - | `FUN_14099e680` (via `FUN_14099ae10`) | - |
 | `LOOT_STOLEN_GOODS` 212 | - | `FUN_1408cf6a0` (calls the stolen predicate) | - |
 | `PICKUP_INTRUDERS` 223 / 273 | - | `FUN_14099c110` / `FUN_14099c250` | - |
+
+**Character finder** (`FUN_1408cd2d0(task, out, include, exclude, allowBed)`, **Verified** by decompile; rescue 105/148 call it with masks 1 / 0x4010 and `allowBed` 0,
+kidnap 132 with 0x4008 / 0x811 and `allowBed` 1): walks the owner's sensed list, keeping entries whose category word has a bit of `include` and none of `exclude`
+(the bits are **Unknown**); the nearest (squared XZ distance) passing all of these wins: the target is down (ragdolled or carried, `FUN_1407d1440`, or the byte
+`+0x5b8`) or, only when `allowBed`, in a bed (`+0x2f8 == 1`); not carried (`+0x3d4`), not dead, special state 0 (not caged; bed 1 when allowed), not an animal
+(slot `0x248` is `asAnimal`), and not in the squad's give-up list (`FUN_1402690e0`, a handle-pair list every finder tests; its writer was not traced). Rescue also requires
+the target to share the owner's slot-11 object (probably its faction; **Observed**: tested when `include` has bit 1 and a global flag at `+0x112` is clear). So raiders also take sleepers out of beds. 132 is a
+planner goal (A: 153 got a victim, B: not carrying, effect 48 carrying); 254 has no finder: its B list 153, 154 chains 132, then 112/281 find a cage (`FUN_1408d0770`) and 108 puts the
+carried one in. What sets `Status+0xe9` ("innocent victim") was not found: it is saved with the slave state (`FUN_140626580` / `FUN_140626830`), cleared by the per-update
+`FUN_140852a30` (not carried and in its town's bed, or carried by a friend) and read at the lift's release (`FUN_1405ce1e0`) and by `FUN_1406cc470` / `FUN_1407211b0`;
+it is not part of target eligibility.
 
 ## Unknowns
 
@@ -91,7 +102,7 @@ finders resolved from the thunks in the exe's bytes):
 2. The **sensed-list category bits** (`FUN_140853960` masks 1, 0x4010, 0x20, 0x210, 0x4008, 0x811, 0x10): which bit is ally, enemy, dead, slave;
    and the size of the sensed list, which is the search range of every finder.
 3. The **status object at `Character+0x1a0`** (int at +0: 1 slave, `FUN_1405a4940` "{1} has been enslaved"; 2 probably an escaped slave or
-   prisoner); its `+0xe9` (the "innocent victim" flag of the kidnapping rules), `+0x88`, `+0xe0` (a slave's owner faction); its class name.
+   prisoner); its `+0x88`, `+0xe0` (a slave's owner faction); its class name, and what sets `+0xe9` (the "innocent victim" flag; see the character finder).
    Partly known (**Observed**, [economy 11.4-11.8](economy.md#115-bail-and-sentence)): `+0xe8` escaped-prisoner flag, `+0xea` set on release
    or bail and cleared by a new pending crime, `+0x110` the "recently wanted" marker (250.0).
 4. The **writer of `+0x5b9`**, read as "unconscious" from its readers only.
