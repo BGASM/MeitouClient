@@ -26,7 +26,7 @@ public sealed partial class PopulationSystem
     readonly List<Platoon> platoonBuffer = [];   // StepRoaming's copy of the registry (a step may remove a platoon)
     readonly List<Vector2> playerPositions = [];
 
-    sealed record BuiltRoamer(int Platoon, BuiltSquad Squad);
+    sealed record BuiltRoamer(int Platoon, BuiltSquad? Squad);
 
     static bool IsSettlement(TownType t) => t is TownType.Town or TownType.Village or TownType.Outpost or TownType.Military;
 
@@ -253,11 +253,12 @@ public sealed partial class PopulationSystem
         }
     }
 
-    BuiltSquad BuildRoamer(string templateId, int faction, ulong key, ulong seed, Vector2 position)
+    /// <summary>Null when the template is gone or plans no one now (e.g. a save's platoon whose members are all dead or unique).</summary>
+    BuiltSquad? BuildRoamer(string templateId, int faction, ulong key, ulong seed, Vector2 position)
     {
-        var template = SquadTemplate.From(data.Db.Find(templateId)!);
+        if (data.Db.Find(templateId) is not { } record) return null;
         var townFaction = faction >= 0 ? data.Factions[faction] : null;
-        return BuildOne(template, faction, townFaction, key, seed, position)!;
+        return BuildOne(SquadTemplate.From(record), faction, townFaction, key, seed, position);
     }
 
     void DrainRoamers(World world)
@@ -272,6 +273,7 @@ public sealed partial class PopulationSystem
     {
         var p = world.Platoons.Find(b.Platoon);
         if (p is null || p.State != PlatoonState.Activating) return;
+        if (b.Squad is null) { world.Platoons.Remove(p.Id); return; }   // nobody to spawn: the pool is free to make another
         var site = data.Sites[p.Origin];
         var squad = SpawnSquad(world, b.Squad, site, site.Town.SizeRadius * site.Town.TownRadiusMult, platoonId: p.Id);
         squad.Money = p.Money;
