@@ -120,9 +120,8 @@ Values from the install through the repo's readers (**Verified**, `GameDatabase.
 - The exact priority rule behind `+0xe4` (which squads) and the distance metric of `npc range` (2D or 3D; it is a squared distance from a camera/player focus object).
 - What the heavier per-faction step `FUN_1406b97c0` does with the accumulated time, the other speed-scaled timers (`FUN_140792500`, `FUN_1409a7930`, `FUN_140857500`), and which function starts a loaded save at speed 1 (only the new-game routine `FUN_1405f5d10` was seen to set it).
 - Character slots 79 and 80, the second helper thread (`world +0x8c0`), the pending-event list at `+0x608`, `FUN_140671f50`, `FUN_1407869e0` and several smaller steps of `FUN_140788a00`.
-- Timer lengths of the zone unload test and the margins of the `UnloadedPlatoon` modes; whether physics substeps or fixed-step settings are used (the PhysX scene desc has `timeStepMethod`/`maxTimestep` fields; where the game sets them was not found).
+- Whether physics substeps or fixed-step settings are used (the PhysX scene desc has `timeStepMethod`/`maxTimestep` fields; where the game sets them was not found).
 - Whether character movement compensates for the non-scaled physics step at 2x and 5x.
-- How a loaded squad becomes unloaded in detail (activation of an `UnloadedPlatoon` by player proximity).
 - Which parts of the world use hours vs days for their own timers (about 50 readers of the clock).
 
 ## Expression reference

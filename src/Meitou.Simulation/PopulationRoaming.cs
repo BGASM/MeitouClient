@@ -36,9 +36,12 @@ public sealed partial class PopulationSystem
     bool Wanted(Platoon p) =>
         active.Contains(WorldLayout.ZoneOf(p.Position.X, p.Position.Y)) || p.Pinned && p.Origin >= 0 && active.Contains(data.Sites[p.Origin].Zone);
 
-    /// <summary>Whether a wanted platoon may be made now: the host's <see cref="ZoneGate"/> holds it back until the navmesh of its zone (and a town's own, its town's) is ready.</summary>
+    /// <summary>
+    /// Whether a wanted platoon may be made now: the host's <see cref="ZoneGate"/> holds it back until the navmesh is ready, of its town's zone for a town's own (as the
+    /// town's load is gated; its members may stand in a neighbouring zone), else of its own zone.
+    /// </summary>
     bool Ready(Platoon p) =>
-        ZoneGate is not { } gate || gate(WorldLayout.ZoneOf(p.Position.X, p.Position.Y)) && (!p.Pinned || p.Origin < 0 || gate(data.Sites[p.Origin].Zone));
+        ZoneGate is not { } gate || gate(p.Pinned && p.Origin >= 0 ? data.Sites[p.Origin].Zone : WorldLayout.ZoneOf(p.Position.X, p.Position.Y));
 
     // ---- the look at the roaming squads, in the slow phase ----
 

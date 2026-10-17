@@ -82,7 +82,7 @@ cleared of path, AI, carry, treatment, combat and stealth state, plus the squad'
 The town then holds squads and makes none of its own; the platoon is made of the same characters when the town's zone is
 active again and leaves with the town's grace. This is the original's model: residents are persistent platoons kept as their
 characters ([persistent platoons](game/factions-squads-towns.md#1-object-model)). Saves write stored squads as the town's platoons (`sqt` 1). Any platoon's
-activation waits for the navmesh gate of its zone and its town's. A town whose stored squads all died is made afresh on the
+activation waits for the navmesh gate of its town's zone (a traveller: its own). A town whose stored squads all died is made afresh on the
 next visit (engine gap: the original refills it only through its pools). `ActiveZones` is double-buffered. Zone loading/spawn planning stays off the
 simulation thread; publish results at boundaries.
 `World.PreparePopulation` queues nearby residents/wild squads, activates existing nearby roaming
@@ -120,7 +120,7 @@ budgets. The tier follows it, with Meitou choices marked.
 - **Cost**: target well under 0.1 ms a frame with 1000 platoons (save 2 holds 510). Measured with the bench harness (`--view hub`) before and
   after, plus the simulation's per-system time; no new `--ab` switch without OK.
 - **Waves**: (1) the parallel step, original jobs and speeds, stored roaming squads, hand-off snapping, bench; (2) budgets, regeneration,
-  nests; (3) campaigns. Tests to propose then: the growth formula pin, one real-data round trip of travelled stored squads.
+  nests (`RoamingShare` gives way to the pools: a town's roaming pool starts at the faction's `roaming population`, 0.7 is the nests' rule); (3) campaigns. Tests to propose then: the growth formula pin, one real-data round trip of travelled stored squads.
 
 ## Player
 
