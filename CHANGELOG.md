@@ -3,6 +3,21 @@
 What changed in each release, newest first. The release workflow copies the section of the version it builds into the GitHub release
 notes and refuses to release a version without one: add a `## vX.Y.Z` section with one `- ` line per change before running it.
 
+## v0.12.0
+
+- Audio: ambience, biome music, the title theme, interior reverb and building emitters, footsteps, combat, voices, task and interface sounds, with an Audio settings page (volumes, music frequency) and pause ducking
+- Dialogue: Talk verb and conversation panel with choices, conditions, effects and locks; speech bubbles for ambient lines and campaign announcements
+- Campaigns: war managers, rolls, gathering, phases and assaults, columns with leader trails, negotiation talk, and saved war state
+- Population: town and nest pools that grow and regenerate, stored platoons for unloaded towns, off-screen fights and healing, roads for roaming squads, and "Wild squads stay" (Faithful off, Meitou on)
+- Unique NPCs are made once (replacement or nobody) and their death and capture states are saved
+- Kidnapping: raiders and cannibals lift the downed and carry them to their cage; rescued or escaped victims are free
+- Doors: leaves slide open and shut, walkers open closed doors and stop at locked ones, and an Advanced "Doors close behind" setting closes them 5 s after the last passer
+- Camera follows the original's pan, zoom, turn and tilt rates, input smoothing and edge scroll; the character editor has its own scene with orbit
+- Inventory charge bars on food and tools; trade: right click buys or sells one unit (Shift the stack) and buying equips into a free slot
+- HUD: inspecting another faction's character keeps your selection; the build button works and B opens the build window; Tab changes squad
+- Hover label removed; the outline is white unless the faction is hostile
+- Advanced setting "luckyren Mode" (stored only, no effect yet)
+
 ## v0.11.0
 
 - Building: build menu with placement ghost and queue, construction sites with builders and material delivery, dismantling refunds, wall lines with shorts, connectors and wedges, and player outposts; buildings and research are saved and loaded
