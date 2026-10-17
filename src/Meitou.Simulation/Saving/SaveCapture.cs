@@ -33,7 +33,7 @@ public sealed class SaveCaptureOptions
 /// population's own town and roaming squads in the world as new platoons; everything else is carried through unchanged. Without one a new save
 /// is made from the game data: all factions with their relations, the player's platoons and the population's squads, a default state per placed town, and empty weather, research and decals.
 /// </summary>
-public static class SaveCapture
+public static partial class SaveCapture
 {
     /// <summary>
     /// The save a capture starts from: a copy of the loaded save, or a new one made from the data (all factions with the data's relations, a default state per placed town). It holds
@@ -84,6 +84,12 @@ public static class SaveCapture
         if (loaded is not null) WriteRoaming(game, world, loaded);
         WriteSavedNpcs(builder, world, data, options, clock, buildings, races);
         WriteFreshNpcs(builder, world, data, options, clock, buildings, races);
+        // The wild: every nest in the town list the original's way, and the wild squads in the world as new platoons of their nest or sector.
+        if (world.Systems.OfType<PopulationSystem>().FirstOrDefault() is { } population)
+        {
+            var nests = WriteNests(builder, world, data, population, options.Seed);
+            WriteWildNpcs(builder, world, data, population, nests, options, clock, buildings, races);
+        }
 
         game.UpdateDerived();
         return game;
@@ -116,11 +122,13 @@ public static class SaveCapture
         }
     }
 
-    /// <summary>Writes the prosperity and counters of the loaded factions and the current relation table into the save's factions.</summary>
-    /// <summary>Writes what the player knows of each placed town into its state, by instance id. Flags are only added: the world never forgets a town.</summary>
-    /// <summary>The instance a camp's town state carries: Meitou's own key (wild site and TOWN record), as nests have none in the original.</summary>
+    /// <summary>
+    /// The instance of a camp's town state in Meitou saves written before nests were saved the original's way (wild site and TOWN record): still read, and still updated
+    /// in a save that has one, never written new (camps are now their nest's state, <see cref="WriteNests"/>).
+    /// </summary>
     internal const string CampInstancePrefix = "meitou-nest:";
 
+    /// <summary>Writes what the player knows of each placed town into its state, by instance id. Flags are only added: the world never forgets a town.</summary>
     static void WriteTownKnowledge(SaveBuilder builder, PopulationData data, PlayerState player)
     {
         var game = builder.Game;
@@ -129,13 +137,7 @@ public static class SaveCapture
         for (int i = 0; i < known.Length && i < data.Sites.Count; i++)
             if (known[i] != 0 && data.Sites[i].InstanceId.Length > 0) byInstance[data.Sites[i].InstanceId] = known[i];
         foreach (var camp in player.Camps)
-        {
-            string instance = CampInstancePrefix + camp.Site.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + camp.TownId;
-            byInstance[instance] = camp.Known;
-            if (!game.Towns.Any(t => t.Instance == instance))
-                builder.AddTown("Town state " + camp.Name, instance, camp.FactionId, isNest: true,
-                    camp.Position is { } p ? WorldLayout.ZoneOf(p.X, p.Z) : null, (int)FcsRecordType.NEST);
-        }
+            byInstance[CampInstancePrefix + camp.Site.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + camp.TownId] = camp.Known;
         foreach (var town in game.Towns)
         {
             if (!byInstance.TryGetValue(town.Instance, out var flags)) continue;

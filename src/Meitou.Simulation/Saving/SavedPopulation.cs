@@ -53,7 +53,19 @@ public sealed class SavedPlatoon
     public Vector2 Anchor { get; set; }
     /// <summary>Its characters were in the world at least once: a capture writes them.</summary>
     public bool Touched { get; set; }
+    /// <summary>A wild platoon (docs/formats/save.md "Wild and nest platoons"): a nest's (<see cref="Nest"/> set) or a homeless one (a sector's); null for a town's.</summary>
+    public WildKind? Wild { get; init; }
+    /// <summary>The save's nest its <c>hometown</c> names (a nest platoon).</summary>
+    public SavedNest? Nest { get; init; }
+    /// <summary>The population's wild site it counts against (set when the wild layout is made; -1: none, e.g. a world without biome data).</summary>
+    public int WildSite { get; set; } = -1;
 }
+
+/// <summary>
+/// A nest of the save: an entry of <c>quick.save</c>'s GAMESTATE_TOWN_INSTANCE_LIST (id, TOWN record, position) and its <c>Nest state</c> GAMESTATE_TOWN, whose type-85
+/// <c>hand</c> is what nest platoons name as <c>hometown</c> (docs/formats/save.md "Nests").
+/// </summary>
+public sealed record SavedNest(string Instance, string TownId, Vector3 Position, Hand Handle, FcsRecord State);
 
 /// <summary>What a world loaded from a save needs to make the save's NPC platoons later (<see cref="World.Saved"/>), and the platoons themselves.</summary>
 public sealed class SavedPopulation
@@ -65,6 +77,8 @@ public sealed class SavedPopulation
     public SaveClock Clock { get; init; }
     public int PlayerFaction { get; init; } = -1;
     public List<SavedPlatoon> Platoons { get; } = [];
+    /// <summary>The save's nests in list order: the wild layout takes them before rolling more (empty: none, e.g. a Meitou save from before nests were written).</summary>
+    public List<SavedNest> Nests { get; } = [];
     /// <summary>Platoon names to their entry.</summary>
     public Dictionary<string, SavedPlatoon> ByName { get; } = new(StringComparer.Ordinal);
     /// <summary>Lines for the host's log (each platoon made, characters left out); taken by <see cref="TakeLog"/>.</summary>
@@ -288,7 +302,7 @@ internal static class SavedCharacters
             }
             float yaw = m.Position is null ? SaveRotation.YawOf(p.Source.Rotation) : m.Yaw;
             bool leads = p.Source.IsLeader || !hasLeader && made.Count == 0;
-            var task = leads ? (sp.Pinned ? CharacterTask.Wander : CharacterTask.Idle) : CharacterTask.Follow;
+            var task = leads ? (sp.Pinned || sp.Wild is not null ? CharacterTask.Wander : CharacterTask.Idle) : CharacterTask.Follow;
             var id = Make(world, p, sp.Name, squad, platoon.Faction, context.PlayerFaction, false, at, yaw, task, SpeedMode.Walk, data, assembly, context, m.Bounties, notes);
             ref var hot = ref world.Characters.Next[id.Slot];
             hot.TaskTime = 0.5f + Rng.Float(Rng.Hash(world.Seed, (ulong)squad.Id << 8 | (uint)(m.Slot & 0xFF), RngPurpose.Think)) * 3;
@@ -309,7 +323,7 @@ internal static class SavedCharacters
         }
         world.Squads.Add(squad);
         sp.Touched = true;
-        context.Log($"{sp.Name} ({name}, {(sp.Pinned ? "town" : "roaming")}): {squad.Members.Count} saved character(s) at {lead.X:0}, {lead.Z:0}");
+        context.Log($"{sp.Name} ({name}, {(sp.Pinned ? "town" : sp.Wild is { } wild ? (wild == WildKind.Nest ? "nest" : "homeless") : "roaming")}): {squad.Members.Count} saved character(s) at {lead.X:0}, {lead.Z:0}");
         return squad;
     }
 

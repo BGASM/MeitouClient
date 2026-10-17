@@ -34,6 +34,11 @@ spawn distances/timers/owner rules. Nest debris and regenerating squads are stat
 resolve faction, homes/parts/material replacement, residents, interiors, contents and culture.
 World-state replacement towns and faction ownership affect both population and building data.
 
+**Sector and nest counts** (**Verified** by code): a platoon is filed in the area sector of its position (`FUN_1408f6c80`, from the platoon constructor and
+`Platoon::vfunc_28`): persistent platoons and nest squads into a set that is not counted, the rest into the counted set (+0x60, size +0x70), moved to a third set
+(+0x88, size +0x98) while imprisoned or dead but still loaded; a sector's load is +0x70 + 0.5 x +0x98 against its group's cap. A nest's or town's pool is the set
+of platoons whose `hometown` is it, by `sqt` (1 residents, 2 roaming), counted in living characters ([save keys](../formats/save.md#npc-platoons-meitou-mapping)).
+
 Loot/building inventories, artifacts, shop stock, prisoners/slaves and placed debris derive
 from different reference lists. Preserve slot/count/quality/owner fields and forbidden-item
 rules rather than treating every list as uniform random loot. Unique/campaign survey is data,
@@ -169,7 +174,7 @@ not decoded behaviour. Off-screen town lifecycle and full campaigns remain incom
   replacement logic, `faction gen` at game start, `NEW_GAME_STARTOFF.faction relations`.
 - Who enforces CONSTANTS `max squads`, `max squad size`, `max faction size`.
 - Which override town wins among several qualifying candidates; what exactly repopulating a town from its override does.
-- Whether the 1250 radius of the proximity helper is squared; the sector counters a/b (`+0x70`, `+0x98`) beyond "squad counts".
+- Whether the 1250 radius of the proximity helper is squared.
 - Patrol routes: the patrol tasks (`Task_Patrol`, `Task_PatrolTown`, `GoOutOnPatrol*`) were not decoded here (class mapping: [ai-tasks.md](ai-tasks.md#tasktype-to-task-class); packages: [ai.md](ai.md#signal-functions-and-the-package-classes)); no fixed route data
   was found in FCS records (squad templates only name `AI packages`; `patrol approaches towns` is a bool).
 

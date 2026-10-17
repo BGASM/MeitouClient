@@ -79,6 +79,7 @@ public static class SaveLoader
             Handles = handles, InstanceOf = instanceOf, Appearances = options.Appearances, Clock = loaded.Clock, PlayerFaction = playerIndex,
         };
         world.Saved = context;
+        ReadNests(save, data, context);
         foreach (var platoon in save.Platoons)
         {
             bool mine = playerFaction is not null && platoon.FactionId == playerFaction.Id;
@@ -190,6 +191,7 @@ public static class SaveLoader
         int origin = -1;
         for (int i = 0; i < data.Sites.Count && baseTown.Length > 0; i++)
             if (data.Sites[i].Town.Id == baseTown) { origin = i; break; }
+        if (origin < 0 && platoon.SquadTemplate.Length > 0 && LoadWildPlatoon(world, platoon, data, loaded, context)) return;
         if (origin < 0 || platoon.SquadTemplate.Length == 0)
         {
             loaded.Notes.Add($"{platoon.Name}: no placed town for its base town '{baseTown}' or no squad template; its platoon stays in the save only.");
@@ -252,4 +254,65 @@ public static class SaveLoader
         return job is Ai.PlatoonJob.PatrolShortRange or Ai.PlatoonJob.TravelTarget or Ai.PlatoonJob.TravelTargetFast;
     }
 
+    /// <summary>
+    /// The save's nests (docs/formats/save.md "Nests"): the entries of <c>quick.save</c>'s town list whose GAMESTATE_TOWN is a nest (<c>is nest</c>, a type-85 <c>hand</c>) and
+    /// whose target is a TOWN of the game data, in list order.
+    /// </summary>
+    static void ReadNests(SaveGame save, PopulationData data, SavedPopulation context)
+    {
+        if (save.TownInstanceList is not { } list) return;
+        var byId = new Dictionary<string, FcsRecord>(StringComparer.Ordinal);
+        foreach (var r in save.Quick.Records) byId.TryAdd(r.StringId, r);
+        foreach (var entry in list.Instances)
+        {
+            if (entry.IsRemoved || entry.States.Count == 0 || !byId.TryGetValue(entry.States[0], out var state)) continue;
+            if (state.RecordType != FcsRecordType.GAMESTATE_TOWN || !state.Bools.GetValueOrDefault("is nest")) continue;
+            var hand = Hand.Read(state, "hand");
+            if (hand.Type != (int)FcsRecordType.NEST || data.Db.Find(entry.Target) is not { Type: FcsRecordType.TOWN }) continue;
+            context.Nests.Add(new SavedNest(entry.Id, entry.Target, entry.Position, hand, state));
+        }
+    }
+
+    /// <summary>
+    /// A wild platoon (docs/formats/save.md "Wild and nest platoons"): one whose <c>hometown</c> names a nest of the save is that nest's, one with no home town and no placed
+    /// <c>basetown</c> is homeless. Either becomes a stand-in at its saved place that never travels; the population binds it to its nest or its sector, which make that much
+    /// less of their own. False when it is neither (the caller notes it).
+    /// </summary>
+    static bool LoadWildPlatoon(World world, SavePlatoon platoon, PopulationData data, LoadedSave loaded, SavedPopulation context)
+    {
+        var home = Hand.Read(platoon.Record, "hometown");
+        SavedNest? nest = null;
+        if (home.Type == (int)FcsRecordType.NEST)
+            foreach (var n in context.Nests)
+                if (n.Handle.C == home.C && n.Handle.CS == home.CS) { nest = n; break; }
+        if (nest is null && !home.IsNull) return false;
+        if (data.Db.Find(platoon.SquadTemplate) is not { } templateRecord || !SquadFactory.IsTemplate(templateRecord)) return false;
+        if (!platoon.IsLoaded || platoon.Characters.Count == 0) return true;   // nothing to make: it stays in the save as it is
+        var kind = nest is null ? WildKind.Sector : WildKind.Nest;
+        var sp = new SavedPlatoon { Source = platoon, Pinned = false, Wild = kind, Nest = nest, Anchor = new Vector2(platoon.Position.X, platoon.Position.Z) };
+        foreach (var sc in platoon.Characters) sp.Members.Add(new SavedMember { Source = sc });
+        string? saved = platoon.Record.Strings.TryGetValue("currentPackage", out var current) && current.Length > 0 ? current : null;
+        var (package, job) = Ai.PlatoonJobs.For(data.Ai, Meitou.Data.Gameplay.SquadTemplate.From(templateRecord), saved);
+        int faction = data.FactionIndex(platoon.FactionId);
+        var p = new Platoon
+        {
+            Id = world.Platoons.NextId(),
+            Origin = -1,
+            TemplateId = platoon.SquadTemplate,
+            Faction = faction,
+            Key = Rng.Mix(Rng.StableHash(platoon.Name)),
+            Size = Math.Max(platoon.CharCount, platoon.Characters.Count),
+            Position = new Vector2(platoon.Position.X, platoon.Position.Z),
+            Money = platoon.Money,
+            State = PlatoonState.Unloaded,
+            Package = package?.Id, Job = job,
+            Saved = sp,
+        };
+        world.Platoons.Add(p);
+        sp.PlatoonId = p.Id;
+        context.Platoons.Add(sp);
+        context.ByName[sp.Name] = sp;
+        loaded.WildPlatoons++;
+        return true;
+    }
 }

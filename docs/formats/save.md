@@ -157,11 +157,11 @@ saves (71 regions each, mods included):
 | int `p_w_wi_bu_t_s` / `_t_e`, float `_bu_s_s` / `_s_e`, `_bu_a_s` / `_a_e` | the last wind change: start/end minute, speed and angle (radians) at each end, lerped linearly. On load one not running at the current minute is marked done and its times zeroed |
 | float `p_w_wi_time` | game-speed seconds the weather has run (dt × speed, `FUN_1409dc0e0`); **Observed** = (now − start) × 20/11 in 57 of 71 regions of the later saves, larger for a new game's first weathers |
 | float `p_w_fog_a` | written for the camera's region only (one per save, 0 in every sample): a fog value read from and restored into the fog manager; meaning **Unknown** |
-| `p_<nest TOWN id>_count` / `_start` (int), `_respawn` (float) | the region's nests (`FUN_140103700`, `FUN_140104290`); **Unknown** |
+| `<k>_<effect group id>_count` / `_start` (int), `_respawn` (float) | weather effect groups, not nests (**Verified** by code, `EffectGroup::vfunc_0/1` `FUN_140103700` / `FUN_140104290`): the id is the group's record (`40561-weather_otto1.mod` = `weather_rain1`), `_start` its first `E<n>` instance, `_count` how many follow, `_respawn` its timer; the writer puts `_respawn` in the float map and the loader reads the int map, so it always loads 0 |
 
 Meitou (`Data/Save/SaveWeather`, the host's `WorldWeather.Restore`): reads every region's season, weather, strength and wind into `WeatherRegionSnapshot`
 (heading = −angle; the fog fade is not saved, so a restored weather starts faded in) and writes them back at save time, with `_w_wi_time` as
-(now − start) × 20/11 and a new region's `_nestcount` from its BIOME_GROUP. Nest keys, `_w_fog_a` and the `E<n>` effect instances are carried as read.
+(now − start) × 20/11 and a new region's `_nestcount` from its BIOME_GROUP. Effect-group keys, `_w_fog_a` and the `E<n>` effect instances are carried as read.
 The CAMERA's sky transition is written as finished (`sky updating` false, both times 30, the current sky multiplier and cloud density); the loader snaps the sky.
 
 ### Saved, derived and regenerated
@@ -193,12 +193,44 @@ one changed in the character editor (its keys replaced by the edited copy's, so 
 ### NPC platoons (Meitou mapping)
 
 Every saved NPC platoon with a `basetown` naming a placed town is restored (a characterless town-bound one is skipped); town-bound ones (template does not travel) are pinned to their town and replace
-that many of its resident squads of the same template; a town holding any rolls no bar squads. Wild and nest platoons are kept in the file untouched. On save, a restored platoon is rewritten
+that many of its resident squads of the same template; a town holding any rolls no bar squads. Wild and nest platoons: [below](#wild-and-nest-platoons-meitou-mapping). On save, a restored platoon is rewritten
 only once loaded (its characters from the world), otherwise only its position/package; a squad the population made is written as a new PLATOON with the
 `SaveBuilder` key set plus `basetown` (town id), `is resident` (false for a travelling template) and `currentPackage`. **Observed** (headless load of saves 1, 2,
 wade): NPCs within 5 units of their saved positions (save 2: 4 of 107 differ in Y only, flat test ground); a Meitou save → load restores them
 exactly with no fresh squads for save 2 and a new game. A pinned platoon is homed in the building its `homebuilding` handle names (state `<id>-S23`
 of zone C-1, X = c % 64, Y = c / 64; ids repeat across zones); that building is taken out of the town's free homes. **Unknown:** how the original reuses the saved package.
+
+PLATOON keys (**Verified**):
+- `sqt` is the town pool the platoon counts against (platoon +0xa8; by code: written by `FUN_140372ef0`, read by `FUN_1407ed0f0`, setter `FUN_1409c44b0` makes 0 into 1
+  and 3+ into 2, default 2): 1 residents (and bar squads), 2 roaming; every wild platoon of the samples has 2 (nests have only pool 2).
+- `hometown` (handle) puts the platoon into that town's or nest's pool at load (`FUN_1407ec8d0`; the platoon's faction and player status must match the town's);
+  the pool counts living characters, `char count` while the platoon is not active (`FUN_1408f6a40`). `basetown` is only kept as a TOWN record pointer.
+
+### Wild and nest platoons (Meitou mapping)
+
+A wild platoon is one whose `basetown` is no placed town: its `hometown` naming a nest of the [town list](#nests-town-list) makes it that nest's, no `hometown` and no
+placed `basetown` makes it homeless (in the samples `basetown` is the nest's TOWN or empty). **Observed** census: save 2 holds 6 nest and 5 homeless platoons
+(49 characters, 8 dead), wade 0 and 4 (10), save 1 4 and 3 (67), all `sqt` 2. Meitou (`SaveLoader.LoadWildPlatoon`, `PopulationWild.cs`) loads each as a stand-in
+at its saved place that never travels and is made as its saved characters when its zone is active: a nest's counts its living members against the nest's pool (as the
+original), a homeless one counts as one of the squads of the sector it stands in (the original files a platoon in the sector of its position, **Verified** by code
+`FUN_1408f6c80`, but a loaded one starts in the sector at the origin and is moved later, so for a while its real sector may spawn beside it; engine choice: bound at once).
+A nest squad more than 3 nest radii from its nest wanders where it stands (engine choice: saves hold nest squads kilometres away). On save the wild squads the
+population made are written as new platoons: a nest's with `basetown` = its TOWN and `hometown` = the nest's handle, a homeless one with neither, `sqt` 2.
+**Observed** (headless, saves 2, wade, 1, the player moved next to each wild platoon): 41 of 49, 10 of 10, 67 of 67 saved wild characters made (the rest dead in the
+save), each at its saved position (0 units off); a held nest or sector made only its remainder; a Meitou save → load gives the same wild characters at the same places
+(78, 10, 96) and no fresh wild squads.
+
+### Nests (town list)
+
+**Verified** by code (`FUN_140935120` from `loadGame`, factory `FUN_140581770`, `Nest` constructor `FUN_140934ab0`): each GAMESTATE_TOWN_INSTANCE_LIST entry whose target
+TOWN has `type` 0 becomes a nest at the entry's position; its handle is the `hand` of the entry's state (a null one gets a new random handle); no other key of the
+`Nest state` is read. Entries (**Observed**, saves 1, 2, wade: 13, 150, 150): id `<n>-quick.save-INGAME`, zero quaternion, state `<id>-S5e` named
+`Nest state <TOWN name> <k>` (`k` a rising number with gaps, origin **Unknown**), keys `hand` (type 85, a town container `C`), `started`, `explored`,
+`recently discovered`, `discovered`, `ded`, `is nest` true, `faction`, `artifacts count`, floats `popd2` (= the TOWN's `nest resident population` in every sample) and
+`pop2` (≤ it), `popd`, `pop`, `tod` (0); some have `zzX0` / `zzY0`. The states sit before the list. A save holds only the nests made so far (save 1: 13; the original
+adds them as areas tick). Meitou takes a save's nests first and rolls the rest of each group's count; a Meitou save writes every nest of its layout this way
+(new ones with `popd2` = `pop2` = `nest resident population`, `started` once loaded, the player's knowledge as `discovered` / `explored`), so a base save gains its
+unrolled nests on the first Meitou save, and loading a Meitou save rolls none. Older Meitou saves' `meitou-nest:` camp states are still read.
 
 ### Locks, cages and sentences
 
@@ -272,7 +304,7 @@ Buildings name it by their `town` handle. Whether the loader takes the name from
 
 - What `byteSize` encodes beyond "child count for some record classes", and whether the game ever reads it (it does not at load).
 - The two long slot lists (2503 and 2969 ints) at the end of `quick.save`; the `S` serial's use when a handle goes stale (what happens on a mismatch).
-- The roles of BIOMES `E<n>` instances (EffectHandler state fields) and nest keys, `_w_fog_a`, the short-key CAMERA floats and bools (`bs cod gdm ht nnm ps rs`, `bl ep`), `TI day/dat0`, `sqt`, `towntime`, `jobhr`, `ssct`, and whether MEDICAL `fed` / `KO` are the stomach buffer and the KO timer (the other MEDICAL floats are explained above).
+- The roles of BIOMES `E<n>` instances (EffectHandler state fields), `_w_fog_a`, the short-key CAMERA floats and bools (`bs cod gdm ht nnm ps rs`, `bl ep`), `TI day/dat0`, `towntime`, `jobhr`, `ssct`, and whether MEDICAL `fed` / `KO` are the stomach buffer and the KO timer (the other MEDICAL floats are explained above).
 - Whether `loadGame` rejects or adapts to a `mods` list that differs from the current load order (nothing in the sample: single base-game save).
 - Prisoners, dead characters, bounties, trade and mission state, and player outposts: not present in an early-game sample. Player-built building and outpost keys are known from the code only ([zones](zones.md#placement-keys), [outposts](#player-outposts)).
 - Exactly when platoon files are written to the working folder between saves (only at save time is certain) and which zones are written on unload ("Delaying saving zone").

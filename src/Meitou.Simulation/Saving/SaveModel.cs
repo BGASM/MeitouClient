@@ -68,6 +68,8 @@ public sealed class LoadedSave
     public Dictionary<int, string> RoamingPlatoons { get; } = [];
     /// <summary>NPC platoons that stay in their placed town (residents, bar squads, slaves): pinned stand-ins, made when the town loads, and that many fewer of the town's own.</summary>
     public int TownBoundPlatoons { get; set; }
+    /// <summary>Wild NPC platoons (a nest's or homeless): stand-ins that stay where they are, made when their zone loads, counted by their nest or sector.</summary>
+    public int WildPlatoons { get; set; }
     /// <summary>The CAMERA <c>mods</c> entries the running load order lacks (the save was made with mods this game does not load).</summary>
     public List<string> MissingMods { get; } = [];
     /// <summary>What was left out or changed, one line each (a record that could not be resolved, characters that are dead, platoons without a town...).</summary>

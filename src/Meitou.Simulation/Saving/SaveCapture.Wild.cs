@@ -1,0 +1,165 @@
+using System.Numerics;
+using Meitou.Data.Fcs;
+using Meitou.Data.Gameplay;
+using Meitou.Data.Gameplay.Bodies;
+using Meitou.Data.Save;
+using Meitou.Data.World;
+
+namespace Meitou.Simulation.Saving;
+
+public static partial class SaveCapture
+{
+    const string NestStatePrefix = "Nest state ";
+    const string TownStateSuffix = "-S5e";   // the hex of GAMESTATE_TOWN (94)
+
+    /// <summary>
+    /// Every nest of the wild layout in <c>quick.save</c>'s town list, the original's way (docs/formats/save.md "Nests"): a nest the save already holds keeps its entry and
+    /// state, and gets the player's knowledge of it; a rolled one gets an entry <c>&lt;n&gt;-quick.save-INGAME</c> (target the TOWN record, its position, a zero
+    /// quaternion) and a GAMESTATE_TOWN <c>&lt;entry&gt;-S5e</c> named <c>Nest state &lt;name&gt; &lt;k&gt;</c> with a type-85 <c>hand</c> and the key set of the samples. The
+    /// population remembers each one, so the next save reuses it. Returns each nest site's handle (what its platoons' <c>hometown</c> names).
+    /// </summary>
+    static Dictionary<int, Hand> WriteNests(SaveBuilder builder, World world, PopulationData data, PopulationSystem population, ulong seed)
+    {
+        var hands = new Dictionary<int, Hand>();
+        var sites = population.WildSites;
+        if (sites.Count == 0) return hands;
+        var game = builder.Game;
+        var quick = game.Quick;
+        var byId = new Dictionary<string, FcsRecord>(StringComparer.Ordinal);
+        foreach (var r in quick.Records) byId.TryAdd(r.StringId, r);
+        var list = game.TownInstanceList;
+        var entries = new Dictionary<string, FcsInstance>(StringComparer.Ordinal);
+        foreach (var e in list?.Instances ?? []) entries.TryAdd(e.Id, e);
+        var known = new Dictionary<int, CampView>();
+        foreach (var camp in world.Player.Camps) known[camp.Site] = camp;
+        int container = game.Towns.Select(t => t.Handle).Where(h => !h.IsNull).Select(h => h.C).DefaultIfEmpty(0).Max();
+        // The number after a nest state's name: one more than the highest a save's nest has (its origin is Unknown, docs/formats/save.md "Nests").
+        int counter = game.Towns.Select(t => t.Record.Name).Where(n => n.StartsWith(NestStatePrefix, StringComparison.Ordinal))
+            .Select(n => int.TryParse(n[(n.LastIndexOf(' ') + 1)..], System.Globalization.CultureInfo.InvariantCulture, out int k) ? k : 0).DefaultIfEmpty(game.Towns.Count).Max();
+        // quick.save's id counter, taken once (a scan of every record) and counted on here.
+        int nextNumber = -1;
+        int Next()
+        {
+            if (nextNumber < 0) nextNumber = NextQuickNumber(quick);
+            else quick.Data.NextId = ++nextNumber;
+            return nextNumber;
+        }
+
+        foreach (var site in sites)
+        {
+            if (site.Kind != WildKind.Nest || site.Nest is not { } nest) continue;
+            FcsRecord? state = null;
+            if (population.NestSaveId(site.Index, out var id) && entries.TryGetValue(id.Instance, out var entry) && entry.States.Count > 0)
+                state = byId.GetValueOrDefault(entry.States[0]);
+            if (state is null)
+            {
+                if (list is null)
+                {
+                    int n = Next();
+                    list = new FcsRecord { Type = (int)FcsRecordType.GAMESTATE_TOWN_INSTANCE_LIST, Id = n, Name = "0", StringId = QuickNumberId(n) };
+                    quick.Records.Add(list);
+                    game.TownInstanceList = list;
+                }
+                var centre = population.WildCentreOf(site.Index) ?? site.Spots[0];
+                entry = new FcsInstance
+                {
+                    Id = QuickNumberId(Next()), Target = nest.Id,
+                    Position = new Vector3(centre.X, world.Walkability.GroundHeight(centre.X, centre.Y), centre.Y), Rotation = new Quaternion(0, 0, 0, 0),
+                };
+                state = new FcsRecord { Type = (int)FcsRecordType.GAMESTATE_TOWN, Id = Next(), Name = $"{NestStatePrefix}{nest.Name} {++counter}", StringId = entry.Id + TownStateSuffix };
+                entry.States.Add(state.StringId);
+                list.Instances.Add(entry);
+                entries[entry.Id] = entry;
+                // With the other town states, before the list (the original's order).
+                int at = quick.Records.IndexOf(list);
+                quick.Records.Insert(at < 0 ? quick.Records.Count : at, state);
+                byId[state.StringId] = state;
+                var hand = new Hand((int)FcsRecordType.NEST, ++container, (int)Rng.Mix(Rng.StableHash(entry.Id) ^ seed), 0, 0);
+                hand.Write(state, "hand");
+                state.Ints["artifacts count"] = 0;
+                foreach (var k in new[] { "started", "explored", "recently discovered", "discovered", "ded" }) state.Bools[k] = false;
+                state.Bools["is nest"] = true;
+                state.Strings["faction"] = site.Faction >= 0 ? data.Factions[site.Faction].Id : nest.Faction ?? "";
+                // popd2 = pop2 = the TOWN's nest resident population for a nest that has lost no one (every full nest of the samples); the town pools are 0.
+                state.Floats["popd2"] = nest.NestResidentPopulation;
+                state.Floats["pop2"] = nest.NestResidentPopulation;
+                foreach (var k in new[] { "popd", "pop", "tod" }) state.Floats[k] = 0;
+                game.Towns.Add(new SaveTown(state));
+                population.RememberNest(site.Index, entry.Id, hand);
+            }
+            // Loaded once: `started` (Observed: set on most nests near the player's path, meaning not decoded).
+            if (population.WildCentreOf(site.Index) is not null) state.Bools["started"] = true;
+            if (known.TryGetValue(site.Index, out var camp))
+            {
+                if ((camp.Known & TownKnowledge.Discovered) != 0) state.Bools["discovered"] = true;
+                if ((camp.Known & TownKnowledge.Explored) != 0) state.Bools["explored"] = true;
+                state.Bools["recently discovered"] = (camp.Known & TownKnowledge.Recent) != 0;
+            }
+            hands[site.Index] = Hand.Read(state, "hand");
+        }
+        return hands;
+    }
+
+    /// <summary>
+    /// The wild squads the population made that are in the world (docs/formats/save.md "Wild and nest platoons") as new platoons: a nest's with <c>basetown</c> its TOWN
+    /// record and <c>hometown</c> the nest's handle, a homeless one with neither; <c>sqt</c> 2 (every wild platoon of the samples), the region as <c>map area</c>, the package
+    /// running; its characters as new ones. Loaded again they are the save's wild platoons, counted by their nest or sector.
+    /// </summary>
+    static void WriteWildNpcs(SaveBuilder builder, World world, PopulationData data, PopulationSystem population, Dictionary<int, Hand> nests, SaveCaptureOptions options, SaveClock clock,
+        IReadOnlyDictionary<string, FcsRecord> buildings, Dictionary<string, RaceData?> races)
+    {
+        var game = builder.Game;
+        var table = world.Characters;
+        var factions = new Dictionary<string, SaveFaction>(StringComparer.Ordinal);
+        foreach (var f in game.Factions) factions.TryAdd(f.Id, f);
+        foreach (var site in population.WildSites)
+            foreach (int squadId in population.WildSquadsOf(site.Index))
+            {
+                if (world.Squads.Find(squadId) is not { } squad || squad.Faction < 0 || squad.Faction >= data.Factions.Count) continue;
+                var alive = squad.Members.Where(m => table.IsAlive(m) && table.Cold(m.Slot) is { IsPlayer: false, DiedTick: < 0, Save: null }).ToList();
+                if (alive.Count == 0) continue;
+                var faction = data.Factions[squad.Faction];
+                factions.TryGetValue(faction.Id, out var state);
+                var leader = alive.Contains(squad.Leader) ? squad.Leader : alive[0];
+                var at = table.Previous[leader.Slot].Position;
+                var platoon = builder.AddPlatoon(FreshName(game, state, faction.Name), faction.Name, faction.Id, squad.TemplateId, at, (int)Math.Clamp(squad.Money, int.MinValue, int.MaxValue));
+                var record = platoon.Record;
+                record.Ints["sqt"] = 2;
+                if (site.Kind == WildKind.Nest && site.Nest is { } nest && nests.TryGetValue(site.Index, out var hand))
+                {
+                    record.Strings["basetown"] = nest.Id;
+                    hand.Write(record, "hometown");
+                }
+                WriteMapArea(record, data, at);
+                if (squad.Ai?.Current?.Id is { } package) record.Strings["currentPackage"] = package;
+                foreach (var id in alive)
+                {
+                    int f = table.Cold(id.Slot)!.Faction;
+                    string owner = f >= 0 && f < data.Factions.Count ? data.Factions[f].Id : faction.Id;
+                    WriteCharacter(builder, world, data, options, clock, buildings, races, platoon, null, id, owner, id == leader, orders: false);
+                }
+                SetCharCount(platoon);
+            }
+    }
+
+    /// <summary>A new platoon's region: <c>map area sid</c> = the BIOME_GROUP of the cell it stands in, <c>map area name</c> its name (as every platoon of the samples has).</summary>
+    static void WriteMapArea(FcsRecord record, PopulationData data, Vector3 at)
+    {
+        if (data.Biomes is not { } biomes) return;
+        var (cx, cz) = WeatherAreas.CellOf(at.X, at.Z);
+        int g = biomes.GroupOf(cx, cz);
+        if (g < 0) return;
+        record.Strings["map area sid"] = biomes.Groups[g].Id;
+        record.Strings["map area name"] = biomes.Groups[g].Name;
+    }
+
+    static string QuickNumberId(int n) => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{n}-{SaveFolder.QuickSaveName}-INGAME");
+
+    /// <summary>Takes the next number of <c>quick.save</c>'s id counter.</summary>
+    static int NextQuickNumber(SaveFile file)
+    {
+        int n = Math.Max(file.Data.NextId, file.Records.Count == 0 ? 0 : file.Records.Max(r => Math.Max(r.Id, SaveGame.NumberOf(r)))) + 1;
+        file.Data.NextId = n;
+        return n;
+    }
+}

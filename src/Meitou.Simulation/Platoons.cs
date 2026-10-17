@@ -22,7 +22,7 @@ public enum PlatoonState : byte
 public sealed class Platoon
 {
     public required int Id { get; init; }
-    /// <summary>The town (a position in the population's site list) whose pool it counts against.</summary>
+    /// <summary>The town (a position in the population's site list) whose pool it counts against; -1 for a save's wild platoon.</summary>
     public required int Origin { get; init; }
     public required string TemplateId { get; init; }
     public int Faction { get; init; } = -1;
@@ -54,6 +54,8 @@ public sealed class Platoon
     public Saving.SavedPlatoon? Saved { get; init; }
     /// <summary>A saved platoon of its town's own (residents, bar squads, slaves): it never travels, its squad is run by the AI like the town's, and it is not in the roaming pool.</summary>
     public bool Pinned => Saved?.Pinned == true;
+    /// <summary>A save's wild platoon (a nest's or a homeless one, <see cref="Origin"/> -1): it never travels and counts against its wild site, not a town's pool.</summary>
+    public bool Wild => Saved?.Wild is not null;
 }
 
 /// <summary>The roaming squads of a world, by id. Ids are never reused. Part of the state hash.</summary>

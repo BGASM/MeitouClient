@@ -58,7 +58,7 @@ public sealed partial class PopulationSystem
     /// <summary>The unloaded half: moves a stand-in for the squad towards its target, with no physics (the original's <c>UnloadedPlatoon</c>).</summary>
     void StandIn(World world, Platoon p, float dt)
     {
-        if (p.Pinned) return;   // a town's own saved squad stays where it was
+        if (p.Pinned || p.Wild) return;   // a town's own saved squad, or a wild one, stays where it was
         if (p.WaitLeft > 0)
         {
             p.WaitLeft -= dt;
@@ -186,7 +186,7 @@ public sealed partial class PopulationSystem
             p.UnloadAtTick = -1;
             return;
         }
-        if (p.Pinned) return;   // a town's own: its AI runs it, it has no trips
+        if (p.Pinned || p.Wild) return;   // a town's own or a wild one: its AI runs it, it has no trips
         // A leader in a fight is left to it: an order now would replace the fight's task (the trip goes on when it is over).
         if (table.Next[squad.Leader.Slot].Task == (byte)CharacterTask.Attack) return;
 
@@ -288,12 +288,21 @@ public sealed partial class PopulationSystem
     {
         var p = world.Platoons.Find(b.Platoon);
         if (p is null || p.State != PlatoonState.Activating) return;
-        var site = data.Sites[p.Origin];
-        float radius = site.Town.SizeRadius * site.Town.TownRadiusMult;
         Squad? squad;
-        if (b.Saved is { } members && p.Saved is { } saved)
-            squad = Saving.SavedCharacters.Spawn(world, p, saved, members, data, assembly, new Vector2(site.Position.X, site.Position.Z), Math.Max(radius * 0.8f, 40));
-        else squad = b.Squad is null ? null : SpawnSquad(world, b.Squad, site, radius, platoonId: p.Id);
+        if (p.Saved is { Wild: not null } wild)
+        {
+            // A save's wild platoon wanders round its nest, or (homeless) round where it stands.
+            var (centre, homeRadius) = WildHome(wild, p.Position);
+            squad = b.Saved is { } wildMembers ? Saving.SavedCharacters.Spawn(world, p, wild, wildMembers, data, assembly, centre, homeRadius) : null;
+        }
+        else
+        {
+            var site = data.Sites[p.Origin];
+            float radius = site.Town.SizeRadius * site.Town.TownRadiusMult;
+            if (b.Saved is { } members && p.Saved is { } saved)
+                squad = Saving.SavedCharacters.Spawn(world, p, saved, members, data, assembly, new Vector2(site.Position.X, site.Position.Z), Math.Max(radius * 0.8f, 40));
+            else squad = b.Squad is null ? null : SpawnSquad(world, b.Squad, site, radius, platoonId: p.Id);
+        }
         if (squad is null)
         {
             // Nobody to spawn: the pool is free to make another (a saved platoon whose members are all dead stays in the save as it is).
@@ -306,6 +315,21 @@ public sealed partial class PopulationSystem
         p.SquadId = squad.Id;
         p.UnloadAtTick = -1;
         if (Goal(p) is not null && p.WaitLeft <= 0) OrderLeader(world, p, squad);
+    }
+
+    /// <summary>
+    /// Where a save's wild platoon keeps to: its nest's centre and radius (as the nest's own squads, <c>PopulationWild.cs</c>) when it stands within 3 radii of it, else
+    /// its own place with the homeless radius (engine choice: saves hold nest squads kilometres from their nest, and they are not walked back).
+    /// </summary>
+    (Vector2 Centre, float Radius) WildHome(Saving.SavedPlatoon sp, Vector2 at)
+    {
+        if (sp.Wild == WildKind.Nest && sp.WildSite >= 0 && sp.WildSite < WildSites.Count && WildSites[sp.WildSite].Nest is { } nest)
+        {
+            var centre = wildCentres[sp.WildSite] ?? WildSites[sp.WildSite].Spots[0];
+            float radius = NestRadius(nest);
+            if (Vector2.DistanceSquared(centre, at) <= 9 * radius * radius) return (centre, radius);
+        }
+        return (at, settings.HomelessHomeRadius);
     }
 
     // ---- the pools ----
