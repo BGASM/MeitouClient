@@ -33,6 +33,8 @@ public sealed class UniqueCharacters
     bool seeded;
 
     public int Count => entries.Count;
+    /// <summary>Bumped by every change to a state or player flag (an entry made, released, dead, captured, freed, loaded or seeded): world states read it.</summary>
+    public long Version { get; private set; }
     public IEnumerable<KeyValuePair<string, UniqueEntry>> All => entries;
     public UniqueEntry? Find(string recordId) => entries.GetValueOrDefault(recordId);
     /// <summary>The state a query sees: an absent entry is alive (the original's default).</summary>
@@ -90,11 +92,13 @@ public sealed class UniqueCharacters
         if (!entries.TryGetValue(recordId, out var e) || e.State == UniqueState.Dead) return;
         Unbind(e);
         entries.Remove(recordId);
+        Version++;
     }
 
     /// <summary>Death (<c>FUN_1407a6200</c>): state 0; the player flag is set (never cleared here) when the killer is the player's.</summary>
     public void Died(string recordId, bool byPlayer)
     {
+        Version++;
         var e = Entry(recordId);
         e.State = UniqueState.Dead;
         e.Player |= byPlayer;
@@ -106,6 +110,7 @@ public sealed class UniqueCharacters
         var e = Entry(recordId);
         if (e.State == UniqueState.Dead) return;
         e.State = UniqueState.Imprisoned;
+        Version++;
         e.Player |= byPlayer;
     }
 
@@ -115,6 +120,7 @@ public sealed class UniqueCharacters
         var e = Entry(recordId);
         e.State = UniqueState.Alive;
         e.Player = false;
+        Version++;
     }
 
     /// <summary>A loaded save's entry (claimed, as the save writes only made ones and re-derives the prisoners).</summary>
@@ -125,6 +131,7 @@ public sealed class UniqueCharacters
         e.State = state;
         e.Player = player;
         e.SavedHandle = handle;
+        Version++;
     }
 
     /// <summary>
@@ -135,6 +142,7 @@ public sealed class UniqueCharacters
     {
         if (seeded) return;
         seeded = true;
+        Version++;
         foreach (var template in db.OfType(FcsRecordType.SQUAD_TEMPLATE))
         {
             var refs = template.GetReferences("prisoners");

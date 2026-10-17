@@ -9,8 +9,13 @@ checks. Tables/expressions retain fields and event values. Runtime: [simulation]
 **Verified** initial A→B: explicit A.relations v0, otherwise min(A.default,B.default); self100.
 Hostile<=-30, ally>=50; directional flags/coexistence and event changes are distinct. Storage,
 trust/known/player-faction branches and dialogue/reaction events remain scoped Observed where
-not independently checked. Start-off relation overrides and initial WORLD_EVENT_STATE values
-are not fully decoded; false as an engine default is not original-game proof.
+not independently checked. Start-off relation overrides are not fully decoded.
+
+WORLD_EVENT_STATE (`FUN_1409a7e00`, **Observed** by code): holds when every `NPC is` CHARACTER has unique state v0 (0 dead, 1 alive,
+2 imprisoned), no `NPC is NOT` one has its v0, each `player ally` FACTION is (v0 1) or is not (v0 0) the player's ally and each `player
+enemy` hostile to it. With `player involvement`, an `NPC is` other than alive or an `NPC is NOT` alive also needs the unique's player
+flag. A unique with no entry counts as alive, so a new game answers by the data alone; nothing is stored. A `world state` list entry
+(`FUN_1409a9a70`: spawn gates, weighted picks, campaigns) passes when the state's answer equals (v0 == 1); a missing record is skipped.
 
 ## Squad factory
 
@@ -348,7 +353,8 @@ or population); a failed start retries each run, up to 100 times; a gone target 
 **End effects** (the only callees): victory: "{1} against {2} has ended" (hostile) and one `victory trigger` roll. Defeat: "{1} was defeated
 on their way to {2}" (not hostile), "{1} against {2} has been defeated" (its leader fought a player squad) or "{1} to {2} has failed"; a
 `loss trigger` roll when it reached the town or fought the player, else a hostile one is requested again in uniform[40, 96) h. No relation,
-world state, ownership, building or town state changes; looting or occupation are only what the loaded `pt2` packages do.
+world state, ownership, building or town state changes; looting or occupation are only what the loaded `pt2` packages do. In
+every message {1} is the campaign's name and {2} the target town's (the cancel message has only {1}; **Observed**).
 
 ### 9. Settings and constants that matter
 

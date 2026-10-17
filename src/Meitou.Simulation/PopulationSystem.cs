@@ -63,6 +63,8 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         KeepRoamers = this.settings.KeepRoamers;
         OffscreenFights = this.settings.OffscreenFights;
         OffscreenHealing = this.settings.OffscreenHealing;
+        CampaignAncestorsOnce = this.settings.CampaignAncestorsOnce;
+        live = new WorldStates(data.Db, data.Relations);
         if (!this.settings.Background) return;
         work = [];
         worker = new Thread(() => { foreach (var job in work.GetConsumingEnumerable()) job(); }) { IsBackground = true, Name = "Meitou.Sim population" };
@@ -73,6 +75,15 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
     public bool KeepRoamers { get; set; }
     public bool OffscreenFights { get; set; }
     public bool OffscreenHealing { get; set; }
+    /// <summary>The campaign inheritance switch (<see cref="PopulationSettings.CampaignAncestorsOnce"/>), changed live by the host.</summary>
+    public bool CampaignAncestorsOnce { get; set; }
+
+    readonly WorldStates live;
+    /// <summary>The world states the population's spawns and campaigns read: the data's fixed ones when it has any, else the live ones of this world (<see cref="WorldStates"/>).</summary>
+    public IWorldStates States => ReferenceEquals(data.States, IWorldStates.None) ? live : data.States;
+
+    /// <summary>The live world states take the unique table and the player's faction (serial; every look, and before the loading screen's builds).</summary>
+    void RefreshStates(World world) => live.Refresh(world.Uniques, world.Player.Faction >= 0 ? world.Player.Faction : data.PlayerFaction);
 
     public PopulationData Data => data;
     public PopulationSettings Settings => settings;
@@ -106,9 +117,11 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         if (world.Tick % settings.CheckEveryTicks != 0) return;
         world.Uniques.SeedPrisoners(data.Db);
         RefreshUniques(world);
+        RefreshStates(world);
         RefreshZones(world);
         Discover(world);
         StepRoaming(world);
+        StepCampaigns(world);
     }
 
     /// <summary>The XZ distance at which a player character explores a town (and discovers it).</summary>

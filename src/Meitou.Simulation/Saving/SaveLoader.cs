@@ -88,13 +88,20 @@ public static class SaveLoader
         ReadNests(save, data, context);
         foreach (var town in save.Towns)
             if (!town.IsNest && town.Instance.Length > 0) context.TownStates.TryAdd(town.Instance, town.Record);
+        // The war states, and the town handles their targets and homes name (docs/formats/save.md WAR_SAVESTATE).
+        var siteOf = data.Sites.Where(s => s.InstanceId.Length > 0).GroupBy(s => s.InstanceId).ToDictionary(g => g.Key, g => g.First().Index, StringComparer.Ordinal);
+        foreach (var town in save.Towns)
+            if (!town.IsNest && siteOf.TryGetValue(town.Instance, out int site) && !town.Handle.IsNull) context.TownSites.TryAdd((town.Handle.C, town.Handle.CS), site);
+        foreach (var f in save.Factions)
+            if (f.War is { } war) context.Wars.TryAdd(f.Id, war);
+        var campaignPlatoons = WarSave.PlatoonHandles(context.Wars.Values);
         foreach (var platoon in save.Platoons)
         {
             bool mine = playerFaction is not null && platoon.FactionId == playerFaction.Id;
             if (mine && platoon.IsLoaded)
                 LoadPlayerPlatoon(world, platoon, data, options, loaded, playerIndex, races, parts, bySource, assembly, context);
             else if (!mine && options.NpcPlatoons)
-                LoadNpcPlatoon(world, platoon, data, loaded, context);
+                LoadNpcPlatoon(world, platoon, data, loaded, context, campaignPlatoons.Contains((platoon.Handle.C, platoon.Handle.CS)));
         }
         if (loaded.PlayerPlatoons.Count > 0) world.Player.Squad = loaded.PlayerPlatoons[0].Squad.Id;
 
@@ -207,8 +214,9 @@ public static class SaveLoader
     /// <summary>
     /// An NPC platoon of a placed town: a <see cref="Platoon"/> stand-in at its saved place carrying its saved characters (<see cref="SavedPlatoon"/>), made when a zone
     /// near it is active. Town-bound platoons (<see cref="Travels"/> false) are pinned to their town and are its whole population (it makes none of its own); the others travel.
+    /// A platoon a war state names (<paramref name="campaign"/>) always travels: its campaign takes it on when the war managers read their states.
     /// </summary>
-    static void LoadNpcPlatoon(World world, SavePlatoon platoon, PopulationData data, LoadedSave loaded, SavedPopulation context)
+    static void LoadNpcPlatoon(World world, SavePlatoon platoon, PopulationData data, LoadedSave loaded, SavedPopulation context, bool campaign = false)
     {
         string baseTown = platoon.Record.Strings.GetValueOrDefault("basetown", "");
         int origin = -1;
@@ -226,7 +234,7 @@ public static class SaveLoader
             ? Ai.PlatoonJobs.For(data.Ai, Meitou.Data.Gameplay.SquadTemplate.From(templateRecord), saved) : (null, Ai.PlatoonJob.None);
         // Town-bound platoons are the town's own: its residents, bar squads, slaves and farm animals. They stay home, and the town makes none of its own.
         int siteFaction = data.SiteFactions.Count > origin ? data.SiteFactions[origin] : -1;
-        bool travels = Travels(platoon, job, data.Sites[origin].Town, siteFaction >= 0 ? data.Factions[siteFaction] : null);
+        bool travels = campaign || Travels(platoon, job, data.Sites[origin].Town, siteFaction >= 0 ? data.Factions[siteFaction] : null);
         int faction = data.FactionIndex(platoon.FactionId);
         // A platoon without characters (no file, or none in it) has nothing to make: a town's stays in the save as it is, a travelling one is a stand-in whose members the
         // template makes, as for the population's own.
@@ -238,14 +246,19 @@ public static class SaveLoader
             sp = new SavedPlatoon { Source = platoon, Pinned = !travels, Anchor = new Vector2(platoon.Position.X, platoon.Position.Z) };
             foreach (var sc in platoon.Characters) sp.Members.Add(new SavedMember { Source = sc });
         }
+        ulong key = Rng.Mix(Rng.StableHash(platoon.Name));
+        int size = Math.Max(platoon.CharCount, platoon.Characters.Count);
+        // A campaign's stand-in with no characters is made from its template: the plan gives its size (the men its campaign counts).
+        if (size == 0 && campaign && data.Db.Find(platoon.SquadTemplate) is { } sizeRecord && SquadFactory.IsTemplate(sizeRecord))
+            size = SquadFactory.Plan(data.Db, Meitou.Data.Gameplay.SquadTemplate.From(sizeRecord), 1, world.Seed, key, data.States).TotalMembers;
         var p = new Platoon
         {
             Id = world.Platoons.NextId(),
             Origin = origin,
             TemplateId = platoon.SquadTemplate,
             Faction = faction >= 0 ? faction : siteFaction,
-            Key = Rng.Mix(Rng.StableHash(platoon.Name)),
-            Size = Math.Max(platoon.CharCount, platoon.Characters.Count),
+            Key = key,
+            Size = size,
             Position = new Vector2(platoon.Position.X, platoon.Position.Z),
             Money = platoon.Money,
             State = PlatoonState.Unloaded,
@@ -253,6 +266,7 @@ public static class SaveLoader
             Saved = sp,
         };
         world.Platoons.Add(p);
+        if (!platoon.Handle.IsNull) context.PlatoonIds.TryAdd((platoon.Handle.C, platoon.Handle.CS), p.Id);
         if (sp is not null)
         {
             sp.PlatoonId = p.Id;

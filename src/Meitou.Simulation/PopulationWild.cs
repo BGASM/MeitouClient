@@ -84,7 +84,7 @@ public sealed partial class PopulationSystem
     {
         if (wildSites is not null || data.Biomes is not { } biomes) return;
         var saved = world.Saved;
-        wildSites = BuildWildSites(data, settings, biomes, world.Seed, saved?.Nests);
+        wildSites = BuildWildSites(data, settings, biomes, world.Seed, saved?.Nests, States);
         wildStates = new SiteState[wildSites.Count];
         wildCentres = new Vector2?[wildSites.Count];
         for (int i = 0; i < wildStates.Length; i++) wildStates[i] = new SiteState();
@@ -162,8 +162,9 @@ public sealed partial class PopulationSystem
     /// The sectors (every in-map zone whose group has homeless spawns), then the nests of every group in record order: the <paramref name="saved"/> nests in it (a save's),
     /// then rolled ones up to the group's count.
     /// </summary>
-    public static List<WildSite> BuildWildSites(PopulationData data, PopulationSettings settings, BiomeMap biomes, ulong seed, IReadOnlyList<Saving.SavedNest>? saved = null)
+    public static List<WildSite> BuildWildSites(PopulationData data, PopulationSettings settings, BiomeMap biomes, ulong seed, IReadOnlyList<Saving.SavedNest>? saved = null, IWorldStates? states = null)
     {
+        states ??= data.States;
         var sites = new List<WildSite>();
         var groups = biomes.Groups;
         var cellsOf = new List<(int X, int Z)>[groups.Count];
@@ -178,7 +179,7 @@ public sealed partial class PopulationSystem
                     sites.Add(new WildSite(sites.Count, WildKind.Sector, new ZoneCoordinate(x, z), g, null, -1, []));
             }
 
-        bool Gated(string townId) => data.Db.Find(townId) is not { } r || r.GetReferences("world state").Any(w => !data.States.IsTrue(w.TargetStringId));
+        bool Gated(string townId) => data.Db.Find(townId) is not { } r || r.GetReferences("world state").Any(w => !IWorldStates.Passes(states, data.Db, w.TargetStringId, w.Values.Value0));
         // A save's nests, by the group of the cell they stand in (-1: outside every group; they are kept all the same).
         var savedOf = new Dictionary<int, List<Saving.SavedNest>>();
         foreach (var n in saved ?? [])
@@ -419,7 +420,7 @@ public sealed partial class PopulationSystem
     }
 
     bool TemplateUsable(string id) =>
-        data.Db.Find(id) is { } r && SquadFactory.IsTemplate(r) && SquadTemplate.From(r).WorldState.All(w => data.States.IsTrue(w.Id));
+        data.Db.Find(id) is { } r && SquadFactory.IsTemplate(r) && SquadTemplate.From(r).WorldState.All(w => IWorldStates.Passes(States, data.Db, w.Id, w.V0));
 
     BuiltWild BuildSector(WildSite site, long loadId, ulong seed, IWalkability walk, Vector2[] players, WildHold? hold)
     {

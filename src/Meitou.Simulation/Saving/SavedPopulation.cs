@@ -87,6 +87,12 @@ public sealed class SavedPopulation
     public Dictionary<string, FcsRecord> TownStates { get; } = new(StringComparer.Ordinal);
     /// <summary>Platoon names to their entry.</summary>
     public Dictionary<string, SavedPlatoon> ByName { get; } = new(StringComparer.Ordinal);
+    /// <summary>The save's WAR_SAVESTATEs by FACTION id: the war managers read them at the first look (<see cref="WarSave"/>).</summary>
+    public Dictionary<string, FcsRecord> Wars { get; } = new(StringComparer.Ordinal);
+    /// <summary>Town handles (container and serial) to the placed town they name, for the war states' targets and homes.</summary>
+    public Dictionary<(int C, int CS), int> TownSites { get; } = [];
+    /// <summary>Platoon handles (container and serial) to the world's platoon made for them, for the war states' <c>p&lt;i&gt;</c> and <c>leader c&lt;i&gt;</c>.</summary>
+    public Dictionary<(int C, int CS), int> PlatoonIds { get; } = [];
     /// <summary>Lines for the host's log (each platoon made, characters left out); taken by <see cref="TakeLog"/>.</summary>
     readonly List<string> log = [];
     internal void Log(string line) { lock (log) log.Add(line); }

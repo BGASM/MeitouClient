@@ -198,6 +198,14 @@ public sealed class PopulationSettings
     public bool OffscreenFights { get; init; } = true;
     /// <summary>Meitou: a squad coming back catches up its healing for the time away. Faithful: it comes back as it left.</summary>
     public bool OffscreenHealing { get; init; } = true;
+    /// <summary>Meitou: a campaign's <c>inherits from</c> ancestors count once. Faithful: twice, as the original applies them (doubled squad weights and follow-up chances).</summary>
+    public bool CampaignAncestorsOnce { get; init; } = true;
+
+    // ---- faction campaigns (docs/game/factions-squads-towns.md "Campaigns") ----
+    /// <summary>The original's <c>raidFrequencyMult</c> (settings.cfg, "Town raid events: frequency" 0.25 to 3; default 1): times the roll chance.</summary>
+    public float RaidFrequencyMult { get; init; } = 1;
+    /// <summary>The original's <c>raidSizeMult</c> ("Town raid events: size" 0.25 to 4; default 1): times <c>num forces</c>.</summary>
+    public float RaidSizeMult { get; init; } = 1;
 
     // ---- the wild: homeless squads and nests (6.2, 6.3) ----
     /// <summary>The new game's <i>Number of nests multiplier</i> (slider 0.5 to 4; its default is <b>Unknown</b>, 1 here).</summary>

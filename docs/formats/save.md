@@ -366,7 +366,9 @@ resolves. Missing keys read as 0 / "" / false (**Observed**).
 **Observed** (owner saves 1, 2, 3, wade, quicksave, autosave0-2, new; up to day 8): no running campaign, request or platoon in any;
 every `fwc id` and all 77 `poss time` are 0 (no campaign ever started; no save has a player outpost, which rolls need). Each faction's
 `poss` list is its merged FACTION `campaigns` list in order (103 of 103). `updatetime` lies in (clock, clock + 6], spread over about
-0.6 h (all 40 in the two day-1 saves). Meitou's `SaveBuilder` writes `updatetime` 40 and zero counts, as a new game.
+0.6 h (all 40 in the two day-1 saves). Meitou's `SaveBuilder` writes `updatetime` 40 and zero counts, as a new game; a captured
+world writes its war managers over the loaded state (unknown keys kept, numbered keys past the new counts removed), and a campaign squad
+never made is written as a PLATOON with content file `platoon/` (no file) so its `p<i>` handle resolves.
 
 ### Cross-checks against base data (the sample vs `GameDatabase` of the four base files)
 

@@ -80,7 +80,9 @@ static class SyntheticTown
         patrol.References["animals"] = [Ref("4-t", 1, 0, 50)];
         var gated = Rec("11-t", FcsRecordType.SQUAD_TEMPLATE, "Gated");
         gated.References["squad"] = [Ref("2-t", 5)];
-        gated.References["world state"] = [Ref("90-t")];
+        gated.References["world state"] = [Ref("90-t", 1)];   // needs a state that does not hold: the boss dead
+        var bossDead = Rec("90-t", FcsRecordType.WORLD_EVENT_STATE, "Boss dead");
+        bossDead.References["NPC is"] = [Ref("3-t", 0)];
         var factionTemplate = Rec("12-t", FcsRecordType.SQUAD_TEMPLATE, "Faction folk");
         factionTemplate.References["squad"] = [Ref("2-t", 3)];
 
@@ -120,7 +122,7 @@ static class SyntheticTown
         var file = new FcsFile();
         file.Records.AddRange(parts);
         file.Records.AddRange(itemRecords);
-        file.Records.AddRange([race, guard, boss, dog, patrol, gated, factionTemplate, faction, town, nameless, startoff]);
+        file.Records.AddRange([race, guard, boss, dog, patrol, gated, bossDead, factionTemplate, faction, town, nameless, startoff]);
         if (far is not null) file.Records.Add(far);
         changePatrol?.Invoke(patrol);
         changeFolk?.Invoke(factionTemplate);

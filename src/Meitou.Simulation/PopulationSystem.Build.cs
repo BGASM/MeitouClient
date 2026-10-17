@@ -127,7 +127,7 @@ public sealed partial class PopulationSystem
     /// <summary>One squad: its plan from the factory and a rolled look for every human member. Pure given its arguments (any thread).</summary>
     BuiltSquad? BuildOne(SquadTemplate template, int townFactionIndex, FactionData? townFaction, ulong key, ulong seed, Vector2 position)
     {
-        var plan = SquadFactory.Plan(data.Db, template, settings.SquadSizeMultiplier, seed, key, data.States);
+        var plan = SquadFactory.Plan(data.Db, template, settings.SquadSizeMultiplier, seed, key, States);
         if (plan.TotalMembers == 0) return null;
         // The squad's own faction (its template's) wins over the town's (section 4).
         int squadFaction = template.Faction is { } tf && data.FactionIndex(tf) is var ti and >= 0 ? ti : townFactionIndex;

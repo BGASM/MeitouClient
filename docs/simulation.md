@@ -73,8 +73,7 @@ crime sees deeds and final positions/carry links. Game combat uses `SelfApproach
 around focus, gate spawning on navmesh readiness, create residents/bar/roaming/wild/nest squads,
 and assemble race appearance, gear, stats and bodies. Counts, roles, offsets, caps, spawn weights
 and world-state gating follow [population research](game/factions-squads-towns.md).
-Missing references become `SquadPlan.Problems`; world states initially false are an engine
-choice, not a verified original default. Residents are housed by the original's building rules with housemates and
+Missing references become `SquadPlan.Problems`; world states are answered live (`WorldStates`, see Campaigns under the off-screen tier). Residents are housed by the original's building rules with housemates and
 default residents ([town residents](game/factions-squads-towns.md#town-residents)); prisoners/cages remain
 incomplete. A town that unloads turns each squad it made into a pinned platoon holding a `StoredSquad`
 (`PopulationStored.cs`): each living member's own cold state (name, look, body, kit, bounties, crime marks) with its place,
@@ -108,8 +107,7 @@ original's table (CHARACTER → claimed, live character, state 1/0/2, player fla
   save already has them).
 - **Save**: CAMERA `usedUniques*` as the original (claimed entries; prisoners derived again). Handles are the written character's for player
   squads, else the loaded save's, else null (NPC handles are not tracked back from the writer).
-- **Not built**: FACTION `special squads` (the original never spawns them), campaign `special leader` gathering and `NPC is` world-state
-  queries (read `StateOf`, which treats an unknown unique as alive), the import rules, `UniquePlatoon` missions.
+- **Not built**: FACTION `special squads` (the original never spawns them), the import rules, `UniquePlatoon` missions.
 
 ### Off-screen tier
 
@@ -117,7 +115,7 @@ The original's rules: [off-screen world](game/factions-squads-towns.md#off-scree
 campaign squads off screen, moves them in straight lines (roads for long trips), never fights or heals there, and drives the rest by clock-based
 budgets. The tier follows it, with Meitou choices marked.
 
-Three Faithful/Meitou switches (`PopulationSettings`, live on `PopulationSystem`; Advanced settings, Meitou on by default; `PopulationOffscreen.cs`):
+Four Faithful/Meitou switches (the fourth, campaign inheritance, under Campaigns below; `PopulationSettings`, live on `PopulationSystem`; Advanced settings, Meitou on by default; `PopulationOffscreen.cs`):
 - **Squads keep their people** (`KeepRoamers`). Meitou: a roaming squad the population made keeps its characters as a `StoredSquad` from the
   first time it leaves, travels on as them and comes back as them (moved along with its stand-in); saves write it as a new platoon (`sqt` 2,
   `persistent` false). Faithful (the original): a platoon that is not a town's own is despawned as it leaves, and a stand-in out of range for
@@ -168,40 +166,43 @@ Implemented (`PopulationRoaming.cs`):
     (N 20, pool 14) refills an 8-duck squad after its two squads die; drained to 1 with all dead it is wiped out and saved with `ded`, `tod`,
     `pop2` 1.008, `popd2` 20.
 
+Implemented (`PopulationCampaigns.cs`; [original rules](game/factions-squads-towns.md#campaigns),
+[save](formats/save.md#war_savestate-type-9-faction-campaigns)). Almost all campaigns aim at player towns (outposts), so nothing rolls until
+the player has one; requests (victory/loss chains, ally help) can follow.
+
+- **Data** (`Meitou.Data`, `CampaignData` from FACTION_CAMPAIGN, cached per inheritance mode): ranges × 10, `repeat limit` × 24, weighted
+  trigger lists, phase packages. Fourth switch, **Raids as written** (`CampaignAncestorsOnce`): Meitou applies each ancestor's list entries
+  once; Faithful twice, as the original (doubled weights and trigger chances).
+- **War manager** (serial, in faction order at the population look; every rule reads the game clock, so the cadence does not matter): the
+  6 h roll, the chance with the linear falloff and `raidFrequencyMult`, targets among `World.Buildings.Towns` (biome groups, no-go zones;
+  slot 70 and Town +0x128 taken as passing, tech level as 0: engine choices), requests with due times, redirects and retries, the
+  `trigger player ally` help. `RequestCampaign` is the DIALOGUE_LINE `trigger campaign` entry point, waiting for the dialogue system. Rolls
+  are keyed off the world seed, faction and roll hour, so a run repeats. The state hash includes the managers only once one has started or
+  queued something, so worlds without a campaign hash as before.
+- **Squads**: required men = int(`num forces` × `raidSizeMult`); the `special leader`'s platoon (or the template it leads, made near the
+  faction's town), then for the 4 own towns nearest the target their free roaming platoons, then new unloaded stand-ins from `squads to use`
+  within 700. Engine choice: homeless and a town's own platoons are not drafted. After the campaign a platoon goes home as a roaming squad:
+  Meitou (`KeepRoamers`) with its people, Faithful under the normal despawn.
+- **Phases** off screen as the original (0.8 × radius arrival, 4 / 12 / 1 h, the 20 % rule, 3 h removal); the leader travels to the target
+  and the others to it at the `travel speed unloaded` speeds (serial, outside the parallel movers). With `OffscreenFights` (Meitou) campaign
+  stand-ins fight like other travellers and a squad lost there counts as not intact for the 20 % rule; Faithful: an unloaded assault wins at 4 h. Engine choice: a
+  campaign with no platoon left is defeated. End effects: the messages and the trigger roll or the 40-96 h retry; nothing else changes.
+- **Loaded**: the pt1 / pt2 / retreat packages are not built (`PackageClass.Unbuilt`); the leader walks or runs to the goal and the others to
+  it, and they fight through the normal aggro; arrival, timers and the 20 % rule still run. The packages and the army column are wave 4.
+- **World states** (`WorldStates`, `PopulationSystem.States`): WORLD_EVENT_STATEs answered live by the original's rule
+  ([world states](game/factions-squads-towns.md#relations-and-world-states)) from the unique table and the relations; the squad factory,
+  wild sites, towns and campaigns all ask it. A population given its own `IWorldStates` (the pinned tests) uses that instead.
+- **Save**: WAR_SAVESTATE read and written with the original's keys (unknown keys kept; numbered keys past the new counts removed); a
+  characterless campaign stand-in is written as a PLATOON with content file `platoon/` so `p<i>` resolves; a loaded campaign platoon travels.
+  Phase timers restart at load, as the original.
+- **Observed** (headless, real data, `raidFrequencyMult` 1000): Dust Bandits "Invasion with demands" against an outpost 1500 from Dust King
+  Tower gathers 1 squad of 12 for 10 men, arrives after 0.28 h, survives a save and load in phase 1 (campaign, id, phase, squads), wins at 4 h,
+  is removed 3 h later and queues its follow-up. The 9 owner saves' 103 war states each come out with the same keys and values.
+
 Proposed (awaiting review):
 
 - **Who**: campaign squads join the town and roaming squads. Wild and nest squads are dropped, as in the original.
 - **Jobs**: the original's destinations (the blackboard's target, GOHOME's home within 2000) and roads.
-- **Campaigns** ([original rules](game/factions-squads-towns.md#campaigns), [save](formats/save.md#war_savestate-type-9-faction-campaigns)).
-  Almost all are aimed at player towns (outposts), so nothing rolls until the player has one; requests (victory/loss chains, ally help)
-  can follow.
-  - **Data** (`Meitou.Data`, `CampaignData` from FACTION_CAMPAIGN): ranges × 10, `repeat limit` × 24, weighted trigger lists, phase
-    packages; inheritance applied twice as the original (doubled weights and chances). Decision for the owner: keep that or apply once.
-  - **War manager** (`PopulationCampaigns.cs`, serial, in faction order at the population look; every rule reads the game clock, so the
-    cadence does not matter): `updatetime` roll, chance with the linear falloff and `raidFrequencyMult`, target among `World.Buildings.Towns`
-    (biome groups, no-go zones; slot 70 and Town +0x128 taken as passing, engine choice), requests with due times and retries. Rolls keyed
-    off the world seed, faction and roll time, so a run repeats.
-  - **Squads**: required men = int(`num forces` × `raidSizeMult`); draft the faction's idle homeless and town platoons (Meitou keeps them
-    as `StoredSquad`s), then make squads from `squads to use` within 700 of the up-to-4 nearest own towns as unloaded stand-ins. A
-    campaign platoon is pinned until the campaign ends (both modes, as the original). Afterwards Faithful: the normal despawn; Meitou
-    (`KeepRoamers`): the squad keeps its people, goes home and stays a roaming squad.
-  - **Phases** off screen exactly as the original (arrival radii, 4 / 12 / 1 h, the 20 % rule, 3 h removal, redirect); the leader travels
-    to the target and the others to the leader at the MoveSpeed speeds. With `OffscreenFights` (Meitou) campaign stand-ins fight like other
-    travellers, and their losses feed the 20 % rule (the original only updates it while loaded); Faithful: no fights, an unloaded assault
-    wins at 4 h. End effects: the messages (message log, as the nest wipe-out) and the trigger roll or 40-96 h retry; nothing else changes.
-  - **Loaded**: the pt1 / pt2 / retreat packages (`Package_WarBase`, `Package_WarAssault`, signals 19, 20, 32) are not built
-    (`PackageClass.Unbuilt`). Until they are, a loaded campaign squad runs the engine's travel stand-in towards its target and fights through
-    the normal aggro; arrival, timers and the 20 % rule still run. The packages and the army column are wave 4.
-  - **Dependencies**: `world state` queries (120 of 179 campaigns; Meitou has `IWorldStates`, saves write an empty world state), so until
-    world states are tracked a campaign with queries uses their initial values; `special leader` (37) reads `World.Uniques.StateOf` ([unique characters](#unique-characters); a leader not in
-    the world counts as alive, the original's default); DIALOGUE_LINE `trigger campaign` (86) waits for the dialogue system, the request
-    entry point is ready for it; the ally test uses the relation table.
-  - **Save**: WAR_SAVESTATE read and written with the original's keys (unknown keys kept), `p<i>`/`forces<i>` naming the campaign
-    platoons; phase timers restart at load as the original. A `SaveBuilder` world keeps `updatetime` 40 and zero counts.
-  - **Cost**: 103 managers, a roll every 6 game hours and a handful of instances: negligible next to the stand-in step.
-- **Waves**: (3) campaign data, war manager, off-screen phases, saves, messages; (4) the loaded war packages and army formation. Tests to
-  propose: the chance and falloff pin, a WAR_SAVESTATE round-trip of the owner's saves (keys and values unchanged), a headless raid on a
-  sandbox outpost (roll, travel, 4 h victory, removal, a save and load in phase 1).
 
 ## Player
 

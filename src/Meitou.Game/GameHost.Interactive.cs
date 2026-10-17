@@ -101,7 +101,7 @@ sealed partial class GameHost
                 OffscreenChanged = () =>
                 {
                     foreach (var population in session.World.Systems.OfType<Meitou.Simulation.PopulationSystem>())
-                        (population.KeepRoamers, population.OffscreenFights, population.OffscreenHealing) = (config.KeepRoamers, config.OffscreenFights, config.OffscreenHealing);
+                        (population.KeepRoamers, population.OffscreenFights, population.OffscreenHealing, population.CampaignAncestorsOnce) = (config.KeepRoamers, config.OffscreenFights, config.OffscreenHealing, config.CampaignAncestorsOnce);
                 },
             };
         if (panel is not null)

@@ -65,6 +65,13 @@ public sealed class Platoon
     public float OrphanSeconds { get; set; }
     /// <summary>A town's own squad that lost so many that its town makes it afresh when it next comes into the world (<see cref="PopulationSystem"/> regeneration).</summary>
     public bool Regenerate { get; set; }
+    /// <summary>
+    /// The faction campaign it marches in (null: none; <c>PopulationCampaigns.cs</c>): kept (never despawned) until the campaign is removed, moved by the campaign off
+    /// screen and led to <see cref="CampaignGoal"/> while loaded, out of the roaming pools.
+    /// </summary>
+    public CampaignInstance? Campaign { get; set; }
+    /// <summary>Where its campaign sends it (the target for the leader platoon, the leader for the others; set each population look).</summary>
+    public Vector2? CampaignGoal { get; set; }
 }
 
 /// <summary>
@@ -139,6 +146,13 @@ public sealed class PlatoonRegistry
                 h.Add(stored.Pinned);
             }
             if (p.OrphanSeconds > 0) h.Add(p.OrphanSeconds);   // only while counting, so worlds without it hash as before
+            if (p.Campaign is { } campaign)
+            {
+                // Only for campaign platoons, so worlds without them hash as before.
+                h.Add(campaign.Faction);
+                h.Add(campaign.Id);
+                h.Add(p.CampaignGoal ?? default);
+            }
             if (p.Saved is { } saved)
             {
                 // Only for a save's platoons, so worlds without them hash as before.

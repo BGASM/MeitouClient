@@ -40,6 +40,8 @@ sealed class UserConfig
     public bool KeepRoamers { get; set; } = true;
     public bool OffscreenFights { get; set; } = true;
     public bool OffscreenHealing { get; set; } = true;
+    /// <summary>Campaign data counts each <c>inherits from</c> ancestor once (Advanced settings; Faithful off: twice, as the game does, doubling inherited squad weights and follow-up chances).</summary>
+    public bool CampaignAncestorsOnce { get; set; } = true;
     /// <summary>The Windows cursor instead of the game's drawn pointer (the original's <c>hardware_mouse</c>, default off; Interface settings).</summary>
     public bool HardwareMouse { get; set; }
     /// <summary>Outline and tint the character under the cursor (Advanced settings; Meitou only, the game has none).</summary>
