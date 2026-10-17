@@ -199,8 +199,13 @@ the player has one; requests (victory/loss chains, ally help) can follow.
   and the others to it at the `travel speed unloaded` speeds (serial, outside the parallel movers). With `OffscreenFights` (Meitou) campaign
   stand-ins fight like other travellers and a squad lost there counts as not intact for the 20 % rule; Faithful: an unloaded assault wins at 4 h. Engine choice: a
   campaign with no platoon left is defeated. End effects: the messages and the trigger roll or the 40-96 h retry; nothing else changes.
-- **Loaded**: the pt1 / pt2 / retreat packages are not built (`PackageClass.Unbuilt`); the leader walks or runs to the goal and the others to
-  it, and they fight through the normal aggro; arrival, timers and the 20 % rule still run. The packages and the army column are wave 4.
+- **Loaded**: campaign squads are platoons the AI does not run, so the campaign drives them; the phase's package is what the next population
+  look does with `Phase` (the original installs it at the next AI update). Column (`GatherAndMove` as the original): the leader's trail is
+  laid each look and follower i heads for its point i × slots × 150 / N back (engine choice for the Unknown: the trail point, also off screen);
+  loaded followers jog, the leader marching out keeps its `travel speed loaded` (WALK walk, JOG run mode, RUN and GROUPED free, NO_SPEED_CHANGE
+  as it was) while every intact platoon is within 6000, else it waits within 8294.4 of the target or walks. They fight through the normal aggro;
+  arrival, timers and the 20 % rule run. **Observed** (headless, Dust Bandits, 4 squads of 49 at `raidSizeMult` 4, camera on the leader): the
+  followers keep 190, 380 and 470 behind a walking leader (the rule's 187, 375, 562).
 - **World states** (`WorldStates`, `PopulationSystem.States`): WORLD_EVENT_STATEs answered live by the original's rule
   ([world states](game/factions-squads-towns.md#relations-and-world-states)) from the unique table and the relations; the squad factory,
   wild sites, towns and campaigns all ask it. A population given its own `IWorldStates` (the pinned tests) uses that instead.

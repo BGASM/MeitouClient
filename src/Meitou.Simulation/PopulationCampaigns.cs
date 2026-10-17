@@ -48,6 +48,8 @@ public sealed class CampaignInstance
     public double FightStart { get; set; } = -1;
     /// <summary>Its leader platoon fought the player's characters (engine test, <c>PopulationCampaigns.cs</c>).</summary>
     public bool FoughtPlayer { get; set; }
+    /// <summary>The leader's recorded trail, oldest first (the original's <c>GatherAndMove</c>): its followers' places. Not saved: laid again after a load.</summary>
+    public List<Vector2> Trail { get; } = [];
 }
 
 /// <summary>A queued campaign (<c>req*</c> of the save): due at a game hour against a target.</summary>
@@ -849,11 +851,14 @@ public sealed partial class PopulationSystem : IStateHashed
             {
                 if (CampaignOf(inst.CampaignId) is not { } c || world.Platoons.Find(inst.Leader) is not { } leader) continue;
                 var target = inst.Phase == 2 ? CentreOf(world, inst.Home) : CentreOf(world, inst.Target);
+                int count = inst.Platoons.Count, slots = count > TrailSlots ? count + 1 : TrailSlots, follower = 0;
+                LayTrail(world, inst, leader.Position, slots, count);
                 foreach (int id in inst.Platoons)
                 {
                     if (world.Platoons.Find(id) is not { } p) continue;
                     bool leads = p == leader;
-                    var goal = leads ? target : leader.Position;
+                    // Follower i keeps i × slots × 150 / N back along the leader's trail (engine choice for the Unknown: the trail point, not the leader platoon).
+                    var goal = leads ? target : TrailPoint(inst, ++follower * slots * TrailStep / count);
                     p.CampaignGoal = goal;
                     if (p.State != PlatoonState.Unloaded) continue;
                     var to = goal - p.Position;
@@ -866,6 +871,56 @@ public sealed partial class PopulationSystem : IStateHashed
                 }
             }
     }
+
+    /// <summary>The trail's step and its first slot count (<b>Verified</b>, <c>FUN_1409d6070</c>).</summary>
+    const float TrailStep = 150;
+    const int TrailSlots = 5;
+
+    /// <summary>
+    /// The leader's trail, each war-manager run (<b>Verified</b>): an empty one is seeded with <paramref name="slots"/> + 1 points within ±100 of the leader; the leader's
+    /// place is added once it is over 150 from the newest; one oldest point is dropped while there are more points than platoons.
+    /// </summary>
+    void LayTrail(World world, CampaignInstance inst, Vector2 leader, int slots, int platoons)
+    {
+        var trail = inst.Trail;
+        if (trail.Count == 0)
+        {
+            ulong key = (ulong)inst.Faction << 32 | (uint)inst.Id;
+            for (int k = 0; k <= slots; k++)
+            {
+                float x = Rng.Float(Rng.Hash(world.Seed, key, RngPurpose.Campaign, SeedSalts.CampaignTrail + (ulong)(2 * k))) * 200 - 100;
+                float z = Rng.Float(Rng.Hash(world.Seed, key, RngPurpose.Campaign, SeedSalts.CampaignTrail + (ulong)(2 * k + 1))) * 200 - 100;
+                trail.Add(leader + new Vector2(x, z));
+            }
+        }
+        else if (Vector2.Distance(trail[^1], leader) > TrailStep) trail.Add(leader);
+        if (trail.Count > Math.Max(platoons, 1)) trail.RemoveAt(0);
+    }
+
+    /// <summary>The point <paramref name="back"/> units back along the trail from its newest point (its oldest when the trail is shorter).</summary>
+    static Vector2 TrailPoint(CampaignInstance inst, float back)
+    {
+        var trail = inst.Trail;
+        for (int k = trail.Count - 1; k > 0; k--)
+        {
+            float d = Vector2.Distance(trail[k], trail[k - 1]);
+            if (back <= d) return Vector2.Lerp(trail[k], trail[k - 1], d > 0 ? back / d : 0);
+            back -= d;
+        }
+        return trail[0];
+    }
+
+    /// <summary>A <c>travel speed loaded</c> as a movement mode (<b>Verified</b>: WALK the default walk, JOG 55, RUN and GROUPED uncapped, NO_SPEED_CHANGE as it was).</summary>
+    static byte LoadedMode(MoveSpeed speed, byte current) => speed switch
+    {
+        MoveSpeed.Walk => SpeedMode.Walk,
+        MoveSpeed.Jog => SpeedMode.Run,
+        MoveSpeed.Run or MoveSpeed.Grouped => SpeedMode.Free,
+        _ => current,
+    };
+
+    /// <summary>The leader keeps its loaded speed while every intact platoon is within this of it (<b>Verified</b>), else it stops within <see cref="WaitNearTarget"/> of its target, else walks.</summary>
+    const float ColumnRange = 6000, WaitNearTarget = 8294.4f;
 
     static float CampaignSpeed(MoveSpeed speed, bool leader, float distance) => speed switch
     {
@@ -897,10 +952,26 @@ public sealed partial class PopulationSystem : IStateHashed
             squad.HomeRadius = leads && p.Campaign.Phase == 1 ? Math.Max(RadiusOf(p.Campaign.Target) * 0.5f, 40) : 60;
             return;
         }
-        bool busy = n.Task == (byte)CharacterTask.GoTo && (n.Flags & (ushort)MoveFlags.AnyPath) != 0;
+        // The column (task 215, Verified): followers jog to their trail points; the leader marching out keeps its loaded speed while every intact platoon is within
+        // 6000, else it waits near the target or walks.
+        var inst = p.Campaign;
+        byte mode = SpeedMode.Run;
+        if (leads)
+        {
+            mode = LoadedMode(CampaignOf(inst.CampaignId)?.TravelSpeedLoaded ?? MoveSpeed.Run, n.Mode);
+            if (inst.Phase == 0 && !inst.Platoons.All(id => id == p.Id || world.Platoons.Find(id) is not { } q || !Intact(world, q) || Vector2.Distance(q.Position, p.Position) <= ColumnRange))
+            {
+                if (Vector2.Distance(p.Position, goal) <= WaitNearTarget)
+                {
+                    if (n.Task == (byte)CharacterTask.GoTo) MovementSystem.Stop(table, slot);
+                    return;
+                }
+                mode = SpeedMode.Walk;
+            }
+        }
+        bool busy = n.Task == (byte)CharacterTask.GoTo && (n.Flags & (ushort)MoveFlags.AnyPath) != 0 && n.Mode == mode;
         p.OrderCooldown -= dt;
         if (busy || p.OrderCooldown > 0) return;
-        var mode = CampaignOf(p.Campaign.CampaignId)?.TravelSpeedLoaded == MoveSpeed.Walk ? SpeedMode.Walk : SpeedMode.Run;
         MovementSystem.GoTo(table, slot, goal, mode);
         p.OrderCooldown = 4;
     }
@@ -940,6 +1011,8 @@ public sealed partial class PopulationSystem : IStateHashed
                 h.Add(a.Leader);
                 h.Add(a.Men);
                 h.Add(a.Lost);
+                h.Add(a.Trail.Count);
+                foreach (var t in a.Trail) h.Add(t);
                 h.Add(a.Platoons.Count);
                 foreach (int id in a.Platoons) h.Add(id);
             }
