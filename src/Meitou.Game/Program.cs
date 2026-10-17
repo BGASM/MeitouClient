@@ -9,6 +9,7 @@ static class Program
     static int Main(string[] args)
     {
         GameConsole.AttachToParent();
+        GameConsole.StartLog();
         RenderJobs.RaiseRenderThread();
         GameOptions game;
         string[] rest;
