@@ -60,6 +60,14 @@ no defence for 1.2 s (+0x14c). A dodge plays its whole clip at its own speed, th
 ends leaves 0.2 s.
 
 
+## Combat stance
+
+**Observed** (static reading; the animation's combat flag is `AnimationClass +0x244`, the value a clip's `is combat mode` is compared with, [animation](../animation.md#choosing-candidates--14051d660)). One setter, `FUN_14051cc30`, writes it. Set on: every tick of the fight's attack update (`CombatClass::vfunc_11`), and by the combat footwork (`FUN_1402ae1b0`, from a movement flag, not from the target). Cleared by: any new movement goal (`CharMovement::vfunc_18`), the end of the fight task (`CombatClass::vfunc_2`, mode 2), and the chase branch of `CombatClassAI::vfunc_9` (fight states 10 and 11, which also put the movement back to its plain mode 0; every other state sets movement mode 1). When a movement stops (`CharMovement::vfunc_19`) the flag is set to whether the fight task is active (`FUN_140436610`, `CombatClass +0x130`, set at task start). So the stance follows the fight's own steering and is off while the character walks a path to a goal, including a chase of its target along a path (state 10, chosen by `FUN_14060c8b0` when `+0x58` is set from a navmesh query between the two, `FUN_1403a56e0`; what the query's result means is not decoded).
+
+Data (**Verified**, the base ANIMATION records through `AnimationLibrary`): with the flag on, the lower clips are the `walk lower combat shuffle` trio (speeds −99 to 50) and `jog lower combat fallback` (50 and up); `walk`/`jog`/`run lower` are combat NO.
+
+**Unknown**: how far from its target a fighter is in its footwork rather than on the chase path; what makes the AI conditions `iAmBeingMeleeAttacked immediate` / `general` (ids 158 and 159, registered in `FUN_140610250`) true (they read a flag byte at `+0x2b0` of the object at Character `+0x2f8` and an int at `+0x58` of the object that object's vtable slot `0x68` returns; no writer found), and so when a player's character that is idle starts its fight task when attacked. Meitou: `RetaliationSystem` engages it at once, and the stance is off until the pair is within `CombatTuning.StanceRange` ([simulation](../simulation.md#animation)).
+
 ## Armour and medical hit
 
 Coverage rolls, slot order, armour class/material quality and cut/blunt resist/efficiency affect

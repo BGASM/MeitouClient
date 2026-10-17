@@ -277,6 +277,8 @@ lengths, masks and selection data. Movement, held care/lying clips, melee/ranged
 reactions use researched animation rules. Root motion advances with clip time; relocation keeps
 separation by footprint radii and drops blocked components. Rendering consumes snapshot layers;
 shape/skinning belongs to the character renderer. [animation.md](animation.md).
+A fighter on a path to its target further than `CombatTuning.StanceRange` (40 units, engine choice) keeps the plain walk/run clips and
+the drawn weapon; the combat clips (and the signed speed) start within it ([combat](game/combat.md#combat-stance)).
 
 ## Bodies
 

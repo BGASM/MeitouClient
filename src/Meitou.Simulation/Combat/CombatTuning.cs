@@ -26,6 +26,12 @@ public static class CombatTuning
     public const float DefaultClipSeconds = 1;
     /// <summary>A fighter closes in until the gap between bodies is this (units), when it moves by itself.</summary>
     public const float CloseInGap = 3;
+    /// <summary>
+    /// A fighter on its way to its target from further than this (world units between the two, engine choice) is not in the combat stance yet: it moves with the plain
+    /// walk and run clips and the weapon in hand. The original clears the combat flag of the animation whenever a movement goal is given and in its chase of a target along
+    /// a path (docs/game/combat.md "Combat stance"); how far away its footwork takes over is <b>Unknown</b>.
+    /// </summary>
+    public const float StanceRange = 40;
 
     /// <summary>The footprint radius of a human, used when a character has no race data.</summary>
     public const float DefaultFootprint = 4;

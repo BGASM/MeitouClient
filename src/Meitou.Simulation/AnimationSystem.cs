@@ -177,14 +177,31 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             var a = cold.Animation ??= new CharacterAnimation();
             var v = next[i].Velocity;
             float speed = v.Length();
+            bool approaching = Approaching(table, i, cold);
             // In combat the speed is signed along the facing: backing off is negative and picks the clips with a negative move speed.
-            if (cold.InCombat) speed = v.X * MathF.Sin(next[i].Yaw) + v.Z * MathF.Cos(next[i].Yaw);
+            if (cold.InCombat && !approaching) speed = v.X * MathF.Sin(next[i].Yaw) + v.Z * MathF.Cos(next[i].Yaw);
             speed = a.SmoothSpeed(speed, CharacterAnimation.WindowFor(dt));
             var id = table.IdOf(i);
             var ragdoll = Ragdolls is { } r ? new RagdollView(r.HasRagdoll(cold), r.WasWhole(id)) : default;
-            var root = Update(a, cold, speed, dt, world.Seed, Rng.Key(id), world.Tick, wantedLower, wantedUpper, ViewOf(id, world.Tick, cold, dt), (CharacterTask)next[i].Task, ragdoll);
+            var root = Update(a, cold, speed, dt, world.Seed, Rng.Key(id), world.Tick, wantedLower, wantedUpper, ViewOf(id, world.Tick, cold, dt), (CharacterTask)next[i].Task, ragdoll, approaching);
             if (root != Vector2.Zero) Relocate(world, i, ref next[i], root);
         }
+    }
+
+    /// <summary>
+    /// Whether a fighter is still closing in on its target: on a path to it (the pursuit system asks for one only while the target is out of reach) and more than
+    /// <see cref="CombatTuning.StanceRange"/> away. It keeps the plain walk and run clips until it is near (engine choice, docs/game/combat.md "Combat stance").
+    /// </summary>
+    bool Approaching(CharacterTable table, int slot, CharacterCold cold)
+    {
+        if (!cold.InCombat || combat is null) return false;
+        var next = table.Next;
+        if (next[slot].Task != (byte)CharacterTask.Attack || (next[slot].Flags & (ushort)MoveFlags.AnyPath) == 0) return false;
+        var target = combat.StateOf(table.IdOf(slot));
+        int t = target.TargetSlot;
+        if (t < 0 || t >= table.HighWater || !next[t].Alive || next[t].Generation != target.TargetGeneration) return false;
+        var d = next[t].Position - next[slot].Position;
+        return d.X * d.X + d.Z * d.Z > CombatTuning.StanceRange * CombatTuning.StanceRange;
     }
 
     /// <summary>What the combat system says about a character for its animation: the technique playing and its progress, and the last hit taken (the last finished tick's state).</summary>
@@ -263,7 +280,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     /// </summary>
     public Vector2 Update(CharacterAnimation a, CharacterCold cold, float speed, float dt, ulong seed, ulong key, long tick,
         List<(int Index, float Weight)>? lowerScratch = null, List<(int Index, float Weight)>? upperScratch = null, CombatView? combatView = null, CharacterTask task = CharacterTask.Idle,
-        RagdollView ragdoll = default)
+        RagdollView ragdoll = default, bool approaching = false)
     {
         var fight = combatView ?? CombatView.None;
         var lower = lowerScratch ?? [];
@@ -274,7 +291,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         if (a.Rate == 0) a.Rate = cold.Appearance is { } look ? 2 - CharacterShape.MovementScaleOf(look) : 1;
         // Carrying picks the "carrying left" clips and a carried body the "being carried" ones (the ANIMATION booleans, docs/animation.md).
         bool carried = !cold.CarriedBy.IsNone;
-        var stance = StanceOf(cold);
+        var stance = StanceOf(cold) with { Combat = cold.InCombat && !approaching };
         bool down = cold.Medical is { Incapacitated: true };
         if (HoldsForRagdoll(a, down, carried, ragdoll)) return Vector2.Zero;
 
