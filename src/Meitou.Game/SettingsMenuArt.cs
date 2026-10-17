@@ -23,6 +23,19 @@ sealed class SettingsMenuArt
         painter.SetImage(SurfacePrefix + "paper-hover", MenuArt.Card(atlas, new(352, 457, 164, 81), 160, 40, 1, 0, 1.1f), srgb: false);
     }
 
+    /// <summary>The picture under the luckyren Mode setting: <c>assets/luckyren-mode.png</c>, embedded; <c>ImageTexture</c> name.</summary>
+    public const string LuckyrenImage = Prefix + "luckyren-mode";
+
+    public void EnsureLuckyrenImage(UiPainter painter)
+    {
+        if (painter.HasTexture(LuckyrenImage)) return;
+        using var stream = typeof(SettingsMenuArt).Assembly.GetManifestResourceStream("luckyren-mode.png");
+        if (stream is null) return;
+        using var bytes = new MemoryStream();
+        stream.CopyTo(bytes);
+        painter.SetImage(LuckyrenImage, TextureLoader.LoadImage(bytes.ToArray()));
+    }
+
     public string WindowTexture(UiPainter painter, float width, float height)
     {
         int w = Math.Max(1, (int)MathF.Round(width)), h = Math.Max(1, (int)MathF.Round(height));

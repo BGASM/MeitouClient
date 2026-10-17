@@ -50,6 +50,8 @@ sealed class UserConfig
     public bool HardwareMouse { get; set; }
     /// <summary>Outline and tint the character under the cursor (Advanced settings; Meitou only, the game has none).</summary>
     public bool HoverOutline { get; set; } = true;
+    /// <summary>A character that takes a fatal hit explodes, covers everything around in blood and sends bones flying (Advanced settings; Meitou only, off by default). Stored only: nothing reads it yet.</summary>
+    public bool LuckyrenMode { get; set; }
     /// <summary>Worker threads of the simulation; null = half the cores.</summary>
     public int? SimThreads { get; set; }
     public Dictionary<string, float> Graphics { get; set; } = [];

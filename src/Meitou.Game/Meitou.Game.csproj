@@ -35,6 +35,8 @@
     <RuntimeHostConfigurationOption Include="System.GC.HeapCount" Value="4" />
     <!-- The Meitou title's wordmark (TitleLogo). -->
     <EmbeddedResource Include="../../assets/branding/kenshi-logo.png" LogicalName="kenshi-logo.png" />
+    <!-- The picture under the luckyren Mode setting (SettingsMenuArt). -->
+    <EmbeddedResource Include="../../assets/luckyren-mode.png" LogicalName="luckyren-mode.png" />
   </ItemGroup>
 
   <Target Name="ReadBuildRevision" BeforeTargets="GetAssemblyAttributes">

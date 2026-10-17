@@ -44,7 +44,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
 
     sealed record Choice(Func<IReadOnlyList<string>> Options, Func<int> Current, Action<int> Choose);
     sealed record Entry(string Label, string Hint = "", Slider? Slider = null, Toggle? Toggle = null, Choice? Choice = null,
-        InputAction? Binding = null, Action? Run = null);
+        InputAction? Binding = null, Action? Run = null, string? Picture = null);
     sealed record Hit(UiRect Bounds, Action Activate, Slider? Slider = null, UiRect? Track = null);
 
     public IReadOnlyList<Slider> Sliders => values.Sliders;
@@ -162,6 +162,9 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
                 Toggle: new("Doors close behind", () => config.DoorsCloseBehind, v => { config.DoorsCloseBehind = v; DoorsCloseChanged?.Invoke(v); }, Remaster: true, OnOff: true)));
             result.Add(new("Hover outline", "Outline and tint the character under the cursor, in the colour of what a right click would do.",
                 Toggle: new("Hover outline", () => config.HoverOutline, v => config.HoverOutline = v, Remaster: true, OnOff: true)));
+            result.Add(new("luckyren Mode", "A character that takes a fatal hit explodes, covers everything around in blood and sends bones flying everywhere. Not implemented yet: this switch does nothing.",
+                Toggle: new("luckyren Mode", () => config.LuckyrenMode, v => config.LuckyrenMode = v, Remaster: true, OnOff: true),
+                Picture: SettingsMenuArt.LuckyrenImage));
             result.Add(new("Main menu scene transitions", "Sky flight to/from the main menu (Meitou UI).",
                 Toggle: new("Main menu scene transitions", () => config.MainMenuTransitions, v => config.MainMenuTransitions = v)));
             result.Add(new(mainMenuTransitionSpeed.Label, "Higher values make the camera ascend and descend faster.", Slider: mainMenuTransitionSpeed));
@@ -385,6 +388,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         OffscreenChanged?.Invoke();
         config.HardwareMouse = false;
         config.HoverOutline = true;
+        config.LuckyrenMode = false;
         player.SetUiMode(UiMode.Faithful);
         player.SpeedUnit = config.SpeedUnit = SpeedUnit.Mph;
         player.Floaters = config.Floaters = FloaterMode.Simple;

@@ -1,5 +1,7 @@
 # MeitouClient
 
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/martinvlcek)
+
 C#/.NET10 reimplementation of [Kenshi](https://lofigames.com/), aiming to run original content,
 mods and saves unchanged. **No game assets are shipped; an installed legal copy is required.**
 Early playable slice: streamed Vulkan world, characters/animation, movement/combat/body state,

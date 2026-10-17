@@ -51,6 +51,18 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
         GPL-3.0-or-later · No game assets are distributed · Not affiliated with Lo-Fi Games
       </footer>
     </div>
+    <script is:inline src="https://storage.ko-fi.com/cdn/scripts/overlay-widget.js"></script>
+    <script is:inline>
+      kofiWidgetOverlay.draw('martinvlcek', {
+        'type': 'floating-chat',
+        'floating-chat.donateButton.text': 'Support me',
+        'floating-chat.donateButton.background-color': '#323842',
+        'floating-chat.donateButton.text-color': '#fff'
+      });
+      const kofiToggle = () => document.documentElement.classList.toggle('is-scrolled', scrollY > 0);
+      addEventListener('scroll', kofiToggle, { passive: true });
+      kofiToggle();
+    </script>
     {video && (
       <script is:inline>
         if (matchMedia('(prefers-reduced-motion: reduce)').matches) document.querySelector('.bg video')?.pause();
@@ -58,6 +70,19 @@ const { title, description = 'MeitouClient: a .NET reimplementation of the Kensh
     )}
   </body>
 </html>
+
+<style is:global>
+  /* Ko-fi floating widget (bottom left): hidden until the page is scrolled (see the script below). */
+  .floatingchat-container-wrap, .floatingchat-container-wrap-mobi,
+  .floating-chat-kofi-popup-iframe, .floating-chat-kofi-popup-iframe-mobi {
+    transition: opacity .2s ease;
+  }
+  html:not(.is-scrolled) :is(.floatingchat-container-wrap, .floatingchat-container-wrap-mobi,
+  .floating-chat-kofi-popup-iframe, .floating-chat-kofi-popup-iframe-mobi) {
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+</style>
 
 <style>
   /* --frame: the page ground around the video; --edge: where content starts, just inside the frame. */

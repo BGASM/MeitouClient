@@ -154,12 +154,24 @@ sealed partial class SettingsMenu
     /// <summary>The lines a hint wraps to (about 86 characters of the 11 px text fit the 456-unit column).</summary>
     static int HintLines(Entry entry) => entry.Hint.Length == 0 ? 0 : Math.Max(1, (int)MathF.Ceiling(entry.Hint.Length / 86f));
 
-    static float EntryHeight(Entry entry) => entry.Hint.Length > 0 ? 28 + 14 * HintLines(entry) : 36;
+    /// <summary>A picture under an entry's row: 560 units wide, the luckyren Mode image's proportions, with 8 units above it.</summary>
+    const float PictureWidth = 560, PictureHeight = 72, PictureGap = 8;
+
+    static float RowHeight(Entry entry) => entry.Hint.Length > 0 ? 28 + 14 * HintLines(entry) : 36;
+
+    static float EntryHeight(Entry entry) => RowHeight(entry) + (entry.Picture is null ? 0 : PictureGap + PictureHeight);
 
     void DrawEntry(Entry entry, float y)
     {
-        float row = EntryHeight(entry), buttonY = y + (row - 26) / 2;
-        Rect(R(212, y + row - 1, 888, 1), MainInk with { W = 0.075f }, viewport);
+        float row = RowHeight(entry), buttonY = y + (row - 26) / 2;
+        Rect(R(212, y + EntryHeight(entry) - 1, 888, 1), MainInk with { W = 0.075f }, viewport);
+        if (entry.Picture is { } picture && player.SettingsPainter is { } painter)
+        {
+            art.EnsureLuckyrenImage(painter);
+            if (painter.HasTexture(picture))
+                controls.Add(new("settings-picture", "ImageBox", R(212, y + row - 4, PictureWidth, PictureHeight), "", "", "", true,
+                    new Dictionary<string, string> { ["ImageTexture"] = picture }, Vector4.Zero, Clip: viewport, Pickable: false));
+        }
         Text(entry.Label, R(212, y + 2, 456, entry.Hint.Length > 0 ? 20 : 32), 14, clip: viewport);
         if (HintLines(entry) is var lines and > 0)
             Text(entry.Hint, R(212, y + 19, 456, 14 * lines + 3), 11, MutedInk, lines > 1 ? "Left Top" : "Left VCenter", viewport, wrap: lines > 1);
