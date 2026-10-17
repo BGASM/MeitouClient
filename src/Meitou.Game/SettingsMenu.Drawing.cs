@@ -16,10 +16,12 @@ sealed partial class SettingsMenu
 
     void Rect(UiRect at, Vector4 colour, UiRect? clip = null) => controls.Add(new("settings-fill", "Panel", at, "", "", "", true, new Dictionary<string, string>(), colour, Clip: clip, Pickable: false));
 
-    void Text(string caption, UiRect at, float size = 16, Vector4? colour = null, string align = "Left VCenter", UiRect? clip = null)
-        => controls.Add(new("settings-text", "TextBox", at, caption, "", "", true,
-            new Dictionary<string, string> { ["TextAlign"] = align, ["FontName"] = "Kenshi_StandardFont", ["FontPixels"] = ((int)MathF.Round(size * scale)).ToString(System.Globalization.CultureInfo.InvariantCulture) }, Vector4.Zero,
-            colour ?? MainInk, Clip: clip, Pickable: false, TextScale: size * scale / 16));
+    void Text(string caption, UiRect at, float size = 16, Vector4? colour = null, string align = "Left VCenter", UiRect? clip = null, bool wrap = false)
+    {
+        var properties = new Dictionary<string, string> { ["TextAlign"] = align, ["FontName"] = "Kenshi_StandardFont", ["FontPixels"] = ((int)MathF.Round(size * scale)).ToString(System.Globalization.CultureInfo.InvariantCulture) };
+        if (wrap) properties["WordWrap"] = "true";
+        controls.Add(new("settings-text", "TextBox", at, caption, "", "", true, properties, Vector4.Zero, colour ?? MainInk, Clip: clip, Pickable: false, TextScale: size * scale / 16));
+    }
 
     void Surface(UiRect at, string kind, bool selected = false, bool hover = false, UiRect? clip = null)
     {
@@ -149,14 +151,18 @@ sealed partial class SettingsMenu
         painter.Draw(controls, width, height, pointer, null);
     }
 
-    static float EntryHeight(Entry entry) => entry.Hint.Length > 0 ? 42 : 36;
+    /// <summary>The lines a hint wraps to (about 86 characters of the 11 px text fit the 456-unit column).</summary>
+    static int HintLines(Entry entry) => entry.Hint.Length == 0 ? 0 : Math.Max(1, (int)MathF.Ceiling(entry.Hint.Length / 86f));
+
+    static float EntryHeight(Entry entry) => entry.Hint.Length > 0 ? 28 + 14 * HintLines(entry) : 36;
 
     void DrawEntry(Entry entry, float y)
     {
         float row = EntryHeight(entry), buttonY = y + (row - 26) / 2;
         Rect(R(212, y + row - 1, 888, 1), MainInk with { W = 0.075f }, viewport);
         Text(entry.Label, R(212, y + 2, 456, entry.Hint.Length > 0 ? 20 : 32), 14, clip: viewport);
-        if (entry.Hint.Length > 0) Text(entry.Hint, R(212, y + 19, 456, 17), 11, MutedInk, clip: viewport);
+        if (HintLines(entry) is var lines and > 0)
+            Text(entry.Hint, R(212, y + 19, 456, 14 * lines + 3), 11, MutedInk, lines > 1 ? "Left Top" : "Left VCenter", viewport, wrap: lines > 1);
         if (entry.Toggle is { Remaster: true } remaster)
         {
             // A Faithful / Meitou switch: both sides as buttons, the active one marked.
