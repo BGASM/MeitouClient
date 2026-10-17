@@ -37,7 +37,7 @@ sealed class GameOptions
           --fps-limit <n>            frame limit when vsync is off (default 240 from meitou.user.json; 0 = unlimited)
           --vsync / --no-vsync       vsync (default off)
           --seed <n>                 the world seed (default 0)
-          --ui <faithful|meitou>      UI mode, independent of graphics; also available in Tab settings (default faithful)
+          --ui <faithful|meitou>      UI mode, independent of graphics; also available in the settings (default faithful)
           --ui-showcase              with --screenshot: capture HUD, inventory, stats, map, menus, a trade with the nearest trader and a conversation in either UI mode
           --title-preview            with --screenshot: capture the staged Meitou title scene
           --no-population            no town residents or movement (an empty world)
@@ -55,11 +55,11 @@ sealed class GameOptions
           --yaw/--pitch/--distance   start view: heading, pitch above the horizon and boom (Kenshi: 30 degrees, boom 150; clamped to 10..2000)
           world options as meitou-viewer --world: --at, --zone, --town, --radius, --time, --screenshot, --size, --no-foliage, ...
         Keys: W/A/S/D or arrows move (or the pointer at a screen edge), Q/E rotate, Comma/Period tilt, wheel or Home/End zoom, PageUp/PageDown floor up/down, middle drag orbit, left click or drag selects, right click moves (shift queues), 1..9 / ` select, R stops,
-          ; free camera (R/F up/down), Space pause, F2/F3/F4 speed 1x/2x/5x, Tab settings, F8 or PrintScreen screenshot,
+          ; free camera (R/F up/down), Space pause, F2/F3/F4 speed 1x/2x/5x, F8 or PrintScreen screenshot,
           F5 quicksave, F9 quickload (Meitou's own slot under %LOCALAPPDATA%\Meitou\save), Ctrl+F9 fps counter, F10 keys, F11 statistics, F12 profiler (gpu, cpu, off), Esc game menu (save, load, exit). Shift+F1 Meitou on / off, Alt+Enter full screen,
           F6 cinematic camera editor (numpad keys as in the viewer; game-shots.json; PageUp/PageDown/Home the lens also in the free camera), F7 hide the interface,
           Backspace restarts the --duel lap.
-        Settings (frame limit, vsync, full screen (--windowed for one run), tick rate (tickRate), simulation threads (simThreads), the Tab sliders, key bindings) are kept in meitou.user.json.
+        Settings (frame limit, vsync, full screen (--windowed for one run), tick rate (tickRate), simulation threads (simThreads), the settings sliders, key bindings) are kept in meitou.user.json.
         """;
 
     /// <summary>Takes the game's own options out of <paramref name="args"/> and returns the rest.</summary>

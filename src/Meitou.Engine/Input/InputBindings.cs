@@ -101,7 +101,7 @@ public sealed class InputBindings
         Set(InputAction.Speed2, Key.F3);
         Set(InputAction.Speed3, Key.F4);
         Set(InputAction.Screenshot, Key.F8, Key.PrintScreen);   // the game's own screenshot keys (docs/game/ui-input.md)
-        Set(InputAction.ToggleSettings, Key.Tab);
+        Set(InputAction.ToggleSettings);   // Tab is the game's change_squad (docs/game/ui-input.md); the settings open from the Esc menu's Options
         Set(InputAction.ToggleFps);   // Ctrl+F9 in the game (plain F9 is the game's quickload), so unbound here
         Set(InputAction.QuickSave, Key.F5);
         Set(InputAction.QuickLoad, Key.F9);

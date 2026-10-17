@@ -30,7 +30,7 @@ While a selected character sneaks, an NPC that is up gets the verb "Stealth KO (
 that instead of an attack ([combat](combat.md#stealth-knock-out)); the first sneaking selected character goes.
 
 Original strategy camera actions/zoom flags are in [camera](../formats/camera.md). Engine defaults:
-Space pause,F2/F3/F4=1/2/5,F5 save,F9 load,Tab settings; current complete keys in [viewer](../viewer.md)
+Space pause,F2/F3/F4=1/2/5,F5 save,F9 load; Tab is the original's change_squad (a no-op with one squad tab; the settings open from the Esc menu, ToggleSettings is unbound by default); current complete keys in [viewer](../viewer.md)
 and [engine](../engine.md). User bindings and viewer/cinematic bindings have separate lifetimes.
 Settings-tab labels/type/ranges/restart semantics: [settings](../formats/settings.md).
 
