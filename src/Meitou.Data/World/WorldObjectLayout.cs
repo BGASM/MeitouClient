@@ -28,6 +28,9 @@ public sealed record PlacedMesh(string MeshPath, Matrix4x4 Transform, GameRecord
     /// <summary>A part of the building's <c>interior</c> list (inner walls, floors, inner stairs): drawn only in the interior view.</summary>
     public bool Interior { get; init; }
 
+    /// <summary>For a door's parts: the door's index in the building's <c>doors</c> list (the save's suffix, the fixture's <c>#i</c>); -1 for every other part.</summary>
+    public int DoorIndex { get; init; } = -1;
+
     /// <summary>For an object of a building layout (sign, furniture): the placement id of the building it belongs to, whose interior view it follows.</summary>
     public string? ParentPlacementId { get; init; }
 }
@@ -94,9 +97,12 @@ public static class WorldObjectLayout
         AddBuilding(db, building, placementId, worldPosition, rotation, state, result, lights);
         // Doors: one building per "doors" entry at the parent's position and rotation, not for destroyed buildings (game: Building::createPhysical).
         if (!state.Destroyed && !building.GetBool("is node"))
-            foreach (var r in building.GetReferences("doors"))
-                if (db.Find(r.TargetStringId) is { Type: FcsRecordType.BUILDING } door)
-                    AddBuilding(db, door, placementId, worldPosition, rotation, state, result, lights);
+        {
+            var doors = building.GetReferences("doors");
+            for (int i = 0; i < doors.Count; i++)
+                if (db.Find(doors[i].TargetStringId) is { Type: FcsRecordType.BUILDING } door)
+                    AddBuilding(db, door, placementId, worldPosition, rotation, state, result, lights, i);
+        }
         return result;
     }
 
@@ -114,10 +120,12 @@ public static class WorldObjectLayout
         public Matrix4x4 Node = Matrix4x4.Identity;
         /// <summary>Laying out the <c>interior</c> list.</summary>
         public bool Interior;
+        /// <summary>Laying out door i of the parent's <c>doors</c> list; -1 for the building itself.</summary>
+        public int DoorIndex = -1;
     }
 
     static void AddBuilding(GameDatabase db, GameRecord building, string placementId, Vector3 position, Quaternion rotation, BuildingState state,
-        List<PlacedMesh> result, List<PlacedLight>? lights)
+        List<PlacedMesh> result, List<PlacedLight>? lights, int doorIndex = -1)
     {
         if (building.GetBool("is node")) return;
         float scale = building.GetFloat("scale", 1);
@@ -129,6 +137,7 @@ public static class WorldObjectLayout
                 ? ResolveCollection(db, db.Find(m[0].TargetStringId) is { Type: FcsRecordType.MATERIAL_SPEC } spec ? spec : null, placementId + building.StringId)
                 : state.TownMaterial,
             Random = new BuildingRandom(BuildingRandom.Seed(position.X, position.Z)),
+            DoorIndex = doorIndex,
         };
         // The building's scene node: position and rotation, no scale (each part node carries the scale).
         a.Node = Matrix4x4.CreateFromQuaternion(Normalized(rotation)) * Matrix4x4.CreateTranslation(position);
@@ -197,7 +206,7 @@ public static class WorldObjectLayout
         local *= Matrix4x4.CreateTranslation(offset);
         var node = local * parentNode;
         if (!entity) return null;
-        a.Result.Add(new PlacedMesh(mesh, node, part, a.Building, a.PlacementId, PlacedKind.BuildingPart) { Material = PartMaterial(a, part), Floor = Math.Clamp(part.GetInt("building floor"), 0, 3), Interior = a.Interior });
+        a.Result.Add(new PlacedMesh(mesh, node, part, a.Building, a.PlacementId, PlacedKind.BuildingPart) { Material = PartMaterial(a, part), Floor = Math.Clamp(part.GetInt("building floor"), 0, 3), Interior = a.Interior, DoorIndex = a.DoorIndex });
         return node;
     }
 

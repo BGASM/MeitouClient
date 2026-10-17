@@ -105,10 +105,27 @@ Same targets as picking; Task_CutLock / Task_BruteForceLock share the shackle ta
 ## Doors
 
 - Door object fields (**Verified**: save writer `DoorStuff` slot 148 / reader 149): `state` (+0x380: 0 closed, 1 open,
-  3 closing; this is not the DoorState enum), `doa` open amount (+0x37c, 0..1), `broken` (+0x3ec), `gatecode`, `wants lock`
+  2 opening, 3 closing; this is not the DoorState enum), `doa` open amount (+0x37c, 0..1), `broken` (+0x3ec), `gatecode`, `wants lock`
   (+0x384), and the lock (`lock lvl`, `locked`, `broken`, `hardness`). `wants lock` starts from `always locks` (gates).
-- **Player lock toggle** (`FUN_140547060`): flips `wants lock` (sound `Lock_Building` / `Unlock_Building`); locking a closed
-  door sets the lock at once, unlocking clears it; an open door locks when it next closes (**Observed** for the close path).
+- **Motion** (**Verified**, constructor `FUN_14029fb40`, update slot 28 `FUN_140299030`, pose `FUN_140298d10` by disassembly): doors
+  slide, they never swing. Open (`FUN_140297040`) works only from state 0 -> 2 and tests no lock; close (`FUN_140298c50`) only from
+  1 -> 3, not on a destroyed door. Each frame `doa` moves by frame time x `door move speed` (+0x388, default 0.5 before the record
+  is read); at 1 the state is 1, below 0 it is 0 and, with `wants lock`, the lock is set (`FUN_1402969f0`). Sounds `Door_Open`,
+  `Door_Close`; `Door_Shut` at both ends. Leaf offset from its closed pose, `d` = `door move dist`, `o` = `door comes out` (both signed):
+  `o = 0`: `slide x d x doa`; else `t = |o| / (0.25 |d| + |o|)` and `doa < t`: `out x o x doa / t`, otherwise
+  `slide x d x (doa - t) / (1 - t) + out x o`. `slide` is the door collision shape's local axis `door axis` (0 X, 1 Y, 2 Z); `out`
+  is the shape box's thinnest other axis, sign-flipped by a dot test against the shape position (`FUN_14029cc90`; the reference
+  point is not decoded, **Observed**: Meitou points it away from the building origin, which matches the Storm House doors in game).
+  Data (35 door records): houses slide sideways (axis 0, 16..30 units, speed 1), gates up (`Concrete Gate Door` axis 1, 85) or along
+  Z (defensive gates 65..100, speed 0.2..0.25); 14 TwoStorey doors step out 0.6..13 units first.
+- **Who opens and closes** (**Observed**, callers of the two functions): opening: Task_OpenDoor (its start and update; the update
+  fails on a locked lock), the door panel button, a broken lock (bashing), dialogue effect 0x36 (the speaker's building's door).
+  Closing: Task_CloseDoor, Task_LockDoor and the door panel. Nothing closes a door by itself: doors stay open until an AI task or
+  the player closes them. How the planner queues Task_OpenDoor before a walk into a building is not traced (**Unknown**).
+- **Door panel** (player's building): open/close button `FUN_140546fb0`: an open door closes; otherwise an effectively locked
+  one is unlocked first, then opened (**Verified**).
+- **Player lock toggle** (`FUN_140547060`, **Verified**): flips `wants lock` (sound `Lock_Building` / `Unlock_Building`); locking a
+  closed door sets the lock at once, unlocking clears it; an open door locks when it next closes (the update above).
 - **Navigation**: the navmesh treats a door as open once `doa >= 0.6` (`FUN_140298d10` -> `FUN_1403a6070`); closed faces are
   blocked for every filter ([pathfinding](pathfinding.md)). A locked lock makes `Task_OpenDoor` fail ("It's locked.") for anyone,
   owner included: the owner must unlock first (**Verified**). Whether the planner routes strangers around locked doors is **Unknown**.
@@ -167,5 +184,6 @@ suffix `i`: `state<i>`, `doa<i>`, `broken<i>`, `gatecode<i>`, `wants lock<i>`, a
 | Exact strength terms of cut/break (`FUN_1406457e0(stats, 1, ...)` x stat-scale virtual) | effective strength x 1 |
 | Whether an awake prisoner can be lifted out of an unlocked cage (`FUN_14034fbe0`'s callers not traced) | allowed; the carry rules then knock out a non-friendly one on the shoulder and set a friendly one down |
 | Whether non-owners path around locked doors | a building whose doors are all effectively locked is closed for every path; closed unlocked doors are passable |
-| Door states 2 (opening) and their timing; `gatecode` | 2 = opening; preserve `gatecode` |
+| `gatecode` | preserve it |
+| How the planner inserts Task_OpenDoor into walks | a walker whose next path legs pass a closed door opens it; at a locked one it stops ("It's locked.") |
 | What else sets or clears the squad "house locked" flag | the rules above |
