@@ -83,9 +83,9 @@ public sealed class Fixture
     /// <summary>Doors: how the leaf moves (its record's <c>door move speed</c> etc.), and the parent BUILDING record (the door's position is looked up by it and <see cref="DoorIndex"/>).</summary>
     public DoorLeaf Leaf { get; init; }
     public string HostRecordId { get; init; } = "";
-    /// <summary>Doors: the leaf's centre in the world, once the door gate has told it (<see cref="FixtureRegistry.DoorCentre"/>); derived from the data, not hashed or saved.</summary>
-    internal Vector3? Centre { get; set; }
-    internal bool CentreAsked { get; set; }
+    /// <summary>Doors: where the leaf is in the world, once the door gate has told it (<see cref="FixtureRegistry.DoorSpotOf"/>); derived from the data, not hashed or saved.</summary>
+    internal DoorSpot? Spot { get; set; }
+    internal bool SpotAsked { get; set; }
 
     /// <summary>Cages: the functionality's <c>restrains movement</c> (pole, peeler). Cages and beds: <c>use range</c>, and who is in it.</summary>
     public bool Restrains { get; init; }
@@ -115,8 +115,11 @@ public interface IDoorGate
     /// <summary>Opens every door again (the world was replaced).</summary>
     void ResetDoors();
     /// <summary>
-    /// The centre of door <paramref name="doorIndex"/> of a BUILDING record in the building's frame (scaled, not rotated or moved; from the door's collision, as the navmesh
+    /// Where door <paramref name="doorIndex"/> of a BUILDING record is, in the building's frame (scaled, not rotated or moved; from the door's collision, as the navmesh
     /// paints it); null when not known. Pure data: the same answer every time.
     /// </summary>
-    Vector3? DoorCentre(string buildingRecordId, int doorIndex) => null;
+    DoorSpot? DoorSpotOf(string buildingRecordId, int doorIndex) => null;
 }
+
+/// <summary>A door leaf's closed box: its centre, the horizontal unit normal of its thinnest side (the way through), and half its width along the wall.</summary>
+public readonly record struct DoorSpot(Vector3 Centre, Vector3 Normal, float HalfWidth);

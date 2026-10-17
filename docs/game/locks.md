@@ -120,8 +120,10 @@ Same targets as picking; Task_CutLock / Task_BruteForceLock share the shackle ta
   Z (defensive gates 65..100, speed 0.2..0.25); 14 TwoStorey doors step out 0.6..13 units first.
 - **Who opens and closes** (**Observed**, callers of the two functions): opening: Task_OpenDoor (its start and update; the update
   fails on a locked lock), the door panel button, a broken lock (bashing), dialogue effect 0x36 (the speaker's building's door).
-  Closing: Task_CloseDoor, Task_LockDoor and the door panel. Nothing closes a door by itself: doors stay open until an AI task or
-  the player closes them. How the planner queues Task_OpenDoor before a walk into a building is not traced (**Unknown**).
+  Closing: Task_CloseDoor, Task_LockDoor and the door panel. The planner opens doors for walks: Moving (1, 29, 67) lists states 59
+  `DESTINATION_IS_ACCESSIBLE` and 60 `LOCATION_IS_ACCESSIBLE` in list B, which tasks 85 / 84 (Task_OpenDoor) make true by opening
+  the door ([ai-tasks](ai-tasks.md)). Nothing closes a door behind a walker: only the lock tasks list a closed door (`!52`), and no
+  AI package lists tasks 73/75 (**Observed**: TaskData and package census). How states 59/60 pick their door is **Unknown**.
 - **Door panel** (player's building): open/close button `FUN_140546fb0`: an open door closes; otherwise an effectively locked
   one is unlocked first, then opened (**Verified**).
 - **Player lock toggle** (`FUN_140547060`, **Verified**): flips `wants lock` (sound `Lock_Building` / `Unlock_Building`); locking a
@@ -185,5 +187,5 @@ suffix `i`: `state<i>`, `doa<i>`, `broken<i>`, `gatecode<i>`, `wants lock<i>`, a
 | Whether an awake prisoner can be lifted out of an unlocked cage (`FUN_14034fbe0`'s callers not traced) | allowed; the carry rules then knock out a non-friendly one on the shoulder and set a friendly one down |
 | Whether non-owners path around locked doors | a building whose doors are all effectively locked is closed for every path; closed unlocked doors are passable |
 | `gatecode` | preserve it |
-| How the planner inserts Task_OpenDoor into walks | a walker whose next path legs pass a closed door opens it; at a locked one it stops ("It's locked.") |
+| Which door states 59/60 open for a walk | a walker whose next path legs cross a closed door's plane opens it; at a locked one it stops ("It's locked.") |
 | What else sets or clears the squad "house locked" flag | the rules above |

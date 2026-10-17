@@ -13,19 +13,21 @@ public sealed record ToggleDoorLocksOrder(string Building) : SimCommand;
 /// every <see cref="WalkerEveryTicks"/> ticks a character whose path runs through a closed door opens it, or stops at a locked one ("It's locked."); the player's finished buildings
 /// get their doors registered (<see cref="FixtureRegistry.RegisterPlayerBuilding"/>) and the player's door orders are applied. Serial phases only.
 /// <list type="bullet">
-/// <item><b>Engine choice</b>: the original opens a door with Task_OpenDoor, which its planner puts before a walk into a building (the walker faces the door, a locked one fails the task);
-/// here the walk itself opens it, within <see cref="OpenReach"/> of the door when its path passes within <see cref="DoorPass"/> of the leaf's centre. The walker does not wait for the
-/// leaf (the navmesh lets paths through closed unlocked doors).</item>
-/// <item>Nothing closes a door by itself (<b>Observed</b>: only Task_CloseDoor, Task_LockDoor and the door panel start a close): doors stay open until a lock-up round or the player closes them.</item>
+/// <item><b>Engine choice</b>: the original's walk needs its destination and location "accessible" (states 59, 60), which Task_OpenDoor (84, 85) makes true by opening the door
+/// (the walker faces the door, a locked one fails the task); here the walk itself opens it: a walker within <see cref="OpenReach"/> of a closed door whose current or next path leg
+/// crosses the leaf's plane within its width (plus <see cref="DoorSlack"/>). At a locked one the walker stops, within <see cref="LockedReach"/> on its current leg. The walker does not
+/// wait for the leaf (the navmesh lets paths through closed unlocked doors).</item>
+/// <item>No walk closes a door behind it (<b>Observed</b>: only Task_CloseDoor, Task_LockDoor and the door panel start a close, and only the lock tasks need a closed door): doors stay
+/// open until a lock-up round or the player closes them.</item>
 /// </list>
 /// </summary>
 public sealed partial class LockSystem
 {
     /// <summary>Engine choices of the walk-through opening (see the class remarks).</summary>
     public const int WalkerEveryTicks = 3;
-    public const float OpenReach = 40, DoorPass = 10, DoorHeight = 40;
+    public const float OpenReach = 40, LockedReach = 15, DoorSlack = 6, DoorHeight = 40;
 
-    long buildingsVersion = -1;
+    long buildingsRevision = -1;
 
     void DoorInputs(World world, SimCommand command)
     {
@@ -83,8 +85,8 @@ public sealed partial class LockSystem
     void SyncPlayerBuildings(World world)
     {
         var reg = world.Buildings;
-        if (reg.Version == buildingsVersion) return;
-        buildingsVersion = reg.Version;
+        if (reg.Revision == buildingsRevision) return;
+        buildingsRevision = reg.Revision;
         var fixtures = world.Fixtures;
         foreach (var b in fixtures.Buildings.ToArray())
             if (fixtures.OfBuilding(b) is [{ Site: -1 }, ..] && reg.Find(b) is not { Complete: true, Destroyed: false }) fixtures.Unregister(b);
@@ -97,7 +99,7 @@ public sealed partial class LockSystem
     {
         public World World;
         public Fixture Door;
-        public Vector3 Centre;
+        public DoorSpot Spot;
         public bool Opened;
     }
 
@@ -108,47 +110,44 @@ public sealed partial class LockSystem
         foreach (var f in fixtures.All)
         {
             if (f.Kind != FixtureKind.Door || f.DoorBroken || f.Motion is DoorMotion.Open or DoorMotion.Opening) continue;
-            if (fixtures.DoorCentre(f) is not { } centre) continue;
-            var scan = new WalkerScan { World = world, Door = f, Centre = centre };
-            world.Grid.Query(centre.X, centre.Z, OpenReach, ref scan, static (int slot, ref WalkerScan s) =>
+            if (fixtures.DoorSpotOf(f) is not { } spot) continue;
+            var scan = new WalkerScan { World = world, Door = f, Spot = spot };
+            world.Grid.Query(spot.Centre.X, spot.Centre.Z, OpenReach, ref scan, static (int slot, ref WalkerScan s) =>
             {
                 if (s.Opened) return;
                 var table = s.World.Characters;
                 ref var n = ref table.Next[slot];
                 if (!n.Alive || ((MoveFlags)n.Flags & MoveFlags.HasPath) == 0 || table.Cold(slot) is not { } c || c.Medical is { Incapacitated: true } || c.IsImprisoned) return;
-                if (MathF.Abs(n.Position.Y - s.Centre.Y) > DoorHeight || !PassesDoor(n.Position, c.Path, n.PathCursor, s.Centre)) return;
-                if (Vector2.Distance(new Vector2(n.Position.X, n.Position.Z), new Vector2(s.Centre.X, s.Centre.Z)) > OpenReach) return;
+                if (MathF.Abs(n.Position.Y - s.Spot.Centre.Y) > DoorHeight) return;
+                float away = Vector2.Distance(new Vector2(n.Position.X, n.Position.Z), new Vector2(s.Spot.Centre.X, s.Spot.Centre.Z));
+                if (away > OpenReach) return;
                 if (s.Door.Lock is { EffectivelyLocked: true })
                 {
                     // Task_OpenDoor fails at a locked door for anyone, the owner too (docs/game/locks.md "Doors").
+                    if (away > LockedReach || !Crosses(n.Position, c.Path, n.PathCursor, s.Spot, legs: 1)) return;
                     MovementSystem.Stop(table, slot);
                     if (c.IsPlayer) s.World.Post($"{c.Name}: It's locked.");
                     return;
                 }
+                if (!Crosses(n.Position, c.Path, n.PathCursor, s.Spot, legs: 2)) return;
                 s.Opened = FixtureRegistry.OpenDoor(s.Door) || s.Door.Motion == DoorMotion.Opening;
             });
         }
     }
 
-    /// <summary>Whether the next two legs of a path (from the walker to its next point, and on to the one after) pass within <see cref="DoorPass"/> of the door, in X/Z.</summary>
-    static bool PassesDoor(Vector3 at, Vector3[] path, int cursor, Vector3 door)
+    /// <summary>Whether one of the next <paramref name="legs"/> legs of a path (from the walker to its next point, then on) crosses the leaf's plane within its width plus <see cref="DoorSlack"/>, in X/Z.</summary>
+    static bool Crosses(Vector3 at, Vector3[] path, int cursor, DoorSpot door, int legs)
     {
-        var d = new Vector2(door.X, door.Z);
+        var c = new Vector2(door.Centre.X, door.Centre.Z);
+        var normal = new Vector2(door.Normal.X, door.Normal.Z);
         var a = new Vector2(at.X, at.Z);
-        for (int k = cursor; k < path.Length && k < cursor + 2; k++)
+        for (int k = cursor; k < path.Length && k < cursor + legs; k++)
         {
             var b = new Vector2(path[k].X, path[k].Z);
-            if (DistanceToSegment(d, a, b) <= DoorPass) return true;
+            float da = Vector2.Dot(a - c, normal), db = Vector2.Dot(b - c, normal);
+            if ((da <= 0) != (db <= 0) && Vector2.Distance(a + (b - a) * (da / (da - db)), c) <= door.HalfWidth + DoorSlack) return true;
             a = b;
         }
         return false;
-    }
-
-    static float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
-    {
-        var ab = b - a;
-        float len2 = ab.LengthSquared();
-        float t = len2 < 1e-6f ? 0 : Math.Clamp(Vector2.Dot(p - a, ab) / len2, 0, 1);
-        return Vector2.Distance(p, a + ab * t);
     }
 }

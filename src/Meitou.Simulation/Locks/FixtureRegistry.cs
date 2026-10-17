@@ -275,16 +275,19 @@ public sealed class FixtureRegistry
         }
     }
 
-    /// <summary>The world position of a door's leaf (closed), asked of the door gate once; null without a gate or when it does not know the door.</summary>
-    public Vector3? DoorCentre(Fixture door)
+    /// <summary>Where a door's leaf is in the world (closed), asked of the door gate once; null without a gate or when it does not know the door.</summary>
+    public DoorSpot? DoorSpotOf(Fixture door)
     {
         if (door.Kind != FixtureKind.Door) return null;
-        if (door.CentreAsked) return door.Centre;
+        if (door.SpotAsked) return door.Spot;
         if (doors is null) return null;
-        door.CentreAsked = true;
-        if (doors.DoorCentre(door.HostRecordId, door.DoorIndex) is { } local)
-            door.Centre = door.Position + Vector3.Transform(local, Quaternion.CreateFromAxisAngle(Vector3.UnitY, door.Yaw));
-        return door.Centre;
+        door.SpotAsked = true;
+        if (doors.DoorSpotOf(door.HostRecordId, door.DoorIndex) is { } local)
+        {
+            var turn = Quaternion.CreateFromAxisAngle(Vector3.UnitY, door.Yaw);
+            door.Spot = local with { Centre = door.Position + Vector3.Transform(local.Centre, turn), Normal = Vector3.Transform(local.Normal, turn) };
+        }
+        return door.Spot;
     }
 
     /// <summary>Tells navigation after a door's lock changed (a pick, a break, an unlock).</summary>

@@ -394,9 +394,10 @@ unload, hashed only once non-empty. Facts: [locks](game/locks.md), [economy 11.5
   all its doors are effectively locked and none broken (engine: one nav door state per building; closed-unlocked doors stay passable).
   Motion (`LockSystem.Doors.cs`, serial `SlowWorld`): `StepDoors` moves opening/closing leaves by `door move speed` per second and
   locks a closed one that `wants lock`; locking a home's doors closes them (animated, the lock holds at once). Engine stand-in for
-  Task_OpenDoor: every 3 ticks a walker within 40 of a closed door whose next two path legs pass within 10 of the leaf's centre
-  (`IDoorGate.DoorCentre`, from the door collision via `NavDoorGeometry`; headless: none, so no walk-through opening) opens it, or
-  stops at an effectively locked one ("It's locked." for the player). Nothing closes a door by itself, as in the original.
+  Task_OpenDoor: every 3 ticks a walker within 40 of a closed door whose current or next path leg crosses the leaf's plane within
+  its half width + 6 (`IDoorGate.DoorSpotOf`: the door collision's box via `NavDoorGeometry`; headless: none, so no walk-through opening) opens it;
+  at an effectively locked one a walker within 15 whose current leg crosses it stops ("It's locked." for the player). No walk closes a
+  door behind it, as in the original ([locks](game/locks.md#doors)).
   The player's finished buildings register their doors (`RegisterPlayerBuilding`, site -1, unregistered when no longer finished;
   keys written by `BuildingSave`); the site menu has Open/Close Doors (`ToggleDoorsOrder`) and Lock/Unlock Doors
   (`ToggleDoorLocksOrder`), the door panel's buttons for all doors at once. `WorldSnapshot.Doors` publishes the player's doors and
