@@ -218,7 +218,8 @@ PLATOON keys (**Verified**):
 - `homebuilding` (handle) is bound through the game's per-frame system-message queue (`FUN_1407b65b0`): only if the building resolves that frame, else the message is
   dropped (**Unknown** whether something rebinds it later). Meitou writes the state's handle when the save's zone file holds the building, else its level-data handle
   ([handles](#object-handles-and-slot-lists)); no zone file is written for it, since a zone file marks the zone visited and stops its town generation (`FUN_1409ffad0`;
-  a bool `imported` in `0-buildinglist` forces it back on).
+  a bool `imported` in `0-buildinglist` forces it back on). Consequence: the original loading a Meitou save of zones it has no file of (a new game's) makes those
+  towns' residents again beside the saved platoons; only full zone files (the level states carry the handles) would avoid that (not written yet).
 
 ### Wild and nest platoons (Meitou mapping)
 
