@@ -39,6 +39,7 @@ sealed partial class GameHost
             DiffBuildings(snapshot);
             buildingsRevision = snapshot.BuildingsRevision;
         }
+        UpdateDoors();
         if (gpu.Objects is not { } objects) return;
         constructionLook.Clear();
         foreach (var site in snapshot.Buildings)

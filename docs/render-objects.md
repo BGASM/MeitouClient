@@ -47,6 +47,14 @@ only) at a transform, from the `ObjectStreamer.Loose` pseudo-zone (never streame
 landmarks), with 65 % dither coverage and a tint through the push `FlatColour` (`uTint` only reaches grey-channel
 materials): green valid, red invalid, blue queued. Not drawn in shadow or landmarks-only passes.
 
+## Doors
+
+Door parts carry `PlacedMesh.DoorIndex` (their entry in the building's `doors` list). The host hands the renderer the snapshot's
+open amounts (`WorldObjectRenderer.Doors`, by placement id and index); `DrawReal` poses a door part from its closed placement by
+`DoorLeaf.LocalOffset` ([motion](game/locks.md#doors)) along the part's own axes, in world units, when its amount changed; the
+step-out axis comes from the mesh file's bounds. Colour and shadow passes see the moved leaf; the GI acceleration structures take
+the instance transform only when they gather instances (not checked for leaves in motion).
+
 ## Validation
 
 Main, reflection and shadow stages repeat object work; inspect all three. **Observed** swamp

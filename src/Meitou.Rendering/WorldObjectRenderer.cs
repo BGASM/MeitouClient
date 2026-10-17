@@ -21,7 +21,7 @@ namespace Meitou.Rendering;
 /// </list>
 /// <see cref="Draw"/> can be called with any camera (e.g. the water reflection's) between <see cref="Update"/> calls.
 /// </summary>
-public sealed unsafe class WorldObjectRenderer : IDisposable
+public sealed unsafe partial class WorldObjectRenderer : IDisposable
 {
     /// <summary>The native GPU API (docs/renderer-native.md 7.1 step 8; since phase 8 stage 1 the only one this renderer uses).</summary>
     public GpuContext Gpu { get; }
@@ -87,6 +87,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
     internal WorldObjectRenderer(GpuContext gpu, AssetLocator assets, WorldObjects objects, bool landmarks = false)
     {
         Gpu = gpu;
+        this.assets = assets;
         this.objects = objects;
         // Both native programs are made here with every handle resolved, never inside a draw (the GL programs they replace are not made).
         nativeFrame = new NativeFrame(gpu);
@@ -574,6 +575,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         }
         inst.Gpu = gpu;
         inst.Centre = centre;
+        inst.DoorOpen = -1;   // a door part is posed again from its placement (PoseDoor)
         inst.Radius = radius;
         inst.Limit = inst.Placed.Kind == PlacedKind.BuildingPart
             ? ObjectRanges.PartRenderingDistance(gpu.Radius, inst.Placed.Owner.GetInt("function"), ObjectRanges.ObjectsViewRange)
@@ -808,6 +810,7 @@ public sealed unsafe class WorldObjectRenderer : IDisposable
         if (inst.Gpu is not { } gpu) return;
         if (!ReferenceEquals(inst.Mesh.Gpu, gpu)) { Unresolve(zone, inst); return; }
         if (InteriorHidden(inst.Placed)) return;
+        if (inst.Placed.DoorIndex >= 0) PoseDoor(inst, gpu);
         float value = Vector3.Distance(inst.Centre, eye) - inst.Radius;
         float limit = Math.Min(range, inst.Limit);
         if (value >= limit || !SphereVisible(frustum, inst.Centre, inst.Radius) || MirrorCull?.Invoke(inst.Centre, inst.Radius) == false || FogCull?.Hidden(inst.Centre, inst.Radius, FogVolumes.CullKind.Objects) == true)

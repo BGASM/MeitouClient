@@ -35,6 +35,8 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
         /// <summary>A landmark (<see cref="LandmarkClass"/>): kept in <see cref="LandmarkZone"/>, drawn to the landmark distance. Its <see cref="Radius"/> is
         /// the true world radius from the start, so <see cref="ScanLandmarks"/> asks for its mesh as soon as its bounds could be in range.</summary>
         public bool Landmark;
+        /// <summary>A door part: the open amount its <see cref="Transform"/> was last posed at (-1: not yet; <c>WorldObjectRenderer.PoseDoor</c>).</summary>
+        public float DoorOpen = -1;
         public GpuObjectMesh? Gpu;
         public ObjectMaterialSet? Materials;
     }
