@@ -40,6 +40,8 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
     // The game data the world was built from, kept to build the next world of a quickload (GameHost.Saving.cs).
     Meitou.Simulation.PopulationData? popData;
     IReadOnlyList<Meitou.Data.World.TownPlacement> townPlacements = [];
+    // The level data, for the zone files and town handles of a save (null in the sandbox and the duel).
+    Meitou.Data.World.WorldLevelData? saveLevels;
     Meitou.Simulation.IWalkability? simWalkability;
     Meitou.Data.Characters.CharacterRigs? characterRigs;
     Meitou.Navigation.RagdollGeometry? ragdollGeometry;
@@ -155,6 +157,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             animationLibrary = Meitou.Data.Gameplay.AnimationLibrary.FromDatabase(gameDb);
             popData = data;
             townPlacements = towns;
+            saveLevels = levels;
             simWalkability = walkability;
             var built = BuildSystems(interactive);
             population = built.Population;

@@ -179,7 +179,7 @@ public sealed partial class SaveGame
     /// <summary>
     /// Brings the parts that follow from the rest up to date: the CAMERA <c>zones</c> list from the zone files, every platoon's character count and file name,
     /// slot lists 0 (platoon containers) and 1 (town containers) of <c>quick.save</c> (lists 2 and 3 are kept, or start as 1..4096: their meaning is Unknown), a zone file's
-    /// slot list when it has none, each file's <c>nextId</c> and the <c>byteSize</c> of the records that carry a child count.
+    /// slot list when it has none, each file's <c>nextId</c> (raised to its highest record id, never lowered) and the <c>byteSize</c> of the records that carry a child count.
     /// </summary>
     public void UpdateDerived()
     {
@@ -217,7 +217,8 @@ public sealed partial class SaveGame
         {
             // A file the mod editor saved (type 17, numeric ids 0, real byte sizes) is left as it is.
             if (file.Data.FileType != FcsFileType.V15) continue;
-            file.Data.NextId = file.Records.Count == 0 ? 0 : file.Records.Max(r => r.Id);
+            // The id counter only grows (Observed: the original's nextId can be above the file's highest record id).
+            file.Data.NextId = Math.Max(file.Data.NextId, file.Records.Count == 0 ? 0 : file.Records.Max(r => r.Id));
             foreach (var r in file.Records) r.ByteSize = ChildCountSize(r, name);
         }
     }

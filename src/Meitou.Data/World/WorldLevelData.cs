@@ -34,6 +34,12 @@ public sealed class WorldLevelData
     /// <summary>Merged <c>interiors.level</c> files, or null when not loaded.</summary>
     public GameDatabase? Interiors { get; private set; }
 
+    /// <summary>
+    /// Per zone, what a save's zone file carries over from the level files besides the merged records (docs/formats/save.md "Zone files"): the last layer's slot list
+    /// (the trailer) and the highest <c>nextId</c> of the layers.
+    /// </summary>
+    public Dictionary<ZoneCoordinate, ZoneLevelInfo> ZoneInfo { get; } = [];
+
     /// <summary>Merge problems over all files (records defined twice, ...), tagged with the layer file.</summary>
     public List<GameDataIssue> Issues { get; } = [];
 
@@ -60,7 +66,7 @@ public sealed class WorldLevelData
                 if (!ZoneCoordinate.TryParseFileName(path, out var zone)) continue;
                 if (!world.Zones.TryGetValue(zone, out var db))
                     world.Zones[zone] = db = new GameDatabase();
-                world.Apply(db, path, layer);
+                world.Apply(db, path, layer, zone);
             }
             var level = Path.Combine(layer.Directory, LevelFileName);
             if (File.Exists(level)) world.Apply(world.Level, level, layer);
@@ -70,11 +76,19 @@ public sealed class WorldLevelData
         return world;
     }
 
-    void Apply(GameDatabase db, string path, WorldLevelLayer layer)
+    void Apply(GameDatabase db, string path, WorldLevelLayer layer, ZoneCoordinate? zone = null)
     {
         var name = layer.Name.Length == 0 ? Path.GetFileName(path) : $"{layer.Name}/{Path.GetFileName(path)}";
         int before = db.Issues.Count;
-        db.Apply(LevelFile.ReadFile(path).Data, name);
+        var file = LevelFile.ReadFile(path);
+        if (zone is { } z)
+        {
+            if (!ZoneInfo.TryGetValue(z, out var info)) ZoneInfo[z] = info = new ZoneLevelInfo();
+            // A later layer's slot list replaces an earlier one's, as in the game's container (Observed: a save's list extends the last layer's, not the union).
+            info.Slots = file.Trailer is { } slots && file.TrailerEntryInts == 1 ? slots : [];
+            info.NextId = Math.Max(info.NextId, file.Data.NextId);
+        }
+        db.Apply(file.Data, name);
         Issues.AddRange(db.Issues.Skip(before));
         layer.FileCount++;
     }
@@ -139,6 +153,15 @@ public sealed class WorldLevelData
     public IEnumerable<RoadPath> Roads() =>
         Level.OfType(FcsRecordType.ROAD).Select(r => new RoadPath(r.StringId, r.GetFloat("width"), r.GetInt("start"), r.GetInt("end"),
             r.Instances.Values.Where(i => !i.IsCleared).Select(i => i.Position).ToList()));
+}
+
+/// <summary>What the level files of one zone hold besides records (<see cref="WorldLevelData.ZoneInfo"/>).</summary>
+public sealed class ZoneLevelInfo
+{
+    /// <summary>The last layer's slot list (the trailer; a layer without one empties it): the handle slots (<c>I</c>) of the zone container in use.</summary>
+    public IReadOnlyList<int> Slots { get; internal set; } = [];
+    /// <summary>The highest <c>nextId</c> of the layers' headers.</summary>
+    public int NextId { get; internal set; }
 }
 
 /// <summary>One folder of level files.</summary>

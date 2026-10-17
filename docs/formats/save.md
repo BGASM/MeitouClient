@@ -217,10 +217,8 @@ PLATOON keys (**Verified**):
 - `hometown` (handle) puts the platoon into that town's or nest's pool at load (`FUN_1407ec8d0`; the platoon's faction and player status must match the town's);
   the pool counts living characters, `char count` while the platoon is not active (`FUN_1408f6a40`). `basetown` is only kept as a TOWN record pointer.
 - `homebuilding` (handle) is bound through the game's per-frame system-message queue (`FUN_1407b65b0`): only if the building resolves that frame, else the message is
-  dropped (**Unknown** whether something rebinds it later). Meitou writes the state's handle when the save's zone file holds the building, else its level-data handle
-  ([handles](#object-handles-and-slot-lists)); no zone file is written for it, since a zone file marks the zone visited and stops its town generation (`FUN_1409ffad0`;
-  a bool `imported` in `0-buildinglist` forces it back on). Consequence: the original loading a Meitou save of zones it has no file of (a new game's) makes those
-  towns' residents again beside the saved platoons; only full zone files (the level states carry the handles) would avoid that (not written yet).
+  dropped (**Unknown** whether something rebinds it later). Meitou writes the handle of the building's state in the save's zone file (a Meitou save writes a file for
+  every visited zone, [Zone files](#zone-files)), else its level-data handle ([handles](#object-handles-and-slot-lists)).
 
 ### Wild and nest platoons (Meitou mapping)
 
@@ -253,6 +251,43 @@ random stream apart from its TOWN pick. **Observed** (headless, base saves 1, 2,
 150, 0) + the started ones (3, 3, 4, 4); reloaded with another launch seed, all 325 nests (TOWN and position) and every nest squad's nest equal those before.
 A rolled nest that loads but makes no squad is not written (rolled again). Older Meitou saves' `meitou-nest:` camp states are still read.
 
+### Zone files
+
+**When** (**Verified** by code): `ZoneMapContent::deactivate` (`FUN_1409fe980`) saves a zone (`FUN_14036dde0`) into the save file system's working folder when it
+unloads (single-zone unload `FUN_140a0a4f0` passes its flag on; unloading every zone, `FUN_140a0a7b0`, does not save), and `saveGame` saves every loaded zone
+(`FUN_14036e450`). The zone's container gets a `0-buildinglist` (type 30, name "0") from its buildings, then `1-itemlist` from its loose items; a list left empty is
+deleted; a container with no record left deletes the zone file, else it is written, and the zone's has-file flag (the CAMERA `zones` value) follows. So a save holds a
+file for every zone loaded in the playthrough that has a building or item (save 1: 11 files, 4 without a building). The "Delaying saving zone" scheduler (`FUN_1403c8cb0`)
+is **Observed** only.
+
+**Load** (**Verified** by code, `FUN_1409ffad0`): the level layers' zone files are loaded into the zone's container, then the save's file into the same container
+(so a key the file lacks keeps the level value). No save file means a fresh zone, whose towns make their residents. A file makes it not fresh, unless a town of the zone
+has an override world state (its lists are then replaced) or `0-buildinglist` holds `imported`.
+
+**Content** (**Observed**, census of saves 1, 2, 3, wade against the merged level files, 275 zone files):
+- `0-buildinglist`: every placed building of the zone, the level ones (6688) with the level id, position and rotation (the target differs in 179, see [Unknowns](#unknowns)), the ones made
+  in play with `<n>-zone<X>.<Y>-INGAME` ids; an empty-target, zero-position entry with no state for each level id a later layer clears (107 of 107; never for a layer's removal
+  of an id no earlier layer places, 0 of 147); an entry whose building cannot be made (undefined target) is gone. Instance states: `[<inventory state>, <id>-S23]`, the inventory
+  only when it holds items (a new `-zoneX.Y-INGAME` INVENTORY_STATE).
+- A level building's GAMESTATE_BUILDING has the level state's keys with: `serialised interior` 1 added (all 36561 saved states); `is public night` and `is outside` never
+  written; always `pause`, `destroyed`, `name`, `flags`, `residents template`, `squad template`; a lock's `hardness` and each door i's `hardness<i>` = the
+  BUILDING's `hardness` (3093 of 3093, 614 of 614) and `pause<i>` false; `internalbuildings-<k>` naming the generated furniture (43010 of the level states' 43031 such handles
+  name no level building); `town` the town the building belongs to (3726 of 6743 name another town than the level state; the town states keep the level `hand`, 304 of 304 in
+  saves 1 and 2). Record flags 0, name "0".
+- `serialised interior` = 1 stops the building factory (`FUN_14057cc70`) from generating the interior (**Verified** by code); absent or another value, it is generated.
+- Slot list: the last level layer's list (a layer without one empties it), plus slots allocated in play (the lists Meitou makes this way are within the saved ones in 181 of 183 files, the other two lack
+  one slot each). `nextId` can be above the highest record id.
+- Nest buildings are not saved (no type-85 `town` handle in save 2's 133 files); nest debris are `1-itemlist` ITEMs whose `persist` handle is the nest (222 in save 2).
+
+**Meitou** (`Saving/ZoneSave`, `Data/Save/SaveZoneBuilder`): every zone the population had active, and every zone of a town it made (engine choice: a town is made and
+saved whole), is visited (`World.VisitedZones`, not hashed). A save keeps the loaded save's zone files (locks, doors and player buildings are written into them) and makes
+the missing ones from the level data as above, with `town` set to the save's town state `hand` and a new save's town states taking their level `hand`; it writes no
+`serialised interior`, no furniture, inventories or loose items (not modelled), so the original makes each interior as for a fresh zone (only the residents differ: the
+saved platoons). **Observed** (headless new game, the player moved to Squin and Stack): 8 visited zones, 8 files, every handle in its slot list, 300 of 300 `town` handles
+name a town state; key set = the real saves' minus the runtime-only keys (`serialised interior`, `internalbuildings`, farm, craft and lock keys of buildings that have none
+here) plus `meitou lock <i>`; doors and an interior chest locked before the save are locked after reload, and a second save writes the same zone files. Base saves 1, 3,
+wade and 2 (moved to Admag) keep every zone file byte for byte except door keys added to buildings whose saved variant has no doors (3 files in save 2, 1 in save 1).
+
 ### Locks, cages and sentences
 
 Key types **Verified** by a census of the owner's five saves (every platoon and zone file): building `lock lvl` int, `locked` / `broken` bool, `hardness`
@@ -261,8 +296,8 @@ float; door i `state<i>` int (0/1), `doa<i>` float, `broken<i>` / `locked<i>` / 
 generated interior buildings, e.g. `19765-zone39.16-INGAME-S23`), `sentence` int and `psts` float (0 in every sample); platoon `imprisoned` bool.
 Meanings: [locks](../game/locks.md#save-keys), [economy 11.5](../game/economy.md#115-bail-and-sentence) (`sentence` = start in game hours, `psts` = length).
 
-Meitou (`Saving/HeldSave`): reads building keys from the zones' existing GAMESTATE_BUILDING records when the town registers and writes them back
-into those records only (none for a new save, which has no zone files); the save ids of generated interiors are not mapped, so interior cages and
+Meitou (`Saving/HeldSave`): reads building keys from the zones' GAMESTATE_BUILDING records when the town registers and writes them back into
+them (the visited zones' files, [Zone files](#zone-files)); the save ids of generated interiors are not mapped, so interior cages and
 beds keep rolled state. `in what` resolves only to a placed building; Meitou-only keys `meitou in something` (int) / `meitou in what` (fixture id)
 carry the rest and win on load. Unchanged held state keeps the original keys as read; a changed one without a building handle writes `in something` 0
 and the null handle. `sentence`/`psts` are written while a sentence is set or the save had them; Meitou's start equals `World.GameHours` (day x 24 + hour).
@@ -328,10 +363,10 @@ Buildings name it by their `town` handle. Whether the loader takes the name from
 - The roles of BIOMES `E<n>` instances (EffectHandler state fields), `_w_fog_a`, the short-key CAMERA floats and bools (`bs cod gdm ht nnm ps rs`, `bl ep`), `TI day/dat0`, `towntime`, `jobhr`, `ssct`, and whether MEDICAL `fed` / `KO` are the stomach buffer and the KO timer (the other MEDICAL floats are explained above).
 - Whether `loadGame` rejects or adapts to a `mods` list that differs from the current load order (nothing in the sample: single base-game save).
 - Prisoners, dead characters, bounties, trade and mission state, and player outposts: not present in an early-game sample. Player-built building and outpost keys are known from the code only ([zones](zones.md#placement-keys), [outposts](#player-outposts)).
-- Exactly when platoon files are written to the working folder between saves (only at save time is certain) and which zones are written on unload ("Delaying saving zone").
+- Exactly when platoon files are written to the working folder between saves (only at save time is certain), and what delays a zone's save on unload ("Delaying saving zone", `FUN_1403c8cb0`).
 - The condition list of the autosave pause, and how `Import Game` selects squads (`FUN_140378a30`, `FUN_140377710`).
 - How relations, trust and `trustNeg` change during play (only the fresh-world values are explained), and what the player faction (no relation table, but a `known` list and `global trust`) uses instead.
-- Why 6 building placements of the sample have a different target in the save than in the base list (in zone 19.29 two placements have swapped targets, same positions: a random variant pick is a guess).
+- Why level buildings have a different target in the save than in the level list (179 of 6743 in four saves; in zone 19.29 two placements have swapped targets, same positions: a random variant pick is a guess).
 - Saves made by other game versions or with mods: layout of `mods` and unknown record types would show.
 
 ### Implementation (as built, stage 10)

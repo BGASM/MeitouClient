@@ -558,6 +558,7 @@ public sealed class FixtureRegistry
                 state.Bools["broken" + i] = f.DoorBroken;
                 state.Ints["gatecode" + i] = f.GateCode;
                 state.Bools["wants lock" + i] = f.WantsLock;
+                state.Bools.TryAdd("pause" + i, false);   // the original writes it with every door (Observed, 614 of 614)
                 state.Ints["lock lvl" + i] = l.Level;
                 state.Bools["locked" + i] = l.EffectivelyLocked;
                 state.Floats["hardness" + i] = l.Hardness;

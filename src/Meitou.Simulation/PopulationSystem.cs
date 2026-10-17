@@ -155,6 +155,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         (active, spareActive) = (spareActive, active);
         active.Clear();
         foreach (var f in foci) ZoneActivation.AddZonesAround(f, settings.FastZoneHopping ? 1 : 0, active);
+        world.VisitedZones.UnionWith(active);
         long grace = (long)Math.Ceiling(settings.UnloadGraceSeconds / world.TickSeconds);
         foreach (var site in data.Sites)
         {
@@ -240,6 +241,8 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         float radius = site.Town.SizeRadius * site.Town.TownRadiusMult;
         // The town's doors, cages, containers and beds, once (they stay registered when the town unloads).
         world.Fixtures.RegisterSite(world, data, town.Site);
+        // A town made counts as visited in every zone of its buildings (engine choice: its residents and its buildings' locks are saved whole, docs/formats/save.md "Zone files").
+        foreach (var b in site.Buildings) world.VisitedZones.Add(b.Zone);
         foreach (var built in town.Squads)
         {
             var squad = SpawnSquad(world, built, site, radius);

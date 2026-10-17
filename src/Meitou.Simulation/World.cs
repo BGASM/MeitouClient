@@ -124,6 +124,11 @@ public sealed partial class World : IDisposable
     public Locks.FixtureRegistry Fixtures { get; } = new();
     /// <summary>The player-built buildings and construction sites, in creation order (docs/simulation.md "Buildings").</summary>
     public Construction.BuildingRegistry Buildings { get; } = new();
+    /// <summary>
+    /// Every zone the population has had active in this world (docs/formats/save.md "Zone files": the original writes a file for each zone it loaded): a save writes a zone file for
+    /// each that its loaded save has none of. Only read by saves, so not hashed.
+    /// </summary>
+    public HashSet<Meitou.Data.World.ZoneCoordinate> VisitedZones { get; } = [];
     /// <summary>The player's completed research and the buildings it unlocks; static this milestone, so not hashed.</summary>
     public Construction.ResearchState Research { get; } = new();
     public IReadOnlyList<ITickSystem> Systems => systems;

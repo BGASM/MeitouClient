@@ -36,7 +36,7 @@ sealed partial class GameHost
     SaveCaptureOptions CaptureOptions()
     {
         saveDataFiles ??= [.. LoadOrder.FromInstall(install).Entries.Select(e => e.Name)];
-        return new SaveCaptureOptions { DataFiles = saveDataFiles, Placements = townPlacements, Seed = session.World.Seed ^ (ulong)++captures << 20 };
+        return new SaveCaptureOptions { DataFiles = saveDataFiles, Placements = townPlacements, Levels = saveLevels, Seed = session.World.Seed ^ (ulong)++captures << 20 };
     }
 
     /// <summary>The system list and its order are <see cref="StandardSystems"/>' (docs/simulation.md "Threading"); built again for each world.</summary>

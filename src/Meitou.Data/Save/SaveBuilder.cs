@@ -152,8 +152,8 @@ public sealed class SaveBuilder
         return faction;
     }
 
-    /// <summary>Adds the state of a town or nest. <paramref name="handleType"/> is 13 (TOWN) or 85 (NEST); each gets a container of its own.</summary>
-    public SaveTown AddTown(string name, string instance, string factionId, bool isNest, ZoneCoordinate? zone, int handleType = (int)FcsRecordType.TOWN)
+    /// <summary>Adds the state of a town or nest. <paramref name="handleType"/> is 13 (TOWN) or 85 (NEST); each gets a container of its own, or keeps <paramref name="hand"/> (a level town state's).</summary>
+    public SaveTown AddTown(string name, string instance, string factionId, bool isNest, ZoneCoordinate? zone, int handleType = (int)FcsRecordType.TOWN, Hand? hand = null)
     {
         var r = Quick(FcsRecordType.GAMESTATE_TOWN, name);
         foreach (var k in new[] { "started", "explored", "recently discovered", "discovered", "ded" }) r.Bools[k] = false;
@@ -162,7 +162,12 @@ public sealed class SaveBuilder
         foreach (var k in new[] { "pop", "pop2", "popd", "popd2", "tod" }) r.Floats[k] = 0;
         r.Ints["artifacts count"] = 0;
         r.Ints["plevel"] = 0;
-        new Hand(handleType, nextTownContainer++, Serial(), 0, 0).Write(r, "hand");
+        if (hand is { } h)
+        {
+            h.Write(r, "hand");
+            nextTownContainer = Math.Max(nextTownContainer, h.C + 1);
+        }
+        else new Hand(handleType, nextTownContainer++, Serial(), 0, 0).Write(r, "hand");
         r.Strings["faction"] = factionId;
         r.Strings["instance"] = instance;
         r.Strings["building material"] = "";

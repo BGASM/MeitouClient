@@ -180,7 +180,9 @@ public sealed class SaveZone(ZoneCoordinate coordinate, SaveFile file)
         if (BuildingList is { } list)
             foreach (var i in list.Instances)
             {
-                FcsRecord? state = i.States.Count > 0 ? states.GetValueOrDefault(i.States[0]) : null;
+                // The building state; an inventory state can come first.
+                FcsRecord? state = i.States.Select(s => states.GetValueOrDefault(s)).FirstOrDefault(r => r?.RecordType == FcsRecordType.GAMESTATE_BUILDING)
+                    ?? (i.States.Count > 0 ? states.GetValueOrDefault(i.States[0]) : null);
                 bool inBase = merged.ContainsKey(i.Id);
                 if (!inBase) order.Add(i.Id);
                 merged[i.Id] = new SavedBuilding(i.Id, i.Target, i.Position, i.Rotation, state, inBase, inBase);

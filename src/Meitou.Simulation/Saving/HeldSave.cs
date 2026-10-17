@@ -14,7 +14,7 @@ public static class HeldSave
 {
     public const string MeitouState = "meitou in something", MeitouWhat = "meitou in what";
 
-    /// <summary>The zones' building state records by building instance id (the building lists' instances and their first state).</summary>
+    /// <summary>The zones' building state records by building instance id (the building lists' instances and their GAMESTATE_BUILDING state).</summary>
     public static Dictionary<string, FcsRecord> BuildingStates(SaveGame save)
     {
         var map = new Dictionary<string, FcsRecord>(StringComparer.Ordinal);
@@ -24,7 +24,8 @@ public static class HeldSave
             var states = new Dictionary<string, FcsRecord>(StringComparer.Ordinal);
             foreach (var r in zone.BuildingStates) states[r.StringId] = r;
             foreach (var i in list.Instances)
-                if (i.States.Count > 0 && states.TryGetValue(i.States[0], out var state)) map[i.Id] = state;
+                foreach (var id in i.States)   // the building state; an inventory state can come first (docs/formats/save.md "Zone files")
+                    if (states.TryGetValue(id, out var state)) { map[i.Id] = state; break; }
         }
         return map;
     }

@@ -24,6 +24,12 @@ public sealed class SaveCaptureOptions
 
     /// <summary>Seeds the random serials of new handles.</summary>
     public ulong Seed { get; init; }
+
+    /// <summary>
+    /// The level data: the zone files of the visited zones a loaded save has none of are made from it (<see cref="ZoneSave"/>), and a new save's town states take their level state's
+    /// handle. Null: no zone files are made and new towns get new handles.
+    /// </summary>
+    public WorldLevelData? Levels { get; init; }
 }
 
 /// <summary>
@@ -32,6 +38,7 @@ public sealed class SaveCaptureOptions
 /// facing, stats, medical state, new recruits, removals), the selection, the save's NPC platoons (stand-in positions; the characters of those that were in the world) and the
 /// population's own town and roaming squads in the world as new platoons; everything else is carried through unchanged. Without one a new save
 /// is made from the game data: all factions with their relations, the player's platoons and the population's squads, a default state per placed town, and empty weather, research and decals.
+/// Either way every visited zone gets a zone file (<see cref="ZoneSave"/>).
 /// </summary>
 public static partial class SaveCapture
 {
@@ -74,6 +81,8 @@ public static partial class SaveCapture
 
         UpdateFactions(game, data, loaded);
         WriteTownKnowledge(builder, data, world.Player);
+        // The zone files of the zones visited since (before the locks, the player's buildings and the home handles, which write into them).
+        ZoneSave.WriteVisited(game, world, data, options.Levels);
         var buildings = HeldSave.BuildingStates(game);
         WriteLocks(world, buildings);
         ResearchSave.Write(game.Research, world.Research);
@@ -119,7 +128,10 @@ public static partial class SaveCapture
         {
             if (data.Db.Find(p.TownId) is not { Type: FcsRecordType.TOWN } record) continue;
             var town = TownData.From(record);
-            builder.AddTown("Town state " + record.Name, p.InstanceId, town.Faction ?? "", isNest: false, WorldLayout.ZoneOf(p.Position.X, p.Position.Z));
+            // The level state's handle, as the original keeps it (docs/formats/save.md "Object handles"): the buildings' and platoons' town handles name it.
+            Hand? hand = p.StateId is not null && options.Levels?.Level.Find(p.StateId) is { } level && level.Ints.ContainsKey("handI")
+                ? new Hand(level.GetInt("handTYPE"), level.GetInt("handC"), level.GetInt("handCS"), level.GetInt("handI"), level.GetInt("handS")) : null;
+            builder.AddTown("Town state " + record.Name, p.InstanceId, town.Faction ?? "", isNest: false, WorldLayout.ZoneOf(p.Position.X, p.Position.Z), hand: hand);
         }
     }
 
@@ -429,7 +441,8 @@ public static partial class SaveCapture
         if (game.Zones.TryGetValue(b.Zone, out var zone) && zone.BuildingList is { } list)
         {
             var entry = list.Instances.FirstOrDefault(i => i.Id == b.InstanceId);
-            if (entry is { States.Count: > 0 } && zone.File.Records.FirstOrDefault(r => r.StringId == entry.States[0]) is { } state && Hand.Read(state, "handle") is { IsNull: false } saved)
+            if (entry is not null && zone.File.Records.FirstOrDefault(r => r.RecordType == FcsRecordType.GAMESTATE_BUILDING && entry.States.Contains(r.StringId)) is { } state
+                && Hand.Read(state, "handle") is { IsNull: false } saved)
                 return saved;
         }
         return b.HandleSlot >= 0 ? new Hand((int)FcsRecordType.BUILDING, SaveZone.ContainerIdOf(b.Zone), ZoneContainerSerial, b.HandleSlot, b.HandleSerial) : null;
