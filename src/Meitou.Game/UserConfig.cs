@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Meitou.Game;
@@ -48,6 +48,8 @@ sealed class UserConfig
     public bool HardwareMouse { get; set; }
     /// <summary>Outline and tint the character under the cursor (Advanced settings; Meitou only, the game has none).</summary>
     public bool HoverOutline { get; set; } = true;
+    /// <summary>The audio sliders (Audio settings): the original's six volumes and the music frequency; null until first used, then taken from the install's settings.cfg.</summary>
+    public Meitou.Audio.AudioSettings? Audio { get; set; }
     /// <summary>Worker threads of the simulation; null = half the cores.</summary>
     public int? SimThreads { get; set; }
     public Dictionary<string, float> Graphics { get; set; } = [];

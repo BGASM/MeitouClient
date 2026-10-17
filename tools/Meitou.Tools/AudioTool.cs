@@ -28,55 +28,95 @@ static class AudioTool
     /// <summary>
     /// <c>audio render &lt;seconds&gt; &lt;out.wav&gt; [banks and events...] [name=value parameters] [group:state states]</c>: plays events through
     /// <see cref="Meitou.Audio.WwisePlayer"/> offline (no sound card) and writes the mix; a word ending in <c>.bnk</c> loads that bank first.
-    /// Prints the level each second.
+    /// An event word may carry a place, an object and a time: <c>Footsteps@500,0,0~3</c> posts it at second 3 on a new game object at (500, 0, 0),
+    /// <c>Stop_Emitter#1~9</c> on object 1001 (<c>#1</c> names it; <c>Start_Emitter@50,0,0#1</c> places it), while <c>Pause_Game~10</c> posts it on the music object (100) at second 10; <c>@listener=x,y,z[,fx,fy,fz]</c> puts the listener there (facing -z by
+    /// default). Prints the level each second, with the left and right levels.
     /// </summary>
     static int Render(GameInstall install, string[] args)
     {
         if (args.Length < 2 || !double.TryParse(args[0], System.Globalization.CultureInfo.InvariantCulture, out double seconds))
         {
-            Console.Error.WriteLine("audio render <seconds> <out.wav> [Bank.bnk ...] [Event or 8-digit hex id ...] [Parameter=value ...] [Group:State ...]");
+            Console.Error.WriteLine("audio render <seconds> <out.wav> [Bank.bnk ...] [Event[@x,y,z][~seconds] or 8-digit hex id ...] [Parameter=value ...] [Group:State ...] [@listener=x,y,z[,fx,fy,fz]]");
             return 2;
         }
         if (Library(install) is not { } library) return 1;
         const int rate = Meitou.Audio.AudioSystem.SampleRate;
         using var player = new Meitou.Audio.WwisePlayer(library, AudioDirectory(install), rate);
         var loads = new List<Task>();
+        var events = new List<(double At, string Event, ulong Object)>();
+        ulong nextObject = 2000;
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
         foreach (var a in args[2..])
         {
             if (a.EndsWith(".bnk", StringComparison.OrdinalIgnoreCase)) loads.Add(player.LoadBank(a[..^4]));
-            else if (a.Split('=') is [var p, var v]) player.SetParameter(p, float.Parse(v, System.Globalization.CultureInfo.InvariantCulture));
+            else if (a.StartsWith("@listener=", StringComparison.Ordinal))
+            {
+                var n = a["@listener=".Length..].Split(',').Select(x => float.Parse(x, ci)).ToArray();
+                var front = n.Length >= 6 ? new System.Numerics.Vector3(n[3], n[4], n[5]) : -System.Numerics.Vector3.UnitZ;
+                player.SetListener(new System.Numerics.Vector3(n[0], n[1], n[2]), front, System.Numerics.Vector3.UnitY);
+            }
+            else if (a.Split('=') is [var p, var v]) player.SetParameter(p, float.Parse(v, ci));
             else if (a.Split(':') is [var g, var s]) player.SetState(g, s);
+            else
+            {
+                // An event by name, or by its id when it has no name we know (eight hex digits), with an optional place and time.
+                double at = 0;
+                string word = a;
+                if (word.LastIndexOf('~') is var tilde and >= 0)
+                {
+                    at = double.Parse(word[(tilde + 1)..], ci);
+                    word = word[..tilde];
+                }
+                ulong obj = Meitou.Audio.AudioSystem.MusicObject;
+                if (word.LastIndexOf('#') is var hash and >= 0)
+                {
+                    obj = 1000 + ulong.Parse(word[(hash + 1)..], ci);
+                    word = word[..hash];
+                }
+                if (word.IndexOf('@') is var pos and >= 0)
+                {
+                    var n = word[(pos + 1)..].Split(',').Select(x => float.Parse(x, ci)).ToArray();
+                    if (obj == Meitou.Audio.AudioSystem.MusicObject) obj = nextObject++;
+                    player.SetPosition(obj, new System.Numerics.Vector3(n[0], n[1], n[2]));
+                    word = word[..pos];
+                }
+                events.Add((at, word, obj));
+            }
         }
         Task.WaitAll([.. loads]);
-        foreach (var a in args[2..])
-            if (!a.EndsWith(".bnk", StringComparison.OrdinalIgnoreCase) && !a.Contains('=') && !a.Contains(':'))
-            {
-                // An event by name, or by its id when it has no name we know (eight hex digits).
-                if (a.Length == 8 && uint.TryParse(a, System.Globalization.NumberStyles.AllowHexSpecifier, null, out var id)) player.Post(id);
-                else player.Post(a);
-            }
+        events.Sort((x, y) => x.At.CompareTo(y.At));
+        int nextEvent = 0;
         int total = (int)(seconds * rate);
         var all = new float[total * 2];
         var block = new float[Meitou.Audio.AudioOutput.BlockFrames * 2];
         var watch = System.Diagnostics.Stopwatch.StartNew();
         for (int at = 0; at < total; at += Meitou.Audio.AudioOutput.BlockFrames)
         {
+            for (; nextEvent < events.Count && events[nextEvent].At <= (double)at / rate; nextEvent++)
+            {
+                var (_, name, obj) = events[nextEvent];
+                if (name.Length == 8 && uint.TryParse(name, System.Globalization.NumberStyles.AllowHexSpecifier, null, out var id)) player.Post(id, obj);
+                else player.Post(name, obj);
+            }
             Array.Clear(block);
             player.Mix(block, Meitou.Audio.AudioOutput.BlockFrames);
             Array.Copy(block, 0, all, at * 2, Math.Min(block.Length, (total - at) * 2));
             if ((at / Meitou.Audio.AudioOutput.BlockFrames) % 43 == 0)
             {
                 var (instances, voices, _, clips) = player.Stats;
-                int from = Math.Max(0, at - rate) * 2, to = at * 2;
-                double rms = 0;
+                int from = Math.Max(0, at - rate), to = at;
+                double left = 0, right = 0;
                 float peak = 0;
                 for (int i = from; i < to; i++)
                 {
-                    rms += all[i] * all[i];
-                    peak = Math.Max(peak, Math.Abs(all[i]));
+                    left += all[2 * i] * all[2 * i];
+                    right += all[2 * i + 1] * all[2 * i + 1];
+                    peak = Math.Max(peak, Math.Max(Math.Abs(all[2 * i]), Math.Abs(all[2 * i + 1])));
                 }
-                rms = to > from ? Math.Sqrt(rms / (to - from)) : 0;
-                Console.WriteLine($"{(double)at / rate,6:0.0} s  instances {instances,2} voices {voices,2} (music {player.MusicVoices,2}) clips {clips,3}  last second: rms {20 * Math.Log10(rms + 1e-9),6:0.0} dBFS peak {peak:0.000}");
+                int n = Math.Max(1, to - from);
+                double rms = Math.Sqrt((left + right) / (2 * n));
+                static double Db(double x) => 20 * Math.Log10(x + 1e-9);
+                Console.WriteLine($"{(double)at / rate,6:0.0} s  instances {instances,2} voices {voices,2} (music {player.MusicVoices,2}) clips {clips,3}  last second: rms {Db(rms),6:0.0} dBFS (L {Db(Math.Sqrt(left / n)),6:0.0} R {Db(Math.Sqrt(right / n)),6:0.0}) peak {peak:0.000}");
             }
         }
         WriteWav(args[1], all, 2, rate);

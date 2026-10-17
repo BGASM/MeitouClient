@@ -142,6 +142,10 @@ public sealed record WwisePositioning(byte Bits, byte Bits3D, uint AttenuationId
     public bool OverridesParent => (Bits & 1) != 0;
     public bool Is3D => (Bits & 8) != 0;
     public int PositionType3D => (Bits >> 5) & 3;
+    /// <summary>The sound moves along the stored paths around the listener (3D type 3 with vertices).</summary>
+    public bool HasPaths => Is3D && PositionType3D == 3 && Vertices.Length > 0;
+    /// <summary>The sound is placed by its game object and attenuated by distance (3D without paths).</summary>
+    public bool IsGameDefined => Is3D && !HasPaths;
 }
 
 /// <summary>The parameters every sound and container carries (docs/formats/wwise-bnk.md#node-base).</summary>
@@ -176,11 +180,60 @@ public sealed record WwiseLayer(uint Id, WwiseRtpc[] Rtpcs, uint CrossfadeParame
 /// <summary>A layer container (blend container): plays all its children at once.</summary>
 public sealed record WwiseLayerContainer(uint Id, WwiseNodeBase Node, uint[] Children, WwiseLayer[] Layers) : WwiseObject(WwiseObjectType.LayerContainer, Id);
 
+/// <summary>An effect slot of a bus (or node): the slot index, the effect (<see cref="WwiseEffect"/>, or a share set) and whether it is a share set.</summary>
+public readonly record struct WwiseEffectSlot(byte Index, uint EffectId, bool IsShareSet, bool IsRendered);
+
 /// <summary>
-/// A bus, partly decoded: its parent bus, its properties (bus volume <c>0x05</c> in dB) and its RTPCs (the user volume sliders), found by
-/// shape in the undecoded rest (<see cref="Body"/>).
+/// A bus (type 8) or an auxiliary bus (type 20, <see cref="IsAux"/>), partly decoded: its parent bus, its properties (bus volume <c>0x05</c>
+/// in dB), its effect slots with their initial bypass bits (<see cref="FxBypass"/>, bit n = slot n bypassed) and its RTPCs (the user volume
+/// sliders), found by shape in the undecoded rest (<see cref="Body"/>). See docs/formats/wwise-bnk.md#buses.
 /// </summary>
-public sealed record WwiseBus(uint Id, uint ParentBusId, WwiseProperties Properties, WwiseRtpc[] Rtpcs, byte[] Body) : WwiseObject(WwiseObjectType.Bus, Id);
+public sealed record WwiseBus(uint Id, uint ParentBusId, WwiseProperties Properties, WwiseRtpc[] Rtpcs, byte[] Body,
+    bool IsAux = false, WwiseEffectSlot[]? Slots = null, byte FxBypass = 0)
+    : WwiseObject(IsAux ? WwiseObjectType.AuxBus : WwiseObjectType.Bus, Id)
+{
+    public WwiseEffectSlot[] Effects { get; init; } = Slots ?? [];
+}
+
+/// <summary>
+/// An attenuation (type 14): how a 3D sound changes with its distance to the listener. <see cref="Curves"/> are shared by the usages:
+/// <see cref="CurveToUse"/> gives, per usage (<see cref="VolumeDry"/> ...), the index of its curve (-1: none, the usage is not attenuated).
+/// The cone, when enabled, attenuates by the angle off the emitter's front. Curve x is the distance, volume y is linear gain - 1
+/// (Observed, as the RTPC volume curves), low-pass y is the low-pass amount 0..100.
+/// </summary>
+public sealed record WwiseAttenuation(uint Id, WwiseCone? Cone, sbyte[] CurveToUse, WwiseAttenuationCurve[] Curves, WwiseRtpc[] Rtpcs)
+    : WwiseObject(WwiseObjectType.Attenuation, Id)
+{
+    public const int VolumeDry = 0, AuxGameDefined = 1, AuxUserDefined = 2, LowPass = 3;
+
+    /// <summary>The curve of a usage, or null when it has none.</summary>
+    public WwiseAttenuationCurve? Curve(int usage) =>
+        usage < CurveToUse.Length && CurveToUse[usage] is >= 0 and var i && i < Curves.Length ? Curves[i] : null;
+}
+
+/// <summary>An attenuation curve: <see cref="Scaling"/> as the RTPC curves (2 = dB for volumes, 0 none) and its points (x = distance).</summary>
+public sealed record WwiseAttenuationCurve(byte Scaling, WwiseCurvePoint[] Points);
+
+/// <summary>The cone of an attenuation: full inside <see cref="InsideDegrees"/>, <see cref="OutsideVolume"/> (dB) and <see cref="LowPass"/> beyond <see cref="OutsideDegrees"/>.</summary>
+public sealed record WwiseCone(float InsideDegrees, float OutsideDegrees, float OutsideVolume, float LowPass, float HighPass);
+
+/// <summary>
+/// An effect (type 19) or an effect share set (type 18): the plug-in (<see cref="PluginId"/>: company in the high word, 0x0076 is Wwise RoomVerb,
+/// 0x0069 parametric EQ, 0x006C compressor; type nibble 3), its parameter block (plug-in specific) and the RTPCs on its parameters
+/// (<see cref="WwiseRtpc.ParameterId"/> is the plug-in's parameter id).
+/// </summary>
+public sealed record WwiseEffect(WwiseObjectType Type, uint Id, uint PluginId, byte[] Parameters, WwiseRtpc[] Rtpcs) : WwiseObject(Type, Id)
+{
+    public const uint RoomVerbPlugin = 0x00760003;
+    public bool IsRoomVerb => PluginId == RoomVerbPlugin && Parameters.Length >= 80;
+
+    /// <summary>
+    /// RoomVerb's float parameters in the block's order (Observed from the six Kenshi effects; names are the plug-in's, guessed by value):
+    /// 0 decay time (s), 1 HF damping (kHz), 2 diffusion (%), 3 stereo width (degrees), 4-12 three filter bands (gain dB, frequency Hz, Q),
+    /// 13-15 front, rear, center level (dB), 16 dry level (dB), 17-19 levels (dB, see docs/audio.md#reverb).
+    /// </summary>
+    public float RoomVerbValue(int index) => BitConverter.ToSingle(Parameters, index * 4);
+}
 
 /// <summary>A fade: its length (ms), the curve shape, and its offset (ms) from the point it is aligned to (negative = earlier).</summary>
 public readonly record struct WwiseFade(int Time, uint Curve, int Offset);

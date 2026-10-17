@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Numerics;
 using Meitou.Data.Audio;
 
 namespace Meitou.Audio;
@@ -7,8 +8,9 @@ namespace Meitou.Audio;
 /// Plays Wwise banks the way the game's events ask (docs/audio.md): a good-enough interpreter of the bank hierarchy, not a copy of Wwise.
 /// Events run their actions (play, stop, set state, volume offsets, with delays and fades); played nodes become instances (sounds, random/
 /// sequence, layer and switch containers) whose volume, pitch and low-pass add up along the node's parents (properties, random ranges and
-/// RTPC curves of game parameters); 3D path positioning pans the random one-shots around the listener. Buses, effects, attenuation curves
-/// and music are not done.
+/// RTPC curves of game parameters); 3D sounds are placed by their game object (WwisePlayer.Objects.cs) with the attenuation's distance curves and
+/// stereo panning, the random one-shots of the ambience move along paths around the listener, sends feed the reverb of the auxiliary buses
+/// (WwisePlayer.Buses.cs), and actions fade bus volumes (the pause ducking). Music is in WwisePlayer.Music.cs.
 /// <para>
 /// Thread use: <see cref="Post(string)"/>, <see cref="SetParameter(string, float)"/>, <see cref="SetState(string, string)"/> and
 /// <see cref="LoadBank"/> may be called from any thread; they queue commands that <see cref="Mix"/> (the audio thread) runs first.
@@ -28,12 +30,11 @@ public sealed partial class WwisePlayer : IDisposable
     readonly Dictionary<uint, MediaClip> media = [];
     readonly Dictionary<uint, float> parameters = [];
     readonly Dictionary<uint, uint> states = [];
-    readonly Dictionary<uint, float> volumeOffsets = [], pitchOffsets = [], lowPassOffsets = [];
     readonly Dictionary<uint, List<uint>> history = [];
     readonly List<Instance> roots = [];
     readonly List<SoundInstance> sounds = [];
-    readonly List<(double At, uint EventId, double Expires)> pending = [];
-    readonly List<(double At, WwiseAction Action)> delayed = [];
+    readonly List<(double At, uint EventId, ulong Object, double Expires)> pending = [];
+    readonly List<(double At, WwiseAction Action, ulong Object)> delayed = [];
     readonly Dictionary<string, (WwiseObject[] Objects, uint[] Media)> bankContents = new(StringComparer.OrdinalIgnoreCase);
     // The block being mixed covers [blockStart, time); runTime is when the action being run takes effect (music starts at that point).
     double time, blockStart, runTime;
@@ -120,8 +121,9 @@ public sealed partial class WwisePlayer : IDisposable
         });
     }
 
-    public void Post(string eventName) => Post(WwiseHash.Id(eventName));
-    public void Post(uint eventId) => commands.Enqueue(() => PostNow(eventId, expires: time + 10));
+    /// <summary>Posts an event on the default game object (0); see the overloads with a game object.</summary>
+    public void Post(string eventName) => Post(WwiseHash.Id(eventName), 0);
+    public void Post(uint eventId) => Post(eventId, 0);
     public void SetParameter(string name, float value) => SetParameter(WwiseHash.Id(name), value);
     public void SetParameter(uint id, float value) => commands.Enqueue(() => parameters[id] = value);
     public void SetState(string group, string state) => SetState(WwiseHash.Id(group), WwiseHash.Id(state));
@@ -137,13 +139,17 @@ public sealed partial class WwisePlayer : IDisposable
         while (commands.TryDequeue(out var command)) command();
         double dt = (double)frames / outputRate;
         time += dt;
+        volumeOffsets.Advance(dt);
+        pitchOffsets.Advance(dt);
+        lowPassOffsets.Advance(dt);
+        busVolumes.Advance(dt);
         for (int i = delayed.Count - 1; i >= 0; i--)
             if (delayed[i].At <= time)
             {
-                var action = delayed[i].Action;
+                var (_, action, gameObject) = delayed[i];
                 runTime = Math.Max(delayed[i].At, blockStart);
                 delayed.RemoveAt(i);
-                Run(action);
+                Run(action, gameObject);
             }
         runTime = blockStart;
         for (int i = roots.Count - 1; i >= 0; i--)
@@ -165,6 +171,7 @@ public sealed partial class WwisePlayer : IDisposable
             voices++;
             if (s.IsMusic) music++;
         }
+        MixAuxBuses(mix, frames);
         Stats = (roots.Count, voices, loading.Count, media.Count);
         MusicVoices = music;
     }
@@ -173,51 +180,69 @@ public sealed partial class WwisePlayer : IDisposable
     {
         var waiting = pending.ToList();
         pending.Clear();
-        foreach (var p in waiting) PostNow(p.EventId, p.Expires);
+        foreach (var p in waiting) PostNow(p.EventId, p.Object, p.Expires);
     }
 
-    void PostNow(uint eventId, double expires)
+    void PostNow(uint eventId, ulong gameObject, double expires)
     {
         if (!objects.TryGetValue(eventId, out var o) || o is not WwiseEvent e)
         {
             // Its bank is still loading: try again when a bank arrives, for a while.
-            if (time < expires) pending.Add((time, eventId, expires));
+            if (time < expires) pending.Add((time, eventId, gameObject, expires));
             return;
         }
         foreach (var actionId in e.Actions)
         {
             if (!objects.TryGetValue(actionId, out var a) || a is not WwiseAction action) continue;
             int delay = action.Properties.Int(WwisePropertyId.Delay);
-            if (delay > 0) delayed.Add((time + delay / 1000.0, action));
-            else Run(action);
+            if (delay > 0) delayed.Add((time + delay / 1000.0, action, gameObject));
+            else Run(action, gameObject);
         }
     }
 
-    void Run(WwiseAction action)
+    /// <summary>
+    /// Whether an action is limited to the game object the event was posted on. The scope (the action type's low byte) follows the Wwise action
+    /// numbering: 2 is global (the "master" forms), 3 is the posting object only (the "object" forms; Observed: <c>Stop_Emitter</c> uses it, a global
+    /// stop would silence every emitter), 5 and 7 are the object forms of "all" and "all except"; 4 and 6 are global. Play always plays on the object.
+    /// </summary>
+    static bool ObjectScoped(WwiseAction action) => action.Scope is 3 or 5 or 7;
+
+    void Run(WwiseAction action, ulong gameObject)
     {
         float fade = action.Properties.Int(WwisePropertyId.FadeTime) / 1000f;
+        ulong scopeObject = ObjectScoped(action) ? gameObject : 0;
         switch (action.Kind)
         {
             case WwiseActionKind.Play:
-                if (objects.TryGetValue(action.Target, out var node) && Create(node, null) is { } instance)
+                postingObject = gameObject;
+                try
                 {
-                    instance.FadeIn(fade);
-                    roots.Add(instance);
-                    instance.Start();
+                    if (objects.TryGetValue(action.Target, out var node) && Create(node, null) is { } instance)
+                    {
+                        instance.FadeIn(fade);
+                        roots.Add(instance);
+                        instance.Start();
+                    }
                 }
+                finally { postingObject = 0; }
                 break;
             case WwiseActionKind.Stop:
-                foreach (var r in roots) r.StopMatching(action.Target, fade);
+                foreach (var r in roots) r.StopMatching(action.Target, fade, ObjectScoped(action) ? gameObject : null);
                 break;
             case WwiseActionKind.SetState:
                 ChangeState(action.GroupId, action.StateId);
                 break;
-            case WwiseActionKind.SetVolume: volumeOffsets[action.Target] = action.Value; break;
-            case WwiseActionKind.ResetVolume: volumeOffsets.Remove(action.Target); break;
-            case WwiseActionKind.SetPitch: pitchOffsets[action.Target] = action.Value; break;
-            case WwiseActionKind.ResetPitch: pitchOffsets.Remove(action.Target); break;
-            case WwiseActionKind.SetLowPass: lowPassOffsets[action.Target] = action.Value; break;
-            case WwiseActionKind.ResetLowPass: lowPassOffsets.Remove(action.Target); break;
+            case WwiseActionKind.SetVolume: volumeOffsets.Set(action.Target, scopeObject, action.Value, fade); break;
+            case WwiseActionKind.ResetVolume: volumeOffsets.Reset(action.Target, scopeObject, fade); break;
+            case WwiseActionKind.SetPitch: pitchOffsets.Set(action.Target, scopeObject, action.Value, fade); break;
+            case WwiseActionKind.ResetPitch: pitchOffsets.Reset(action.Target, scopeObject, fade); break;
+            case WwiseActionKind.SetLowPass: lowPassOffsets.Set(action.Target, scopeObject, action.Value, fade); break;
+            case WwiseActionKind.ResetLowPass: lowPassOffsets.Reset(action.Target, scopeObject, fade); break;
+            case WwiseActionKind.SetBusVolume: busVolumes.Set(action.Target, scopeObject, action.Value, fade); break;
+            case WwiseActionKind.ResetBusVolume: busVolumes.Reset(action.Target, scopeObject, fade); break;
+            case WwiseActionKind.BypassFx:
+                if (action.TargetIsBus) ApplyBypass(action.Target, action.Bypass, action.BypassMask);
+                break;
         }
     }
 
@@ -280,6 +305,9 @@ public sealed partial class WwisePlayer : IDisposable
         protected readonly WwisePlayer Player = player;
         public readonly WwiseObject Node = node;
         public readonly Instance? Parent = parent;
+
+        /// <summary>The game object this plays on: the one the event was posted on (inherited from the parent).</summary>
+        public readonly ulong GameObject = parent?.GameObject ?? player.postingObject;
         protected readonly List<Instance> Children = [];
         float fade = 1, fadeTarget = 1, fadeRate;
         bool stopping;
@@ -353,16 +381,19 @@ public sealed partial class WwisePlayer : IDisposable
             fadeRate = Math.Max(fadeRate, fade / seconds);
         }
 
-        /// <summary>Stops this instance if its node or a parent node is <paramref name="target"/>, otherwise looks among the children.</summary>
-        public void StopMatching(uint target, float seconds)
+        /// <summary>
+        /// Stops this instance if its node or a parent node is <paramref name="target"/>, otherwise looks among the children; with
+        /// <paramref name="onlyObject"/> only instances playing on that game object.
+        /// </summary>
+        public void StopMatching(uint target, float seconds, ulong? onlyObject = null)
         {
-            if (Done) return;
+            if (Done || onlyObject is { } only && only != GameObject) return;
             if (Player.Chain(Node).Any(n => n.Id == target))
             {
                 Stop(seconds);
                 return;
             }
-            foreach (var c in Children) c.StopMatching(target, seconds);
+            foreach (var c in Children) c.StopMatching(target, seconds, onlyObject);
         }
 
         public virtual void StateChanged(uint group)
@@ -475,7 +506,7 @@ public sealed partial class WwisePlayer : IDisposable
 
         void Switch()
         {
-            current = Player.states.TryGetValue(node.GroupId, out var s) ? s : node.DefaultSwitch;
+            current = Player.TryGetGroupValue(node.GroupId, GameObject, out var s) ? s : node.DefaultSwitch;
             var list = node.Switches.FirstOrDefault(w => w.SwitchId == current).Nodes ?? [];
             foreach (var c in list)
             {
@@ -489,7 +520,7 @@ public sealed partial class WwisePlayer : IDisposable
         {
             base.StateChanged(group);
             if (group != node.GroupId || Done) return;
-            uint state = Player.states[group];
+            uint state = Player.TryGetGroupValue(group, GameObject, out var s) ? s : node.DefaultSwitch;
             if (state == current) return;
             foreach (var c in Children) c.Stop(Math.Max(0, node.NodeParameters.FirstOrDefault(p => p.NodeId == c.Node.Id).FadeOut) / 1000f);
             Switch();
@@ -500,8 +531,9 @@ public sealed partial class WwisePlayer : IDisposable
     }
 
     /// <summary>
-    /// A sound: one voice, its gains from the node chain, and its position on a 3D path when a parent positions it so. Also a clip of a
-    /// music track (<see cref="IsMusic"/>), which starts at <see cref="Instance.StartTime"/>, inside a block when that falls in it.
+    /// A sound: one voice, its gains from the node chain, its place (on a 3D path when a parent positions it so, else at its game object with the
+    /// attenuation's curves) and its sends to auxiliary buses. Also a clip of a music track (<see cref="IsMusic"/>), which starts at
+    /// <see cref="Instance.StartTime"/>, inside a block when that falls in it.
     /// </summary>
     sealed class SoundInstance : Instance, IDisposable
     {
@@ -510,7 +542,13 @@ public sealed partial class WwisePlayer : IDisposable
         readonly float rolledVolume, rolledPitch, rolledLowPass;
         readonly WwisePositioning? path;
         readonly int pathIndex;
+        // 3D by the game object's place (no paths): the attenuation, if the positioning names one.
+        readonly bool placed3D;
+        readonly WwiseAttenuation? attenuation;
+        readonly GameObjectState? objectState;
         readonly uint outputBus;
+        readonly AuxBusState[] sends = [];
+        readonly VoiceSend[] targets = new VoiceSend[Voice.MaxSends];
         double age;
         double delayFrames;
 
@@ -542,11 +580,21 @@ public sealed partial class WwisePlayer : IDisposable
                 rolledLowPass += Roll(props, WwisePropertyId.LowPass);
             }
             var positioning = chain.Select(n => NodeOf(n)!.Positioning).FirstOrDefault(p => p.OverridesParent);
-            if (positioning is { Is3D: true, Paths.Length: > 0, Vertices.Length: > 0 })
+            if (positioning is { HasPaths: true })
             {
                 path = positioning;
                 pathIndex = player.random.Next(positioning.Paths.Length);
             }
+            else if (positioning is { IsGameDefined: true })
+            {
+                placed3D = true;
+                if (positioning.AttenuationId != 0 && player.objects.TryGetValue(positioning.AttenuationId, out var a)) attenuation = a as WwiseAttenuation;
+                player.gameObjects.TryGetValue(GameObject, out objectState);
+            }
+            // The sends: the nearest node that sets user-defined sends (bit 2 overrides, bit 3 lists the buses) decides; a node that overrides with no buses sends nowhere.
+            var sender = chain.Select(n => NodeOf(n)!).FirstOrDefault(n => (n.AuxBits & 0x0C) != 0);
+            if (sender is not null)
+                sends = [.. sender.AuxBuses.Where(b => b != 0).Take(Voice.MaxSends).Select(b => player.AuxBus(b)).OfType<AuxBusState>()];
             if (source.IsVorbis && player.media.TryGetValue(source.SourceId, out var clip))
             {
                 // Plays: 0 = forever, n = n times; absent = once. A music clip plays from its begin trim to its end trim.
@@ -606,40 +654,54 @@ public sealed partial class WwisePlayer : IDisposable
                 db += node.Properties.Float(WwisePropertyId.Volume);
                 cents += node.Properties.Float(WwisePropertyId.Pitch);
                 lowPass += node.Properties.Float(WwisePropertyId.LowPass);
-                db += Player.volumeOffsets.GetValueOrDefault(n.Id);
-                cents += Player.pitchOffsets.GetValueOrDefault(n.Id);
-                lowPass += Player.lowPassOffsets.GetValueOrDefault(n.Id);
+                db += Player.volumeOffsets.Get(n.Id, GameObject);
+                cents += Player.pitchOffsets.Get(n.Id, GameObject);
+                lowPass += Player.lowPassOffsets.Get(n.Id, GameObject);
                 foreach (var rtpc in node.Rtpcs) Apply(rtpc, ref db, ref linear, ref cents, ref lowPass);
                 if (n is WwiseLayerContainer layers && child is not null)
                     foreach (var layer in layers.Layers)
                         foreach (var (childId, curve) in layer.Associations)
                         {
                             if (childId != child.Id) continue;
-                            if (layer.CrossfadeParameterId != 0 && curve.Length > 0) linear *= Math.Max(0, WwiseCurves.Evaluate(curve, Player.Parameter(layer.CrossfadeParameterId)));
+                            if (layer.CrossfadeParameterId != 0 && curve.Length > 0) linear *= Math.Max(0, WwiseCurves.Evaluate(curve, Player.Parameter(layer.CrossfadeParameterId, GameObject)));
                             foreach (var rtpc in layer.Rtpcs) Apply(rtpc, ref db, ref linear, ref cents, ref lowPass);
                         }
                 child = n;
             }
-            // The output bus: the nearest node that overrides it, then the bus's parents (bus volume and the user volume curves).
-            uint busId = outputBus;
-            for (int guard = 0; busId != 0 && guard < 16 && Player.objects.TryGetValue(busId, out var o) && o is WwiseBus bus; guard++)
-            {
-                db += bus.Properties.Float(WwisePropertyId.BusVolume);
-                foreach (var rtpc in bus.Rtpcs) Apply(rtpc, ref db, ref linear, ref cents, ref lowPass);
-                busId = bus.ParentBusId;
-            }
-            float gain = WwiseCurves.DbToGain(db) * linear * Fade * masterGain;
-            float left = gain, right = gain;
+            // The voice's level before the output bus and the distance: what the sends start from.
+            float voiceGain = WwiseCurves.DbToGain(db) * linear * Fade * masterGain;
+            // The output bus: the nearest node that overrides it, then the bus's parents (bus volume, the pause ducking, the user volume curves).
+            float busGain = Player.BusGain(outputBus, GameObject);
+
+            float dry = 1, send = 1, pan = 0;
             if (path is not null)
             {
                 var (x, z) = PathPosition();
-                float pan = MathF.Sqrt(x * x + z * z) < 1e-3f ? 0 : x / MathF.Sqrt(x * x + z * z);
-                float angle = (pan + 1) * MathF.PI / 4;
-                left *= Math.Min(1, MathF.Sqrt(2) * MathF.Cos(angle));
-                right *= Math.Min(1, MathF.Sqrt(2) * MathF.Sin(angle));
+                pan = MathF.Sqrt(x * x + z * z) < 1e-3f ? 0 : x / MathF.Sqrt(x * x + z * z);
             }
+            else if (placed3D && objectState is not null && objectState.TryGetPlace(out var position, out var front))
+            {
+                // Game-defined: at the object, attenuated by the distance. An object never placed is heard at the listener.
+                var ears = Player.CurrentListener();
+                float distance;
+                (distance, pan) = Spatial.Locate(position, ears);
+                if (attenuation is not null)
+                {
+                    dry = Spatial.VolumeGain(attenuation.Curve(WwiseAttenuation.VolumeDry), distance);
+                    send = Spatial.VolumeGain(attenuation.Curve(WwiseAttenuation.AuxUserDefined), distance);
+                    if (attenuation.Curve(WwiseAttenuation.LowPass) is { } lp && lp.Points.Length > 0) lowPass += WwiseCurves.Evaluate(lp.Points, distance);
+                    var (coneGain, coneLowPass) = Spatial.Cone(attenuation.Cone, front, position, ears.Position);
+                    dry *= coneGain;
+                    send *= coneGain;
+                    lowPass += coneLowPass;
+                }
+            }
+            var (panLeft, panRight) = Spatial.PanGains(pan);
+            float level = voiceGain * busGain;
+            for (int i = 0; i < sends.Length; i++)
+                targets[i] = new VoiceSend(sends[i].Prepare(frames), level * send * panLeft, level * send * panRight);
             double rate = (double)voice.Clip.SampleRate / Player.outputRate * Math.Pow(2, cents / 1200.0);
-            voice.Mix(mix, frames, rate, left, right, LowPassCoefficient(lowPass), first);
+            voice.Mix(mix, frames, rate, level * dry * panLeft, level * dry * panRight, LowPassCoefficient(lowPass), first, targets.AsSpan(0, sends.Length));
         }
 
         /// <summary>
@@ -648,7 +710,7 @@ public sealed partial class WwisePlayer : IDisposable
         /// </summary>
         void Apply(WwiseRtpc rtpc, ref float db, ref float linear, ref float cents, ref float lowPass)
         {
-            float y = WwiseCurves.Evaluate(rtpc.Points, Player.Parameter(rtpc.GameParameterId));
+            float y = WwiseCurves.Evaluate(rtpc.Points, Player.Parameter(rtpc.GameParameterId, GameObject));
             switch (rtpc.ParameterId)
             {
                 case WwisePropertyId.Volume when rtpc.Scaling == 2: linear *= Math.Max(0, 1 + y); break;

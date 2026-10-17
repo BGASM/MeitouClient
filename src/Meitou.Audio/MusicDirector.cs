@@ -84,14 +84,17 @@ public sealed class MusicDirector
     {
         TitleScreen = true;
         player.LoadBank(MainThemeBank);
-        player.Post("Boot_Up_Game");
+        player.Post("Boot_Up_Game", AudioSystem.MusicObject);
     }
 
-    /// <summary>A new game, load or import starts: <c>Create_or_Load_Game</c> stops the main theme (5 s fade) and the title screen is gone.</summary>
+    /// <summary>
+    /// A new game, load or import starts: the title screen is gone and <c>Create_or_Load_Game</c> is posted on the GUI object. Its stop of the main theme is limited
+    /// to that object (docs/audio.md#music), so the theme, started on the music object, plays on until a biome's <c>Enter_</c> event stops it.
+    /// </summary>
     public void OnCreateOrLoadGame()
     {
         TitleScreen = false;
-        player.Post("Create_or_Load_Game");
+        player.Post("Create_or_Load_Game", AudioSystem.GuiObject);
     }
 
     /// <summary>
@@ -107,7 +110,7 @@ public sealed class MusicDirector
         {
             deadline = now + Interval() * (0.8 + 0.6 * random.NextDouble());
             // Moves on whether or not anything is posted; nothing checks whether music still plays, and no Stop is ever posted.
-            if (remembered is not null && Volume > 0) player.Post(remembered);
+            if (remembered is not null && Volume > 0) player.Post(remembered, AudioSystem.MusicObject);
         }
         if (remembered is not null) lastCurrent[BankOf(Biome!)] = now;
         UnloadStale(now);

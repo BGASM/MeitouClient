@@ -17,7 +17,11 @@ sealed class Voice : IDisposable
     long toSkip, limit;
     bool ended, final;
     float lastLeft, lastRight;
+    readonly float[] lastSend = new float[2 * MaxSends];
     bool started;
+
+    /// <summary>The most auxiliary buses a voice can feed (a node lists four user-defined sends).</summary>
+    public const int MaxSends = 4;
     readonly float[] lowPass = new float[2];
 
     /// <summary>
@@ -43,15 +47,20 @@ sealed class Voice : IDisposable
     /// <summary>
     /// Adds <paramref name="frames"/> frames to <paramref name="mix"/> (stereo), the first <paramref name="first"/> of them left silent (a
     /// start inside the block). <paramref name="rate"/> is source frames per output frame; <paramref name="lowPass"/> the one-pole
-    /// coefficient (1 = no filtering).
+    /// coefficient (1 = no filtering). Each of <paramref name="sends"/> receives the voice with its own gains (an auxiliary bus's input), ramped like the main ones.
     /// </summary>
-    public void Mix(float[] mix, int frames, double rate, float left, float right, float lowPass, int first = 0)
+    public void Mix(float[] mix, int frames, double rate, float left, float right, float lowPass, int first = 0, ReadOnlySpan<VoiceSend> sends = default)
     {
         if (ended) return;
         if (!started)
         {
             lastLeft = left;
             lastRight = right;
+            for (int s = 0; s < sends.Length; s++)
+            {
+                lastSend[2 * s] = sends[s].Left;
+                lastSend[2 * s + 1] = sends[s].Right;
+            }
             started = true;
         }
         int channels = clip.Channels;
@@ -78,10 +87,20 @@ sealed class Voice : IDisposable
             float k = (f - first + 1f) / (frames - first);
             mix[2 * f] += l * (lastLeft + (left - lastLeft) * k);
             mix[2 * f + 1] += r * (lastRight + (right - lastRight) * k);
+            for (int s = 0; s < sends.Length; s++)
+            {
+                sends[s].Buffer[2 * f] += l * (lastSend[2 * s] + (sends[s].Left - lastSend[2 * s]) * k);
+                sends[s].Buffer[2 * f + 1] += r * (lastSend[2 * s + 1] + (sends[s].Right - lastSend[2 * s + 1]) * k);
+            }
             position += rate;
         }
         lastLeft = left;
         lastRight = right;
+        for (int s = 0; s < sends.Length; s++)
+        {
+            lastSend[2 * s] = sends[s].Left;
+            lastSend[2 * s + 1] = sends[s].Right;
+        }
     }
 
     /// <summary>Keeps the last decoded frame (for interpolation) and decodes more after it, looping at the end. False when the clip is done.</summary>
@@ -134,6 +153,9 @@ sealed class Voice : IDisposable
 
     public void Dispose() => reader.Dispose();
 }
+
+/// <summary>One auxiliary send of a voice: the bus's stereo input buffer and the gains the voice adds to it.</summary>
+readonly record struct VoiceSend(float[] Buffer, float Left, float Right);
 
 /// <summary>A WEM converted to Ogg Vorbis, ready to play.</summary>
 sealed record MediaClip(uint Id, byte[] Ogg, int Channels, int SampleRate, int Frames);

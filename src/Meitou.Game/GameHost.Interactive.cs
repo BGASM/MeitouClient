@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 using Meitou.Content;
@@ -100,6 +100,7 @@ sealed partial class GameHost
                 UpscalerStatus = () => gpu.Post?.ActiveUpscaler ?? "Off",
                 AttackSlotsChanged = slots => { foreach (var combat in session.World.Systems.OfType<Meitou.Simulation.Combat.CombatSystem>()) combat.AttackSlots = slots; },
                 LateDefencesChanged = on => { foreach (var combat in session.World.Systems.OfType<Meitou.Simulation.Combat.CombatSystem>()) combat.LateDefences = on; },
+                AudioChanged = AudioSettingsChanged,
                 OffscreenChanged = () =>
                 {
                     foreach (var population in session.World.Systems.OfType<Meitou.Simulation.PopulationSystem>())

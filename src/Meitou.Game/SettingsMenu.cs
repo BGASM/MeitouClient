@@ -1,16 +1,17 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Meitou.Data.Ui;
 using Meitou.Engine.Input;
 using Meitou.Rendering;
+using AudioSettings = Meitou.Audio.AudioSettings;
 
 namespace Meitou.Game;
 
 /// <summary>Shared settings layout and interaction; the current UI mode selects only its presentation.</summary>
 sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, InputBindings bindings, Action save, Slider frameLimit, UserConfig config)
 {
-    static readonly string[] Pages = ["Display", "Graphics", "Interface", "Controls", "Advanced"];
+    static readonly string[] Pages = ["Display", "Graphics", "Interface", "Controls", "Advanced", "Audio"];
     static readonly string[] GraphicsPages = ["World", "Lighting", "Water", "Effects"];
     readonly float[] defaults = values.Sliders.Select(s => s.Get()).ToArray();
     readonly bool[] toggleDefaults = values.Toggles.Select(t => t.Get()).ToArray();
@@ -18,6 +19,24 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         () => config.MainMenuTransitionSpeed, v => config.MainMenuTransitionSpeed = v, "0.00'x'");
     readonly Slider inGameTransitionSpeed = new("In-game transition speed", SkyArrival.MinSpeed, SkyArrival.MaxSpeed,
         () => config.InGameTransitionSpeed, v => config.InGameTransitionSpeed = v, "0.00'x'");
+    Slider[]? audioSliders;
+    /// <summary>The seven audio sliders of the original's options (docs/formats/settings.md); each writes <see cref="UserConfig.Audio"/> and calls <see cref="AudioChanged"/>.</summary>
+    Slider[] AudioSliders => audioSliders ??= [
+        Volume("Music volume", a => a.Music, (a, v) => a with { Music = v }),
+        Volume("Ambient volume", a => a.Ambient, (a, v) => a with { Ambient = v }),
+        Volume("Footstep volume", a => a.Footstep, (a, v) => a with { Footstep = v }),
+        Volume("Sfx volume", a => a.Sfx, (a, v) => a with { Sfx = v }),
+        Volume("UI volume", a => a.Ui, (a, v) => a with { Ui = v }),
+        Volume("VO volume", a => a.Vo, (a, v) => a with { Vo = v }),
+        new("Music frequency", AudioSettings.MinFrequency, AudioSettings.MaxFrequency,
+            () => (config.Audio ??= new()).MusicFrequency,
+            v => { config.Audio = (config.Audio ?? new()) with { MusicFrequency = MathF.Round(v) }; AudioChanged?.Invoke(); },
+            "0", Text: v => $"{v:0} min", Faithful: 5),
+    ];
+
+    Slider Volume(string label, Func<AudioSettings, float> get, Func<AudioSettings, float, AudioSettings> set) =>
+        new(label, 0, 1, () => get(config.Audio ??= new()), v => { config.Audio = set(config.Audio ?? new(), Math.Clamp(v, 0, 1)); AudioChanged?.Invoke(); },
+            "0.00", Text: v => $"{v * 100:0}%", Faithful: 0.5f);
     Slider? attackSlotsSlider;
     Slider AttackSlotsSlider => attackSlotsSlider ??= new("Attackers per target", 1, 5, () => config.AttackSlots, v =>
     {
@@ -56,6 +75,8 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
     public Action<bool>? LateDefencesChanged { get; init; }
     /// <summary>Called when an off-screen switch changes (the config holds the new values).</summary>
     public Action? OffscreenChanged { get; init; }
+    /// <summary>Called when an audio slider changes (the config holds the new values); the game applies them to the running sound.</summary>
+    public Action? AudioChanged { get; init; }
     public bool Visible
     {
         get => visible || menuProgress > 0;
@@ -137,6 +158,20 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         if (page == 3)
             foreach (var action in Enum.GetValues<InputAction>().Where(a => a != InputAction.Quit && a != InputAction.ToggleFps))
                 result.Add(new(ActionLabel(action), BindingHint(action), Binding: action));
+        if (page == 5)
+        {
+            string[] hints = [
+                "Volume of the biome music and the main theme.",
+                "Volume of the weather and the world's ambience.",
+                "Volume of footsteps.",
+                "Volume of combat, building and other sound effects.",
+                "Volume of the interface sounds.",
+                "Volume of the voices.",
+                "Average minutes of silence between pieces of biome music.",
+            ];
+            for (int i = 0; i < AudioSliders.Length; i++)
+                result.Add(new(AudioSliders[i].Label, hints[i], Slider: AudioSliders[i]));
+        }
         if (page == 4)
         {
             result.Add(new(AttackSlotsSlider.Label, "How many enemies may fight one character in melee at once (the game: 1).", Slider: AttackSlotsSlider));
@@ -377,6 +412,8 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         LateDefencesChanged?.Invoke(true);
         config.KeepRoamers = config.OffscreenFights = config.OffscreenHealing = config.CampaignAncestorsOnce = config.KeepWild = true;
         OffscreenChanged?.Invoke();
+        config.Audio = new();
+        AudioChanged?.Invoke();
         config.HardwareMouse = false;
         config.HoverOutline = true;
         player.SetUiMode(UiMode.Faithful);

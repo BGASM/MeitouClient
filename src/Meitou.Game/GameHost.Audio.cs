@@ -1,3 +1,4 @@
+﻿using System.Numerics;
 using Meitou.Audio;
 
 namespace Meitou.Game;
@@ -15,11 +16,13 @@ sealed partial class GameHost
     void BeginAudio()
     {
         if (o.NoAudio) return;
+        // The sliders as saved, else the install's settings.cfg (read once, here, so the settings menu shows the same values).
+        var settings = config.Audio ??= AudioSettings.FromInstall(install);
         audioStart = Task.Run(() =>
         {
             try
             {
-                var made = AudioSystem.TryCreate(install, AudioSystem.AmbientVolumeSetting(install), out var error);
+                var made = AudioSystem.TryCreate(install, settings, out var error);
                 if (made is not null) made.Player.Gain = MathF.Pow(10, o.AudioGainDb / 20);
                 return (made, error);
             }
@@ -58,10 +61,20 @@ sealed partial class GameHost
         if (audio is null || player.TitleOpen) return;
         var target = camera.Target;
         var eye = camera.Eye;
+        var front = camera.Forward;
+        var right = Vector3.Normalize(Vector3.Cross(front, Vector3.UnitY));
+        audio.SetListener(eye, front, Vector3.Cross(right, front));
+        audio.SetPaused(session.Simulation.IsPaused);
         var weather = gpu.Weather;
         var clock = session.Clock;
         audio.Update(weather?.World.RegionAt(target.X, target.Z), weather?.State, clock.HourOfDay, clock.Sunrise, clock.Sunset,
             eye.Y - gpu.Terrain.HeightAt(eye.X, eye.Z), realSeconds);
+    }
+
+    /// <summary>The audio sliders changed in the settings menu: they apply at once.</summary>
+    void AudioSettingsChanged()
+    {
+        if (audio is not null && config.Audio is { } settings) audio.Apply(settings);
     }
 
     /// <summary>A new game, load or import starts: the game posts <c>Create_or_Load_Game</c>, which fades the main theme out.</summary>
@@ -73,6 +86,7 @@ sealed partial class GameHost
     void AudioMainMenu()
     {
         if (audio is null) return;
+        audio.SetPaused(false);
         audio.Ambience.Silence();
         audio.Music.StartMainTheme();
     }

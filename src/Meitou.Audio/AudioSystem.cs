@@ -1,3 +1,4 @@
+using System.Numerics;
 using Meitou.Content;
 using Meitou.Data.Audio;
 using Meitou.Data.World;
@@ -5,36 +6,79 @@ using Meitou.Data.World;
 namespace Meitou.Audio;
 
 /// <summary>
+/// The player's audio options (the original's <c>settings.cfg</c> keys, docs/formats/settings.md#audio): the six category volumes (0..1, the
+/// game sends them as the <c>User_Volume_*</c> parameters × 100) and how often biome music starts (<see cref="MusicFrequency"/>, minutes).
+/// </summary>
+public sealed record AudioSettings(float Music = 0.5f, float Ambient = 0.5f, float Footstep = 0.5f, float Sfx = 0.5f, float Ui = 0.5f, float Vo = 0.5f,
+    float MusicFrequency = 5)
+{
+    public const float MinFrequency = 1, MaxFrequency = 20;
+
+    /// <summary>The install's <c>settings.cfg</c>; every missing key takes the original's default.</summary>
+    public static AudioSettings FromInstall(GameInstall install) => new(
+        Music: AudioSystem.Setting(install, "Music volume", 0.5f),
+        Ambient: AudioSystem.Setting(install, "Ambient volume", 0.5f),
+        Footstep: AudioSystem.Setting(install, "Footstep volume", 0.5f),
+        Sfx: AudioSystem.Setting(install, "Sfx volume", 0.5f),
+        Ui: AudioSystem.Setting(install, "UI volume", 0.5f),
+        Vo: AudioSystem.Setting(install, "VO volume", 0.5f),
+        MusicFrequency: AudioSystem.Setting(install, "Music frequency", 5, 0, 1000));
+}
+
+/// <summary>
 /// The audio of a viewer or game session: the codebook library (from the cache, else the exe), the bank player, the ambience and music
-/// rules and the output device, wired together. <see cref="TryCreate"/> returns null with the reason when any part is missing, so a host
-/// simply runs without sound.
+/// rules and the output device, wired together. <see cref="TryCreate(GameInstall, AudioSettings, out string?)"/> returns null with the reason
+/// when any part is missing, so a host simply runs without sound.
+/// <para>
+/// For the events a host posts itself (footsteps, combat, the interface, voices): <see cref="Player"/>'s <c>Post(event, gameObject)</c>,
+/// <c>SetPosition</c>, <c>UnregisterObject</c>, <c>SetSwitch(group, value, gameObject)</c> and <c>SetParameter(name, value, gameObject)</c>
+/// (docs/audio.md#api-for-event-sources). <see cref="MusicObject"/> and <see cref="GuiObject"/> are the game's own object ids; pick other ids
+/// for emitters. <see cref="SetListener"/> follows the camera.
+/// </para>
 /// </summary>
 public sealed class AudioSystem : IDisposable
 {
     public const int SampleRate = 44100;
 
+    /// <summary>The game object the original posts the music, the ambience and the pause events on (<c>RegisterGameObj(100, "Music")</c>).</summary>
+    public const ulong MusicObject = 100;
+
+    /// <summary>The game object of the interface sounds (<c>RegisterGameObj(110, "GUI")</c>).</summary>
+    public const ulong GuiObject = 110;
+
     readonly AudioOutput output;
+    bool paused;
 
     public WwisePlayer Player { get; }
     public AmbienceDirector Ambience { get; }
     public MusicDirector Music { get; }
     public string DeviceName => output.DeviceName;
 
-    AudioSystem(WwisePlayer player, AudioOutput output, MusicDirector music)
+    /// <summary>The options last applied (<see cref="Apply"/>).</summary>
+    public AudioSettings Settings { get; private set; }
+
+    AudioSystem(WwisePlayer player, AudioOutput output, MusicDirector music, AudioSettings settings)
     {
         Player = player;
         this.output = output;
         Music = music;
+        Settings = settings;
         Ambience = new AmbienceDirector(player);
         Ambience.Start();
     }
 
     /// <summary>
-    /// <paramref name="ambientVolume"/>: the install's <c>settings.cfg</c> <c>Ambient volume</c> (0..1, missing → 0.5). The game sends it as the
-    /// game parameter <c>User_Volume_Ambient_SFX</c> (× 100), which the ambience bus's curve turns into its gain (0.5 → about −8 dB). The
-    /// music takes its <c>Music volume</c> and <c>Music frequency</c> from the same file.
+    /// <paramref name="ambientVolume"/>: the install's <c>settings.cfg</c> <c>Ambient volume</c> (0..1, missing → 0.5), for hosts that keep the other options
+    /// in <c>settings.cfg</c> too (the viewer): the rest is read from there.
     /// </summary>
-    public static AudioSystem? TryCreate(GameInstall install, float ambientVolume, out string? error)
+    public static AudioSystem? TryCreate(GameInstall install, float ambientVolume, out string? error) =>
+        TryCreate(install, AudioSettings.FromInstall(install) with { Ambient = ambientVolume }, out error);
+
+    /// <summary>
+    /// <paramref name="settings"/>: the volumes and the music frequency to start with. The game sends the volumes as the game parameters
+    /// <c>User_Volume_*</c> and <c>Footstep_Volume</c> (× 100), which the buses in <c>Init.bnk</c> turn into their gains (docs/audio.md#volumes).
+    /// </summary>
+    public static AudioSystem? TryCreate(GameInstall install, AudioSettings settings, out string? error)
     {
         var exe = Path.Combine(install.Root, "kenshi_x64.exe");
         var library = WwiseCodebookLibrary.Load(exe);
@@ -44,16 +88,53 @@ public sealed class AudioSystem : IDisposable
             return null;
         }
         var player = new WwisePlayer(library, Path.Combine(install.DataDirectory, "audio"), SampleRate);
-        player.SetParameter("User_Volume_Ambient_SFX", ambientVolume * 100);
-        var music = new MusicDirector(player, Setting(install, "Music frequency", 5, 0, 1000), Setting(install, "Music volume", 0.5f));
+        var music = new MusicDirector(player, settings.MusicFrequency, settings.Music);
         var output = AudioOutput.TryOpen(SampleRate, player.Mix, out error);
         if (output is null)
         {
             player.Dispose();
             return null;
         }
-        return new AudioSystem(player, output, music);
+        var system = new AudioSystem(player, output, music, settings);
+        system.Apply(settings);
+        return system;
     }
+
+    /// <summary>
+    /// Applies the options (the game does at start and when its options close): each volume becomes its game parameter × 100 and a changed music
+    /// frequency moves the music timer's deadline earlier, never later.
+    /// </summary>
+    public void Apply(AudioSettings settings)
+    {
+        Settings = settings;
+        Music.SetVolume(settings.Music);
+        Player.SetParameter("User_Volume_Ambient_SFX", Math.Clamp(settings.Ambient, 0, 1) * 100);
+        Player.SetParameter("Footstep_Volume", Math.Clamp(settings.Footstep, 0, 1) * 100);
+        Player.SetParameter("User_Volume_SFX", Math.Clamp(settings.Sfx, 0, 1) * 100);
+        Player.SetParameter("User_Volume_UI", Math.Clamp(settings.Ui, 0, 1) * 100);
+        Player.SetParameter("User_Volume_VO", Math.Clamp(settings.Vo, 0, 1) * 100);
+        Music.SetFrequency(settings.MusicFrequency);
+    }
+
+    /// <summary>
+    /// The game was paused (or its speed set to 0) or resumed: posts <c>Pause_Game</c> / <c>Resume_Game</c> on the music object, which duck the SFX bus
+    /// to silence and the ambience by 9 dB over a second, and give them back over three; the music is not touched. Does nothing when the state is the same.
+    /// </summary>
+    public void SetPaused(bool pause)
+    {
+        if (pause == paused) return;
+        paused = pause;
+        Player.Post(pause ? "Pause_Game" : "Resume_Game", MusicObject);
+    }
+
+    /// <summary>Whether <see cref="SetPaused"/> last paused.</summary>
+    public bool Paused => paused;
+
+    /// <summary>
+    /// Where the ears are: the camera's eye and the way it faces. Meitou gives the listener the camera's true front and up; the original sets the
+    /// listener's front slot to the camera's up vector and leaves the top slot unset (docs/audio.md#listener), which cannot be reproduced.
+    /// </summary>
+    public void SetListener(Vector3 eye, Vector3 front, Vector3 up) => Player.SetListener(eye, front, up);
 
     /// <summary>
     /// Feeds the ambience and the music the frame's state the way the game's camera update does (docs/audio.md): <paramref name="region"/> is the
@@ -82,7 +163,7 @@ public sealed class AudioSystem : IDisposable
     {
         string music = Music.Remembered is null ? "nothing to post" : Music.Volume <= 0 ? "volume 0" : $"next in {Math.Max(0, Music.SecondsToNext):0} s";
         string biome = Ambience.Biome is { } heard ? $"{heard} {(Ambience.Night ? "night" : "day")}" : "no biome";
-        return $"{biome}{(Ambience.Raining ? ", rain" : "")}{(Ambience.Windy ? ", wind" : "")}: {Player.Stats.Voices} voices, {Player.Stats.Clips} clips loaded; " +
+        return $"{biome}{(Ambience.Raining ? ", rain" : "")}{(Ambience.Windy ? ", wind" : "")}{(paused ? ", paused" : "")}: {Player.Stats.Voices} voices, {Player.Stats.Clips} clips loaded; " +
             $"music {(Music.TitleScreen ? "main theme" : Music.Biome ?? "none")}, {music}, {Player.MusicVoices} voices";
     }
 

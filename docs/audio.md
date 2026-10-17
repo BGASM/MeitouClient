@@ -2,7 +2,8 @@
 
 How Kenshi drives its sound, and how Meitou plays it. The bank and WEM formats are in [formats/wwise-bnk.md](formats/wwise-bnk.md); this
 page is the runtime: what the game sends to Wwise, and Meitou's player (`src/Meitou.Audio`). Only the ambience (biome beds, weather beds) and the music
-play so far (in the viewer and the game); interiors, effects' and objects' emitters, footsteps, combat, UI and voices do not.
+play from the games' own rules (in the viewer and the game); the player also does pause ducking, game objects with 3D positions, attenuation and reverb,
+and the game's settings menu has the audio sliders. What posts effects, footsteps, combat, UI, voices and emitters, and the interiors, is still to do.
 
 The facts about the exe come from its decompiled camera update and audio manager, traced 2026-10-10 (functions named per claim). Facts
 about the banks are checked against the 24 banks of the Steam install.
@@ -35,8 +36,7 @@ of the pivot at the zoom distance).
 - When the biome's bank is not loaded yet, the game loads it first and posts `Enter_` afterwards. **Bug in the game**: on that delayed path
   the suffix is inverted (night posts `_Day`), until the next change. Banks of biomes left behind are unloaded 60 s after they were last
   current (`FUN_140258e30`).
-- Events go to one game object (100); the listener is the camera **eye** (with a broken orientation: the camera's up vector ends in the
-  front slot, so 3D panning in the game is not what the camera faces; Verified by disassembly).
+- Events go to one game object (100); the listener is the camera **eye** ([listener](#game-objects-3d-and-attenuation): the orientation is broken in the game).
 - The banks loaded at start are listed under [Music](#music).
 
 ### Music
@@ -72,8 +72,9 @@ Traced 2026-10-17 from the audio manager (`AudioSystemGlobal`: biome music `FUN_
 - **Main theme.** Plays from `Boot_Up_Game` on the title screen and is never restarted: the audio manager is built once (`FUN_140259d10`
   from `FUN_14086a960`) and the title screen only by the start-up loading loop (`Main_LoadingStateLoop` `14082b370`); whether a return to
   the menu exists is Unknown. Stopped by `Create_or_Load_Game` (`6455137B`, in `MT_Music_Bank` and `SFX_General_Bank`: a click sound plus
-  stop `3A626E51` with a 5 s fade, global scope) posted on the **GUI object 110** when a new game, load or import starts (`FUN_140917400`,
-  `FUN_14047b210`, `FUN_14047b2f0`); by every ambience `Enter_` event; and finally by the bank unload above.
+  stop `3A626E51` with a 5 s fade, **object scope** (Stop/3)) posted on the **GUI object 110** when a new game, load or import starts (`FUN_140917400`,
+  `FUN_14047b210`, `FUN_14047b2f0`). Because that stop is scoped to the posting object and the theme plays on object 100, **it does not stop the theme** (Verified by the
+  action scope numbering, [wwise-bnk.md](formats/wwise-bnk.md#action-3)); the theme ends with the first ambience `Enter_` event (Stop/2, global scope) or the bank unload above.
 - **What `_Play` does** (Observed, banks): plays the biome's three layers directly, no `Biomes` switch involved; what they are, how long
   they last and how the day/night switch behaves: [wwise-bnk.md Music](formats/wwise-bnk.md#music).
 - **Pause and speed.** `Pause_Game` / `Resume_Game` (`FUN_140787d40`, on object 100, when paused or speed 0 flips) duck the SFX bus
@@ -128,7 +129,8 @@ host running without sound.
 - `WwisePlayer` loads a bank on a worker (reads it, converts every WEM to Ogg Vorbis in parallel: about 130 ms for a biome bank) and then
   hands it to the audio thread. Events wait (up to 10 s) for their bank. It interprets:
   - **Actions**: play (with the action's fade-in), stop (every playing instance whose node is the target or below it, with the fade),
-    set state, set/reset volume, pitch and low-pass offsets, the delay property. Effect bypass is ignored.
+    set state, set/reset volume, pitch, low-pass and bus volume offsets (faded, in dB; per game object for scope 3), the delay property, and effect
+    bypass ([reverb](#reverb-and-aux-buses)). Stop with scope 3 only reaches sounds started on the posting game object.
   - **Sounds** loop by their loop property (0 forever). **Random/sequence containers**: continuous ones (flags bit 3) play one child after
     another (back to back; transition mode 3 waits the transition time), forever or for the loop count; step ones play one child. Random
     picks by weight, skipping the last *avoid repeat* picks. **Layer containers** play all children, each scaled by its layer's crossfade
@@ -137,7 +139,8 @@ host running without sound.
     RTPC curves of the game parameters, then the output bus and its parents (bus volume, the slider curves). Volume curves store y as
     linear gain − 1 (below). Pitch (cents) resamples; low-pass runs a one-pole filter.
   - **3D paths**: a positioned container's one-shots pick a random path and move along its vertices (listener-relative x, z); the player
-    pans them left/right by direction (equal power). No distance attenuation (the ambience has attenuation 0), no reverb.
+    pans them left/right by direction (equal power). The ambience has no attenuation and no sends, so these get neither distance gain nor reverb.
+  - **Positions, attenuation, reverb**: [below](#game-objects-3d-and-attenuation).
 - `AudioOutput` keeps four blocks of 1024 frames (23 ms each at 44100 Hz) queued on one OpenAL Soft streaming source, refilled by a thread.
 - `AmbienceDirector` is the game's rules above: biome under the pivot, day/night, `Camera_Zoom`, `Time_in_Game`, rain and wind. Two
   differences from the game: the delayed-load suffix bug is not copied (the right event always plays), and the wind is stopped with
@@ -167,7 +170,7 @@ host running without sound.
   the remembered event when set and `Music volume` is above 0, moving the deadline either way; no `_Stop` is ever posted; a biome bank
   not current for 60 s is unloaded. `StartMainTheme` (loads `MT_Music_Bank`, posts `Boot_Up_Game`, pauses the timer) and
   `OnCreateOrLoadGame` (posts `Create_or_Load_Game`, resumes it) are for a host with a title screen (the game, see below); the viewer has none and does not call
-  them. `Music frequency` (minutes, default 5) and `Music volume` (default 0.5, sent as `User_Volume_Music` × 100) come from `settings.cfg`.
+  them. `Music frequency` (minutes, default 5) and `Music volume` (default 0.5, sent as `User_Volume_Music` × 100) come from `AudioSettings`.
 
 ### Volume curves (Observed)
 
@@ -186,26 +189,79 @@ The music at `Music volume` 0.5 (`User_Volume_Music=50`): the main theme's loude
 (one segment per layer, so seconds of silence between pieces). `Init.bnk` defaults the parameter to 100 (the curve is half at 50, so +6 dB),
 which is what the offline render uses unless told.
 
+### Game objects, 3D and attenuation
+
+What the game does (**Verified**, `FUN_140259620`, `FUN_140258410`): it registers object 100 (`Music`) and 110 (`GUI`); every event of the
+ambience, weather and music posts on 100, `Create_or_Load_Game` on 110. Point emitters (AMBIENT_SOUND records) each get an object id from a counter:
+register, `SetSwitch("Emitters", name)`, `SetPosition` with a zero orientation, `SetRTPCValue("Intensity")`, then `Start_Emitter` / `Stop_Emitter` on it. The exe
+never sets aux sends, output bus volumes or occlusion (the wrappers exist, unused), and registers the plug-ins silence source (`0x65`), RoomVerb (`0x76`),
+parametric EQ (`0x69`), compressor (`0x6C`) and one effect `0x6E` (Unknown).
+
+- **Listener.** The game's `SetListenerPosition` call (`FUN_1406b0140`) puts the camera's up vector in the front slot and leaves the top slot unset (**Verified**
+  by disassembly), so its 3D panning follows no real direction. Meitou's listener has the camera's true front and up (`AudioSystem.SetListener`); there is no
+  Faithful switch, since the game's behaviour is a broken orientation that cannot be reproduced (and no new option may be added).
+- **Objects.** `WwisePlayer` registers an object on first use. A sound posted on an object remembers it; its position (`SetPosition`) is read each block
+  (lock-protected). Object 0 is the default object and is never placed. An object never placed is heard at the listener. `UnregisterObject` ends its sounds.
+  `SetSwitch` and `SetParameter` take an object (0 = global); a value set on an object wins over the global one. An object-scoped Stop (scope 3) only stops
+  sounds started on the posting object.
+- **Position.** A node whose positioning is game-defined (3D, no paths) is placed at its object. Distance and pan come from the object's offset in the
+  listener's frame (`Spatial.Locate`): the pan is side over horizontal distance, front and back folded, pulled to the centre within 50 units, then the
+  equal-power law. Paths (3D type 3) move relative to the listener as before.
+- **Attenuation.** The node's [attenuation](formats/wwise-bnk.md#attenuation-14) gives the dry gain (curve 0 at the distance, linear gain − 1 as for
+  RTPC curves; zero beyond the last point), the low-pass (curve 3) and, only for a placed object with a front, the cone (full inside the inner angle,
+  the outside volume and low-pass beyond the outer, linear between). Measured by rendering: a sound 100 / 200 / 300 / 500 units away fell by about
+  8 / 18 / 26 dB / to silence against the one at the listener, and was louder on the side it was placed. The game never sets an orientation, so cones are inert there.
+
+### Reverb and aux buses
+
+- **Which reverb** is switched by the game's Bypass-effects actions ([wwise-bnk.md](formats/wwise-bnk.md#buses)): `Enter_<biome>` turns the outdoor reverb on, the
+  building events turn the big or small indoor one on and the outdoor one off, `Leave_Building` reverses it. `WwisePlayer` keeps the bypass bits per aux
+  bus and applies the actions; hosts can also call `SetAuxBypass(auxBus, bypass, slots)`.
+- **Which sounds** reach it: the nearest node with aux-send bits 04/08 sends to the bus ids it lists (`SFX_General_Bank`: 6 nodes, `VO_Bank`: 1, to both
+  aux buses), the level being the voice's level times the attenuation's aux curve (usually the dry curve) and the output bus gain (Meitou's choice).
+  Every ambience and weather node has no sends, so the beds never go through the reverb.
+- **The reverb** (`RoomReverb`, a clean-room approximation of RoomVerb, **Observed** parameters in [wwise-bnk.md](formats/wwise-bnk.md#effects-18-and-19)):
+  Freeverb-style, 8 damped combs and 4 Schroeder all-passes per side with a stereo spread, comb feedback set for the effect's decay time, damping from
+  the HF damping parameter, a pre-delay of up to 250 ms, a 250 Hz input high-pass (below it all combs add coherently), input normalisation, the wet level
+  the root-sum-square of the two wet level parameters scaled by the effect's RTPC curves (the outdoor one follows `Camera_Zoom`). A bypassed reverb takes no
+  input and rings out (Wwise's behaviour is **Unknown**); slots of one bus run in parallel (Wwise runs them in series, **Unknown**). A silent tail is skipped.
+  Measured by rendering: decay about 3.5 s (big indoor), 0.9 s (small), 2 s (outdoor); the level is near unity.
+  Unknown: which wet level is early reflections or tail, the pattern id and millisecond bytes, the outdoor pre-delay curve.
+
+### API for event sources
+
+For a host that posts its own events (footsteps, combat, UI, voices, emitters), through `AudioSystem.Player` (a `WwisePlayer`):
+`Post(event, gameObject)` (a name or id), `SetPosition(gameObject, position, front)`, `RegisterObject` / `UnregisterObject`, `SetSwitch(group, value, gameObject)`,
+`SetParameter(name, value, gameObject)`, `SetAuxBypass`, and `AudioSystem.SetListener` / `SetPaused` / `Apply(AudioSettings)`. `AudioSystem.MusicObject`
+(100) and `GuiObject` (110) are the game's ids; pick other ids for emitters. `SFX_General_Bank` (loaded with the ambience) holds the effects. Events found by
+hashing the exe's strings: about 71 of its 88 (`Footsteps` `8E31CC26`, `Start_Emitter` `AEB16404`, `Stop_Emitter` `AE9274C2`, `Impact` `C2299AA7`, `Attack`, `Door_Open`, the UI
+and `Game_Speed_*` events) and 6 of the 14 in `VO_Bank` (`VO_Creature_*`, `VO_Get_Hit`). Switch groups confirmed by hash: `Door_Type`, the weapon groups,
+`Impacts`, `Break`, `Armor_Worn`, `Surface_Material`, `Consume`, `Notifications`, `Stats_Preview`, `Inventory_Items`, `Building_Place`, `Buildings_Click`,
+`Emitters` (`2488FB4C`; values such as `Furnace`, `Stone_Processor`, `Generator`, `Research_Bench`); game parameters `Movement_Speed` (`5A988332`) and others.
+Open for the next wave: which event each game action posts and on which object, the `Emitters` and `Intensity` use, interior events (`Enter_Building*` with the
+`Indoors` switch and `Building_Integrity` after the building raycast), and the footstep switches.
+
 ### Not done
 
-Pause ducking (`Pause_Game` / `Resume_Game` live in `SFX_General_Bank`, which is never loaded, and the player skips the bus-volume actions
-`SetBusVolume` / `ResetBusVolume`), audio sliders in the game's settings, interiors (needs the building raycast), point emitters
-(`Start_Emitter` / `Stop_Emitter` with the `Emitters` switch, AMBIENT_SOUND records), effects and reverb (aux buses), attenuation curves,
-voice limits, the radio's 3D attenuation (type 14 is not decoded), and unloading ambience banks left behind (they stay loaded: about 5
-to 14 MB of Ogg each; the music banks unload as above).
+Interiors (the building raycast and the `Indoors` switch), the callers that post effects, footsteps, combat, UI, voices and emitters (the engine is ready:
+[API](#api-for-event-sources)), voice limits, obstruction and occlusion (the game uses none), the radio, serial effect slots and the cone as Wwise draws it, and unloading ambience
+banks left behind (they stay loaded: about 5 to 14 MB of Ogg each; the music banks unload as above).
 
 ## In the viewer and the game
 
 On by default; `--no-audio` turns it off, `--audio-gain <dB>` raises or lowers everything. The console (the game's `log.txt`) prints the device, or
 why there is none: the host then runs silently. F11's statistics show the biome, day or night, rain, wind and the number of voices, and the music: the
-main theme or the remembered biome music, seconds until the timer next posts it, music voices (`AudioSystem.StatsLine`). Ambient and music volume
-and `Music frequency` come from the install's `settings.cfg` once at start (the game's own settings have no audio sliders). Both hosts feed
+main theme or the remembered biome music, seconds until the timer next posts it, music voices (`AudioSystem.StatsLine`; paused shows). Both hosts feed
 `AudioSystem.Update` each frame (region under the pivot, weather, hour, sunrise and sunset, eye height).
 
 - **Viewer** (`WorldApp.Audio.cs`): pivot = the camera's target, eye = its position, the viewer's hour; no title screen, so no main theme.
 - **Game** (`GameHost.Audio.cs`): the audio is made on a worker while the window and the world load. Pivot = `camera.Target` and eye =
   `camera.Eye` (the strategy or free camera as drawn), hour, sunrise and sunset from the game clock (`session.Clock`), region and weather from the
-  weather scheduler (`gpu.Weather`).
+  weather scheduler (`gpu.Weather`). Each frame it also sets the listener from the camera (`camera.Forward` and the true up) and `SetPaused(session.Simulation.IsPaused)`
+  (paused or speed 0): `Pause_Game` / `Resume_Game` post on object 100. `SFX_General_Bank` loads with the ambience banks.
+  - **Audio sliders.** The settings menu's Audio page has the original's seven (`Music volume`, `Ambient volume`, `Footstep volume`, `Sfx volume`, `UI volume`, `VO volume`, `Music frequency`;
+    [settings.md](formats/settings.md)), kept in `meitou.user.json` (`audio`); the first run takes them from the install's `settings.cfg`. They apply at once (`AudioSystem.Apply`),
+    where the original applies them when its options close. The viewer still reads `settings.cfg` once at start.
   - **Title screen.** `StartMainTheme` when the world is up and the title is open (either UI mode: the faithful title or the Meitou game menu).
     While the title is open the host does not update the ambience or the music (**Unknown** whether the original's camera update runs there; if it did, its first biome call would unload the theme's bank), so no `Enter_` event or
     music-bank unload cuts the theme. A new game or a load posts `Create_or_Load_Game` (5 s fade) as it starts; `--new-game` and `--load` skip the

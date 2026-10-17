@@ -72,10 +72,10 @@ the objects tile the section exactly.
 
 Types (the format's numbers): 1 state, 2 sound, 3 action, 4 event, 5 random/sequence container, 6 switch container, 7 actor-mixer,
 8 bus, 9 layer (blend) container, 10 music segment, 11 music track, 12 music switch, 13 music random/sequence, 14 attenuation,
-18 effect share set, 19 effect, 20 aux bus. The reader decodes 2-7, 9 and 10-13 ([Music](#music)) in version 112 banks, buses (8) in part ([below](#buses)), and keeps the rest raw.
+18 effect share set, 19 effect, 20 aux bus. The reader decodes 2-14, 18-20 ([Music](#music), [Buses](#buses), [Attenuation](#attenuation-14), [Effects](#effects-18-and-19)) in version 112 banks and keeps the rest (states, 1) raw.
 
-**Verified** (`Every_version_112_object_of_a_decoded_type_uses_exactly_its_size`): with the layouts below, all 2,492 objects of types 2-7
-and 9 and all 687 music objects in the 22 version-112 banks decode to exactly their size (3,190 with the 11 buses, which are decoded only in part). The field order is certain; the meaning of a field is **Observed** unless
+**Verified** (`Every_version_112_object_of_a_decoded_type_uses_exactly_its_size`, and a survey of every object): with the layouts below, every object of
+types 2-14 and 18-20 in the 22 version-112 banks decodes to exactly its size (3,260 objects counting every bank, as the test does). The field order is certain; the meaning of a field is **Observed** unless
 said otherwise.
 
 ### Shared pieces
@@ -95,8 +95,10 @@ u32 action count, the action ids in order.
 
 ### Action (3)
 
-u16 action type, u32 target id, u8 target-is-bus, property list, then by kind (high byte of the type). The low byte is the scope
-(Observed: 1/2 one object, 3/4 all, where 2 and 4 are limited to the posting game object). Kinds seen in version 112 banks:
+u16 action type, u32 target id, u8 target-is-bus, property list, then by kind (high byte of the type). The low byte is the scope,
+numbered as in the Wwise SDK (**Verified**, by which events use which: `Stop_Emitter` is Stop/3 and the emitters are separate game objects; the ambience `Enter_` events, the
+pause and the bypass actions use 2; Play is always 3): 2 = global (the target on every game object), 3 = the posting game object only, 4 = all, 5 = all but the exceptions
+on the posting object, 6/7 = all but the exceptions. Kinds seen in version 112 banks:
 
 | Kind | Name | Then |
 |---|---|---|
@@ -107,7 +109,7 @@ u16 action type, u32 target id, u8 target-is-bus, property list, then by kind (h
 | 0x0C / 0x0D | Set / reset bus volume | as pitch |
 | 0x0E / 0x0F | Set / reset low-pass | as pitch |
 | 0x12 | Set state | u32 state group, u32 state |
-| 0x1A | Bypass effects | u8 bypass, u8 slot mask, exceptions as Stop |
+| 0x1A | Bypass effects | u8 bypass (1 = bypass, 0 = unbypass), u8 slot mask (bit n = slot n, 0x10 = all slots), exceptions as Stop |
 
 Action properties seen: `0x0F` (int ms, 1000 to 10000 on stops and plays: the fade time) and `0x0E` (int ms, 6000; probably a delay).
 
@@ -132,9 +134,10 @@ Action properties seen: `0x0F` (int ms, 1000 to 10000 on stops and plays: the fa
 6. Positioning: u8 bits. Bit 0 = overrides the parent's positioning. If bit 0 and bit 3 (3D) are set: u8 3D bits, u32 attenuation id;
    and if the 3D type (bits 5-6) is 3: u8 path mode, s32 transition time (ms), u32 vertex count, vertices (f32 x, y, z, s32 duration ms),
    u32 path count, paths (u32 first vertex, u32 vertex count), then per path three floats (random range in x, y, z). Values seen:
-   `C0` (no override), `C3` (override, 2D), `C9`/`D9` (3D), `79`/`F9` (3D with paths: the random one-shots of the ambience move along
-   paths around the listener).
-7. Aux sends: u8 bits; bit 3 set adds four u32 aux bus ids.
+   `C0` (no override), `C3` (override, 2D), `C9`/`D9` (3D: bit 3 and the 3D byte, a game-defined position), `79`/`F9` (3D with paths, 3D type 3: the random one-shots of the ambience move along
+   paths around the listener). With bit 0 clear a node takes its parent's positioning.
+7. Aux sends: u8 bits; bit 2 = overrides the parent's sends, bit 3 = four user-defined aux bus ids follow (u32 each, 0 = none). Seen: `00`, `04`, `08`, `0C`. Only 6 nodes of `SFX_General_Bank` and one of `VO_Bank`
+   send, all to `[23F4785D, 5E1D37D4]`; there is no send level property (**Observed**: the send is the voice level times the attenuation's aux curve).
 8. Advanced settings: u8 bits, u8 virtual voice behaviour (1), u16 max instances, u8 below-threshold behaviour, u8 bits.
 9. States: u32 group count; per group u32 group id, u8 sync type, u16 count, (u32 state id, u32 state object id) pairs.
 10. RTPC list.
@@ -215,9 +218,9 @@ Silences are 15-60 s in the beds, 5-60 s in the other layers. Segment volumes ra
 
 - **Main theme** (`MT_Music_Bank`). Event `Boot_Up_Game` (`7D68E3F0`) plays `3A626E51`: a sequence-continuous group looping forever over one item, itself
   looping forever, of one 281.7 s segment (−6 dB). Its second rule (any → any at the exit cue, fade-out 10100 ms offset +3200, fade-in
-  3200 ms offset −600) would crossfade the loop. `Create_or_Load_Game` stops it (5000 ms), as do the ambience enter events.
+  3200 ms offset −600) would crossfade the loop. `Create_or_Load_Game` is Stop/3 on the GUI object, which does not reach the theme (started on object 100); the ambience enter events (Stop/2) stop it.
 - **Radio** (`Radio_Music_Bank`). `Radio_On` stops `00DBE1E6` (all biome music, by ancestor; 10 s) and plays `34220ED8` (−9 dB,
-  positioned 3D with attenuation `2791811A`, type 14 not decoded): random continuous, shuffle, avoid 4, looping forever over 9 items,
+  positioned 3D with attenuation `2791811A`): random continuous, shuffle, avoid 4, looping forever over 9 items,
   4 songs of 152-267 s and 5 jingles of 5.5-11.3 s (−6 dB; three items weigh 0.6, one 0.5). `Radio_Off` stops it without a fade;
   `FCC71927` stops radio and biome music (5000 ms). `Radio_On` and `Radio_Off` also play a sound in `SFX_General_Bank`.
 - **Media.** Music WEMs are the same Wwise Vorbis as the ambience, all embedded (source stream type 0 in all 239; no streaming, prefetch
@@ -254,12 +257,41 @@ or 100 ([audio.md](../audio.md#game-parameters-and-states)).
 
 ## Buses
 
-A bus (type 8) starts with u32 parent bus (0 for the two top buses), then a property list without ranges: ids `1A`, `1B`, `1C`, `1F`
-(values 0, 100, 0, 100 on every bus; Unknown) and on three buses `05`, the **bus volume** in dB (+6 footsteps, −4 music, −9 on the aux
-bus `5E1D37D4`). The rest of the layout is not decoded; the reader finds the bus's RTPC list by its shape (a u16 count of 1..8 followed by
-well-formed entries), which gives each category bus its slider curve (**Observed**, the curves are listed in [audio.md](../audio.md#volumes)).
+A bus (type 8) or aux bus (type 20): u32 parent bus (0 for the two top buses), a property list without ranges (ids `1A`, `1B`, `1C`, `1F`:
+0, 100, 0, 100 on every bus, Unknown; and on three buses `05`, the **bus volume** in dB: +6 footsteps, −4 music, −9 on the outdoor aux
+bus `5E1D37D4`), 13 bytes (Unknown), f32 maximum duck volume, u32 duck count (0 in Kenshi), u8 effect count and, if any, u8 bypass bits then per
+effect u8 slot, u32 effect id, u8 is-share-set, u8 is-rendered; 6 bytes (Unknown); the RTPC list (each category bus's slider curve, **Observed**,
+listed in [audio.md](../audio.md#volumes)); u32 state group count (0). **Verified**: exact size for all 15 buses (11 buses, 4 aux buses).
 Sounds reach a bus through the nearest node with an override bus id (in the biome banks the top actor-mixer goes to the SFX bus
 `59927CD0` and the one below it to the ambience bus `95836E4C`).
+
+**Aux buses** (**Observed**, `Init.bnk`, `Reverb_*` banks): indoor `23F4785D` has slot 0 = RoomVerb `21C5CB35` (big room) and slot 1 = `1284F30B`
+(small room), both bypassed at start (bypass bits 3); outdoor `5E1D37D4` has slot 0 = `3C6A9ABC`, bus volume −9 dB, bypassed at start.
+The game switches them with Bypass-effects actions (scope 2): every biome `Enter_*` event unbypasses outdoor slot 0 (mask 01);
+`Enter_Building_Big` (`AD014E1F`) unbypasses indoor slot 0 and bypasses outdoor (mask 0x11 = all slots); `Enter_Building` (`C26421B4`) unbypasses
+indoor slot 1 and bypasses outdoor; `Leave_Building` (`704C22D9`) bypasses indoor and unbypasses outdoor.
+
+## Attenuation (14)
+
+Used by the nodes whose positioning names an attenuation id. u8 cone flag; if set, 5 f32 (inside angle, outside angle in degrees, outside volume dB,
+low-pass, high-pass). Then 7 u8 curve indices (by usage: 0 dry volume, 1 game-defined aux send, 2 user-defined aux send, 3 low-pass, 4-6 unused,
+0xFF = none), u8 curve count, per curve u8 scaling, u16 point count, points (f32 x = distance, f32 y, u32 interpolation); then the RTPC list.
+**Verified**: exact size for all 14 attenuations. Volume curves have scaling 2 and are read as linear gain − 1, like the RTPC curves (**Observed**); the
+low-pass curve y is 0..75. Kenshi's maximum distances are 400..1000 units. Two attenuations (`0FDAD054`, `2E5501C5`) have a cone of 90°/245° and −6 dB,
+which the game cannot use: it sets no orientation on emitters.
+
+## Effects (18 and 19)
+
+Effect (19) and effect share set (18): u32 plug-in id, u32 parameter size, the parameters, u8 media count (0), the RTPC list, u16 0. **Verified**:
+exact size for all 11 (6 in `Init.bnk`, 3 more in the reverb banks). Plug-ins in the banks: `0x00760003` RoomVerb (`1284F30B` 0.9 s decay, `21C5CB35`
+3.2 s, `3C6A9ABC` outdoor 1.9 s, share sets `769EF412`, `02E5E37F`), `0x00690003` parametric EQ (`1E402603`, `2CB4FF60`), `0x006C0003` compressor (`395A8EFF`).
+
+**RoomVerb parameters** (**Observed**, from the values; 20 f32 then bytes): 0 decay time (s), 1 high-frequency damping (kHz), 2 diffusion (%), 3 stereo width
+(degrees), 4-12 three filter bands (gain dB, frequency, Q), 13-15 front, rear and centre level, 16 dry level (−96.3 dB), 17-19 levels in dB: 17 is 0
+and 18 and 19 are the two wet levels (small indoor −7 / −28, big indoor −16 / −21, outdoor −25 / −20). **Unknown**: the trailing bytes (byte 80 = 1, a
+pattern id 23 / 9 / 29, millisecond values such as 34 / 6 / 11 / 67 / 79 or 123 / 95 / 53 / 62), which of the two wet levels is early reflections
+and which the tail. The outdoor effect has three RTPCs on `Camera_Zoom` for parameter ids 16 (a 25.6 .. 175.4 curve, read as pre-delay ms,
+**Unknown**), 60 and 62 (dB curves falling to about −1 at zoom 100, so the reverb fades as the camera rises).
 
 ## How an ambience bank is built (Observed, e.g. `SFX_Amb_Desert`)
 

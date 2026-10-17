@@ -31,7 +31,7 @@ static class WwiseHierarchyReader
 
     static WwiseObject Decode(WwiseObjectType type, uint id, ReadOnlySpan<byte> body)
     {
-        if (type == WwiseObjectType.Bus) return Bus(id, body);
+        if (type is WwiseObjectType.Bus or WwiseObjectType.AuxBus) return Bus(id, body, type == WwiseObjectType.AuxBus);
         var r = new Reader(body);
         try
         {
@@ -48,6 +48,8 @@ static class WwiseHierarchyReader
                 WwiseObjectType.MusicTrack => MusicTrack(ref r, id),
                 WwiseObjectType.MusicSwitch => MusicSwitch(ref r, id),
                 WwiseObjectType.MusicRandomSequence => MusicPlaylist(ref r, id),
+                WwiseObjectType.Attenuation => Attenuation(ref r, id),
+                WwiseObjectType.FxShareSet or WwiseObjectType.FxCustom => Effect(ref r, type, id),
                 _ => null,
             };
             if (o is null) return new WwiseRawObject(type, id, body.ToArray(), null);
@@ -239,11 +241,12 @@ static class WwiseHierarchyReader
     }
 
     /// <summary>
-    /// A bus, partly: u32 parent bus, then the property list without ranges (bus volume is <c>0x05</c>). The rest of the layout is not decoded;
-    /// the RTPC list is found by its shape (docs/formats/wwise-bnk.md#buses): the last place where a u16 count of 1..8 is followed by that many
-    /// well-formed RTPC entries that end exactly at a known position (the end, or before u16 0 / u32 0 tails seen in the banks).
+    /// A bus (type 8) or auxiliary bus (type 20): u32 parent bus, the property list without ranges (bus volume is <c>0x05</c>), 13 bytes
+    /// (positioning and recovery time, <b>Unknown</b>), f32 maximum duck volume, u32 duck count (always 0 in Kenshi; others are rejected), the
+    /// effect slots (u8 count; if any u8 bypass bits, then per slot u8 index, u32 effect id, u8 share set, u8 rendered), 6 bytes
+    /// (<b>Unknown</b>), the RTPC list and u32 state group count (0). docs/formats/wwise-bnk.md#buses.
     /// </summary>
-    static WwiseObject Bus(uint id, ReadOnlySpan<byte> body)
+    static WwiseObject Bus(uint id, ReadOnlySpan<byte> body, bool aux)
     {
         try
         {
@@ -253,31 +256,60 @@ static class WwiseHierarchyReader
             var ids = r.Bytes(n);
             var values = new Dictionary<byte, uint>(n);
             for (int i = 0; i < n; i++) values[ids[i]] = r.U32();
-            var rtpcs = FindRtpcs(body, body.Length - r.Remaining);
-            return new WwiseBus(id, parent, new WwiseProperties(values, new Dictionary<byte, (float, float)>()), rtpcs, body.ToArray());
+            r.Bytes(13);
+            r.F32();
+            uint ducks = r.U32();
+            if (ducks != 0) throw new InvalidDataException($"{ducks} ducking entries, not decoded");
+            int slotCount = r.U8();
+            byte bypass = slotCount > 0 ? r.U8() : (byte)0;
+            var slots = new WwiseEffectSlot[slotCount];
+            for (int i = 0; i < slots.Length; i++) slots[i] = new WwiseEffectSlot(r.U8(), r.U32(), r.U8() != 0, r.U8() != 0);
+            r.Bytes(6);
+            var rtpcs = Rtpcs(ref r);
+            uint states = r.U32();
+            if (states != 0) throw new InvalidDataException($"{states} state groups on a bus, not decoded");
+            if (r.Remaining != 0) throw new InvalidDataException($"{r.Remaining} bytes left over");
+            return new WwiseBus(id, parent, new WwiseProperties(values, new Dictionary<byte, (float, float)>()), rtpcs, body.ToArray(), aux, slots, bypass);
         }
         catch (InvalidDataException e)
         {
-            return new WwiseRawObject(WwiseObjectType.Bus, id, body.ToArray(), e.Message);
+            return new WwiseRawObject(aux ? WwiseObjectType.AuxBus : WwiseObjectType.Bus, id, body.ToArray(), e.Message);
         }
     }
 
-    static WwiseRtpc[] FindRtpcs(ReadOnlySpan<byte> body, int from)
+    /// <summary>
+    /// An attenuation: u8 cone flag (then f32 inside and outside degrees, outside volume dB, low-pass, high-pass), 7 u8 curve indices (per usage:
+    /// dry volume, game-defined aux send, user-defined aux send, low-pass, three unused; 0xFF none), u8 curve count, per curve u8 scaling and
+    /// u16 point count and the points, then the RTPC list.
+    /// </summary>
+    static WwiseAttenuation Attenuation(ref Reader r, uint id)
     {
-        for (int start = body.Length - 2; start >= from; start--)
+        WwiseCone? cone = null;
+        if (r.U8() != 0) cone = new WwiseCone(r.F32(), r.F32(), r.F32(), r.F32(), r.F32());
+        var use = new sbyte[7];
+        for (int i = 0; i < use.Length; i++) use[i] = (sbyte)r.U8();
+        var curves = new WwiseAttenuationCurve[r.U8()];
+        for (int i = 0; i < curves.Length; i++)
         {
-            int count = BinaryPrimitives.ReadUInt16LittleEndian(body[start..]);
-            if (count is < 1 or > 8) continue;
-            var r = new Reader(body[start..]);
-            try
-            {
-                var list = Rtpcs(ref r);
-                if (list.All(x => x.Points.Length is > 0 and < 64 && x.ParameterId < 64 && x.RtpcType == 0 && x.Points.All(p => float.IsFinite(p.X) && float.IsFinite(p.Y))))
-                    return list;
-            }
-            catch (InvalidDataException) { }
+            byte scaling = r.U8();
+            curves[i] = new WwiseAttenuationCurve(scaling, Points(ref r, r.U16()));
         }
-        return [];
+        return new WwiseAttenuation(id, cone, use, curves, Rtpcs(ref r));
+    }
+
+    /// <summary>
+    /// An effect or share set: u32 plug-in id, u32 parameter size and the parameter block, u8 media count (0 in Kenshi), the RTPC list on the
+    /// effect's parameters (as node RTPCs; the u8 is the plug-in's parameter id) and u16 0 (<b>Unknown</b>).
+    /// </summary>
+    static WwiseEffect Effect(ref Reader r, WwiseObjectType type, uint id)
+    {
+        uint plugin = r.U32();
+        var parameters = r.Bytes(r.Count(r.U32(), 1));
+        byte media = r.U8();
+        if (media != 0) throw new InvalidDataException($"{media} media on an effect, not decoded");
+        var rtpcs = Rtpcs(ref r);
+        if (r.U16() != 0) throw new InvalidDataException("Effect tail not zero");
+        return new WwiseEffect(type, id, plugin, parameters, rtpcs);
     }
 
     static WwiseLayerContainer Layer(ref Reader r, uint id)

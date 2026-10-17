@@ -39,11 +39,12 @@ public sealed class AmbienceDirector(WwisePlayer player)
     public bool Raining => raining;
     public bool Windy => windy;
 
-    /// <summary>The banks the game loads at start (with Init, the music, the general sounds and the voices, which the viewer does not play).</summary>
+    /// <summary>The banks the game loads at start (with Init, the music and the voices, which the viewer does not play; the voices are not played yet).</summary>
     public void Start()
     {
         player.LoadBank("SFX_Amb_Weather_Bank");
         player.LoadBank("SFX_Amb_Indoors_Bank");
+        player.LoadBank("SFX_General_Bank");
     }
 
     /// <summary>
@@ -52,9 +53,9 @@ public sealed class AmbienceDirector(WwisePlayer player)
     /// </summary>
     public void Silence()
     {
-        if (state >= 0) player.Post($"Leave_{(Ambience)(state & 0xFF)}");
-        if (raining) player.Post("Weather_Rain_End");
-        if (windy) player.Post("Weather_Wind_End");
+        if (state >= 0) player.Post($"Leave_{(Ambience)(state & 0xFF)}", AudioSystem.MusicObject);
+        if (raining) player.Post("Weather_Rain_End", AudioSystem.MusicObject);
+        if (windy) player.Post("Weather_Wind_End", AudioSystem.MusicObject);
         state = -1;
         day = null;
         raining = windy = false;
@@ -80,25 +81,25 @@ public sealed class AmbienceDirector(WwisePlayer player)
             int next = (int)biome | (isDay ? 0 : 0x100);
             if (next != state)
             {
-                if (state >= 0 && (state & 0xFF) != (int)biome) player.Post($"Leave_{(Ambience)(state & 0xFF)}");
+                if (state >= 0 && (state & 0xFF) != (int)biome) player.Post($"Leave_{(Ambience)(state & 0xFF)}", AudioSystem.MusicObject);
                 state = next;
                 // The game posts Enter at once when the bank is loaded, otherwise after loading it (and then, by a bug, with the opposite
                 // suffix); the player keeps the event until its bank arrives, so the suffix here is always the right one.
                 player.LoadBank($"SFX_Amb_{biome}");
-                player.Post($"Enter_{biome}_{(isDay ? "Day" : "Night")}");
+                player.Post($"Enter_{biome}_{(isDay ? "Day" : "Night")}", AudioSystem.MusicObject);
             }
         }
 
         if (input.Rain > 0 != raining)
         {
             raining = input.Rain > 0;
-            player.Post(raining ? "Weather_Rain_Start" : "Weather_Rain_End");
+            player.Post(raining ? "Weather_Rain_Start" : "Weather_Rain_End", AudioSystem.MusicObject);
         }
         if (input.Wind > 0 != windy)
         {
             windy = input.Wind > 0;
             // The game posts Weather_Wind_Stop, which no bank has, so its wind never stops; Meitou posts the bank's Weather_Wind_End.
-            player.Post(windy ? "Weather_Wind_Start" : "Weather_Wind_End");
+            player.Post(windy ? "Weather_Wind_Start" : "Weather_Wind_End", AudioSystem.MusicObject);
         }
         player.SetParameter("Rain_Intensity", input.Rain);
         player.SetParameter("Intensity", input.Wind);
