@@ -201,7 +201,10 @@ one changed in the character editor (its keys replaced by the edited copy's, so 
 
 Every saved NPC platoon with a `basetown` naming a placed town is restored (a characterless town-bound one is skipped); town-bound ones (template does not travel) are pinned to their town, and a town holding any
 is made of them alone: it makes no residents, default residents, housemates or bar squads (**engine rule**, after the original's: a zone with a save file makes no town
-population, [Zone files](#zone-files) Load; Meitou keys it on the saved platoons, since a town it unloaded before saving is not in the save and is made again). A count per
+population, [Zone files](#zone-files) Load; Meitou keys it on the saved platoons). A town Meitou made and unloaded before saving keeps its squads as stored
+platoons, which the save writes like the town's squads in the world, so a Meitou save holds the residents of every town it made a zone file for
+(**Observed**, headless: a new game at The Hub and Squin, and base save 2 at Stack/Mongrel and Shark/Admag, each town left so it unloaded, then save → load → save → load:
+the same characters by name, record and stats in each town). A count per
 template would not do: housing spends a building on a slot whose rolled squad is empty (68 of 200 `hub squatters` plans), so a town's saved squads are fewer than its entries' `v0`, and the rest rolled
 again at load makes new squads (**Observed**, headless new game with town buildings: The Hub 4 of 7 `hub squatters` slots, 36 NPCs; reloaded 42, three more). Each platoon is made with its town (when the town's zone is active, as the
 town's fresh squads are). On save, a restored platoon is rewritten
@@ -261,8 +264,8 @@ A rolled nest that loads but makes no squad is not written (rolled again). Older
 unloads (single-zone unload `FUN_140a0a4f0` passes its flag on; unloading every zone, `FUN_140a0a7b0`, does not save), and `saveGame` saves every loaded zone
 (`FUN_14036e450`). The zone's container gets a `0-buildinglist` (type 30, name "0") from its buildings, then `1-itemlist` from its loose items; a list left empty is
 deleted; a container with no record left deletes the zone file, else it is written, and the zone's has-file flag (the CAMERA `zones` value) follows. So a save holds a
-file for every zone loaded in the playthrough that has a building or item (save 1: 11 files, 4 without a building). The "Delaying saving zone" scheduler (`FUN_1403c8cb0`)
-is **Observed** only.
+file for every zone loaded in the playthrough that has a building or item (save 1: 11 files, 4 without a building). "Delaying saving zone" (`FUN_1403c8cb0`) is not this:
+it writes the navmesh tile cache (`FUN_1403a6f40`, `data/newland/land/navtiles/`) and waits, retrying on a later call with no timer, while a game save runs or its lock is held (**Verified** by code). Platoon files are written only by `saveGame` (`FUN_140372ef0`), every platoon of both faction lists, active and unloaded, with no dirty filter (**Verified** by code), so a save holds the residents of every town ever loaded ([persistent platoons](../game/factions-squads-towns.md#1-object-model)).
 
 **Load** (**Verified** by code, `FUN_1409ffad0`): the level layers' zone files are loaded into the zone's container, then the save's file into the same container
 (by the layers' merge rules, not read in the code: a key the file lacks keeps the level value). No save file means a fresh zone, whose towns make their residents. A file makes it not fresh, unless a town of the zone
@@ -367,7 +370,6 @@ Buildings name it by their `town` handle. Whether the loader takes the name from
 - The roles of BIOMES `E<n>` instances (EffectHandler state fields), `_w_fog_a`, the short-key CAMERA floats and bools (`bs cod gdm ht nnm ps rs`, `bl ep`), `TI day/dat0`, `towntime`, `jobhr`, `ssct`, and whether MEDICAL `fed` / `KO` are the stomach buffer and the KO timer (the other MEDICAL floats are explained above).
 - Whether `loadGame` rejects or adapts to a `mods` list that differs from the current load order (nothing in the sample: single base-game save).
 - Prisoners, dead characters, bounties, trade and mission state, and player outposts: not present in an early-game sample. Player-built building and outpost keys are known from the code only ([zones](zones.md#placement-keys), [outposts](#player-outposts)).
-- Exactly when platoon files are written to the working folder between saves (only at save time is certain), and what delays a zone's save on unload ("Delaying saving zone", `FUN_1403c8cb0`).
 - The condition list of the autosave pause, and how `Import Game` selects squads (`FUN_140378a30`, `FUN_140377710`).
 - How relations, trust and `trustNeg` change during play (only the fresh-world values are explained), and what the player faction (no relation table, but a `known` list and `global trust`) uses instead.
 - Why level buildings have a different target in the save than in the level list (179 of 6743 in four saves; in zone 19.29 two placements have swapped targets, same positions: a random variant pick is a guess).

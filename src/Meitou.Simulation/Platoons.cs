@@ -52,11 +52,31 @@ public sealed class Platoon
     public Vector2? Point { get; set; }
     /// <summary>The save's platoon this stand-in is (null: one the population made): its characters are made from the save, not from <see cref="Key"/>.</summary>
     public Saving.SavedPlatoon? Saved { get; init; }
-    /// <summary>A saved platoon of its town's own (residents, bar squads, slaves): it never travels, its squad is run by the AI like the town's, and it is not in the roaming pool.</summary>
-    public bool Pinned => Saved?.Pinned == true;
+    /// <summary>A town's squad the population made, kept as its characters since its town unloaded (null: none): made of them again, never rolled anew.</summary>
+    public StoredSquad? Stored { get; init; }
+    /// <summary>A platoon of its town's own (residents, bar squads, slaves; saved or stored): it never travels, its squad is run by the AI like the town's, and it is not in the roaming pool.</summary>
+    public bool Pinned => Saved?.Pinned == true || Stored is not null;
     /// <summary>A save's wild platoon (a nest's or a homeless one, <see cref="Origin"/> -1): it never travels and counts against its wild site, not a town's pool.</summary>
     public bool Wild => Saved?.Wild is not null;
 }
+
+/// <summary>
+/// A town's squad the population made, kept while it is not in the world (docs/simulation.md "Population"): each member's own <see cref="CharacterCold"/> (name, look, body,
+/// kit, bounties) with where it stood, and the squad's home, shop and AI package. Its platoon is made of them again; a save writes them as the town's platoon.
+/// </summary>
+public sealed class StoredSquad
+{
+    public required string Name { get; init; }
+    public Meitou.Data.World.TownBuilding? HomeBuilding { get; init; }
+    public Trading.Shop? Shop { get; set; }
+    /// <summary>The AI package it ran (saved as <c>currentPackage</c>; null: none).</summary>
+    public string? Package { get; set; }
+    /// <summary>The characters while the platoon is not in the world (empty while it is).</summary>
+    public List<StoredMember> Members { get; } = [];
+}
+
+/// <summary>A character of a <see cref="StoredSquad"/>: its cold state, cleared of what only meant something in the world, and its place.</summary>
+public sealed record StoredMember(CharacterCold Cold, Vector3 Position, float Yaw, bool Leader);
 
 /// <summary>The roaming squads of a world, by id. Ids are never reused. Part of the state hash.</summary>
 public sealed class PlatoonRegistry
@@ -97,6 +117,12 @@ public sealed class PlatoonRegistry
                 h.Add((int)p.Job);
                 h.Add(p.Point.HasValue);
                 h.Add(p.Point ?? default);
+            }
+            if (p.Stored is { } stored)
+            {
+                // Only for stored squads, so worlds without them hash as before.
+                h.Add(stored.Members.Count);
+                foreach (var m in stored.Members) h.Add(m.Position);
             }
             if (p.Saved is { } saved)
             {

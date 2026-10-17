@@ -290,7 +290,7 @@ public sealed partial class PopulationSystem
             if (state.UnloadAtTick < 0) state.UnloadAtTick = world.Tick + grace;
             else if (world.Tick >= state.UnloadAtTick)
             {
-                Unload(world, state);
+                Drop(world, state);
                 wildLoaded.Remove(i);
             }
         }

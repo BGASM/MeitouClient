@@ -76,7 +76,14 @@ and world-state gating follow [population research](game/factions-squads-towns.m
 Missing references become `SquadPlan.Problems`; world states initially false are an engine
 choice, not a verified original default. Residents are housed by the original's building rules with housemates and
 default residents ([town residents](game/factions-squads-towns.md#town-residents)); prisoners/cages and unique replacements
-remain incomplete. `ActiveZones` is double-buffered. Zone loading/spawn planning stays off the
+remain incomplete. A town that unloads turns each squad it made into a pinned platoon holding a `StoredSquad`
+(`PopulationStored.cs`): each living member's own cold state (name, look, body, kit, bounties, crime marks) with its place,
+cleared of path, AI, carry, treatment, combat and stealth state, plus the squad's home building, shop, purse and AI package.
+The town then holds squads and makes none of its own; the platoon is made of the same characters when the town's zone is
+active again and leaves with the town's grace. This is the original's model: residents are persistent platoons kept as their
+characters ([persistent platoons](game/factions-squads-towns.md#1-object-model)). Saves write stored squads as the town's platoons (`sqt` 1). Any platoon's
+activation waits for the navmesh gate of its zone and its town's. A town whose stored squads all died is made afresh on the
+next visit (engine gap: the original refills it only through its pools). `ActiveZones` is double-buffered. Zone loading/spawn planning stays off the
 simulation thread; publish results at boundaries.
 `World.PreparePopulation` queues nearby residents/wild squads, activates existing nearby roaming
 platoons and drains completed builds during loading. It publishes matching snapshots without advancing

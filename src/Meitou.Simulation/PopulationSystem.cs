@@ -174,7 +174,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
                     break;
                 case SiteStatus.Loaded or SiteStatus.Loading:
                     if (state.UnloadAtTick < 0) state.UnloadAtTick = world.Tick + grace;
-                    else if (world.Tick >= state.UnloadAtTick) Unload(world, state);
+                    else if (world.Tick >= state.UnloadAtTick) Unload(world, site.Index, state);
                     break;
             }
         }
@@ -204,7 +204,30 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         }
     }
 
-    void Unload(World world, SiteState state)
+    /// <summary>
+    /// The town leaves the world: each squad it made becomes a pinned platoon that keeps its characters (<see cref="StoredSquad"/>), so the town is made of them next
+    /// time and a save writes them (docs/simulation.md "Population"). A squad with no one alive left is dropped.
+    /// </summary>
+    void Unload(World world, int site, SiteState state)
+    {
+        foreach (int id in state.Squads)
+        {
+            if (world.Squads.Find(id) is not { } squad) continue;
+            var stored = new StoredSquad { Name = squad.Name, HomeBuilding = squad.HomeBuilding, Shop = squad.Shop, Package = squad.Ai?.Current?.Id };
+            var at = Store(world, squad, stored);
+            world.Squads.Remove(id);
+            if (stored.Members.Count == 0) continue;
+            world.Platoons.Add(new Platoon
+            {
+                Id = world.Platoons.NextId(), Origin = site, TemplateId = squad.TemplateId, Faction = squad.Faction, Key = 0, Size = stored.Members.Count,
+                Position = at, Money = squad.Money, Package = stored.Package, Stored = stored,
+            });
+        }
+        Reset(state);
+    }
+
+    /// <summary>A wild site leaves the world: its squads are removed (the population makes them again).</summary>
+    void Drop(World world, SiteState state)
     {
         var table = world.Characters;
         foreach (int id in state.Squads)
@@ -213,6 +236,11 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
             foreach (var m in squad.Members) table.Remove(m);
             world.Squads.Remove(id);
         }
+        Reset(state);
+    }
+
+    static void Reset(SiteState state)
+    {
         state.Squads.Clear();
         state.Status = SiteStatus.Unloaded;
         state.UnloadAtTick = -1;

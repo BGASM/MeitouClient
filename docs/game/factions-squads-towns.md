@@ -58,6 +58,16 @@ not decoded behaviour. Off-screen town lifecycle and full campaigns remain incom
 | `BuildingItemGroup` | an ITEM_PLACEMENT_GROUP placed in a building: one item slot with a respawn timer | section 9 |
 | `FactionWarMgr`, `CampaignData`/`CampaignInstance` | faction campaigns (FACTION_CAMPAIGN, DIPLOMATIC_ASSAULTS) | out of scope; only listed |
 
+**Persistent platoons** (**Verified** by code): a zone's unload (`ZoneMapContent::deactivate`, `FUN_1409fe980`) touches no platoon; each platoon checks
+itself (`FUN_1404febd0`) and after 4 s outside every loaded zone (`FUN_1406bab60`, `FUN_1407ec570`) becomes an `UnloadedPlatoon` (`FUN_1407ef4b0`, its characters
+copied into an in-memory record container, no file written) when its `persistent` flag (+0x115) is set or it is in a live campaign, else it is destroyed
+(`FUN_1406ba9d0`). Town residents are made persistent (`FUN_14057f820`, with `sqt` 1); pool refills, homeless squads and `FUN_1409c4150` are not. A
+non-persistent unloaded platoon is activated after 60 s (`FUN_1407ee790`) and then destroyed, so it lasts about 64 s out of range. An unloaded platoon
+becomes active after 2 s inside a ready zone (`FUN_1407ebf30`), its characters rebuilt from the kept records; at game load each PLATOON is made active or
+unloaded by its zone (`FUN_1407f85f0`). `declareDead` (`FUN_140797090`) clears `persistent` (destroyed at its next unload, its PLATOON record deleted by
+`FUN_1407ec5e0`). No distance, age or emptiness rule removes a persistent platoon. A wiped-out town refills only through its pools, with non-persistent squads;
+no path re-running the initial resident placement was found (**Unknown** whether one exists).
+
 ### 3.1 Storage (**Observed**)
 
 | Offset | Type | Meaning |

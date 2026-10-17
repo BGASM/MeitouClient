@@ -12,7 +12,7 @@ public sealed partial class PopulationSystem
         Inputs(world, []);
         RefreshZones(world);
         foreach (var platoon in world.Platoons.All)
-            if (platoon.State == PlatoonState.Unloaded && Wanted(platoon))
+            if (platoon.State == PlatoonState.Unloaded && Wanted(platoon) && Ready(platoon))
                 Activate(world, platoon);
 
         foreach (var site in data.Sites)

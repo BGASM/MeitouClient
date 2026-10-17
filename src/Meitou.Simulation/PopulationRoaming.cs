@@ -36,6 +36,10 @@ public sealed partial class PopulationSystem
     bool Wanted(Platoon p) =>
         active.Contains(WorldLayout.ZoneOf(p.Position.X, p.Position.Y)) || p.Pinned && p.Origin >= 0 && active.Contains(data.Sites[p.Origin].Zone);
 
+    /// <summary>Whether a wanted platoon may be made now: the host's <see cref="ZoneGate"/> holds it back until the navmesh of its zone (and a town's own, its town's) is ready.</summary>
+    bool Ready(Platoon p) =>
+        ZoneGate is not { } gate || gate(WorldLayout.ZoneOf(p.Position.X, p.Position.Y)) && (!p.Pinned || p.Origin < 0 || gate(data.Sites[p.Origin].Zone));
+
     // ---- the look at the roaming squads, in the slow phase ----
 
     void StepRoaming(World world)
@@ -49,7 +53,7 @@ public sealed partial class PopulationSystem
             {
                 case PlatoonState.Unloaded:
                     StandIn(world, p, dt);
-                    if (p.State == PlatoonState.Unloaded && Wanted(p)) Activate(world, p);
+                    if (p.State == PlatoonState.Unloaded && Wanted(p) && Ready(p)) Activate(world, p);
                     break;
                 case PlatoonState.Loaded:
                     StepLoaded(world, p, dt);
@@ -178,11 +182,18 @@ public sealed partial class PopulationSystem
 
         // Away from every active zone for long enough: only the stand-in goes on.
         if (Wanted(p)) p.UnloadAtTick = -1;
-        else if (p.UnloadAtTick < 0) p.UnloadAtTick = world.Tick + (long)Math.Ceiling(settings.RoamUnloadGraceSeconds / world.TickSeconds);
+        // A town's own squad keeps the town's grace (it leaves with its town), a roaming one the roaming grace.
+        else if (p.UnloadAtTick < 0) p.UnloadAtTick = world.Tick + (long)Math.Ceiling((p.Pinned ? settings.UnloadGraceSeconds : settings.RoamUnloadGraceSeconds) / world.TickSeconds);
         else if (world.Tick >= p.UnloadAtTick)
         {
             if (p.Saved is { } saved) Saving.SavedCharacters.Store(world, saved, p.Position);
             p.Money = squad.Money;
+            if (p.Stored is { } stored)
+            {
+                stored.Shop = squad.Shop;
+                stored.Package = p.Package = squad.Ai?.Current?.Id ?? stored.Package;
+                p.Position = Store(world, squad, stored);
+            }
             foreach (var m in squad.Members) table.Remove(m);
             world.Squads.Remove(squad.Id);
             p.State = PlatoonState.Unloaded;
@@ -255,6 +266,12 @@ public sealed partial class PopulationSystem
         ulong seed = world.Seed;
         var position = p.Position;
         int id = p.Id;
+        // A stored town squad: its own characters, at once (nothing to build).
+        if (p.Stored is not null)
+        {
+            FinishRoamer(world, new BuiltRoamer(id, null));
+            return;
+        }
         // A save's platoon: its saved characters (their records read on the build thread, like a new squad's looks).
         if (p.Saved is { } saved && world.Saved is { } context)
         {
@@ -293,7 +310,8 @@ public sealed partial class PopulationSystem
         var p = world.Platoons.Find(b.Platoon);
         if (p is null || p.State != PlatoonState.Activating) return;
         Squad? squad;
-        if (p.Saved is { Wild: not null } wild)
+        if (p.Stored is { } stored) squad = SpawnStored(world, p, stored);
+        else if (p.Saved is { Wild: not null } wild)
         {
             // A save's wild platoon wanders round its nest, or (homeless) round where it stands.
             var (centre, homeRadius) = WildHome(wild, p.Position);

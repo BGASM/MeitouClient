@@ -282,9 +282,15 @@ public static partial class SaveCapture
     static SaveCharacter WriteCharacter(SaveBuilder builder, World world, PopulationData data, SaveCaptureOptions options, SaveClock clock, IReadOnlyDictionary<string, FcsRecord> buildings,
         Dictionary<string, RaceData?> races, SavePlatoon platoon, SaveCharacter? sc, CharacterId id, string ownerFactionId, bool isLeader, bool orders)
     {
-        var table = world.Characters;
-        var cold = table.Cold(id.Slot)!;
-        ref readonly var hot = ref table.Previous[id.Slot];
+        ref readonly var hot = ref world.Characters.Previous[id.Slot];
+        return WriteCharacter(builder, world, data, options, clock, buildings, races, platoon, sc, world.Characters.Cold(id.Slot)!, hot.Position, hot.Yaw, id, ownerFactionId, isLeader, orders);
+    }
+
+    /// <summary>The same for a character as <paramref name="cold"/> standing at <paramref name="position"/> facing <paramref name="yaw"/>: one in the world (<paramref name="id"/>) or a stored one (none).</summary>
+    static SaveCharacter WriteCharacter(SaveBuilder builder, World world, PopulationData data, SaveCaptureOptions options, SaveClock clock, IReadOnlyDictionary<string, FcsRecord> buildings,
+        Dictionary<string, RaceData?> races, SavePlatoon platoon, SaveCharacter? sc, CharacterCold cold, Vector3 position, float yaw, CharacterId id, string ownerFactionId, bool isLeader, bool orders)
+    {
+        var hot = (Position: position, Yaw: yaw);
         bool isNew = sc is null;
         sc ??= builder.AddCharacter(platoon, cold.RecordId, cold.Name, ownerFactionId, hot.Position, SaveRotation.OfYaw(hot.Yaw), isLeader: isLeader, squadMemberType: cold.Role);
         // The handle's own serial is "random" in the original, and the loader rolls a character's look from it: a character with a rolled look gets the look's seed
@@ -306,7 +312,7 @@ public static partial class SaveCapture
         }
 
         // Body: stats and medical state, from the host, else the loaded ones, else (for a new character) defaults.
-        var (stats, medical) = options.Bodies?.Invoke(id) ?? (null, null);
+        var (stats, medical) = (id.IsNone ? null : options.Bodies?.Invoke(id)) ?? (null, null);
         stats ??= cold.Stats ?? link?.Stats;
         medical ??= cold.Medical ?? link?.Medical;
         WriteBody(sc, cold.RecordId, stats, medical, isNew, data, races);
@@ -378,9 +384,9 @@ public static partial class SaveCapture
     }
 
     /// <summary>
-    /// The NPC squads the population made (a town's residents and bar squads, and roaming squads while they are in the world) as new platoons, so a save keeps them
-    /// where they are: a new PLATOON with its <c>basetown</c>, <c>is resident</c> for a town's residents and the AI package running; its characters as new ones
-    /// (look, kit, body). Wild squads and roaming stand-ins (no characters) are not written: the population makes them again.
+    /// The NPC squads the population made (a town's residents and bar squads, in the world or stored since their town unloaded, and roaming squads while they are in
+    /// the world) as new platoons, so a save keeps them where they are: a new PLATOON with its <c>basetown</c>, <c>is resident</c> for a town's residents and the AI
+    /// package running; its characters as new ones (look, kit, body). Wild squads and roaming stand-ins (no characters) are not written: the population makes them again.
     /// </summary>
     static void WriteFreshNpcs(SaveBuilder builder, World world, PopulationData data, SaveCaptureOptions options, SaveClock clock, IReadOnlyDictionary<string, FcsRecord> buildings,
         Dictionary<string, RaceData?> races)
@@ -392,9 +398,43 @@ public static partial class SaveCapture
         var townHands = new Dictionary<string, Hand>(StringComparer.Ordinal);
         foreach (var t in game.Towns)
             if (t.Instance.Length > 0 && !t.Handle.IsNull) townHands.TryAdd(t.Instance, t.Handle);
+
+        void Write(int town, int factionIndex, string templateId, long money, bool roaming, TownBuilding? homeBuilding, string? package,
+            List<(CharacterCold Cold, Vector3 Position, float Yaw, CharacterId Id, bool Leader)> members)
+        {
+            var faction = data.Factions[factionIndex];
+            factions.TryGetValue(faction.Id, out var state);
+            var site = data.Sites[town];
+            var lead = members.FirstOrDefault(m => m.Leader);
+            if (lead.Cold is null) lead = members[0];
+            var platoon = builder.AddPlatoon(FreshName(game, state, faction.Name), faction.Name, faction.Id, templateId, lead.Position, (int)Math.Clamp(money, int.MinValue, int.MaxValue));
+            var record = platoon.Record;
+            record.Strings["basetown"] = site.Town.Id;
+            int siteFaction = data.SiteFactions.Count > town ? data.SiteFactions[town] : -1;
+            // `sqt` is the town pool it counts against: 1 residents (and bar squads), 2 roaming (docs/formats/save.md "NPC platoons").
+            record.Ints["sqt"] = roaming ? 2 : 1;
+            // A squad with a home is a resident (every platoon of the samples with a `homebuilding` has `is resident`, and only those): a default resident too.
+            record.Bools["is resident"] = !roaming && (homeBuilding is not null
+                || PopulationSystem.ResidentEntries(site.Town, siteFaction >= 0 ? data.Factions[siteFaction] : null).Any(e => e.Id == templateId));
+            if (package is not null) record.Strings["currentPackage"] = package;
+            // Its town and home building by handle, as the original names them (docs/formats/save.md "NPC platoons").
+            if (townHands.TryGetValue(site.InstanceId, out var townHand)) townHand.Write(record, "hometown");
+            if (homeBuilding is { } home && HomeHandle(game, home) is { } homeHand) homeHand.Write(record, "homebuilding");
+            WriteMapArea(record, data, lead.Position);
+            foreach (var m in members)
+            {
+                int f = m.Cold.Faction;
+                string owner = f >= 0 && f < data.Factions.Count ? data.Factions[f].Id : faction.Id;
+                WriteCharacter(builder, world, data, options, clock, buildings, races, platoon, null, m.Cold, m.Position, m.Yaw, m.Id, owner, ReferenceEquals(m.Cold, lead.Cold), orders: false);
+            }
+            SetCharCount(platoon);
+        }
+
+        bool Writable(int town, int faction) => town >= 0 && town < data.Sites.Count && faction >= 0 && faction < data.Factions.Count && faction != data.PlayerFaction;
+
         foreach (var squad in world.Squads.All)
         {
-            if (squad.Town < 0 || squad.Town >= data.Sites.Count || squad.Faction < 0 || squad.Faction >= data.Factions.Count || squad.Faction == data.PlayerFaction) continue;
+            if (!Writable(squad.Town, squad.Faction)) continue;
             Platoon? roamer = null;
             if (squad.PlatoonId >= 0)
             {
@@ -403,32 +443,16 @@ public static partial class SaveCapture
             }
             var alive = squad.Members.Where(m => table.IsAlive(m) && table.Cold(m.Slot) is { IsPlayer: false, DiedTick: < 0, Save: null }).ToList();
             if (alive.Count == 0) continue;
-            var faction = data.Factions[squad.Faction];
-            factions.TryGetValue(faction.Id, out var state);
-            var site = data.Sites[squad.Town];
             var leader = alive.Contains(squad.Leader) ? squad.Leader : alive[0];
-            var platoon = builder.AddPlatoon(FreshName(game, state, faction.Name), faction.Name, faction.Id, squad.TemplateId, table.Previous[leader.Slot].Position,
-                (int)Math.Clamp(squad.Money, int.MinValue, int.MaxValue));
-            var record = platoon.Record;
-            record.Strings["basetown"] = site.Town.Id;
-            int siteFaction = data.SiteFactions.Count > squad.Town ? data.SiteFactions[squad.Town] : -1;
-            // `sqt` is the town pool it counts against: 1 residents (and bar squads), 2 roaming (docs/formats/save.md "NPC platoons").
-            record.Ints["sqt"] = roamer is null ? 1 : 2;
-            // A squad with a home is a resident (every platoon of the samples with a `homebuilding` has `is resident`, and only those): a default resident too.
-            record.Bools["is resident"] = roamer is null && (squad.HomeBuilding is not null
-                || PopulationSystem.ResidentEntries(site.Town, siteFaction >= 0 ? data.Factions[siteFaction] : null).Any(e => e.Id == squad.TemplateId));
-            if ((roamer?.Package ?? squad.Ai?.Current?.Id) is { } package) record.Strings["currentPackage"] = package;
-            // Its town and home building by handle, as the original names them (docs/formats/save.md "NPC platoons").
-            if (townHands.TryGetValue(site.InstanceId, out var townHand)) townHand.Write(record, "hometown");
-            if (squad.HomeBuilding is { } home && HomeHandle(game, home) is { } homeHand) homeHand.Write(record, "homebuilding");
-            WriteMapArea(record, data, table.Previous[leader.Slot].Position);
-            foreach (var id in alive)
-            {
-                int f = table.Cold(id.Slot)!.Faction;
-                string owner = f >= 0 && f < data.Factions.Count ? data.Factions[f].Id : faction.Id;
-                WriteCharacter(builder, world, data, options, clock, buildings, races, platoon, null, id, owner, id == leader, orders: false);
-            }
-            SetCharCount(platoon);
+            var members = alive.Select(id => (table.Cold(id.Slot)!, table.Previous[id.Slot].Position, table.Previous[id.Slot].Yaw, id, id == leader)).ToList();
+            Write(squad.Town, squad.Faction, squad.TemplateId, squad.Money, roamer is { Pinned: false }, squad.HomeBuilding, roamer?.Package ?? squad.Ai?.Current?.Id, members);
+        }
+        // A town's squads stored since their town unloaded.
+        foreach (var p in world.Platoons.All)
+        {
+            if (p is not { State: PlatoonState.Unloaded, Stored: { Members.Count: > 0 } stored } || !Writable(p.Origin, p.Faction)) continue;
+            var members = stored.Members.Select(m => (m.Cold, m.Position, m.Yaw, CharacterId.None, m.Leader)).ToList();
+            Write(p.Origin, p.Faction, p.TemplateId, p.Money, false, stored.HomeBuilding, stored.Package, members);
         }
     }
 

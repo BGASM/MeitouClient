@@ -156,7 +156,7 @@ public sealed class FixtureRegistry
         r is null ? fallback : r.Floats.TryGetValue(key, out float v) ? v : r.Ints.TryGetValue(key, out int n) ? n : fallback;
 
     /// <summary>Binds held characters to the fixtures their <see cref="CharacterCold.InWhat"/> names (a loaded prisoner whose cage registers later).</summary>
-    void Bind(World world)
+    internal void Bind(World world)
     {
         var table = world.Characters;
         var next = table.Next;
