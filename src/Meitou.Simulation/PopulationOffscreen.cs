@@ -66,9 +66,9 @@ public sealed partial class PopulationSystem
             bool aWins = u < ta * ta / (ta * ta + tb * tb);
             var (winner, loser, ws, wt, lt) = aWins ? (a, foe, sa, ta, tb) : (foe, a, sb, tb, ta);
             int losses = (int)MathF.Round(ws.Count * MathF.Min(1, lt * lt / MathF.Max(wt * wt, 1e-3f)) * 0.5f);
-            foreach (var (member, _) in ws.OrderBy(s => s.Strength).Take(losses)) Kill(winner, member);
+            foreach (var (member, _) in ws.OrderBy(s => s.Strength).Take(losses)) Kill(world, winner, member);
             gone.Add(loser.Id);
-            Despawn(world, loser);
+            Despawn(world, loser, killed: true);
             if (townLog.Count >= 256) townLog.RemoveAt(0);
             townLog.Add($"Off screen at {winner.Position.X:0}, {winner.Position.Y:0}: {NameOf(winner)} ({wt:0}) beat {NameOf(loser)} ({lt:0}), losing {losses}");
         }
@@ -106,10 +106,20 @@ public sealed partial class PopulationSystem
     }
 
     /// <summary>A member killed off screen: out of its stored squad, or gone from its saved platoon's file. One with no stored state cannot be singled out.</summary>
-    static void Kill(Platoon p, object? member)
+    void Kill(World world, Platoon p, object? member)
     {
-        if (member is StoredMember sm) p.Stored?.Members.Remove(sm);
-        else if (member is Saving.SavedMember saved) saved.Gone = true;
+        string? recordId = null;
+        if (member is StoredMember sm)
+        {
+            p.Stored?.Members.Remove(sm);
+            recordId = sm.Cold.RecordId;
+        }
+        else if (member is Saving.SavedMember saved)
+        {
+            saved.Gone = true;
+            recordId = saved.Source.RecordId;
+        }
+        if (recordId is not null && UniqueCharacters.IsUnique(data.Db.Find(recordId))) world.Uniques.Died(recordId, false);
     }
 
     /// <summary>

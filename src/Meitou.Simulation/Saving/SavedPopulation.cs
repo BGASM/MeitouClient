@@ -321,6 +321,7 @@ internal static class SavedCharacters
             ref var hot = ref world.Characters.Next[id.Slot];
             hot.TaskTime = 0.5f + Rng.Float(Rng.Hash(world.Seed, (ulong)squad.Id << 8 | (uint)(m.Slot & 0xFF), RngPurpose.Think)) * 3;
             m.Live = id;
+            if (UniqueCharacters.IsUnique(data.Db.Find(p.Source.RecordId))) world.Uniques.Bind(p.Source.RecordId, id);
             squad.Members.Add(id);
             if (leads && squad.Leader.IsNone) squad.Leader = id;
             made.Add((m, p.Source.SquadMemberType));

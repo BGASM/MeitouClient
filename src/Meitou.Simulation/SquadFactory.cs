@@ -42,8 +42,8 @@ public sealed record SquadPlan(SquadTemplate Template, IReadOnlyList<MemberPlan>
 /// squads of their own (role 4).</item>
 /// <item>Layout: member number i (every member so far; the leader is 0) stands at (3 x (i mod 8), 3 x floor(i / 8) + (i mod 2)) from the squad
 /// position; animals2 use spacing 5.</item>
-/// <item>Not made yet (Unknown or later stages): <c>prisoners</c> (they need cages in the home building), <c>housemates</c>, the unique-character
-/// replacement of a story-unique leader, and the squad's AI packages.</item>
+/// <item>Not made yet (Unknown or later stages): <c>prisoners</c> (they need cages in the home building), <c>housemates</c> and the squad's AI
+/// packages. Unique characters are gated when the squad is made (<c>PopulationSystem.GateUniques</c>), not here, so a plan stays pure.</item>
 /// </list>
 /// </summary>
 public static class SquadFactory

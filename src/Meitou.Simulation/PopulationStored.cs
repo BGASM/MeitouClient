@@ -31,6 +31,7 @@ public sealed partial class PopulationSystem
                 if (leads || !placed) at = new Vector2(hot.Position.X, hot.Position.Z);
                 placed |= leads;
             }
+            world.Uniques.Left(id);
             table.Remove(id);
         }
         stored.Anchor = at;
@@ -127,6 +128,7 @@ public sealed partial class PopulationSystem
                 TaskTime = 0.5f + Rng.Float(Rng.Hash(world.Seed, (ulong)squad.Id << 8 | (uint)squad.Members.Count, RngPurpose.Think)) * 3,
             };
             var id = table.Spawn(hot, cold, world.Tick);
+            if (UniqueCharacters.IsUnique(data.Db.Find(cold.RecordId))) world.Uniques.Bind(cold.RecordId, id);
             squad.Members.Add(id);
             if (leads && squad.Leader.IsNone) squad.Leader = id;
         }

@@ -116,6 +116,8 @@ public sealed partial class CombatSystem
             if (death) crimes.Murder(world, a, d);
         }
         if (death && Relations is not null && ac.IsPlayer && !dc.IsPlayer) PlayerRelations.Event(world, Relations, dc.Faction, RelationEventKind.Murder);
+        // A unique killed: dead in the registry, with the player flag when the killer is the player's (the body pass would mark it dead without).
+        if (death && world.Uniques.RecordOf(world.Characters.IdOf(d)) is { } unique) world.Uniques.Died(unique, ac.IsPlayer);
         Record(now, a, d, blow, outcome, part, damage, knockout, death);
     }
 

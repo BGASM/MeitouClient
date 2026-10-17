@@ -108,8 +108,9 @@ public sealed partial class PopulationSystem
     /// Takes a platoon out of the world for good (serial phase), as the original does with one it does not keep: its characters (if made) and its stand-in; a save's platoon
     /// is marked so a save leaves it out.
     /// </summary>
-    void Despawn(World world, Platoon p)
+    void Despawn(World world, Platoon p, bool killed = false, bool release = true)
     {
+        if (release) ReleaseUniques(world, p, killed);
         if (world.Squads.Find(p.SquadId) is { } squad)
         {
             foreach (var m in squad.Members) world.Characters.Remove(m);
@@ -284,7 +285,7 @@ public sealed partial class PopulationSystem
                 stored.Package = p.Package = squad.Ai?.Current?.Id ?? stored.Package;
                 p.Position = Store(world, squad, stored);
             }
-            foreach (var m in squad.Members) table.Remove(m);
+            foreach (var m in squad.Members) { world.Uniques.Left(m); table.Remove(m); }
             world.Squads.Remove(squad.Id);
             p.State = PlatoonState.Unloaded;
             p.SquadId = -1;

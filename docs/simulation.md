@@ -75,8 +75,8 @@ and assemble race appearance, gear, stats and bodies. Counts, roles, offsets, ca
 and world-state gating follow [population research](game/factions-squads-towns.md).
 Missing references become `SquadPlan.Problems`; world states initially false are an engine
 choice, not a verified original default. Residents are housed by the original's building rules with housemates and
-default residents ([town residents](game/factions-squads-towns.md#town-residents)); prisoners/cages and unique replacements
-remain incomplete. A town that unloads turns each squad it made into a pinned platoon holding a `StoredSquad`
+default residents ([town residents](game/factions-squads-towns.md#town-residents)); prisoners/cages remain
+incomplete. A town that unloads turns each squad it made into a pinned platoon holding a `StoredSquad`
 (`PopulationStored.cs`): each living member's own cold state (name, look, body, kit, bounties, crime marks) with its place,
 cleared of path, AI, carry, treatment, combat and stealth state, plus the squad's home building, shop, purse and AI package.
 The town then holds squads and makes none of its own; the platoon is made of the same characters when the town's zone is
@@ -88,6 +88,28 @@ simulation thread; publish results at boundaries.
 `World.PreparePopulation` queues nearby residents/wild squads, activates existing nearby roaming
 platoons and drains completed builds during loading. It publishes matching snapshots without advancing
 ticks, game hours, AI, movement or roaming timers; readiness includes navmesh-gated sites.
+
+### Unique characters
+
+The original's rules: [unique characters](game/factions-squads-towns.md#unique-characters). `World.Uniques` (`UniqueCharacters.cs`) is the
+original's table (CHARACTER → claimed, live character, state 1/0/2, player flag), changed in serial phases only and hashed once it has an entry.
+- **Create gate** in `SpawnSquad` (serial, so two squads built at once cannot both make one): a free unique human member is claimed and made; a
+  claimed one gets its first `unique replacement spawn` (look rolled then) or nobody, and the first member left leads. Animals are not gated, as
+  the original (unique pets such as Settler's Pup can repeat). The player's and sandbox squads skip the gate.
+- **Handles**: bound whenever a unique enters the world (made, stored or saved squads re-made), which also claims it (engine choice: the original
+  records only the handle there); dropped when a squad is stored or a corpse removed.
+- **State**: deaths in the combat commit (player flag when the killer is the player's); a refresh at every population look marks the dead, the
+  caged (player: the cage owner is the player's), the alive carried off by a non-ally, and frees one held or carried no more (engine summary of
+  the original's ally/town tests). Off-screen losses (Meitou fights) die.
+- **Release**: a squad leaving for good without being kept (Faithful despawn, a wild site unloading, a town squad remade by regeneration) frees its
+  living uniques so its template makes them again, only when the entry is that character's (Meitou: knocked-out but alive counts as living); the
+  dead stay claimed. Town squads stored on unload keep their claims.
+- **Seed**: at the first population look, the uniques of each template's first `prisoners` template are imprisoned and unclaimed (kept when a
+  save already has them).
+- **Save**: CAMERA `usedUniques*` as the original (claimed entries; prisoners derived again). Handles are the written character's for player
+  squads, else the loaded save's, else null (NPC handles are not tracked back from the writer).
+- **Not built**: FACTION `special squads` (the original never spawns them), campaign `special leader` gathering and `NPC is` world-state
+  queries (read `StateOf`, which treats an unknown unique as alive), the import rules, `UniquePlatoon` missions.
 
 ### Off-screen tier
 
@@ -171,7 +193,7 @@ Proposed (awaiting review):
     (`PackageClass.Unbuilt`). Until they are, a loaded campaign squad runs the engine's travel stand-in towards its target and fights through
     the normal aggro; arrival, timers and the 20 % rule still run. The packages and the army column are wave 4.
   - **Dependencies**: `world state` queries (120 of 179 campaigns; Meitou has `IWorldStates`, saves write an empty world state), so until
-    world states are tracked a campaign with queries uses their initial values; unique-NPC state for `special leader` (37: a leader not in
+    world states are tracked a campaign with queries uses their initial values; `special leader` (37) reads `World.Uniques.StateOf` ([unique characters](#unique-characters); a leader not in
     the world counts as alive, the original's default); DIALOGUE_LINE `trigger campaign` (86) waits for the dialogue system, the request
     entry point is ready for it; the ally test uses the relation table.
   - **Save**: WAR_SAVESTATE read and written with the original's keys (unknown keys kept), `p<i>`/`forces<i>` naming the campaign
