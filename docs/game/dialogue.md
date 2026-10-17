@@ -19,7 +19,7 @@ unless marked. Engine design: [Meitou design](#meitou-design).
 | NPC squad leader (member 0) | SQUAD_TEMPLATE `dialog leader` (157), else CHARACTER `dialogue package` (793) |
 | other NPC members (and a leader with neither) | SQUAD_TEMPLATE `dialog squad` (216), else CHARACTER `dialogue package` |
 | animal | SQUAD_TEMPLATE `dialog animal` (4) |
-| player character, not an animal | CHARACTER `dialogue package player` (179), else the player faction's FACTION `dialog default` (25 records have one), else the package `5369-gamedata.base` |
+| player character, not an animal | CHARACTER `dialogue package player` (179), else the player faction's FACTION `dialog default` (25 records have one), else the package `5369-gamedata.base` ("player character default", **Verified** by probe) |
 
 No NPC faction or race package is read. Other users of DIALOGUE (**Verified** counts): BIOME_GROUP `arrival dialog` 194,
 FACTION_CAMPAIGN `dialog announcement` 121, AI_PACKAGE `contract end talk passive` 26, SINGLE_DIPLOMATIC_ASSAULT 13.
@@ -108,6 +108,11 @@ order (no EV_NONE, the two blank names, EV_ESCAPING_SLAVE_SPOTTED, EV_MAX), so t
   7 T_TARGET_WITH_RACE.
 - **CharacterTypeEnum**: 0 OT_NONE, 1 OT_LAW_ENFORCEMENT, 2 OT_MILITARY, 3 OT_TRADER, 4 OT_CIVILIAN, 5 OT_DIPLOMAT, 6 OT_SLAVE,
   7 OT_SLAVER, 8 OT_BANDIT, 9 OT_ADVENTURER, 10 OT_END.
+- **PersonalityTags** (DC 26 `tag`): 0 PT_NONE, 1 HONORABLE, 2 TRAITOROUS, 3 `PT___`, 4 `PT__`, 5 SMART, 6 DUMB, 7 `PT____`,
+  8 `PT_____`, 9 BRAVE, 10 FEARFUL, 11 WARM_KIND, 12 COLD_CRUEL, 13 NORMAL, 14 MANIACAL, 15 PT_END.
+- **CharacterPerceptionTags_LongTerm** (DC 23 `tag`): 0 LT_NONE, 1 MY_INTRUDER, 2 MY_LIFESAVER, 3 FREED_ME, 4 STOLE_FROM_ME,
+  5 MY_CAPTOR, 6 FRIENDLY_AQUAINTANCE, 7 DEFEATED_MY_SQUAD_ONCE, 8 SQUAD_LOST_TO_ME_ONCE, 9 KILLED_MY_FRIEND, 10 I_SCREWED_THIS_GUY,
+  11 LT_MAX.
 
 **Use in the data** (**Verified** by probe, references counted).
 - Events (`dialogs` val0): 3 ×294, 1 ×220, 13 ×147, 15 ×87, 24 ×82, 10 ×79, 18 ×79, 8 ×69, 11 ×68, 21 ×63, 42 ×63, 19 ×62, 14 ×61,
@@ -378,8 +383,13 @@ lists, 58's field; the speech timer's unit.
   original); per line the last-use time (global, not saved); conversations in progress (speaker, target, current line, interjectors,
   timers). Rolls use `Rng.Hash` with a new dialogue salt.
 - **Player conversation**: a Talk order walks the selected character to the NPC (task 12 style) and fires event 1; the open
-  conversation (NPC line, choices, money) is in the snapshot; a choice is a command applied in a serial phase; effects apply there too.
-  The window pauses like the original through `RequestedPause`.
+  conversation (NPC line, choices, money) is in the snapshot. The window pauses like the original, so a choice joins the commands that
+  apply between ticks at speed 0 ([simulation](../simulation.md#time-model), like the open shop's): it says the next line and runs the
+  instant effects (money, relations, locks, recruit, trade, editor) at once; effects that hand out AI tasks (attack, go home, follow,
+  run away) are queued and start on the first tick after the window closes.
+- **Prerequisite**: DC 26 (the most used condition) needs a personality index per character, which Meitou does not roll yet (CHARACTER
+  `personality` → PERSONALITY `tags always*` / `common*` / `rare*` / `never*`, 233 references; the roll is **Unknown**). DC 23 needs the
+  squad memory flags (`CharacterPerceptionTags_LongTerm`).
 - **Ambient**: events fired by systems (perception, first aid, getting up, AI tasks 102/159/161) go through one `Fire(owner, target,
   event)` entry point, run serially; the host draws bubbles from the snapshot.
 - **Effects** map onto existing orders and systems (trade, attack, money, relations, bounties, arrest, editor, AI contract, recruit).
