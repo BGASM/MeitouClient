@@ -486,7 +486,7 @@ ghost, commands), `Building/PlacementCheck.cs`, `Building/BuildMenu.cs` (categor
 
 `TradeSystem`: trader-squad stock/purse/restock, open trade, buying/selling/fencing. Charge,
 quality, culture, market, forbidden/stolen factors follow [economy.md](game/economy.md).
-Shop state is hashed; open UI trade is not world state. Building shops/production/research remain
+A squad shop holds one 20 x 20 stock grid (the `Shopkeepers Backpack` size); `ArrangeStock` arranges it. Shop state is hashed; open UI trade is not world state. Building shops/production/research remain
 incomplete. Transfers and money changes must succeed together.
 
 ## AI

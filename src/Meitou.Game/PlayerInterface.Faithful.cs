@@ -11,7 +11,7 @@ namespace Meitou.Game;
 sealed partial class PlayerInterface
 {
     string selectedStat = ((int)StatsEnumerated.Katanas).ToString(CultureInfo.InvariantCulture);
-    public bool UiCapturesPointer => UiVisible && (faithfulScreens.CapturesPointer || mapDrag is not null || inventoryDrag is not null || tradeDrag is not null);
+    public bool UiCapturesPointer => UiVisible && (faithfulScreens.CapturesPointer || mapDrag is not null || inventoryDrag is not null || tradeDrag is not null || scrollDrag is not null);
     /// <summary>Keys the host keeps for itself (the sandbox's letters), so the faithful window shortcuts leave them alone.</summary>
     public HashSet<Key> ReservedKeys { get; } = [];
     void UpdateMenuPause() => session.Simulation.RequestedPause = settingsOpen || faithfulScreens.HasModal;
@@ -69,15 +69,18 @@ sealed partial class PlayerInterface
     {
         if (e.Action.StartsWith("inventory-scroll:", StringComparison.Ordinal))
         { ScrollInventory(e.Screen, float.Parse(e.Action[17..], CultureInfo.InvariantCulture)); return; }
+        if (e.Action.StartsWith("inventory-scroll-page:", StringComparison.Ordinal))
+        { ScrollInventoryPage(e.Screen, float.Parse(e.Action[22..], CultureInfo.InvariantCulture)); return; }
         if (e.Screen == "editor") EditorAction(e);
         else if (HandleFrontendAction(e)) UpdateMenuPause();
         else if (e.Screen == "stats" && e.Action == "select") selectedStat = e.Text;
         else if (e.Screen == "stats" && e.Action.StartsWith("stat:", StringComparison.Ordinal)) selectedStat = e.Action[5..];
         else if (e.Screen == "build") BuildAction(e);
         else if (e.Screen == "overview") MapAction(e.Widget);
+        else if (e.Screen == "trader" && e.Widget == "ArrangeButton") Say(new Meitou.Simulation.Trading.ArrangeStock { Tick = session.World.Tick });
         else if (e.Screen is "inventory" or "bag")
         {
-            if (e.Widget == "OpenBagButton") { faithfulScreens.Open("bag"); PlaceBagWindow(); }
+            if (e.Widget == "OpenBagButton") { faithfulScreens.Open("bag"); if (shownTrader.IsNone) PlaceBagWindow(); else PlaceTradeWindows(); }
             else if (e.Widget == "LimbsButton") faithfulScreens.Open("limbs");
             else if (e.Widget == "ArrangeButton" && Selected().FirstOrDefault() is { } lead) Say(new Meitou.Simulation.Items.ArrangeInventory(lead.Id) { Tick = session.World.Tick });
         }
@@ -166,7 +169,7 @@ sealed partial class PlayerInterface
         if (id == "editor") { AddEditorContent(controls); return; }
         if (id == "build") { AddBuildContent(controls); return; }
         AddMapContent(id, controls);
-        if (id == "trader") { ArrangeContainerGrid(id, controls, session.CurrentSnapshot.Trade?.StockWidth ?? 0, session.CurrentSnapshot.Trade?.StockHeight ?? 0); AddTraderContent(controls); return; }
+        if (id == "trader") { ArrangeTraderWindow(controls); AddTraderContent(controls); return; }
         if (id is not ("inventory" or "bag" or "limbs") || Selected().FirstOrDefault() is not { ItemGrid: { } grid } lead) return;
         string gridSection = id == "bag" ? "backpack_content" : "main";
         int columns = id == "bag" ? grid.BagWidth : grid.Width, rows = id == "bag" ? grid.BagHeight : grid.Height;

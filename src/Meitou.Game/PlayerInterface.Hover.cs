@@ -20,10 +20,18 @@ sealed partial class PlayerInterface
         {
             if (hit.Properties.TryGetValue("ItemTooltip", out string? tooltip))
             {
-                float scale = InventoryScale, width = Math.Min(Width, 280 * scale), height = (tooltip.Count(c => c == '\n') is var breaks and > 0 ? 56 + 20 * breaks : 48) * scale;
-                controls.Add(new("inventory-tooltip", "TextBox", new(Math.Clamp(mouse.X + 18 * scale, 0, Width - width), Math.Clamp(mouse.Y + 18 * scale, 0, Height - height), width, height),
-                    tooltip, "", "Kenshi_GenericTextBoxSkin", true,
-                    new Dictionary<string, string> { ["TextAlign"] = "Left Top", ["TextPadding"] = "8 6 8 6", ["TextColour"] = MyGuiColours.InkText, ["WordWrap"] = "true" }, Vector4.Zero, Pickable: false));
+                // The item's name, then label and value rows (a tab between them) as the original's tooltip lists them.
+                string[] lines = tooltip.Split('\n');
+                float scale = InventoryScale, row = 20 * scale, width = Math.Min(Width, 280 * scale), height = 16 * scale + row * lines.Length;
+                var box = new UiRect(Math.Clamp(mouse.X + 18 * scale, 0, Width - width), Math.Clamp(mouse.Y + 18 * scale, 0, Height - height), width, height);
+                controls.Add(new("inventory-tooltip", "Widget", box, "", "", "Kenshi_GenericTextBoxSkin", true,
+                    new Dictionary<string, string> { ["ItemTooltip"] = tooltip }, Vector4.Zero, Pickable: false));
+                controls.Add(new("inventory-tooltip-title", "TextBox", new(box.X + 8 * scale, box.Y + 6 * scale, box.Width - 16 * scale, row), lines[0], "", "", true,
+                    new Dictionary<string, string> { ["TextAlign"] = "Left Top", ["TextColour"] = TitleColour, ["WordWrap"] = "false" }, Vector4.Zero, Pickable: false));
+                var host = new UiControl("inventory-tooltip-rows", "Widget", new(box.X + 4 * scale, box.Y + 6 * scale + row, box.Width - 8 * scale, row * (lines.Length - 1)), "", "", "", true,
+                    new Dictionary<string, string>(), Vector4.Zero, Pickable: false);
+                controls.Add(host);
+                AddLines(controls, host.Name, lines.Skip(1).Select(l => l.Split('\t') is [var label, var value] ? new HudLine(label, value) : new HudLine(l, "")).ToArray(), row);
             }
             return;
         }

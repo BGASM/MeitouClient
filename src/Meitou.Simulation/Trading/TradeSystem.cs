@@ -31,8 +31,18 @@ public sealed record TradeItemView(int Index, string Record, string Name, string
 {
     /// <summary>The item's material record ("" none), which picks its icon.</summary>
     public string Material { get; init; } = "";
+    /// <summary>The tooltip's two prices of the whole stack (<c>FUN_14079e7a0</c>): what the shop asks for it (Value) and what it pays (Sell value).</summary>
+    public long Value { get; init; }
+    public long SellValue { get; init; }
+    /// <summary>The stack's weight in kg.</summary>
+    public float Weight { get; init; }
+    /// <summary>A stolen good of the customer's that was stolen from the shop's own faction: the chance a sale goes through unnoticed (the fencing prompt's number); null otherwise.</summary>
+    public float? FenceChance { get; init; }
     public InventoryItemToken Token => new(Index, Record, Section, X, Y, Quantity, Quality);
 }
+
+/// <summary>Arranges the open trade's stock (the trader window's ARRANGE button): biggest items first into the first free cells, as <see cref="InventoryCommands.Arrange"/>.</summary>
+public sealed record ArrangeStock : SimCommand;
 
 /// <summary>The open trade as the UI shows it (published with the snapshot).</summary>
 public sealed record TradeView(CharacterId Customer, CharacterId Trader, string TraderName, long ShopMoney, long PlayerMoney, int StockWidth, int StockHeight,
@@ -123,6 +133,9 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
                     break;
                 case SellItem sell when open:
                     Sell(world, sell);
+                    break;
+                case ArrangeStock when open:
+                    if (Resolve(world, out _, out _, out var arranged)) InventoryCommands.Arrange(arranged!.Stock);
                     break;
             }
         }
@@ -367,8 +380,18 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
         var m = Market(world);
         var cold = world.Characters.Cold(c)!;
         var squad = world.Squads.Find(world.Characters.Cold(t)!.SquadId)!;
-        TradeItemView View(ItemInstance item, int index, bool sell, int holder) => new(index, item.Record, item.Name, item.Section, item.X, item.Y, item.Width, item.Height, item.Quantity,
-            item.Quality, m.StackPrice(item, sell, shop.Terms, holder), m.UnitPrice(item.Quantity == 1 ? item : item.WithQuantity(1), sell, shop.Terms, holder), item.IsStolenFor(holder)) { Material = item.MaterialId };
+        float thievery = cold.Stats?[StatsEnumerated.Thieving] ?? 0;
+        TradeItemView View(ItemInstance item, int index, bool sell, int holder)
+        {
+            long value = m.StackPrice(item, false, shop.Terms, holder), sellValue = m.StackPrice(item, true, shop.Terms, holder);
+            bool stolen = item.IsStolenFor(holder);
+            return new(index, item.Record, item.Name, item.Section, item.X, item.Y, item.Width, item.Height, item.Quantity,
+                item.Quality, sell ? sellValue : value, m.UnitPrice(item.Quantity == 1 ? item : item.WithQuantity(1), sell, shop.Terms, holder), stolen)
+            {
+                Material = item.MaterialId, Value = value, SellValue = sellValue, Weight = item.Weight,
+                FenceChance = sell && stolen && item.StolenFrom == squad.Faction ? Math.Clamp(FenceChance(thievery, true), 0, 1) : null,
+            };
+        }
         var stock = shop.Stock.All().Select((item, index) => View(item, index, false, squad.Faction)).ToArray();
         var goods = cold.Inventory!.All().Select((item, index) => (item, index)).Where(p => InventoryCommands.IsMovableSection(p.item.Section))
             .Select(p => View(p.item, p.index, true, cold.Faction)).ToArray();

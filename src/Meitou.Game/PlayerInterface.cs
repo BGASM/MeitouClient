@@ -118,6 +118,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     public void MouseMove(Vector2 p)
     {
         mouse = p;
+        if (ScrollThumbMove(p)) return;
         if (MapPointerMove(p)) return;
         if (UiVisible && faithfulScreens.PointerMove(p)) return;
         if (dragFrom is { } from && !dragging && Vector2.Distance(from, p) >= DragThreshold) dragging = true;

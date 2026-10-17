@@ -57,7 +57,7 @@ public class TradeUiTests
             var bottom = ui.UiFrame.Single(c => c.Name == "trade-item-1");
             Assert.True(bottom.Clip!.Value.Contains(Centre(bottom).X, Centre(bottom).Y));
             ui.MouseMove(Centre(bottom));
-            Assert.Contains(ui.UiFrame, c => c.Name == "inventory-tooltip" && c.Caption == "Bottom\nc.1");
+            Assert.Contains(ui.UiFrame, c => c.Name == "inventory-tooltip" && c.Properties.GetValueOrDefault("ItemTooltip") is { } tip && tip.StartsWith("Bottom\nValue\t", StringComparison.Ordinal));
             Drag(ui, Centre(bottom), Centre(ui.UiFrame.Single(c => c.Name == "main")));
             var buy = Assert.Single(session.World.Commands.TakeDue(long.MaxValue).OfType<Meitou.Simulation.Trading.BuyItem>());
             Assert.Equal("bottom", buy.Item.Record);

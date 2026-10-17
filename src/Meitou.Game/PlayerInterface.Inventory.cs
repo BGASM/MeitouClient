@@ -18,6 +18,7 @@ sealed partial class PlayerInterface
         if (!UiVisible || faithfulScreens.HitTest(p) is not { } picked || !picked.Control.Enabled) return false;
         var bounds = picked.Control.Bounds;
         Vector2 Grab() => (p - new Vector2(bounds.X, bounds.Y)) / new Vector2(bounds.Width, bounds.Height);
+        if (ScrollThumbDown(picked.Screen, picked.Control, p)) return true;
         if (picked.Control.Properties.TryGetValue("TradeItem", out var stockIndex))
         {
             if (session.CurrentSnapshot.Trade?.Stock.FirstOrDefault(i => i.Index == int.Parse(stockIndex, CultureInfo.InvariantCulture)) is not { } stock) return false;
@@ -33,6 +34,7 @@ sealed partial class PlayerInterface
 
     void InventoryPointerUp(Vector2 p)
     {
+        scrollDrag = null;
         var buying = tradeDrag;
         var moving = inventoryDrag;
         tradeDrag = null;
@@ -141,6 +143,7 @@ sealed partial class PlayerInterface
             Preview(drag.Item.Record, drag.Item.Material, drag.Item.Name, drag.Item.Quantity, drag.Item.Width, drag.Item.Height, drag.Grab);
         else if (tradeDrag is { } stock)
             Preview(stock.Item.Record, stock.Item.Material, stock.Item.Name, stock.Item.Quantity, stock.Item.Width, stock.Item.Height, stock.Grab);
+        AddFencePrompt(controls);
 
         void Preview(string record, string material, string name, int quantity, int columns, int rows, Vector2 grab)
         {
@@ -152,7 +155,8 @@ sealed partial class PlayerInterface
 
     bool CancelInventoryDrag()
     {
-        bool captured = inventoryDrag is not null || tradeDrag is not null;
+        bool captured = inventoryDrag is not null || tradeDrag is not null || scrollDrag is not null;
+        scrollDrag = null;
         inventoryDrag = null;
         tradeDrag = null;
         return captured;

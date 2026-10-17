@@ -12,6 +12,10 @@ sealed partial class PlayerInterface
     float InventoryCell => 25 * InventoryScale;
     readonly Dictionary<string, float> inventoryScroll = new(StringComparer.Ordinal);
     readonly Dictionary<string, (UiRect View, float Maximum)> inventoryViews = new(StringComparer.Ordinal);
+    /// <summary>Per scrolled window, where its scrollbar's thumb runs and how tall it is (for dragging it).</summary>
+    readonly Dictionary<string, (UiRect Track, float Thumb)> inventoryTracks = new(StringComparer.Ordinal);
+    /// <summary>A scrollbar thumb being dragged: its window and where on the thumb it was taken.</summary>
+    (string Screen, float Grab)? scrollDrag;
 
     void BindInventoryGeometry(string id, UiBindings b)
     {
@@ -19,12 +23,7 @@ sealed partial class PlayerInterface
         if (id == "bag" && Selected().FirstOrDefault()?.ItemGrid is { } bag)
             b.Positions["Root"] = new(0, 0, bag.BagWidth * InventoryCell + 40 * InventoryScale,
                 Math.Min(Height * 0.8f, bag.BagHeight * InventoryCell + 108 * InventoryScale));
-        if (id == "trader" && session.CurrentSnapshot.Trade is { } trade)
-        {
-            b.Positions["Root"] = new(0, 0, Math.Min(Width * 0.55f, trade.StockWidth * InventoryCell + 64 * InventoryScale), Height * 0.8f);
-            // The runtime stock canvas and its scrollbar replace the editor's preview scroll view.
-            b.Hidden.Add("scrollview_backpack_content");
-        }
+        if (id == "trader") BindTraderGeometry(b);
     }
 
     void PlaceBagWindow() => PlaceInventoryBeside("bag", left: true);
@@ -76,7 +75,7 @@ sealed partial class PlayerInterface
         if (index < 0 || root is null) return;
         float scale = InventoryScale, cell = InventoryCell;
         var r = root.Bounds;
-        float top = (id == "trader" ? 86 : 50) * scale;
+        float top = 50 * scale;
         var view = new UiRect(r.X + 18 * scale, r.Y + top, Math.Max(0, r.Width - 40 * scale), Math.Max(0, r.Height - top - 58 * scale));
         float maximum = Math.Max(0, rows * cell - view.Height);
         if (maximum < 0.01f) maximum = 0;
@@ -91,14 +90,47 @@ sealed partial class PlayerInterface
         };
         int arrange = controls.FindIndex(c => c.Name == "ArrangeButton");
         if (arrange >= 0) controls[arrange] = controls[arrange] with { Bounds = new(r.X + (r.Width - 110 * scale) / 2, r.Y + r.Height - 44 * scale, 110 * scale, 32 * scale) };
-        if (maximum <= 0) return;
-        float barX = r.X + r.Width - 22 * scale, barWidth = 17 * scale, arrow = 14 * scale;
-        void Part(string name, UiRect bounds, string skin, string action = "") => controls.Add(new(name, action.Length > 0 ? "Button" : "Widget", bounds, "", action, skin, true,
-            new Dictionary<string, string>(), Vector4.Zero, Pickable: action.Length > 0, Clip: root.Clip));
-        Part("inventory-scroll-up", new(barX, view.Y, barWidth, arrow), "Kenshi_SmallArrowUpSkin", "inventory-scroll:1");
-        Part("inventory-scroll-down", new(barX, view.Y + view.Height - arrow, barWidth, arrow), "Kenshi_SmallArrowDownSkin", "inventory-scroll:-1");
-        float track = Math.Max(0, view.Height - arrow * 2), thumb = Math.Min(track, Math.Max(20 * scale, track * view.Height / (rows * cell)));
-        Part("inventory-scroll-thumb", new(barX, view.Y + arrow + (track - thumb) * scroll / maximum, barWidth, thumb), "Kenshi_SmallBarSkin");
+        if (maximum <= 0) { inventoryTracks.Remove(id); return; }
+        AddScrollBar(id, controls, new(r.X + r.Width - 22 * scale, view.Y, 17 * scale, view.Height), view.Height, rows * cell, scroll, maximum, root.Clip);
+    }
+
+    /// <summary>
+    /// A vertical scrollbar as the original's <c>Kenshi_ScrollBarV</c> template draws it in <paramref name="bar"/>: arrows at both ends, the track between them and a thumb
+    /// <c>MinTrackSize</c> (10) or more tall, sized to the visible share of the canvas. The arrows scroll by steps, a click on the track beside the thumb by a page, the thumb drags.
+    /// </summary>
+    void AddScrollBar(string id, List<UiControl> controls, UiRect bar, float visible, float canvas, float scroll, float maximum, UiRect? clip)
+    {
+        float scale = InventoryScale;
+        void Part(string name, UiRect bounds, string skin, string action = "", bool pickable = false) => controls.Add(new(name, action.Length > 0 || pickable ? "Button" : "Widget", bounds, "", action, skin, true,
+            new Dictionary<string, string>(), Vector4.Zero, Pickable: action.Length > 0 || pickable, Clip: clip));
+        Part("inventory-scroll", bar, "Kenshi_TextBoxEmptySkin");
+        Part("inventory-scroll-up", new(bar.X, bar.Y + 2 * scale, bar.Width, 12 * scale), "Kenshi_SmallArrowUpSkin", "inventory-scroll:1");
+        Part("inventory-scroll-down", new(bar.X, bar.Y + bar.Height - 14 * scale, bar.Width, 12 * scale), "Kenshi_SmallArrowDownSkin", "inventory-scroll:-1");
+        var track = new UiRect(bar.X, bar.Y + 14 * scale, bar.Width, Math.Max(0, bar.Height - 28 * scale));
+        float thumb = Math.Clamp(track.Height * visible / Math.Max(1, canvas), Math.Min(10 * scale, track.Height), track.Height);
+        float top = track.Y + (track.Height - thumb) * scroll / maximum;
+        Part("inventory-scroll-page-up", new(track.X, track.Y, track.Width, top - track.Y), "", "inventory-scroll-page:1");
+        Part("inventory-scroll-page-down", new(track.X, top + thumb, track.Width, track.Y + track.Height - top - thumb), "", "inventory-scroll-page:-1");
+        Part("inventory-scroll-thumb", new(track.X, top, track.Width, thumb), "Kenshi_SmallBarSkin", pickable: true);
+        inventoryTracks[id] = (track, thumb);
+    }
+
+    /// <summary>Takes the thumb of a window's scrollbar under the pointer (true: taken).</summary>
+    bool ScrollThumbDown(string screen, UiControl picked, Vector2 p)
+    {
+        if (picked.Name != "inventory-scroll-thumb" || !inventoryTracks.ContainsKey(screen)) return false;
+        scrollDrag = (screen, p.Y - picked.Bounds.Y);
+        return true;
+    }
+
+    /// <summary>Moves the dragged thumb's canvas so the thumb follows the pointer.</summary>
+    bool ScrollThumbMove(Vector2 p)
+    {
+        if (scrollDrag is not { } drag) return false;
+        if (!inventoryTracks.TryGetValue(drag.Screen, out var t) || !inventoryViews.TryGetValue(drag.Screen, out var view) || t.Track.Height <= t.Thumb) return true;
+        float share = Math.Clamp((p.Y - drag.Grab - t.Track.Y) / (t.Track.Height - t.Thumb), 0, 1);
+        inventoryScroll[drag.Screen] = share * view.Maximum;
+        return true;
     }
 
     bool InventoryWheel(Vector2 p, float steps)
@@ -114,14 +146,33 @@ sealed partial class PlayerInterface
             inventoryScroll[id] = Math.Clamp(inventoryScroll.GetValueOrDefault(id) - steps * InventoryCell * 3, 0, view.Maximum);
     }
 
+    /// <summary>A click on the scrollbar track beside the thumb: a page (the visible height) up (1) or down (-1).</summary>
+    void ScrollInventoryPage(string id, float direction)
+    {
+        if (inventoryViews.TryGetValue(id, out var view))
+            inventoryScroll[id] = Math.Clamp(inventoryScroll.GetValueOrDefault(id) - direction * view.View.Height, 0, view.Maximum);
+    }
+
     void AddInventorySummary(List<UiControl> controls, CharacterSnapshot lead)
     {
         string weight = lead.ItemGrid?.TotalWeight.ToString("0", CultureInfo.InvariantCulture) ?? "0";
         if (lead.ItemGrid?.CarryCapacity is { } capacity) weight += "/" + capacity.ToString("0", CultureInfo.InvariantCulture);
-        float burden = lead.Hud?.Encumbrance ?? 1;
-        string burdenText = burden >= 1 ? "-Weightless" : $"-{(1 - burden) * 100:0}% Encumbrance";
+        var (burdenWord, burdenColour) = BurdenText(lead.Hud?.Encumbrance ?? 1);
         const string muted = "0.3 0.28 0.25";
-        AddLines(controls, "datapanel", [new("Total Weight:", weight), new("", burdenText), new("Disguise:", "-"), new("", ""),
+        AddLines(controls, "datapanel", [new("Total Weight:", weight), new("", burdenWord, ValueColour: burdenColour), new("Disguise:", "-"), new("", ""),
             new("Slave of:", "-", muted, muted), new("Looks like slave:", "-", muted, muted)], 20 * InventoryScale);
     }
+
+    /// <summary>
+    /// The burden row under Total Weight (<c>FUN_1405d4260</c>, <b>Verified</b> by decompile): by the carry speed factor (1 unburdened), at least 0.95 "-Weightless",
+    /// 0.75 "-Lightweight", 0.5 "-Moderate" (Main colour), 0.1 "-Heavy", below "-Overloaded" (both Bad colour).
+    /// </summary>
+    internal static (string Text, string? Colour) BurdenText(float factor) => factor switch
+    {
+        >= 0.95f => ("-Weightless", null),
+        >= 0.75f => ("-Lightweight", null),
+        >= 0.5f => ("-Moderate", MainColour),
+        >= 0.1f => ("-Heavy", BadColour),
+        _ => ("-Overloaded", BadColour),
+    };
 }

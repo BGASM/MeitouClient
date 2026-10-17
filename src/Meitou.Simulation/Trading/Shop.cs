@@ -9,12 +9,13 @@ namespace Meitou.Simulation.Trading;
 
 /// <summary>
 /// A trader squad's shop: the stock it sells, its trade terms and when it restocks (docs/game/economy.md section 9). The purse is the squad's <see cref="Squad.Money"/>, the game's
-/// <c>Platoon+0x88</c>. <b>Engine choice</b>: the stock is one inventory of <see cref="Width"/> x <see cref="Height"/> cells held by the squad; in the original a squad shop's stock is
-/// offered to "the inventory sections" (not decoded) and a building shop's lies in the shop building's containers, and buildings have no world state here yet.
+/// <c>Platoon+0x88</c>. <b>Engine choice</b>: the stock is one inventory of <see cref="Width"/> x <see cref="Height"/> cells held by the squad, the size of the
+/// <c>Shopkeepers Backpack</c> (CONTAINER <c>910-gamedata.base</c>, storage 20 x 20): the trader window shows its trader's <c>backpack_content</c> section (<c>FUN_140150570</c>,
+/// docs/game/ui-screens.md section 6). In the original a squad shop's stock is offered to "the inventory sections" (not decoded) and a building shop's lies in the shop building's containers, and buildings have no world state here yet.
 /// </summary>
 public sealed class Shop
 {
-    public const int Width = 12, Height = 20;
+    public const int Width = 20, Height = 20;
 
     public Inventory Stock { get; } = new(Width, Height);
     public required Trader Terms { get; init; }

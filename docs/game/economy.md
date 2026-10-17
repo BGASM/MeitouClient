@@ -48,6 +48,10 @@ charges, both parties' funds and inventory fit. Stolen goods require fence/catch
 success alone does not prove legal transfer. Restock, blueprints/research money, artifact and
 money-item branches are scoped in the expressions/field tables and undecoded questions.
 
+- **Stock grid** (**Observed**): the trader window shows its trader's `backpack_content` section ([ui-screens](ui-screens.md#6-inventory-trade-dialogue-build)).
+  The base game's CONTAINER `Shopkeepers Backpack` (`910-gamedata.base`) has storage 20 x 20 (raw read of `gamedata.base`); which characters wear it is not traced.
+  Meitou's squad shops hold one 20 x 20 stock (`Shop`). The 2026-10-17 reference screenshot's trader (Ronin Construction Trader) shows about 28 columns.
+
 ## Crimes, bounties and prisoners
 
 Ledgers are per wanted faction; crimes pending at deed time and witness booking are distinct.

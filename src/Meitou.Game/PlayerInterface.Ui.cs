@@ -255,7 +255,6 @@ sealed partial class PlayerInterface
         else if (action == "medic") Say(new Meitou.Simulation.FirstAid.MedicJobCommand(SelectedIds()) { Tick = session.World.Tick });
         else if (action == "rescue") Say(new Meitou.Simulation.Carrying.RescueJobCommand(SelectedIds()) { Tick = session.World.Tick });
         else if (action == "job-remove") RemoveJob(argument);
-        else if (action is "buy" or "sell" or "trade.close" or "trade.page") TradeAction(action, argument);
         else if (action.StartsWith("order.", StringComparison.Ordinal) && Enum.TryParse(action[6..], out CharacterOrders order))
             Say(new OrdersCommand(SelectedIds(), order) { Tick = session.World.Tick });
         else if (action.StartsWith("runspeed.", StringComparison.Ordinal))
