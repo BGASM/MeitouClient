@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Numerics;
 using Meitou.Data.Ui;
 using Meitou.Simulation;
+using Meitou.Simulation.Items;
 using Meitou.Simulation.Trading;
 using Meitou.Ui;
 
@@ -224,6 +225,23 @@ sealed partial class PlayerInterface
         for (int i = last - 2; i < last; i++)
             if (i >= 0 && controls[i].Name.StartsWith("fence-prompt-", StringComparison.Ordinal))
                 controls[i] = controls[i] with { Bounds = controls[i].Bounds with { Y = controls[i].Bounds.Y + 7 * scale } };
+    }
+
+    /// <summary>
+    /// Sends a sale. A stolen item that a shop which is no fence may catch first asks (<c>FUN_140715290</c>, <b>Observed</b> by decompile): "You have a {N}% chance of getting caught selling this
+    /// stolen item.\nFence it anyway?" under the title "Fencing Item", N = 100 less the chance of getting away in per cent, rounded half up; only Yes sells.
+    /// </summary>
+    void Sell(TradeView trade, InventoryItemToken token, int quantity, int? x, int y)
+    {
+        var sale = new SellItem(token, quantity) { Tick = session.World.Tick, X = x, Y = y };
+        if (trade.Goods.FirstOrDefault(g => g.Index == token.Index) is not { FenceOdds: { } odds })
+        {
+            Say(sale);
+            return;
+        }
+        int caught = 100 - (int)MathF.Floor(odds * 100 + 0.5f);
+        Confirm("FENCING ITEM", $"You have a {caught}% chance of getting caught selling this stolen item.\nFence it anyway?", () => Say(sale with { Tick = session.World.Tick }));
+        UpdateMenuPause();
     }
 
     static string Money(long cats) => cats.ToString("N0", CultureInfo.InvariantCulture);

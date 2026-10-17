@@ -264,11 +264,20 @@ decompile unless marked; Meitou's adapter is `PlayerInterface.Map.cs`.
     367 records with a size, none wider; `gamedata.base`), its backpacks 8 x 8 to 20 x 20. Meitou's 20 x 20 squad stock is therefore already wider than a vanilla squad trader's 18; building shops
     (more rows, scrolled) are not built. The 28 columns the 2026-10-17 screenshot seems to show are **Unknown** (a modded building, or a cell size other than 25 px).
   - Right click (**Observed**, `FUN_140716a40` wires the section widgets, `FUN_1407169a0` the release, `FUN_140714a20` the right-button handler, `FUN_140713d20` the move): with a second inventory
-    window open it moves the item to the other window. First it tries to use the item (food, medkits: `FUN_14070d070`); a stolen item with a fence chance below 1 asks "Fence it anyway?" first
-    (`FUN_140715290`); otherwise one unit moves (a stack of 2 or more is split off, the unit's `+0x12c` quantity set to 1) into the first section of the item's slot type that has room, else any
-    grid, posting the `RClickAutoTrade` event (`Sell_Item` for a sale). Shift (**Verified**: scancodes 0x2a / 0x36 set `DAT_142133449`) repeats the move until one fails, so the whole stack.
-    Failures use the codes of the messages below (no room, can't afford). With no trade the same handler reads map items and uses consumables. Meitou: `PlayerInterface.InventoryRightClick`
-    buys or sells one unit (Shift all), into the first free cell; the slot-type placement, the use-first rule and the fencing confirmation are not built.
+    window open it moves the item to the other window.
+    - *Use first* (`FUN_14070d070`): only an item whose class returns itself from item slot 94 (offset 0x2f0) has a use. The default returns nothing (**Verified**: the Item, Weapon, Armour, Gear
+      and MapItem vtables all share it, so food, medkits and ordinary gear never reach it); `LockedArmour` (shackles) does, and its right click opens the context menu on it (`FUN_1407a6bc0`, verbs such as
+      Unlock Shackles, Use Tools, Use Strength: [locks](locks.md)). A right click on food does not eat it. Not built (no worn shackles in an inventory).
+    - *Fence prompt* (`FUN_140715290`): a stolen item (it has an owner of kind 1 or 0x22 other than the seller's faction) that a trader who is not a knowing fence would buy is held back
+      while a modal asks "You have a {1}% chance of getting caught selling this stolen item.\nFence it anyway?" (title "Fencing Item"), {1} = 100 - floor(100 x chance + 0.5) with the chance of
+      `FUN_140793490`; it is asked only when that chance is below 1. While it is open further clicks are swallowed; Yes repeats the click (or the drop), anything else drops it. The drag-and-drop sale
+      asks the same.
+    - *The move*: one unit (a stack of 2 or more is split, the new stack's quantity 1) goes to the first section of the target inventory that accepts the item's slot type and has room, which for
+      worn gear is its equipment slot, and only if none takes it any general grid section (type 7); then `RClickAutoTrade` (`Sell_Item` for a sale) is posted. The order of two matching
+      sections (weapon slots) is **Unknown**. Shift (**Verified**: scancodes 0x2a / 0x36 set `DAT_142133449`) repeats the move until one fails, so the whole stack. Failures use the codes of the
+      messages below (no room, can't afford).
+    - Meitou: `PlayerInterface.InventoryRightClick` buys or sells one unit (Shift all); a bought weapon goes into a free `back` then `hip` cell and armour into its empty slot
+      (`InventoryCommands.TryEquip`), the rest of the stack and everything else into the first free cell; a stolen item a non-fence shop may catch asks the prompt above (`TradeItemView.FenceOdds`).
   - Reference screenshot (**Observed**, 2026-10-17, from a video): `Money:` label left and `c.442,269` right in the money box, stock icons at their footprints with plain counts bottom
     right, a vertical scrollbar, no other panels; the HUD stays. The character panel reads `Disguise: None`. Its text boxes and empty cells are dark, where the install's skins draw parchment; the cause (a UI mod or setting) is **Unknown**.
 - **Item tooltip** (**Observed**, decompile): name, then `Value` (`c.{1,num}` with ` (+N%)`/` (-N%)` when the price factor is not 1) and `Sell value` (`FUN_14079e7a0`); weight `{1,num} kg`,

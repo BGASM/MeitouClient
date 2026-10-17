@@ -17,6 +17,8 @@ public sealed record BuyItem(InventoryItemToken Item, int Quantity) : SimCommand
     public string? Section { get; init; }
     public int X { get; init; }
     public int Y { get; init; }
+    /// <summary>The window's right click (no cell chosen): one unit goes into the equipment slot that takes it when that is free, before the grids (<see cref="InventoryCommands.TryEquip"/>).</summary>
+    public bool Equip { get; init; }
 }
 
 /// <summary>Sells <see cref="Quantity"/> units of the customer's item <see cref="Item"/> (its index in the customer's inventory) to the shop, at the stock cell dropped on when free.</summary>
@@ -38,6 +40,11 @@ public sealed record TradeItemView(int Index, string Record, string Name, string
     public float Weight { get; init; }
     /// <summary>A stolen good of the customer's that was stolen from the shop's own faction: the chance a sale goes through unnoticed (the fencing prompt's number); null otherwise.</summary>
     public float? FenceChance { get; init; }
+    /// <summary>
+    /// A stolen good of the customer's that a shop which is no fence would buy only with a risk: the chance (0 to 1, below 1) a sale goes through unnoticed, whoever it was stolen from
+    /// (<c>FUN_140715290</c> asks "Fence it anyway?" with the opposite in per cent); null when the sale is safe or the item is not stolen.
+    /// </summary>
+    public float? FenceOdds { get; init; }
     public InventoryItemToken Token => new(Index, Record, Section, X, Y, Quantity, Quality);
 }
 
@@ -264,7 +271,20 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
         }
         var bought = item.WithQuantity(units);
         long price = m.StackPrice(bought, false, shop.Terms, squad.Faction);
-        int placed = buy.Section is { } section ? PlaceAt(cold.Inventory!, bought, units, section, buy.X, buy.Y) : Place(cold.Inventory!, bought, units);
+        int placed;
+        if (buy.Section is { } section) placed = PlaceAt(cold.Inventory!, bought, units, section, buy.X, buy.Y);
+        else if (buy.Equip && InventoryCommands.TryEquip(cold.Inventory!, bought.WithQuantity(1)))
+        {
+            // One unit is worn; the rest of a stack goes where it fits.
+            assembly.RefreshEquipment(cold);
+            placed = 1;
+            if (units > 1)
+            {
+                var rest = bought.WithQuantity(units - 1);
+                placed += Place(cold.Inventory!, rest, units - 1);
+            }
+        }
+        else placed = Place(cold.Inventory!, bought, units);
         if (placed == 0)
         {
             world.Post("No room for that item.");
@@ -390,6 +410,7 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
             {
                 Material = item.MaterialId, Value = value, SellValue = sellValue, Weight = item.Weight,
                 FenceChance = sell && stolen && item.StolenFrom == squad.Faction ? Math.Clamp(FenceChance(thievery, true), 0, 1) : null,
+                FenceOdds = sell && stolen && !shop.Terms.BuysStolen && FenceChance(thievery, item.StolenFrom == squad.Faction) is < 1 and var odds ? Math.Max(odds, 0) : null,
             };
         }
         var stock = shop.Stock.All().Select((item, index) => View(item, index, false, squad.Faction)).ToArray();

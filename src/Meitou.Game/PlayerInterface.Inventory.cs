@@ -67,7 +67,7 @@ sealed partial class PlayerInterface
             if (TraderGrid(hit.Screen) is { } stockGrid && DropCell(p, hit.Screen, stockGrid, trade.StockWidth, trade.StockHeight, drag.Grab, item.Width, item.Height,
                     trade.Stock.Select(s => (s.X, s.Y, s.Width, s.Height)), out int cx, out int cy))
                 (sx, sy) = (cx, cy);
-            Say(new SellItem(token, item.Quantity) { Tick = session.World.Tick, X = sx, Y = sy });
+            Sell(trade, token, item.Quantity, sx, sy);
             return;
         }
         if (hit.Screen is not ("inventory" or "bag") || Selected().FirstOrDefault(c => c.Id == drag.Character)?.ItemGrid is not { } own) return;

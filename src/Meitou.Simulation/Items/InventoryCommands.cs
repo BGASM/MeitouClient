@@ -18,6 +18,38 @@ public static class InventoryCommands
         "armour" => (4, 6), "belt" => (2, 2), _ => (0, 0),
     };
 
+    /// <summary>
+    /// Puts one unit into the equipment slot that takes it when that is free (the trade window's right click, <c>FUN_140713d20</c>: sections that accept the item's slot type are tried before
+    /// the general grids): weapons the first free cell of <c>back</c>, then <c>hip</c>; armour its <see cref="ItemInstance.EquipmentSection"/> when nothing is worn there. The order of two
+    /// matching sections is <b>Unknown</b>; a bag is not equipped this way (its contents are not copied into a purchase). False: no slot, the caller places it in a grid.
+    /// </summary>
+    public static bool TryEquip(Inventory root, ItemInstance item)
+    {
+        if (item.Quantity != 1 || item.Width <= 0 || item.Height <= 0) return false;
+        string[] sections = item.Type is Meitou.Data.Fcs.FcsRecordType.WEAPON or Meitou.Data.Fcs.FcsRecordType.CROSSBOW ? ["back", "hip"]
+            : item.Type == Meitou.Data.Fcs.FcsRecordType.ARMOUR && IsEquipmentSection(item.EquipmentSection) && item.EquipmentSection is not ("back" or "hip" or "backpack_attach") ? [item.EquipmentSection] : [];
+        foreach (string section in sections)
+        {
+            int x = 0, y = 0;
+            if (section is "back" or "hip")
+            {
+                var size = SectionSize(section);
+                var cell = Enumerable.Range(0, Math.Max(0, size.Height - item.Height + 1))
+                    .SelectMany(cy => Enumerable.Range(0, Math.Max(0, size.Width - item.Width + 1)).Select(cx => (X: cx, Y: cy)))
+                    .Cast<(int X, int Y)?>().FirstOrDefault(c => root.IsFree(section, c!.Value.X, c.Value.Y, item.Width, item.Height));
+                if (cell is not { } free) continue;
+                (x, y) = free;
+            }
+            else if (root.Items.Any(i => i.Section == section)) continue;
+            item.Section = section;
+            item.X = x;
+            item.Y = y;
+            root.Items.Add(item);
+            return true;
+        }
+        return false;
+    }
+
     public static bool Move(Inventory root, InventoryItemToken token, string section, int x, int y)
     {
         var item = root.All().ElementAtOrDefault(token.Index);

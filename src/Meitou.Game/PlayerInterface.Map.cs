@@ -254,12 +254,14 @@ sealed partial class PlayerInterface
     /// </summary>
     bool InventoryRightClick(Vector2 p, bool shift)
     {
-        if (!UiVisible || faithfulScreens.HitTest(p) is not { } picked || !picked.Control.Enabled) return false;
+        if (!UiVisible) return false;
+        if (confirmation is not null) return true;   // an open question (the fencing prompt) swallows the click, as the original's pending state does
+        if (faithfulScreens.HitTest(p) is not { } picked || !picked.Control.Enabled) return false;
         var trade = session.CurrentSnapshot.Trade;
         if (trade is not null && picked.Control.Properties.TryGetValue("TradeItem", out var stockIndex))
         {
             if (trade.Stock.FirstOrDefault(i => i.Index == int.Parse(stockIndex, CultureInfo.InvariantCulture)) is not { } stock) return false;
-            Say(new BuyItem(stock.Token, shift ? stock.Quantity : 1) { Tick = session.World.Tick });
+            Say(new BuyItem(stock.Token, shift ? stock.Quantity : 1) { Tick = session.World.Tick, Equip = true });
             return true;
         }
         if (!picked.Control.Properties.TryGetValue("InventoryItem", out var index) || Selected().FirstOrDefault() is not { ItemGrid: { } grid } lead) return false;
@@ -268,7 +270,7 @@ sealed partial class PlayerInterface
         var token = new InventoryItemToken(item.Index, item.Record, item.Section, item.X, item.Y, item.Quantity, item.Quality);
         if (trade is not null && trade.Customer == lead.Id && InventoryCommands.IsMovableSection(item.Section))
         {
-            Say(new SellItem(token, shift ? item.Quantity : 1) { Tick = session.World.Tick });
+            Sell(trade, token, shift ? item.Quantity : 1, null, 0);
             return true;
         }
         if (MapItemTowns?.Invoke(item.Record) is null) return false;
