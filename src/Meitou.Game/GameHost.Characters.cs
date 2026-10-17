@@ -117,6 +117,9 @@ sealed partial class GameHost
                 WeaponDrawn = c.WeaponDrawn, Scale = c.Scale, Hidden = aboveFloor.Contains(c.Id), FullRateAnimation = c.IsPlayer,
                 Bones = Blend(before?.Ragdoll, c.Ragdoll, alpha),
             });
+            // The editor's next preview look, listed hidden so the renderer prepares it while the last one is still shown.
+            if (player.EditorPending(c.Id) is { } pending)
+                list.Add(new CharacterInstance(DrawKey(c.Id) ^ (1L << 55), pending, position, yaw, poses) { Hidden = true });
         }
     }
 

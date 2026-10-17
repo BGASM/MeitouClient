@@ -36,7 +36,9 @@ sealed partial class PlayerInterface
     public (GameDatabase Db, string InstallRoot)? EditorData { get; set; }
     /// <summary>Builds a preview look from a record id and a loadout (the world's appearance source; the host sets it).</summary>
     public Func<string, Loadout, CharacterAppearance?>? PreviewSource { get; set; }
-    readonly Dictionary<CharacterId, (int Version, bool Clothes, CharacterAppearance? Look)> previews = [];
+    readonly Dictionary<CharacterId, (int Version, bool Clothes, CharacterAppearance? Shown, CharacterAppearance? Pending)> previews = [];
+    /// <summary>Whether the renderer has prepared a look (the host sets it); a preview is shown only once it is.</summary>
+    public Func<CharacterAppearance, bool>? PreviewReady { get; set; }
     readonly Stopwatch previewClock = Stopwatch.StartNew();
     double lastPreviewBuild = double.NegativeInfinity;
 
@@ -89,25 +91,34 @@ sealed partial class PlayerInterface
         UpdateMenuPause();
     }
 
-    /// <summary>The look to draw for a character while the editor has a draft of it (null: its own).</summary>
+    /// <summary>
+    /// The look to draw for a character while the editor has a draft of it (null: its own). A changed draft gets a new look (at most every 0.12 s while a slider is
+    /// dragged); the last ready one stays on screen until the renderer has prepared the new one (<see cref="PreviewReady"/>), so the character never blinks out.
+    /// </summary>
     public CharacterAppearance? EditorPreview(CharacterId id, CharacterAppearance? own)
     {
         if (!EditorOpen || !editor!.Drafts.TryGetValue(id, out var draft) || own?.Loadout is not { } loadout || PreviewSource is null) return null;
         bool clothes = editor.Clothes;
-        if (previews.TryGetValue(id, out var shown) && shown.Version == draft.Version && shown.Clothes == clothes) return shown.Look ?? own;
-        // A new asset per look: while a slider is dragged, at most a few a second (each one is kept by the renderer).
+        if (draft.Version == 0 && clothes) { previews.Remove(id); return null; }
+        var entry = previews.TryGetValue(id, out var found) ? found : (Version: -1, Clothes: true, Shown: own, Pending: (CharacterAppearance?)null);
+        if (entry.Pending is { } pending && (PreviewReady?.Invoke(pending) ?? true)) entry = entry with { Shown = pending, Pending = null };
         double now = previewClock.Elapsed.TotalSeconds;
-        if (previews.ContainsKey(id) && now - lastPreviewBuild < 0.12) return shown.Look ?? own;
-        lastPreviewBuild = now;
-        CharacterAppearance? look = null;
-        if (EditorData is { } data && Meitou.Simulation.Saving.SavedKit.Wear(loadout, draft.Record, data.Db) is { } worn)
+        if ((entry.Version != draft.Version || entry.Clothes != clothes) && now - lastPreviewBuild >= 0.12)
         {
-            if (!clothes) { worn.Clothing.Clear(); worn.Backpack = null; }
-            look = PreviewSource(own.Character?.StringId ?? "", worn);
+            lastPreviewBuild = now;
+            if (EditorData is { } data && Meitou.Simulation.Saving.SavedKit.Wear(loadout, draft.Record, data.Db) is { } worn)
+            {
+                if (!clothes) { worn.Clothing.Clear(); worn.Backpack = null; }
+                if (PreviewSource(own.Character?.StringId ?? "", worn) is { } look) entry = entry with { Pending = look };
+            }
+            entry = entry with { Version = draft.Version, Clothes = clothes };
         }
-        previews[id] = (draft.Version, clothes, look);
-        return look ?? own;
+        previews[id] = entry;
+        return entry.Shown ?? own;
     }
+
+    /// <summary>The preview look being prepared for a character (the host lists it hidden, so the renderer builds it), or null.</summary>
+    public CharacterAppearance? EditorPending(CharacterId id) => EditorOpen && previews.TryGetValue(id, out var entry) ? entry.Pending : null;
 
     void EditorAction(MyGuiEvent e)
     {
@@ -318,7 +329,7 @@ sealed partial class PlayerInterface
             var (label, value, good) = lines[i];
             var bounds = new UiRect(area.X + 10 * scale, area.Y + i * row, area.Width - 20 * scale, row);
             controls.Add(new($"editor-stat-{i}", "TextBox", bounds, label, "", "", true,
-                new Dictionary<string, string> { ["FontName"] = "Kenshi_StandardFont_Medium", ["TextColour"] = MyGuiColours.InkText, ["TextAlign"] = "Left VCenter" }, Vector4.Zero, Pickable: false));
+                new Dictionary<string, string> { ["FontName"] = "Kenshi_StandardFont_Medium", ["TextColour"] = MainColour, ["TextAlign"] = "Left VCenter" }, Vector4.Zero, Pickable: false));
             controls.Add(new($"editor-stat-value-{i}", "TextBox", bounds, value, "", "", true,
                 new Dictionary<string, string> { ["FontName"] = "Kenshi_StandardFont_Medium", ["TextColour"] = good ? GoodColour : BadColour, ["TextAlign"] = "Right VCenter" }, Vector4.Zero, Pickable: false));
         }

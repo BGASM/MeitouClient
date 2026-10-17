@@ -42,7 +42,6 @@ public sealed class CharacterDraft
 {
     readonly GameDatabase db;
     readonly string installRoot;
-    readonly FcsRecord original;
     readonly Dictionary<(string, bool), AppearanceLimits?> limitsCache;
 
     /// <summary>The record as edited so far.</summary>
@@ -58,7 +57,6 @@ public sealed class CharacterDraft
     {
         this.db = db;
         this.installRoot = installRoot;
-        original = Copy(appearance);
         Record = Copy(appearance);
         Name = name;
         limitsCache = [];
@@ -302,15 +300,6 @@ public sealed class CharacterDraft
         Record.Strings["hair style"] = "";
         Record.Strings["beard"] = "";
         Record.Strings["idle stance"] = "idle_stand_normal";
-        Version++;
-    }
-
-    /// <summary>Back to the look the editor opened with (race and gender too).</summary>
-    public void Revert()
-    {
-        Record = Copy(original);
-        Race = RaceOf(db, Record) ?? Race;
-        Limits = LimitsFor(Race, Female);
         Version++;
     }
 

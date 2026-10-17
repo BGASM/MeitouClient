@@ -19,6 +19,7 @@ sealed partial class GameHost
         if (popData is not { } data) return;
         player.EditorData = (data.Db, install.Root);
         player.PreviewSource = (recordId, loadout) => data.Appearances?.Create(recordId, loadout);
+        player.PreviewReady = look => gpu.Characters?.IsPrepared(look) ?? true;
     }
 
     /// <summary>Opens the editor on the new game's squad once the world shows and the squad is in the snapshot.</summary>

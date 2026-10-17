@@ -227,6 +227,9 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
             var lead = session.World.Characters.Previous[playerSquad.Leader.Slot].Position;
             target = lead;
             Console.WriteLine($"player    {playerSquad.Members.Count} characters, leader at {lead.X:0}, {lead.Z:0}");
+            // --new-game is a shortcut past the menus: the start's characters stay as rolled (the menu's New game opens the character editor); a still keeps the creation
+            // open for the showcase's editor pictures.
+            if (interactive) session.World.Commands.Enqueue(new Meitou.Simulation.Editing.FinishCreation { Tick = session.World.Tick });
         }
         if (IsSandbox && population is not null) target = SandboxSpawn();
         if (IsDuel && population is not null) target = DuelStart();
