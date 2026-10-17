@@ -258,10 +258,10 @@ decompile's `DialogActionEnum` / `DialogConditionEnum` / `EventTriggerEnum`, com
 - **Fine** (DIALOGUE "Bounty extortion pay", `Npc MILITARY Law 3`; **Verified** by probe of the base load order): one line per bracket,
   `250 < b < 351` -> 400, then +100 per 100 up to `950 < b < 1051` -> 1100; the 300 line (`0 < b < 251`) tests the *speaker's* bounty
   (`who` 0, a data slip: it never shows for a guard without a bounty). Paying needs `DC_PLAYERMONEY > fine` (strict) and runs
-  `DA_TAKE_MONEY` (8, the fine) + `DA_CLEAR_BOUNTY` (49); the 1100 line also runs `DA_PAY_BOUNTY` (10). Which entry 49 clears is
-  **Unknown** (Meitou: the speaker's faction's). As built: [simulation](../simulation.md#arrest-and-jail).
+  `DA_TAKE_MONEY` (8, the fine) + `DA_CLEAR_BOUNTY` (49); the 1100 line also runs `DA_PAY_BOUNTY` (10). 49 erases two entries, the speaker's booking faction's and the target's town's (or jailer's) ([dialogue](dialogue.md#effects));
+  Meitou clears only the speaker's faction's. As built: [simulation](../simulation.md#arrest-and-jail).
 - **`DA_ARREST_TARGET`** (`FUN_140680560` case 0x1d, **Observed**): when the speaker's ownership town (`Character+0x658 -> +0x30`) is set
-  and equals the speaker's status `+0x88` (read as "he is in his own town"), and the target's slot `0x248` is null: the speaker gets tasks 240 `LIFT_PERSON_SNATCHING_ALLOWED_IN_TOWN_ONLY`
+  and equals the speaker's status `+0x88` (read as "he is in his own town"), and the target is not an animal (slot `0x248` is `asAnimal`): the speaker gets tasks 240 `LIFT_PERSON_SNATCHING_ALLOWED_IN_TOWN_ONLY`
   ("Capture Target", needs `isTargetDown`) and 112 `FIND_CAGE_AND_PUT_IN` on the target, and the target's squad marks the speaker
   (flag 5). Otherwise the speaker's squad marks the target (flag 4) and the speaker attacks it (task 4 `MELEE_ATTACK`). Either way the
   guard fights until the target is down, then carries it. `DA_ARREST_TARGETS_CARRIED_PERSON` (30, case 0x1e) does the same for the body
@@ -269,7 +269,7 @@ decompile's `DialogActionEnum` / `DialogConditionEnum` / `EventTriggerEnum`, com
   faction, or books the pending crime when the value is 0.
 - **Arrest goal** (AI_TASK "Arrest bounties", enum 204 `HUNT_BOUNTIES`, in "addon- law enforcement" and the "Gate guard ... -arrests"
   packages; **Verified** by probe): desire 1 when the cage finder finds a free cage, else 0 (AI slot 33 `FUN_140598a90`); target finder
-  `FUN_14099bfc0`: the first sensed character (mask 0x400e/0x221) not carried, not of a `not real` faction, slot `0x248` null, not
+  `FUN_14099bfc0`: the first sensed character (mask 0x400e/0x221) not carried, not of a `not real` faction, not an animal (slot `0x248`), not
   imprisoned, that has a perceived bounty with the guard (`FUN_140853fd0`: the entry for the guard's booking faction, visible while
   `+0x110 > 0`, or when the target is down and an enemy), or that the guard's squad marks with flag 7, or regards as an enemy. Its effect
   129 leads the planner to 203 Arresting (list B: target down, unarmed, carried) and then the cage goals.

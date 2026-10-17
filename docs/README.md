@@ -71,6 +71,7 @@ diaries, asset dumps or decompiled output. Current choices: [DECISIONS](../DECIS
 - [carry-loot](game/carry-loot.md)
 - [locks](game/locks.md): cages, beds, doors, lockable containers, lockpicking, shackles
 - [combat](game/combat.md)
+- [dialogue](game/dialogue.md): packages, line choice, conditions, effects, conversation window
 - [economy](game/economy.md)
 - [factions-squads-towns](game/factions-squads-towns.md)
 - [game-loop](game/game-loop.md)

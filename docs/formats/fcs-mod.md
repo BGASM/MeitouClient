@@ -164,7 +164,7 @@ Leader AI Goals: AI_TASK (0, 24,0) "...val0 and val1 is start and finish time...
 - `TRANSLATE: ALL | NAME | FIELDS ...` lines at the end: which types/fields are translatable.
 - Enum names refer to `fcs_enums.def` (`enum Name { A, B=5, ... }`; not parsed yet). The editor
   also has many enums built in (e.g. `DialogConditionEnum`, `DialogActionEnum`) that aren't in the
-  .def files; extract them when dialogue is implemented.
+  .def files; the dialogue ones are in [dialogue](../game/dialogue.md#enums).
 
 ## Open questions
 

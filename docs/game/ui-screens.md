@@ -65,8 +65,8 @@ which are descriptive (RTTI knows `MessageBoxManager::Box`; the constructor of a
 | Inventory (character) | 1401538e0 | inventory layouts | Window | slots: back, shirt, head, legs, boots, armour, main weapon, hip weapon, belt, backpack_attach, ARRANGE, LIMBS |
 | Inventory variants | 140154cd0 generic, 140154f80 generic fixed, 140155220 animal, 140155910 research, 140155ee0 trader, 140155f90 building, 1401573d0 limbs | | Window | container contents |
 | CharacterTradingWindow / Box | 14072a880 / 14072a070 | Kenshi_CharacterSelectionWindow / Box | Middle | character picker for trade ([economy.md](economy.md#12-slaves-prisoners-animals)) |
-| DialogueWindow | 140725740 | Kenshi_ConversationPanel | Middle | portraits, names, dialog line, money (dialogue effects and AI contracts: [ai.md](ai.md#packages-and-goals)) |
-| DialogueSpeechBubble | 140725f30 | Kenshi_SpeechPanel | Dialog | floating speech |
+| DialogueWindow | 140725740 | Kenshi_ConversationPanel | Middle | portraits, names, dialog line, money ([dialogue](dialogue.md#ui)) |
+| DialogueSpeechBubble | 140725f30 | Kenshi_SpeechPanel | Dialog | floating speech ([dialogue](dialogue.md#ui)) |
 | ContextMenuGUI | 1407977a0 | Kenshi_ContextMenu | Popup | verbs, see [ui-input.md](ui-input.md#dispatch-and-selection) |
 | BuildModeWindow | 1404e5210 | Kenshi_BuildWindow | Middle | categories, buildings, stats, Commands box, Confirm / Undo / Build, floor arrows |
 | CharacterEditWindow | 1405f4dd0 | Kenshi_CharacterEditor | Back | character editor |
