@@ -49,6 +49,7 @@ sealed partial class GameHost
             ? $"audio     {made.DeviceName}, ambience and music from the Wwise banks{(o.AudioGainDb != 0 ? $", gain {o.AudioGainDb:+0.#;-0.#} dB" : "")} (--no-audio turns it off)"
             : $"audio     off: {error}");
         if (audio is not null && player.TitleOpen) audio.Music.StartMainTheme();
+        AttachUiSounds();
     }
 
     /// <summary>
@@ -69,6 +70,8 @@ sealed partial class GameHost
         var clock = session.Clock;
         audio.Update(weather?.World.RegionAt(target.X, target.Z), weather?.State, clock.HourOfDay, clock.Sunrise, clock.Sunset,
             eye.Y - gpu.Terrain.HeightAt(eye.X, eye.Z), realSeconds);
+        UpdateWorldAudio(audio, target, eye);
+        UpdateCharacterAudio(audio, eye);
     }
 
     /// <summary>The audio sliders changed in the settings menu: they apply at once.</summary>
@@ -88,6 +91,8 @@ sealed partial class GameHost
         if (audio is null) return;
         audio.SetPaused(false);
         audio.Ambience.Silence();
+        ResetWorldAudio();
+        ResetCharacterAudio();
         audio.Music.StartMainTheme();
     }
 

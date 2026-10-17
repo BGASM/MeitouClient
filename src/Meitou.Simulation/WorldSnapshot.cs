@@ -4,7 +4,12 @@ using Meitou.Data.Characters;
 namespace Meitou.Simulation;
 
 /// <summary>One animation playing on a character: the skeleton animation's name, its time in seconds and its blend weight.</summary>
-public readonly record struct AnimationLayer(string Name, float Time, float Weight);
+public readonly record struct AnimationLayer(string Name, float Time, float Weight)
+{
+    /// <summary>The clip's length in seconds (0: unknown) and the animation library index of the record playing it (-1: none): the sound events riding on the record fire at fractions of the length (docs/audio.md "Footsteps and animation events"). Set by the animation system; not part of what is drawn.</summary>
+    public float Length { get; init; }
+    public int Definition { get; init; } = -1;
+}
 
 /// <summary>What a character is doing about its body: nothing, bandaging someone (<see cref="CharacterTask.Treat"/>) or resting (<see cref="CharacterTask.Rest"/>).</summary>
 public enum CareKind { None, Treating, Resting }
@@ -86,6 +91,12 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     public string? AttachBone { get; init; }
     /// <summary>The size the body is drawn at: an animal's lerp(age, <c>scale min</c>, <c>scale max</c>) (its <c>MedicalState.ScaleK</c>), 1 for people.</summary>
     public float Scale { get; init; } = 1;
+    /// <summary>The movement task (<see cref="CharacterTask"/>); the host's sounds follow building, treating and looting from it.</summary>
+    public CharacterTask Task { get; init; }
+    /// <summary>Working on a cage's lock (the picker's order is given and it is in reach or walking there).</summary>
+    public bool PickingLock { get; init; }
+    /// <summary>Lying in a bed (<see cref="Locks.HeldState.Bed"/>).</summary>
+    public bool InBed { get; init; }
     /// <summary>The character this one carries (none when not carrying).</summary>
     public CharacterId Carrying { get; init; } = CharacterId.None;
     /// <summary>The goal the AI is acting out, in the game's words (<c>Patrolling town</c>, <c>Shopkeeper</c>); null when the AI does not run the character now.</summary>

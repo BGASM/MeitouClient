@@ -68,6 +68,7 @@ sealed partial class PlayerInterface
     }
     void FaithfulAction(MyGuiEvent e)
     {
+        SoundForScreen(e);
         if (e.Action.StartsWith("inventory-scroll:", StringComparison.Ordinal))
         { ScrollInventory(e.Screen, float.Parse(e.Action[17..], CultureInfo.InvariantCulture)); return; }
         if (e.Action.StartsWith("inventory-scroll-page:", StringComparison.Ordinal))

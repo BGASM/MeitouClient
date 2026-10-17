@@ -723,6 +723,7 @@ public sealed class ConstructionSystem : ITickSystem
         Refund(world, cold, site);
         foreach (var c in world.Buildings.All)
             if (c.WallParent == site.Id) Refund(world, cold, c);   // nothing unless a save from before the link gave it materials
+        world.EmitSound(SoundKind.DismantleDone, slot, world.Characters.Next[slot].Position);
         Remove(world, site);
     }
 

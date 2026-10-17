@@ -48,7 +48,8 @@ actions) have ids that are not name hashes, and banks store no names except `STI
 Names found (from the exe's strings, combined as the exe's fragments suggest; **Verified** by hash):
 
 - Ambience, per biome bank: `Enter_<Biome>_Day`, `Enter_<Biome>_Night`, `Leave_<Biome>` (exactly these three events in each of the 10).
-- Interiors: `Enter_Building`, `Enter_Building_Big`, `Leave_Building`.
+- Interiors: `Enter_Building`, `Enter_Building_Big`, `Leave_Building`; switch group `Indoors` (`F49BEF3F`) with `Wood` `7AAB588A`, `Wicker` `18B774EE`, `Metal` `9375C65E`,
+  `Stone` `48896D1C`; game parameter `Building_Integrity` (`00C01EF9`, an RTPC of the room-tone containers). **Verified** by hash.
 - Weather: `Weather_Rain_Start`, `Weather_Rain_End`, `Weather_Wind_Start`, and **`Weather_Wind_End`**. The exe's string table holds
   `Weather_Wind_Stop`, which is no event in any bank (**Verified** by hash); if the game posts that name ([weather.md](weather.md#sounds-verified-decompiled-fun_1409e8f70-names-only)),
   the wind bed is never stopped by it. **Observed**, not tested in the game.
@@ -60,6 +61,10 @@ Names found (from the exe's strings, combined as the exe's fragments suggest; **
 - State group `Time_in_Game` (`5DBE7335`) with states `Day`, `night`, `none` (used by switch containers in Ashlands and Coast, and by the
   biome music); interior switch `Wicker`.
 - General: `Start_Emitter`, `Stop_Emitter`, `Footsteps`, `Door_Open`, `Map_Open`, UI clicks and many more in `SFX_General_Bank`.
+- Emitters: `Start_Emitter` plays the switch container `3808BFD8` (500 ms fade; group `Emitters` `2488FB4C`, default none, 43 cases), `Stop_Emitter` stops it (1 s); each case is one looping
+  container with an `Intensity` (`933E38F4`) volume curve on some. All 25 distinct `emitter` names of the base game's AMBIENT_SOUND records are cases (`Fire` `9FAC79C9`, `Generator`
+  `13EBF864`, `Water_Tank` `72F5415D`, …; **Verified** by hash). Doors: `Door_Open`, `Door_Shut`, `Door_Close` (`07AAAB24`), `Break`, switch group `Door_Type` (`58A8F750`) with `Wood`
+  `7AAB588A`, `Mechanical_Metal` `62EA9F8C`, `Gate` `42DF2F68` (**Verified** by hash).
 - Game parameters (the 24 in `STMG`): `Camera_Zoom` (`5FE07BCE`, the one RTPC and layer-crossfade parameter of every ambience and weather
   bank), `Time_in_Game`, `User_Volume_Ambient_SFX`, `User_Volume_Music`, `User_Volume_SFX`, `User_Volume_VO`, `User_Volume_UI`,
   `Footstep_Volume`, `Building_Integrity`, `Intensity`; what the game sets them to is in [audio.md](../audio.md#game-parameters-and-states).

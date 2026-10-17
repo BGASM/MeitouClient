@@ -76,6 +76,7 @@ use every rendered triangle as collision or infer PhysX actor dynamics from appe
 | 23, 24, 25, 26 | `passable` parts and every part of a `path mode` IGNORE building, by the building's floor (also FUN_1400dfb80: floor + 23) |
 | 27 | `is unwalkable roof` parts |
 | + 14 | added while the building is under construction and its progress is below `build threshold` × the total (so floor-0 parts become 23, like passable ones) |
+| 2 | the terrain (Observed: the ground-height rays' masks `0x204` and `0x4004` pair it with floors 9 or foliage 14; the interior-ambience ray `0x2004` is 2 + 13, [audio.md](../audio.md#interiors)) |
 | 3, 4 | other physics objects (items, FUN_1407626e0, FUN_1407e7460); not used by the navmesh |
 
 ### Shape to triangles (Observed, FUN_1403c1cf0)

@@ -30,7 +30,7 @@ Project rules: [AGENTS.md](AGENTS.md). Engine constraints: [DECISIONS.md](DECISI
 | Saves | Restore towns, NPC squads and world state beyond the player's squad; preserve original save compatibility. [Save format](docs/formats/save.md), [runtime mapping](docs/simulation.md#saves). |
 | UI | Full control, font, mod and interaction fidelity; runtime code-module loading. [Parity](docs/faithful-ui-parity.md), [native UI](docs/native-ui.md). |
 | Physics | Thrown bodies, physics props, character collision; ragdoll gaps in [simulation](docs/simulation.md#ragdolls). [Collision](docs/formats/collision.md). |
-| Audio | The callers: sound effects and events (footsteps, combat, UI), speech and voices, interiors, point emitters (the engine for them is done). [Audio](docs/audio.md). |
+| Audio | The callers still missing: the sounds of doors, machines and effects, building floors as footstep surfaces, and the task and interface sounds whose trigger Meitou lacks (shackles, ground items, prospecting, research, the biome banner). [Audio](docs/audio.md). |
 
 ## Rendering
 

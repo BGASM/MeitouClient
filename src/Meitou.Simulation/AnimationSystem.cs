@@ -19,6 +19,8 @@ public sealed class CharacterAnimation
     {
         public int Definition;
         public float Time, Weight, Target;
+        /// <summary>The clip's length in seconds as the character's skeleton has it (set while the time advances; derived, not hashed): the sound events' fractions need it.</summary>
+        public float Length;
     }
 
     public readonly Layer[] Layers = new Layer[MaxLayers];
@@ -420,6 +422,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             layer.Weight = layer.Weight < layer.Target ? MathF.Min(layer.Weight + step, layer.Target) : MathF.Max(layer.Weight - step, layer.Target);
             float before = layer.Time;
             float length = lengths.Of(d.Clip);
+            layer.Length = length;
             bool synched = d.Synchs && d.MoveSpeed != 0;
             if (layer.Definition == lift) layer.Time = liftTime;
             else if (layer.Definition == technique) layer.Time = fight.Progress * length;   // the combat system's timing: the blow lands at its frame
@@ -659,7 +662,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             if (layer.Weight <= 0) continue;
             var d = Library.Definitions[layer.Definition];
             float scale = d.Area switch { AnimationArea.Lower => lowerScale, AnimationArea.Overlay => 1, _ => upperScale };
-            list[n++] = new AnimationLayer(d.Name, layer.Time, layer.Weight * scale);
+            list[n++] = new AnimationLayer(d.Name, layer.Time, layer.Weight * scale) { Length = layer.Length, Definition = layer.Definition };
         }
         return list;
     }
