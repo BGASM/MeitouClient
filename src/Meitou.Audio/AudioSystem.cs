@@ -1,5 +1,6 @@
 using Meitou.Content;
 using Meitou.Data.Audio;
+using Meitou.Data.World;
 
 namespace Meitou.Audio;
 
@@ -52,6 +53,37 @@ public sealed class AudioSystem : IDisposable
             return null;
         }
         return new AudioSystem(player, output, music);
+    }
+
+    /// <summary>
+    /// Feeds the ambience and the music the frame's state the way the game's camera update does (docs/audio.md): <paramref name="region"/> is the
+    /// weather region under the camera's pivot (null: none), <paramref name="weather"/> the weather at the camera (null: clear), <paramref name="hour"/>
+    /// the game hour against <paramref name="sunrise"/> and <paramref name="sunset"/>, <paramref name="eyeAboveGround"/> the eye's height over the
+    /// ground under it and <paramref name="realSeconds"/> the real time since the last call.
+    /// </summary>
+    public void Update(WeatherRegion? region, WeatherState? weather, double hour, double sunrise, double sunset, float eyeAboveGround, double realSeconds)
+    {
+        Ambience.Update(new AmbienceInput
+        {
+            Biome = region?.Def.Ambience,
+            Hour = ((hour % 24) + 24) % 24,
+            Sunrise = (float)sunrise,
+            Sunset = (float)sunset,
+            EyeAboveGround = eyeAboveGround,
+            Rain = weather?.Rain ?? 0,
+            Wind = weather is null ? 0 : weather.Weather.WindIntensity * weather.WindSpeed * 0.01f,
+            RealSeconds = realSeconds,
+        });
+        Music.Update(region?.Def.Music);
+    }
+
+    /// <summary>One line for a statistics overlay: the biome heard, day or night, rain, wind, voices and clips, and the music (the one remembered, seconds until its timer posts it, music voices).</summary>
+    public string StatsLine()
+    {
+        string music = Music.Remembered is null ? "nothing to post" : Music.Volume <= 0 ? "volume 0" : $"next in {Math.Max(0, Music.SecondsToNext):0} s";
+        string biome = Ambience.Biome is { } heard ? $"{heard} {(Ambience.Night ? "night" : "day")}" : "no biome";
+        return $"{biome}{(Ambience.Raining ? ", rain" : "")}{(Ambience.Windy ? ", wind" : "")}: {Player.Stats.Voices} voices, {Player.Stats.Clips} clips loaded; " +
+            $"music {(Music.TitleScreen ? "main theme" : Music.Biome ?? "none")}, {music}, {Player.MusicVoices} voices";
     }
 
     /// <summary><c>settings.cfg</c>'s <c>Ambient volume</c> (0..1); 0.5 when missing or unreadable.</summary>

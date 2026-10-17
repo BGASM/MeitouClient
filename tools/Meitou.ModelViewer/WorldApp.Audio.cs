@@ -16,27 +16,7 @@ static partial class WorldApp
         var target = camera.Target;
         var eye = camera.Eye;
         var weather = gpu.Weather;
-        var state = weather?.State;
-        var region = weather?.World.RegionAt(target.X, target.Z);
-        audio.Ambience.Update(new AmbienceInput
-        {
-            Biome = region?.Def.Ambience,
-            Hour = ((hour % 24) + 24) % 24,
-            Sunrise = scene.Clock.Sunrise,
-            Sunset = scene.Clock.Sunset,
-            EyeAboveGround = eye.Y - gpu.Terrain.HeightAt(eye.X, eye.Z),
-            Rain = state?.Rain ?? 0,
-            Wind = state is null ? 0 : state.Weather.WindIntensity * state.WindSpeed * 0.01f,
-            RealSeconds = realSeconds,
-        });
-        audio.Music.Update(region?.Def.Music);
-    }
-
-    /// <summary>F11: the music the director remembers, when its timer posts it next, and the music voices playing.</summary>
-    static string MusicStats(AudioSystem audio)
-    {
-        var music = audio.Music;
-        string next = music.Remembered is null ? "nothing to post" : music.Volume <= 0 ? "volume 0" : $"next in {Math.Max(0, music.SecondsToNext):0} s";
-        return $"music {music.Biome ?? "none"}, {next}, {audio.Player.MusicVoices} voices";
+        audio.Update(weather?.World.RegionAt(target.X, target.Z), weather?.State, hour, scene.Clock.Sunrise, scene.Clock.Sunset,
+            eye.Y - gpu.Terrain.HeightAt(eye.X, eye.Z), realSeconds);
     }
 }

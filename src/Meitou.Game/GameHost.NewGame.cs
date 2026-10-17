@@ -27,6 +27,7 @@ sealed partial class GameHost
             loadedSave = null; preparedBase = null; worldEpoch++;
             SettleNewWorld();
             player.ShowMainMenu();
+            AudioMainMenu();
             return null;
         }));
     }
@@ -39,6 +40,7 @@ sealed partial class GameHost
         if (!SavesAvailable(out string why) || Busy()) { player.Notice(why.Length > 0 ? why : "Save or load still in progress", true); return; }
         if (scene.Database is not { } database || NewGameStart.Find(NewGameStart.LoadAll(database), id) is not { } chosen) return;
         StandardSystemSet? built = null;
+        AudioGameStarts();
         StartSceneLoad(player.TitleOpen,
             Stage("build", () =>
             {

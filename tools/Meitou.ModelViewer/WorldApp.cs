@@ -459,7 +459,7 @@ static partial class WorldApp
                 if (gpu.Post is { } hazy && (hazy.HeatHazeAmount > 0 || gpu.HeatHazeTarget > 0))
                     stats.Add($"heat haze   {hazy.HeatHazeAmount:0.00} (target {gpu.HeatHazeTarget:0.00}, weather {WorldStats.WeatherName(gpu)})" + (hazy.HeatHazeRuns ? "" : hazy.HasHeatHaze ? ", off" : ", no textures"));
                 WorldStats.AddWeather(stats, gpu);
-                if (audio is not null) stats.Add($"audio       {(audio.Ambience.Biome is { } heard ? $"{heard} {(audio.Ambience.Night ? "night" : "day")}" : "no biome")}{(audio.Ambience.Raining ? ", rain" : "")}{(audio.Ambience.Windy ? ", wind" : "")}: {audio.Player.Stats.Voices} voices, {audio.Player.Stats.Clips} clips loaded; {MusicStats(audio)}");
+                if (audio is not null) stats.Add($"audio       {audio.StatsLine()}");
                 stats.Add($"camera      {t.X:0}, {t.Y:0}, {t.Z:0}, zone {WorldLayout.ZoneOf(t.X, t.Z)}");
                 stats.Add($"terrain     {gpu.Terrain.DrawnChunks} chunks, {gpu.Terrain.DrawnTriangles / 1000}k tris" + (gpu.Streamer is { Pending: > 0 } st ? $", loading {st.Pending}" : ""));
                 if (gpu.Objects is { } ob && render.Objects)

@@ -46,6 +46,20 @@ public sealed class AmbienceDirector(WwisePlayer player)
         player.LoadBank("SFX_Amb_Indoors_Bank");
     }
 
+    /// <summary>
+    /// Ends the beds and returns to the state before the first update, so the next one enters its biome afresh (the game never does this; Meitou
+    /// does when the player returns to the main menu).
+    /// </summary>
+    public void Silence()
+    {
+        if (state >= 0) player.Post($"Leave_{(Ambience)(state & 0xFF)}");
+        if (raining) player.Post("Weather_Rain_End");
+        if (windy) player.Post("Weather_Wind_End");
+        state = -1;
+        day = null;
+        raining = windy = false;
+    }
+
     public void Update(in AmbienceInput input)
     {
         // Day strictly between sunrise and sunset; Time_in_Game (the state group) changes only when that flips.

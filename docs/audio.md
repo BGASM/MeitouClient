@@ -2,7 +2,7 @@
 
 How Kenshi drives its sound, and how Meitou plays it. The bank and WEM formats are in [formats/wwise-bnk.md](formats/wwise-bnk.md); this
 page is the runtime: what the game sends to Wwise, and Meitou's player (`src/Meitou.Audio`). Only the ambience (biome beds, weather beds) and the music
-play so far; interiors, effects' and objects' emitters, footsteps, combat, UI and voices do not.
+play so far (in the viewer and the game); interiors, effects' and objects' emitters, footsteps, combat, UI and voices do not.
 
 The facts about the exe come from its decompiled camera update and audio manager, traced 2026-10-10 (functions named per claim). Facts
 about the banks are checked against the 24 banks of the Steam install.
@@ -120,7 +120,7 @@ other buses are alike (SFX, UI: half at 65; Music: half at 50 and −4 dB bus vo
 
 ## Meitou's player
 
-`src/Meitou.Audio`: `AudioSystem` wires these together for a host (the viewer); any missing part (no exe library, no device) leaves the
+`src/Meitou.Audio`: `AudioSystem` wires these together for a host (the viewer, the game); any missing part (no exe library, no device) leaves the
 host running without sound.
 
 - `WwiseCodebookLibrary.Load` reads the codebook library from `%LOCALAPPDATA%\Meitou\audio\codebooks.bin` (72 KB), made from the exe the
@@ -166,7 +166,7 @@ host running without sound.
   first change unloads `MT_Music_Bank`); a real-time stopwatch timer (first deadline construction + F, then now + F × (0.8 + 0.6 r)) posts
   the remembered event when set and `Music volume` is above 0, moving the deadline either way; no `_Stop` is ever posted; a biome bank
   not current for 60 s is unloaded. `StartMainTheme` (loads `MT_Music_Bank`, posts `Boot_Up_Game`, pauses the timer) and
-  `OnCreateOrLoadGame` (posts `Create_or_Load_Game`, resumes it) are for a host with a title screen; the viewer has none and does not call
+  `OnCreateOrLoadGame` (posts `Create_or_Load_Game`, resumes it) are for a host with a title screen (the game, see below); the viewer has none and does not call
   them. `Music frequency` (minutes, default 5) and `Music volume` (default 0.5, sent as `User_Volume_Music` × 100) come from `settings.cfg`.
 
 ### Volume curves (Observed)
@@ -188,16 +188,31 @@ which is what the offline render uses unless told.
 
 ### Not done
 
-Interiors (needs the building raycast), point emitters
+Pause ducking (`Pause_Game` / `Resume_Game` live in `SFX_General_Bank`, which is never loaded, and the player skips the bus-volume actions
+`SetBusVolume` / `ResetBusVolume`), audio sliders in the game's settings, interiors (needs the building raycast), point emitters
 (`Start_Emitter` / `Stop_Emitter` with the `Emitters` switch, AMBIENT_SOUND records), effects and reverb (aux buses), attenuation curves,
-voice limits, the radio's 3D attenuation (type 14 is not decoded), the main theme in the viewer (no title screen), and unloading ambience banks left behind (they stay loaded: about 5
+voice limits, the radio's 3D attenuation (type 14 is not decoded), and unloading ambience banks left behind (they stay loaded: about 5
 to 14 MB of Ogg each; the music banks unload as above).
 
-## In the viewer
+## In the viewer and the game
 
-On by default; `--no-audio` turns it off, `--audio-gain <dB>` raises or lowers everything. The console prints the device; F11's
-statistics show the biome, day or night, rain, wind and the number of voices, and the music: the remembered biome music, seconds until the timer
-next posts it, music voices. Ambient and music volume and `Music frequency` come from the install's `settings.cfg`.
+On by default; `--no-audio` turns it off, `--audio-gain <dB>` raises or lowers everything. The console (the game's `log.txt`) prints the device, or
+why there is none: the host then runs silently. F11's statistics show the biome, day or night, rain, wind and the number of voices, and the music: the
+main theme or the remembered biome music, seconds until the timer next posts it, music voices (`AudioSystem.StatsLine`). Ambient and music volume
+and `Music frequency` come from the install's `settings.cfg` once at start (the game's own settings have no audio sliders). Both hosts feed
+`AudioSystem.Update` each frame (region under the pivot, weather, hour, sunrise and sunset, eye height).
+
+- **Viewer** (`WorldApp.Audio.cs`): pivot = the camera's target, eye = its position, the viewer's hour; no title screen, so no main theme.
+- **Game** (`GameHost.Audio.cs`): the audio is made on a worker while the window and the world load. Pivot = `camera.Target` and eye =
+  `camera.Eye` (the strategy or free camera as drawn), hour, sunrise and sunset from the game clock (`session.Clock`), region and weather from the
+  weather scheduler (`gpu.Weather`).
+  - **Title screen.** `StartMainTheme` when the world is up and the title is open (either UI mode: the faithful title or the Meitou game menu).
+    While the title is open the host does not update the ambience or the music (**Unknown** whether the original's camera update runs there; if it did, its first biome call would unload the theme's bank), so no `Enter_` event or
+    music-bank unload cuts the theme. A new game or a load posts `Create_or_Load_Game` (5 s fade) as it starts; `--new-game` and `--load` skip the
+    title and start no theme. Importing is not offered by the game's menu.
+  - **Return to the main menu** (Meitou's choice: the original has no such path): the ambience is ended (`AmbienceDirector.Silence`: `Leave_<biome>`,
+    rain and wind end) and `StartMainTheme` runs again, so the menu sounds as at start-up; the next game's first update re-enters its biome.
+  - Not in screenshots, the headless paths or tests: only the interactive run creates the audio.
 
 ## Tools
 

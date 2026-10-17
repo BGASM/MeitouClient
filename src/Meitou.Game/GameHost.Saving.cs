@@ -164,6 +164,7 @@ sealed partial class GameHost
         readingFolder = folder;
         Task<SaveGame>? read = null;
         string summary = "";
+        AudioGameStarts();
         StartSceneLoad(player.TitleOpen,
             Stage("read", () => read = Task.Run(() => SaveGame.Load(folder))),
             Stage("build", () => SwapInSave(read!, interactive: true, out summary)),
