@@ -117,35 +117,51 @@ public static partial class SaveCapture
         var table = world.Characters;
         var factions = new Dictionary<string, SaveFaction>(StringComparer.Ordinal);
         foreach (var f in game.Factions) factions.TryAdd(f.Id, f);
+        void Write(WildSite site, string templateId, int factionIndex, long money, string? package, List<(CharacterCold Cold, Vector3 Position, float Yaw, CharacterId Id, bool Leader)> members)
+        {
+            var faction = data.Factions[factionIndex];
+            factions.TryGetValue(faction.Id, out var state);
+            var at = members.First(m => m.Leader).Position;
+            var platoon = builder.AddPlatoon(FreshName(game, state, faction.Name), faction.Name, faction.Id, templateId, at, (int)Math.Clamp(money, int.MinValue, int.MaxValue));
+            var record = platoon.Record;
+            record.Ints["sqt"] = 2;
+            record.Bools["persistent"] = false;
+            if (site.Kind == WildKind.Nest && site.Nest is { } nest && nests.TryGetValue(site.Index, out var hand))
+            {
+                record.Strings["basetown"] = nest.Id;
+                hand.Write(record, "hometown");
+            }
+            WriteMapArea(record, data, at);
+            if (package is not null) record.Strings["currentPackage"] = package;
+            foreach (var m in members)
+            {
+                int f = m.Cold.Faction;
+                string owner = f >= 0 && f < data.Factions.Count ? data.Factions[f].Id : faction.Id;
+                WriteCharacter(builder, world, data, options, clock, buildings, races, platoon, null, m.Cold, m.Position, m.Yaw, m.Id, owner, m.Leader, orders: false);
+            }
+            SetCharCount(platoon);
+        }
+
         foreach (var site in population.WildSites)
+        {
             foreach (int squadId in population.WildSquadsOf(site.Index))
             {
                 if (world.Squads.Find(squadId) is not { } squad || squad.Faction < 0 || squad.Faction >= data.Factions.Count) continue;
                 var alive = squad.Members.Where(m => table.IsAlive(m) && table.Cold(m.Slot) is { IsPlayer: false, DiedTick: < 0, Save: null }).ToList();
                 if (alive.Count == 0) continue;
-                var faction = data.Factions[squad.Faction];
-                factions.TryGetValue(faction.Id, out var state);
                 var leader = alive.Contains(squad.Leader) ? squad.Leader : alive[0];
-                var at = table.Previous[leader.Slot].Position;
-                var platoon = builder.AddPlatoon(FreshName(game, state, faction.Name), faction.Name, faction.Id, squad.TemplateId, at, (int)Math.Clamp(squad.Money, int.MinValue, int.MaxValue));
-                var record = platoon.Record;
-                record.Ints["sqt"] = 2;
-                record.Bools["persistent"] = false;
-                if (site.Kind == WildKind.Nest && site.Nest is { } nest && nests.TryGetValue(site.Index, out var hand))
-                {
-                    record.Strings["basetown"] = nest.Id;
-                    hand.Write(record, "hometown");
-                }
-                WriteMapArea(record, data, at);
-                if (squad.Ai?.Current?.Id is { } package) record.Strings["currentPackage"] = package;
-                foreach (var id in alive)
-                {
-                    int f = table.Cold(id.Slot)!.Faction;
-                    string owner = f >= 0 && f < data.Factions.Count ? data.Factions[f].Id : faction.Id;
-                    WriteCharacter(builder, world, data, options, clock, buildings, races, platoon, null, id, owner, id == leader, orders: false);
-                }
-                SetCharCount(platoon);
+                Write(site, squad.TemplateId, squad.Faction, squad.Money, squad.Ai?.Current?.Id,
+                    [.. alive.Select(id => (table.Cold(id.Slot)!, table.Previous[id.Slot].Position, table.Previous[id.Slot].Yaw, id, id == leader))]);
             }
+            // Kept while the site is unloaded (the Meitou KeepWild switch): their characters as they were stored.
+            foreach (var k in population.KeptWildOf(site.Index))
+            {
+                if (k.Faction < 0 || k.Faction >= data.Factions.Count || k.Stored.Members.Count == 0) continue;
+                bool hasLeader = k.Stored.Members.Any(m => m.Leader);
+                Write(site, k.TemplateId, k.Faction, k.Money, k.Stored.Package,
+                    [.. k.Stored.Members.Select((m, i) => (m.Cold, m.Position, m.Yaw, CharacterId.None, m.Leader || !hasLeader && i == 0))]);
+            }
+        }
     }
 
     /// <summary>A new platoon's region: <c>map area sid</c> = the BIOME_GROUP of the cell it stands in, <c>map area name</c> its name (as every platoon of the samples has).</summary>

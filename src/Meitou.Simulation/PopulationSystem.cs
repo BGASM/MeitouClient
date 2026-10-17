@@ -64,6 +64,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         OffscreenFights = this.settings.OffscreenFights;
         OffscreenHealing = this.settings.OffscreenHealing;
         CampaignAncestorsOnce = this.settings.CampaignAncestorsOnce;
+        KeepWild = this.settings.KeepWild;
         live = new WorldStates(data.Db, data.Relations);
         if (!this.settings.Background) return;
         work = [];
@@ -77,6 +78,8 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
     public bool OffscreenHealing { get; set; }
     /// <summary>The campaign inheritance switch (<see cref="PopulationSettings.CampaignAncestorsOnce"/>), changed live by the host.</summary>
     public bool CampaignAncestorsOnce { get; set; }
+    /// <summary>The wild-squad switch (<see cref="PopulationSettings.KeepWild"/>), changed live by the host.</summary>
+    public bool KeepWild { get; set; }
 
     readonly WorldStates live;
     /// <summary>The world states the population's spawns and campaigns read: the data's fixed ones when it has any, else the live ones of this world (<see cref="WorldStates"/>).</summary>

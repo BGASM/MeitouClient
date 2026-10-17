@@ -99,7 +99,7 @@ public sealed partial class PopulationSystem
     /// </summary>
     void StepOffscreen(World world, Platoon p, float dt)
     {
-        if (!KeepRoamers && !Wanted(p)) p.OrphanSeconds += dt;
+        if (!(p.Wild ? KeepWild : KeepRoamers) && !Wanted(p)) p.OrphanSeconds += dt;
         else p.OrphanSeconds = 0;
         if (p.OrphanSeconds <= OrphanLimitSeconds) StandIn(world, p, dt);
     }
@@ -269,8 +269,8 @@ public sealed partial class PopulationSystem
         else if (p.UnloadAtTick < 0) p.UnloadAtTick = world.Tick + (long)Math.Ceiling((p.Pinned ? settings.UnloadGraceSeconds : settings.RoamUnloadGraceSeconds) / world.TickSeconds);
         else if (world.Tick >= p.UnloadAtTick)
         {
-            // Faithful: a platoon the original does not keep (not a town's own, not in a campaign) is despawned as it leaves.
-            if (!KeepRoamers && !p.Pinned && p.Campaign is null)
+            // Faithful: a platoon the original does not keep (not a town's own, not in a campaign) is despawned as it leaves; a save's wild one by the wild switch.
+            if (!(p.Wild ? KeepWild : KeepRoamers) && !p.Pinned && p.Campaign is null)
             {
                 Despawn(world, p);
                 return;

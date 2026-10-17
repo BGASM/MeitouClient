@@ -203,6 +203,8 @@ public sealed class PopulationSettings
     public bool OffscreenHealing { get; init; } = true;
     /// <summary>Meitou: a campaign's <c>inherits from</c> ancestors count once. Faithful: twice, as the original applies them (doubled squad weights and follow-up chances).</summary>
     public bool CampaignAncestorsOnce { get; init; } = true;
+    /// <summary>Meitou: a wild site keeps its squads' characters while it is unloaded and makes the same ones again. Faithful: they are dropped (and a save's wild platoon despawned on leaving), as the original.</summary>
+    public bool KeepWild { get; init; } = true;
 
     // ---- faction campaigns (docs/game/factions-squads-towns.md "Campaigns") ----
     /// <summary>The original's <c>raidFrequencyMult</c> (settings.cfg, "Town raid events: frequency" 0.25 to 3; default 1): times the roll chance.</summary>

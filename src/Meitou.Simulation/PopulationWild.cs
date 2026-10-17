@@ -53,6 +53,15 @@ public sealed partial class PopulationSystem
     readonly SortedSet<int> wildLoaded = [];
     readonly List<int> wildBuffer = [];
 
+    /// <summary>The squads an unloaded wild site keeps as their characters (the Meitou <see cref="KeepWild"/> switch), by site; made again, where they stood, when it loads.</summary>
+    readonly SortedDictionary<int, List<KeptWild>> keptWild = [];
+
+    /// <summary>A kept wild squad: its characters, what it was made from and the circle it keeps to.</summary>
+    internal sealed record KeptWild(StoredSquad Stored, string TemplateId, int Faction, long Money, int SpawnSize, Vector2 Centre, float Radius);
+
+    /// <summary>The squads an unloaded wild site keeps (empty: none, or the site is loaded).</summary>
+    internal IReadOnlyList<KeptWild> KeptWildOf(int site) => keptWild.TryGetValue(site, out var kept) ? kept : [];
+
     /// <summary>A wild site's squads, built. <paramref name="Rolls"/>: the nest rolls used (the next top-up's keys follow them); <paramref name="Exhausted"/>: a nest roll found no entry that fits or weighs anything.</summary>
     sealed record BuiltWild(int Site, long LoadId, Vector2 Centre, List<BuiltSquad> Squads, int Rolls = 0, bool Exhausted = false, bool TopUp = false);
 
@@ -142,9 +151,16 @@ public sealed partial class PopulationSystem
 
     WildHold? HoldOf(World world, int site)
     {
-        if (world.Saved is null) return null;
         WildHold? hold = null;
         int squads = 0, members = 0;
+        foreach (var k in KeptWildOf(site))
+        {
+            hold ??= new WildHold(0, 0, new Dictionary<string, int>(StringComparer.Ordinal));
+            squads++;
+            members += k.Stored.Members.Count;
+            hold.Templates[k.TemplateId] = hold.Templates.GetValueOrDefault(k.TemplateId) + 1;
+        }
+        if (world.Saved is null) return hold is null ? null : hold with { Squads = squads, Members = members };
         foreach (var p in world.Platoons.All)
         {
             if (p.Saved is not { Wild: not null } sp || sp.WildSite != site) continue;
@@ -299,10 +315,43 @@ public sealed partial class PopulationSystem
             if (state.UnloadAtTick < 0) state.UnloadAtTick = world.Tick + grace;
             else if (world.Tick >= state.UnloadAtTick)
             {
-                PayNestDespawn(world, wildSites[i], state);
+                if (KeepWild) KeepWildSquads(world, i, state);
+                else PayNestDespawn(world, wildSites[i], state);
                 Drop(world, state);
                 wildLoaded.Remove(i);
             }
+        }
+    }
+
+    /// <summary>
+    /// The Meitou <see cref="KeepWild"/> unload: each squad of the site with someone alive keeps its characters (<see cref="StoredSquad"/>), so the site makes the same ones,
+    /// wounds and all, where they stood when it loads again; nothing leaves a nest's pool. Faithful: they are dropped and a nest pays for the hurt ones (<c>PayNestDespawn</c>).
+    /// </summary>
+    void KeepWildSquads(World world, int site, SiteState state)
+    {
+        List<KeptWild>? kept = null;
+        foreach (int id in state.Squads)
+        {
+            if (world.Squads.Find(id) is not { } squad) continue;
+            var stored = new StoredSquad { Name = squad.Name, Shop = squad.Shop, Package = squad.Ai?.Current?.Id };
+            Store(world, squad, stored);
+            world.Squads.Remove(id);
+            if (stored.Members.Count == 0) continue;
+            (kept ??= []).Add(new KeptWild(stored, squad.TemplateId, squad.Faction, squad.Money, squad.SpawnSize, squad.HomeCentre, squad.HomeRadius));
+        }
+        if (kept is not null) keptWild[site] = kept;
+    }
+
+    /// <summary>The site's kept squads into the world (serial, as it loads), counted as its own.</summary>
+    void SpawnKeptWild(World world, int site, SiteState state)
+    {
+        if (!keptWild.Remove(site, out var kept)) return;
+        foreach (var k in kept)
+        {
+            if (OffscreenHealing) RecoverStored(world, k.Stored);
+            if (SpawnKept(world, k.Stored, k.TemplateId, k.Faction, -1, -1, k.Stored.Anchor, k.Centre, k.Radius, k.SpawnSize) is not { } squad) continue;
+            squad.Money = k.Money;
+            state.Squads.Add(squad.Id);
         }
     }
 
@@ -359,6 +408,7 @@ public sealed partial class PopulationSystem
         state.Made = (b.TopUp ? state.Made : 0) + b.Rolls;
         var site = wildSites![b.Site];
         if (site.Kind == WildKind.Nest && (b.Squads.Count > 0 || site.SaveInstance is not null)) wildCentres[b.Site] = b.Centre;
+        if (!b.TopUp) SpawnKeptWild(world, b.Site, state);
         foreach (var built in b.Squads)
         {
             var squad = SpawnSquad(world, built, null, 0);

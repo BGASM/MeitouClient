@@ -115,7 +115,7 @@ The original's rules: [off-screen world](game/factions-squads-towns.md#off-scree
 campaign squads off screen, moves them in straight lines (roads for long trips), never fights or heals there, and drives the rest by clock-based
 budgets. The tier follows it, with Meitou choices marked.
 
-Four Faithful/Meitou switches (the fourth, campaign inheritance, under Campaigns below; `PopulationSettings`, live on `PopulationSystem`; Advanced settings, Meitou on by default; `PopulationOffscreen.cs`):
+Five Faithful/Meitou switches (the fifth, campaign inheritance, under Campaigns below; `PopulationSettings`, live on `PopulationSystem`; Advanced settings, Meitou on by default; `PopulationOffscreen.cs`):
 - **Squads keep their people** (`KeepRoamers`). Meitou: a roaming squad the population made keeps its characters as a `StoredSquad` from the
   first time it leaves, travels on as them and comes back as them (moved along with its stand-in); saves write it as a new platoon (`sqt` 2,
   `persistent` false). Faithful (the original): a platoon that is not a town's own is despawned as it leaves, and a stand-in out of range for
@@ -128,6 +128,11 @@ Four Faithful/Meitou switches (the fourth, campaign inheritance, under Campaigns
 - **Healing far away** (`OffscreenHealing`). Meitou: when a kept squad comes back, `MedicalState.Recover` steps the hours it was away in one go:
   wounds treated and closed, flesh healing at the part rate, stun gone, blood back at the resting rate, a KO ended if vital parts allow; no
   hunger, degeneration or death. Faithful: it comes back as it left.
+- **Wild squads stay** (`KeepWild`). Meitou: a wild site (sector or nest) that unloads keeps each squad with someone alive as a `StoredSquad`
+  (nothing leaves a nest's pool) and makes them first, where they stood, when it loads; they count against the site like a save's wild
+  platoons, heal as above, and a save writes them as wild platoons. Faithful (the original): dropped, a nest paying for its hurt squads, and a
+  save's wild platoon despawned on leaving (the orphan timer). **Observed** (headless, synthetic sectors and nests): Meitou keeps 12 squads and
+  brings back a renamed character; Faithful remakes the squads from the seed.
 
 Implemented (`PopulationRoaming.cs`):
 
@@ -201,7 +206,6 @@ the player has one; requests (victory/loss chains, ally help) can follow.
 
 Proposed (awaiting review):
 
-- **Who**: campaign squads join the town and roaming squads. Wild and nest squads are dropped, as in the original.
 - **Jobs**: the original's destinations (the blackboard's target, GOHOME's home within 2000) and roads.
 
 ## Player

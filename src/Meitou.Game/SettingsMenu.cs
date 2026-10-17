@@ -150,6 +150,9 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
                 Toggle: new("Fights far away", () => config.OffscreenFights, v => { config.OffscreenFights = v; OffscreenChanged?.Invoke(); }, Remaster: true, OnOff: true)));
             result.Add(new("Healing far away", "A squad coming back into the area around your squads has healed for the time it was away. In the game it comes back as it left.",
                 Toggle: new("Healing far away", () => config.OffscreenHealing, v => { config.OffscreenHealing = v; OffscreenChanged?.Invoke(); }, Remaster: true, OnOff: true)));
+            result.Add(new("Wild squads stay", "Animals, bandits and other wild squads keep their characters, wounds and places when the area around them unloads, and are there again when you come back. "
+                + "In the game they are removed and new ones are made.",
+                Toggle: new("Wild squads stay", () => config.KeepWild, v => { config.KeepWild = v; OffscreenChanged?.Invoke(); }, Remaster: true, OnOff: true)));
             result.Add(new("Raids as written", "Raid and campaign data that builds on a base campaign counts the base's squads and follow-up campaigns once. "
                 + "The game counts them twice, so inherited squads come up more often and follow-up raids are about twice as likely.",
                 Toggle: new("Raids as written", () => config.CampaignAncestorsOnce, v => { config.CampaignAncestorsOnce = v; OffscreenChanged?.Invoke(); }, Remaster: true, OnOff: true)));
@@ -372,7 +375,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         AttackSlotsSlider.Set(UserConfig.MeitouAttackSlots);
         config.LateDefences = true;
         LateDefencesChanged?.Invoke(true);
-        config.KeepRoamers = config.OffscreenFights = config.OffscreenHealing = config.CampaignAncestorsOnce = true;
+        config.KeepRoamers = config.OffscreenFights = config.OffscreenHealing = config.CampaignAncestorsOnce = config.KeepWild = true;
         OffscreenChanged?.Invoke();
         config.HardwareMouse = false;
         config.HoverOutline = true;

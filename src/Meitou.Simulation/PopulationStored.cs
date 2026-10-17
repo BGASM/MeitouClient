@@ -83,25 +83,32 @@ public sealed partial class PopulationSystem
         if (stored.Members.Count == 0) return null;
         var site = data.Sites[p.Origin];
         float radius = site.Town.SizeRadius * site.Town.TownRadiusMult;
+        return SpawnKept(world, stored, p.TemplateId, p.Faction, p.Origin, p.Id, p.Position, new Vector2(site.Position.X, site.Position.Z), Math.Max(radius * 0.8f, 40), p.Size);
+    }
+
+    /// <summary>Stored characters into the world as a squad of <paramref name="town"/> (-1: a wild one) homed at the given circle, moved along when <paramref name="position"/> is not where they were stored.</summary>
+    Squad? SpawnKept(World world, StoredSquad stored, string templateId, int faction, int town, int platoonId, Vector2 position, Vector2 homeCentre, float homeRadius, int size)
+    {
+        if (stored.Members.Count == 0) return null;
         var table = world.Characters;
         var squad = new Squad
         {
             Id = world.Squads.NextId(),
-            TemplateId = p.TemplateId,
+            TemplateId = templateId,
             Name = stored.Name,
-            Faction = p.Faction,
-            Town = p.Origin,
-            PlatoonId = p.Id,
-            Pinned = stored.Pinned,
-            Position = new Vector3(p.Position.X, world.Walkability.GroundHeight(p.Position.X, p.Position.Y), p.Position.Y),
-            HomeCentre = new Vector2(site.Position.X, site.Position.Z),
-            HomeRadius = Math.Max(radius * 0.8f, 40),
+            Faction = faction,
+            Town = town,
+            PlatoonId = platoonId,
+            Pinned = stored.Pinned && town >= 0,
+            Position = new Vector3(position.X, world.Walkability.GroundHeight(position.X, position.Y), position.Y),
+            HomeCentre = homeCentre,
+            HomeRadius = homeRadius,
             HomeBuilding = stored.HomeBuilding,
             Shop = stored.Shop,
         };
         // A stand-in that travelled since takes its members along, each on walkable ground (else at the stand-in).
         var walk = world.Walkability;
-        var delta = p.Position - stored.Anchor;
+        var delta = position - stored.Anchor;
         bool moved = delta.LengthSquared() > 1;
         bool hasLeader = stored.Members.Any(m => m.Leader);
         foreach (var m in stored.Members)
@@ -113,7 +120,7 @@ public sealed partial class PopulationSystem
             if (moved)
             {
                 float x = at.X + delta.X, z = at.Z + delta.Y;
-                if (!walk.IsWalkable(x, z)) (x, z) = WalkableSpots.Nearest(walk, new Vector2(x, z), out var near, 32) ? (near.X, near.Y) : (p.Position.X, p.Position.Y);
+                if (!walk.IsWalkable(x, z)) (x, z) = WalkableSpots.Nearest(walk, new Vector2(x, z), out var near, 32) ? (near.X, near.Y) : (position.X, position.Y);
                 at = new Vector3(x, walk.GroundHeight(x, z), z);
             }
             var hot = new CharacterHot
@@ -132,7 +139,7 @@ public sealed partial class PopulationSystem
             squad.Members.Add(id);
             if (leads && squad.Leader.IsNone) squad.Leader = id;
         }
-        squad.SpawnSize = Math.Max(p.Size, squad.Members.Count);
+        squad.SpawnSize = Math.Max(size, squad.Members.Count);
         stored.Members.Clear();
         if (squad.Leader.IsNone) squad.Leader = squad.Members[0];
         var lead = table.Next[squad.Leader.Slot].Position;

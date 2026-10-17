@@ -126,18 +126,21 @@ public sealed partial class PopulationSystem
     /// Heals a platoon's kept characters for the game hours since they left the world (<see cref="MedicalState.Recover"/>), just before they are made again. Characters a save
     /// holds that were never in the world keep the save's state.
     /// </summary>
+    /// <summary>Heals stored characters for the game hours since they were stored (a platoon's, or a kept wild squad's).</summary>
+    void RecoverStored(World world, StoredSquad stored)
+    {
+        float hours = (world.Tick - stored.StoredTick) * BodySystem.HoursPerTick;
+        foreach (var m in stored.Members)
+            if (m.Cold is { Medical: { } medical, Race: { } race } cold)
+                medical.Recover(hours, new MedicalContext(data.Bodies.Constants, data.Bodies.Options, race) { Toughness = cold.Stats?.Toughness ?? 1, Strength = cold.Stats?.Strength ?? 50, Resting = true });
+        stored.StoredTick = world.Tick;
+    }
+
     void Recover(World world, Platoon p)
     {
         var constants = data.Bodies.Constants;
         var options = data.Bodies.Options;
-        if (p.Stored is { } stored)
-        {
-            float hours = (world.Tick - stored.StoredTick) * BodySystem.HoursPerTick;
-            foreach (var m in stored.Members)
-                if (m.Cold is { Medical: { } medical, Race: { } race } cold)
-                    medical.Recover(hours, new MedicalContext(constants, options, race) { Toughness = cold.Stats?.Toughness ?? 1, Strength = cold.Stats?.Strength ?? 50, Resting = true });
-            stored.StoredTick = world.Tick;
-        }
+        if (p.Stored is { } stored) RecoverStored(world, stored);
         else if (p.Saved is { StoredTick: >= 0 } saved)
         {
             float hours = (world.Tick - saved.StoredTick) * BodySystem.HoursPerTick;

@@ -905,8 +905,23 @@ public sealed partial class PopulationSystem : IStateHashed
 
     // ---- state hash ----
 
-    /// <summary>The managers' state, once any faction has started or queued a campaign (so worlds without one hash as before).</summary>
+    /// <summary>The war managers once any faction has started or queued a campaign, and the kept wild squads while there are any (so worlds without either hash as before).</summary>
     public void Hash(ref StateHasher h)
+    {
+        HashWars(ref h);
+        foreach (var (site, kept) in keptWild)
+        {
+            h.Add(site);
+            foreach (var k in kept)
+            {
+                h.Add(Rng.StableHash(k.TemplateId));
+                h.Add(k.Stored.Members.Count);
+                foreach (var m in k.Stored.Members) { h.Add(m.Position.X); h.Add(m.Position.Z); }
+            }
+        }
+    }
+
+    void HashWars(ref StateHasher h)
     {
         if (wars is null || !wars.Any(m => m.NextId > 0 || m.Requests.Count > 0)) return;
         foreach (var m in wars)
