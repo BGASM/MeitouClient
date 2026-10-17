@@ -29,6 +29,36 @@ public static class KenshiCamera
     public const float DefaultZoomSpeed = 125;
     /// <summary><c>settings.cfg</c> <c>camera speed</c> in the install (units not traced).</summary>
     public const float DefaultMoveSpeed = 500;
+    /// <summary>Zoom input of one wheel notch: the mouse reports 120 per notch and the camera divides by 100.</summary>
+    public const float WheelNotchInput = 1.2f;
+    /// <summary>Zoom input per second of a held <c>camera_zoom_in</c> / <c>camera_zoom_out</c> key (three times that with Shift).</summary>
+    public const float ZoomKeyRate = 5;
+    public const float ZoomKeyShiftFactor = 3;
+    /// <summary>The boom closes on the zoom step's target by <c>min(ZoomFollowRate · frame time, 1)</c> of the remaining distance per frame.</summary>
+    public const float ZoomFollowRate = 70;
+
+    /// <summary><c>camera speed</c> scaled by <c>boom / ZoomLengthDivisor</c> (no cap) is the pan speed in units per second.</summary>
+    public static float PanSpeed(float moveSpeed, float boom) => moveSpeed * boom / ZoomLengthDivisor;
+
+    /// <summary>The rotation and tilt keys' input per frame (the mouse's is its movement in pixels times <see cref="DefaultMouseSpeed"/>).</summary>
+    public const float YawKeyInput = 9;
+    public const float TiltKeyInput = 2;
+    /// <summary>Settings <c>mouse speed pan</c> / <c>mouse speed tilt</c> (Camera Rotate Speed X / Y): degrees per second per unit of input.</summary>
+    public const float DefaultRotateSpeed = 6;
+    /// <summary>Settings <c>mouse speed horizontal</c> / <c>vertical</c>: scale of the raw mouse movement.</summary>
+    public const float DefaultMouseSpeed = 1.5f;
+    /// <summary>The yaw and pitch inputs are averaged over the last <see cref="SmoothingFrames"/> frames with weights 1, a, a², ... (newest first).</summary>
+    public const int SmoothingFrames = 20;
+    public const float YawSmoothing = 0.5f;
+    public const float PitchSmoothing = 0.7f;
+
+    /// <summary>The pivot's height closes on its ground target at <c>HeightRate</c> times the gap per second (a gap of up to <see cref="HeightSnap"/> is closed at once).</summary>
+    public const float HeightRate = 10;
+    public const float HeightSnap = 0.1f;
+
+    /// <summary>Edge scrolling pans while the pointer is within this fraction of the screen's width or height of an edge.</summary>
+    public const float EdgeMargin = 0.01f;
+
     /// <summary>The eye is kept above the ground under it by <c>min(ClearanceBoomFraction · boom, ClearanceCap) + ClearanceBase</c>.</summary>
     public const float ClearanceBoomFraction = 0.2f;
     public const float ClearanceCap = 20;

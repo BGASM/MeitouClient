@@ -194,12 +194,12 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         if (doubleTap) CentreOn(members[index]);
     }
 
-    void CentreOn(CharacterId id)
+    void CentreOn(CharacterId id, bool follow = true)
     {
         if (session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is not { } c) return;
         var view = session.Camera.Current;
         session.Camera.Place(new Vector2(c.Position.X, c.Position.Z), view.Yaw, view.Pitch, view.Distance);
-        Follow = id;
+        Follow = follow ? id : null;
     }
 
     public void Key(Key key, bool shift)
@@ -211,8 +211,8 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
             (lastSelectKey, lastSelectAt) = (doubleTap ? default : key, now);
             SelectMember(key - Meitou.Engine.Input.Key.D1, shift, doubleTap);
         }
-        // focus_char (F): centre on the lead selected character and follow it (the free camera's F is its down key).
-        else if (key == Meitou.Engine.Input.Key.F && !session.Camera.IsFree && Selected().FirstOrDefault() is { } lead) CentreOn(lead.Id);
+        // focus_char (F): put the pivot on the lead selected character without following it (the free camera's F is its down key).
+        else if (key == Meitou.Engine.Input.Key.F && !session.Camera.IsFree && Selected().FirstOrDefault() is { } lead) CentreOn(lead.Id, follow: false);
         else if (key == Meitou.Engine.Input.Key.Grave) Select(PlayerCharacters(), shift);
         else if (key == Meitou.Engine.Input.Key.R && !session.Camera.IsFree) Say(new StopCommand(SelectedIds()) { Tick = session.World.Tick });
         else if (key == Meitou.Engine.Input.Key.H && !session.Camera.IsFree) Say(new Meitou.Simulation.FirstAid.MedicJobCommand(SelectedIds()) { Tick = session.World.Tick });

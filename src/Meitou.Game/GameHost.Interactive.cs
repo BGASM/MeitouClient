@@ -338,6 +338,8 @@ sealed partial class GameHost
                 foreach (var button in Enum.GetValues<EngineButton>()) session.Input.SetMouseButton(button, false);
                 session.Input.Consume();
             }
+            // Edge scrolling (the game's default): the pointer at the edge of the window pans the camera, unless something else has the pointer.
+            session.Camera.Strategy.EdgePointer = Covered || TitleVisible || panel?.Visible == true || interfaceHidden || cinemaHolds || cinema.EditorVisible ? null : WindowPointer.InWindow(window);
             if (!Covered) session.Advance(frameDt);   // loading and arrival preserve the loaded world's exact time
             DuelHoldClock();
             advanceTotal += Stopwatch.GetElapsedTime(a0).TotalMilliseconds;

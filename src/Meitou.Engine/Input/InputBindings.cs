@@ -61,7 +61,7 @@ public sealed class ActionState
 
 /// <summary>
 /// Maps actions to keys and mouse buttons: each action has any number of bindings and counts as held while any is down. The
-/// defaults are an engine choice except the time controls and <c>;</c> for the free camera, which are the game's (docs/game/ui-input.md: pause Space, speed_1..3 F2..F4; the keys . and , step through the speeds as well).
+/// defaults are an engine choice except the time controls and <c>;</c> for the free camera, which are the game's (docs/game/ui-input.md: pause Space, speed_1..3 F2..F4) and the camera keys (arrows and WASD move, Q / E rotate, , and . tilt).
 /// A config file can override them through <see cref="Apply"/> with strings such as <c>"W,Up"</c> or <c>"Mouse:Middle"</c>.
 /// </summary>
 public sealed class InputBindings
@@ -77,16 +77,17 @@ public sealed class InputBindings
     public void ResetToDefaults()
     {
         map.Clear();
-        Set(InputAction.MoveForward, Key.W);
-        Set(InputAction.MoveBack, Key.S);
-        Set(InputAction.MoveLeft, Key.A);
-        Set(InputAction.MoveRight, Key.D);
+        // The game's camera keys (controls.cfg): the arrows move too; Q / E rotate; , and . tilt (camera_tilt+ steeper, camera_tilt- shallower).
+        Set(InputAction.MoveForward, Key.W, Key.Up);
+        Set(InputAction.MoveBack, Key.S, Key.Down);
+        Set(InputAction.MoveLeft, Key.A, Key.Left);
+        Set(InputAction.MoveRight, Key.D, Key.Right);
         Set(InputAction.MoveUp, Key.R);
         Set(InputAction.MoveDown, Key.F);
-        Set(InputAction.RotateLeft, Key.Q, Key.Left);
-        Set(InputAction.RotateRight, Key.E, Key.Right);
-        Set(InputAction.PitchUp, Key.Up);
-        Set(InputAction.PitchDown, Key.Down);
+        Set(InputAction.RotateLeft, Key.Q);
+        Set(InputAction.RotateRight, Key.E);
+        Set(InputAction.PitchUp, Key.Period);
+        Set(InputAction.PitchDown, Key.Comma);
         Set(InputAction.ZoomIn, Key.Home);   // the game's camera_zoom_in / out and floor_up / down keys (docs/game/ui-input.md)
         Set(InputAction.ZoomOut, Key.End);
         Set(InputAction.FloorUp, Key.PageUp);
@@ -94,8 +95,8 @@ public sealed class InputBindings
         Set(InputAction.Orbit, MouseButton.Middle);   // right is the command button (move order)
         Set(InputAction.ToggleFreeCamera, Key.Semicolon);
         Set(InputAction.Pause, Key.Space);
-        Set(InputAction.TimeFaster, Key.Period);
-        Set(InputAction.TimeSlower, Key.Comma);
+        Set(InputAction.TimeFaster);   // the game has no such keys (. and , are its camera tilt); F2..F4 set the speed
+        Set(InputAction.TimeSlower);
         Set(InputAction.Speed1, Key.F2);
         Set(InputAction.Speed2, Key.F3);
         Set(InputAction.Speed3, Key.F4);

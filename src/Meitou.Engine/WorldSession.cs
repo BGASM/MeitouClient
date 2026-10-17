@@ -33,7 +33,8 @@ public sealed class WorldSession : IDisposable
         Ticks = new FixedStepClock(tickRate);
         Clock = clock ?? new GameClock(startHour);
         Bindings = bindings ?? new InputBindings();
-        Camera = new CameraRig(ground);
+        // The game keeps its cameras above the water surface too (docs/formats/camera.md): the lowest ground is the sea.
+        Camera = new CameraRig((x, z) => MathF.Max(ground(x, z), Meitou.Data.World.WorldWater.Height));
         worldSettings = settings;
         worldWalkability = walkability ?? new OpenGroundWalkability(ground);
         World = new World(settings, worldWalkability, systems);
