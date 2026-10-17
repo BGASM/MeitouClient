@@ -1,4 +1,4 @@
-# Website image: builds site/ (Astro, served by nginx) and pushes it to GHCR as ghcr.io/vlcekm/meitou-site.
+# Website image: builds site/ (Astro, served by nginx), pushes it to GHCR as ghcr.io/vlcekm/meitou-site, then calls the redeploy webhook.
 # Runs on pushes to master that touch site/ or this file, and on demand.
 name: Site image
 
@@ -50,3 +50,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Tells the server to pull the new image and redeploy. The URL carries a token, so it lives in a repository secret.
+      - name: Redeploy
+        env:
+          REDEPLOY_WEBHOOK_URL: ${{ secrets.REDEPLOY_WEBHOOK_URL }}
+        run: curl --fail --silent --show-error --max-time 60 -X POST "$REDEPLOY_WEBHOOK_URL"
