@@ -247,6 +247,7 @@ public sealed class FixtureRegistry
     {
         if (door.Kind != FixtureKind.Door || door.Motion != DoorMotion.Open) return false;
         door.Motion = DoorMotion.Closing;
+        door.AutoOpened = false;
         return true;
     }
 
@@ -357,7 +358,7 @@ public sealed class FixtureRegistry
         {
             if (d.Kind != FixtureKind.Door || d.Lock is not { } l) continue;
             any = true;
-            if (locked && d.Motion is DoorMotion.Open or DoorMotion.Opening) d.Motion = DoorMotion.Closing;   // the leaf slides shut; the lock holds at once
+            if (locked && d.Motion is DoorMotion.Open or DoorMotion.Opening) { d.Motion = DoorMotion.Closing; d.AutoOpened = false; }   // the leaf slides shut; the lock holds at once
             l.Locked = locked;
             l.PickTime = 0;
             l.NextRoll = LockState.FirstRoll;

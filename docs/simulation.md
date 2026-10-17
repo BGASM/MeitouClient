@@ -396,8 +396,11 @@ unload, hashed only once non-empty. Facts: [locks](game/locks.md), [economy 11.5
   locks a closed one that `wants lock`; locking a home's doors closes them (animated, the lock holds at once). Engine stand-in for
   Task_OpenDoor: every 3 ticks a walker within 40 of a closed door whose current or next path leg crosses the leaf's plane within
   its half width + 6 (`IDoorGate.DoorSpotOf`: the door collision's box via `NavDoorGeometry`; headless: none, so no walk-through opening) opens it;
-  at an effectively locked one a walker within 15 whose current leg crosses it stops ("It's locked." for the player). No walk closes a
-  door behind it, as in the original ([locks](game/locks.md#doors)).
+  at an effectively locked one a walker within 15 whose current leg crosses it stops ("It's locked." for the player). **Meitou difference**
+  (the original closes no door behind a walker, [locks](game/locks.md#doors)): with `DoorsCloseBehind` (Advanced setting "Doors close behind",
+  on; off = Faithful) a door a walker opened closes 5 game seconds after the last character crossed it or stood in its leaf box (depth 12);
+  a door that `wants lock` (gates) is left open, since closing would lock it and a locked gate shuts its building for every path.
+  `AutoOpened`/`LastPass` are engine state, not saved (a loaded open door stays open), hashed only while set.
   The player's finished buildings register their doors (`RegisterPlayerBuilding`, site -1, unregistered when no longer finished;
   keys written by `BuildingSave`); the site menu has Open/Close Doors (`ToggleDoorsOrder`) and Lock/Unlock Doors
   (`ToggleDoorLocksOrder`), the door panel's buttons for all doors at once. `WorldSnapshot.Doors` publishes the player's doors and

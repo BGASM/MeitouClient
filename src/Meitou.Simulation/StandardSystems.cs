@@ -65,6 +65,8 @@ public sealed class StandardSystemOptions
     public Meitou.Simulation.Carrying.CarrySettings? Carry { get; init; }
     public Meitou.Simulation.Crime.CrimeSettings? Crime { get; init; }
     public Meitou.Simulation.Crime.ArrestSettings? Arrest { get; init; }
+    /// <summary>Meitou (on; Faithful off): doors walkers opened close behind them (<see cref="Meitou.Simulation.Locks.LockSystem.DoorsCloseBehind"/>).</summary>
+    public bool DoorsCloseBehind { get; init; } = true;
     public Meitou.Simulation.Kidnap.KidnapSettings? Kidnap { get; init; }
     public Meitou.Simulation.Trading.TradeSettings? Trade { get; init; }
     public Meitou.Simulation.Ai.AiSettings? Ai { get; init; }
@@ -194,7 +196,7 @@ public static class StandardSystems
             if (carry is not null) carry.Crimes = crime;
             // Right after it: the police act on this tick's bookings and sightings; the lock orders (picking, getting out) report their crimes to it.
             systems.Add(arrest = new Meitou.Simulation.Crime.ArrestSystem(crime, data.Bodies.Constants, o.Arrest) { Carry = carry });
-            systems.Add(locks = new Meitou.Simulation.Locks.LockSystem(data.Bodies.Constants, data.BodyOptions) { Crimes = crime });
+            systems.Add(locks = new Meitou.Simulation.Locks.LockSystem(data.Bodies.Constants, data.BodyOptions) { Crimes = crime, DoorsCloseBehind = o.DoorsCloseBehind });
         }
         Meitou.Simulation.Trading.TradeSystem? trade = null;
         if (Has(StandardParts.Trade))

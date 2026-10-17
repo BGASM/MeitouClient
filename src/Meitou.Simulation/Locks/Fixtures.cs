@@ -95,11 +95,16 @@ public sealed class Fixture
     /// <summary>Its state came from a loaded save (the squad's <c>initial door state</c> then does not apply).</summary>
     public bool Restored { get; set; }
 
+    /// <summary>Doors: a walker opened it (Meitou: it closes again once nobody has gone through it for a while, <see cref="LockSystem.DoorsCloseBehind"/>), and the tick a character last
+    /// went through or stood in it. Engine state, not saved; hashed only while set.</summary>
+    public bool AutoOpened { get; set; }
+    public long LastPass { get; set; }
+
     internal void Hash(ref StateHasher h)
     {
         h.Add(Rng.StableHash(Id)); h.Add((int)Kind); h.Add(Owner);
         if (Lock is { } l) l.Hash(ref h); else h.Add(-1);
-        if (Kind == FixtureKind.Door) { h.Add((int)Motion); h.Add(OpenAmount); h.Add(DoorBroken); h.Add(WantsLock); }
+        if (Kind == FixtureKind.Door) { h.Add((int)Motion); h.Add(OpenAmount); h.Add(DoorBroken); h.Add(WantsLock); if (AutoOpened) h.Add(LastPass); }
         h.Add(Occupant);
     }
 }

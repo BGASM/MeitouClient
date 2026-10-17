@@ -17,15 +17,20 @@ public sealed record ToggleDoorLocksOrder(string Building) : SimCommand;
 /// (the walker faces the door, a locked one fails the task); here the walk itself opens it: a walker within <see cref="OpenReach"/> of a closed door whose current or next path leg
 /// crosses the leaf's plane within its width (plus <see cref="DoorSlack"/>). At a locked one the walker stops, within <see cref="LockedReach"/> on its current leg. The walker does not
 /// wait for the leaf (the navmesh lets paths through closed unlocked doors).</item>
-/// <item>No walk closes a door behind it (<b>Observed</b>: only Task_CloseDoor, Task_LockDoor and the door panel start a close, and only the lock tasks need a closed door): doors stay
-/// open until a lock-up round or the player closes them.</item>
+/// <item>The original closes no door behind a walker (<b>Observed</b>: only Task_CloseDoor, Task_LockDoor and the door panel start a close, and only the lock tasks need a closed door).
+/// Meitou (<see cref="DoorsCloseBehind"/>): a door a walker opened closes <see cref="AutoCloseSeconds"/> after the last character went through or stood in it, unless it wants its lock.</item>
 /// </list>
 /// </summary>
 public sealed partial class LockSystem
 {
     /// <summary>Engine choices of the walk-through opening (see the class remarks).</summary>
     public const int WalkerEveryTicks = 3;
-    public const float OpenReach = 40, LockedReach = 15, DoorSlack = 6, DoorHeight = 40;
+    public const float OpenReach = 40, LockedReach = 15, DoorSlack = 6, DoorDepth = 12, DoorHeight = 40;
+    /// <summary>Meitou: a door a walker opened closes again this many game seconds after the last character went through or stood in it.</summary>
+    public const float AutoCloseSeconds = 5;
+
+    /// <summary>Meitou (on; Faithful off, the original leaves doors open): doors walkers opened close behind them (<see cref="AutoCloseSeconds"/>). Set by the host's settings.</summary>
+    public bool DoorsCloseBehind { get; set; } = true;
 
     long buildingsRevision = -1;
 
@@ -101,24 +106,39 @@ public sealed partial class LockSystem
         public Fixture Door;
         public DoorSpot Spot;
         public bool Opened;
+        /// <summary>The door is open (or opening): the scan only notes who goes through or stands in it.</summary>
+        public bool Watch;
+        public bool Passed;
     }
 
-    /// <summary>Opens the closed, unlocked doors that walkers' paths run through; a walker at a locked one stops.</summary>
+    /// <summary>
+    /// Opens the closed, unlocked doors that walkers' paths run through (a walker at a locked one stops); notes who goes through or stands in the doors walkers opened, and closes
+    /// one nobody has used for <see cref="AutoCloseSeconds"/> (Meitou, <see cref="DoorsCloseBehind"/>).
+    /// </summary>
     void OpenForWalkers(World world)
     {
         var fixtures = world.Fixtures;
         foreach (var f in fixtures.All)
         {
-            if (f.Kind != FixtureKind.Door || f.DoorBroken || f.Motion is DoorMotion.Open or DoorMotion.Opening) continue;
+            if (f.Kind != FixtureKind.Door || f.DoorBroken) continue;
+            bool watch = f.Motion is DoorMotion.Open or DoorMotion.Opening;
+            if (watch && !f.AutoOpened) continue;
             if (fixtures.DoorSpotOf(f) is not { } spot) continue;
-            var scan = new WalkerScan { World = world, Door = f, Spot = spot };
+            var scan = new WalkerScan { World = world, Door = f, Spot = spot, Watch = watch };
             world.Grid.Query(spot.Centre.X, spot.Centre.Z, OpenReach, ref scan, static (int slot, ref WalkerScan s) =>
             {
-                if (s.Opened) return;
+                if (s.Opened || s.Passed) return;
                 var table = s.World.Characters;
                 ref var n = ref table.Next[slot];
-                if (!n.Alive || ((MoveFlags)n.Flags & MoveFlags.HasPath) == 0 || table.Cold(slot) is not { } c || c.Medical is { Incapacitated: true } || c.IsImprisoned) return;
+                if (!n.Alive || table.Cold(slot) is not { } c || c.IsImprisoned) return;
                 if (MathF.Abs(n.Position.Y - s.Spot.Centre.Y) > DoorHeight) return;
+                if (s.Watch)
+                {
+                    // Anyone in the doorway (down or standing) or walking through it keeps it open.
+                    s.Passed = InDoorway(n.Position, s.Spot) || ((MoveFlags)n.Flags & MoveFlags.HasPath) != 0 && Crosses(n.Position, c.Path, n.PathCursor, s.Spot, legs: 2);
+                    return;
+                }
+                if (((MoveFlags)n.Flags & MoveFlags.HasPath) == 0 || c.Medical is { Incapacitated: true }) return;
                 float away = Vector2.Distance(new Vector2(n.Position.X, n.Position.Z), new Vector2(s.Spot.Centre.X, s.Spot.Centre.Z));
                 if (away > OpenReach) return;
                 if (s.Door.Lock is { EffectivelyLocked: true })
@@ -132,7 +152,21 @@ public sealed partial class LockSystem
                 if (!Crosses(n.Position, c.Path, n.PathCursor, s.Spot, legs: 2)) return;
                 s.Opened = FixtureRegistry.OpenDoor(s.Door) || s.Door.Motion == DoorMotion.Opening;
             });
+            if (scan.Opened && !watch) { f.AutoOpened = true; f.LastPass = world.Tick; }
+            else if (watch && scan.Passed) f.LastPass = world.Tick;
+            // A door that wants its lock is left open: closing it would lock it, and a locked gate shuts its building for every path.
+            else if (watch && DoorsCloseBehind && !f.WantsLock && f.Motion == DoorMotion.Open && (world.Tick - f.LastPass) * world.TickSeconds >= AutoCloseSeconds)
+                FixtureRegistry.CloseDoor(f);
         }
+    }
+
+    /// <summary>Whether a character stands in the door's leaf box, widened by <see cref="DoorSlack"/> along the wall and <see cref="DoorDepth"/> through it, in X/Z.</summary>
+    static bool InDoorway(Vector3 at, DoorSpot door)
+    {
+        var d = new Vector2(at.X - door.Centre.X, at.Z - door.Centre.Z);
+        var normal = new Vector2(door.Normal.X, door.Normal.Z);
+        float through = Vector2.Dot(d, normal);
+        return MathF.Abs(through) <= DoorDepth && (d - normal * through).Length() <= door.HalfWidth + DoorSlack;
     }
 
     /// <summary>Whether one of the next <paramref name="legs"/> legs of a path (from the walker to its next point, then on) crosses the leaf's plane within its width plus <see cref="DoorSlack"/>, in X/Z.</summary>
