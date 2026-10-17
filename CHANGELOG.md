@@ -3,6 +3,21 @@
 What changed in each release, newest first. The release workflow copies the section of the version it builds into the GitHub release
 notes and refuses to release a version without one: add a `## vX.Y.Z` section with one `- ` line per change before running it.
 
+## v0.11.0
+
+- Building: build menu with placement ghost and queue, construction sites with builders and material delivery, dismantling refunds, wall lines with shorts, connectors and wedges, and player outposts; buildings and research are saved and loaded
+- Crime and jail: guards fine or arrest wanted player characters and cage them, sentences, bail, bounty hunters and claiming bounties, lock picking, and locks on doors, cages and containers
+- Ragdolls: full physics ragdolls for knockouts, deaths, carrying and getting up
+- Stealth: sneak animations, NPC spot meters, stealth XP, sneak-up knockouts and indicators for who is noticing you
+- First aid: Splint Injuries order and splint kits, and first aid on your own characters
+- Combat: Ranged keeps the crossbow up, Taunt draws fights, initiative and abort rules, and a "Late dodges and blocks" balance toggle (Faithful off, Meitou on)
+- Map as in the vanilla game: orientation, zoom, camps, nests, town discovery and explored-place tooltips
+- Hover outline and tint on the character under the cursor, picking over a whole body, and a Hardware mouse setting
+- Damage floaters (Off/Simple/Full) and green heal numbers
+- The game writes its output to log.txt next to meitou.exe, capped at 10 MB
+- Fix: a roaming platoon that builds no squad no longer crashes loading a save
+- Project website, with its Docker image built and published to GitHub Container Registry
+
 ## v0.10.0
 
 - Meitou UI mode has a live title scene: the real world at sunrise near Okran's Shield, the sun turned into the view, both moons, a lone wanderer and the brush-stroke Kenshi logo; Faithful keeps the original title screen
