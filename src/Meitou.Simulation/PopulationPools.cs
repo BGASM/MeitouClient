@@ -243,7 +243,8 @@ public sealed partial class PopulationSystem
         {
             var site = wildSites[i];
             var state = wildStates[i];
-            if (site.Kind != WildKind.Nest || state.Status != SiteStatus.Loaded || state.Pending || wildCentres[i] is not { } centre) continue;
+            if (site.Kind != WildKind.Nest || state.Status != SiteStatus.Loaded || state.Pending) continue;
+            var centre = wildCentres[i] ?? site.Spots[0];
             var pools = NestPools(world, site);
             if (pools.Ded) continue;
             players ??= PlayerSpots(world);
@@ -251,7 +252,12 @@ public sealed partial class PopulationSystem
             foreach (var at in players)
                 if (Vector2.DistanceSquared(at, centre) < NestGuardRadius * NestGuardRadius) { guarded = true; break; }
             var budget = new NestBudget((int)MathF.Floor(pools.Roaming.Current), NestLiving(world, i, state), TemplateCounts(world, site, state), state.Made, 4, 1, !guarded, centre);
-            if (!guarded && budget.Members >= budget.Cap) continue;
+            if (budget.Members >= budget.Cap)
+            {
+                // Full: nothing to make. A pool spent below one member with no one left alive can make nothing again: wiped out.
+                if (budget.Members == 0) CheckWipe(world, site, state);
+                continue;
+            }
             state.Pending = true;
             long loadId = state.LoadId;
             ulong seed = world.Seed;

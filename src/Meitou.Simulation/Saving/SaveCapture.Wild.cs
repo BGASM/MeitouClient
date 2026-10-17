@@ -83,7 +83,7 @@ public static partial class SaveCapture
                 foreach (var k in new[] { "started", "explored", "recently discovered", "discovered", "ded" }) state.Bools[k] = false;
                 state.Bools["is nest"] = true;
                 state.Strings["faction"] = site.Faction >= 0 ? data.Factions[site.Faction].Id : nest.Faction ?? "";
-                // popd2 = pop2 = the TOWN's nest resident population for a nest that has lost no one (every full nest of the samples); the town pools are 0.
+                // The pool keys as a full nest of the samples has them (popd2 = pop2 = nest resident population, town pools 0); its pool overwrites them below.
                 state.Floats["popd2"] = nest.NestResidentPopulation;
                 state.Floats["pop2"] = nest.NestResidentPopulation;
                 foreach (var k in new[] { "popd", "pop", "tod" }) state.Floats[k] = 0;

@@ -78,6 +78,7 @@ public sealed partial class PopulationSystem
         }
         if (world.Tick % settings.RoamCheckTicks == 0)
         {
+            EnsurePools(world);
             GrowPools(world);
             FillPools(world);
             TopUpNests(world);

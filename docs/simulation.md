@@ -127,21 +127,21 @@ Implemented (`PopulationRoaming.cs`):
   0.08-0.1 ms per look. Not measured in the viewer's bench harness, which does not run the population.
 - **Pools** (`PopulationPools.cs`): every town and nest has the original's two pools (residents `pop`/`popd`, roaming `pop2`/`popd2`),
   read from the save's town and nest states and written back, with `started`, `ded`, `tod`; the hour they last grew is not saved (set at load,
-  as the original). Every 4 s they grow 0.21818 per game hour up to the desired max (roaming only once residents are within 1 of full), for all
-  towns and nests, loaded or not. Growth is not state-hashed (as the population's other site state).
+  as the original). Every 2 s (60 ticks) they grow 0.21818 per game hour up to the desired max (roaming only once residents are within 1 of full), for every
+  town with pools (the save's from the first look, a new one once made) and the save's nests from load (a rolled nest from its first load), loaded or not. Growth is not state-hashed (as the population's other site state).
   - **Towns**: one made from its data counts its resident squads (those with a home; bar squads not, engine choice after the census) into `pop`
     and `popd` and is `started`; a started town never makes residents again, even with every squad dead (it holds what is left). Town roaming
     pools stay as loaded (0 in every base save) and `RoamingShare` still caps roaming squads (see the census conflict in
     [off-screen world](game/factions-squads-towns.md#off-screen-world)).
-  - **Regeneration**: on a town's load, each of its resident squads of the town's faction (platoon id order) that lost ≥ 60 % of its spawn size,
+  - **Regeneration**: on a town's load, each of its resident squads (platoon id order; of the town's faction, engine choice after the census) that lost ≥ 60 % of its spawn size,
     while the losses fit `pop` less the living resident members so far, comes back made afresh from its template at its place and home, as a
     new kept platoon (the old one's characters are dropped; a save's leaves the save). A template whose members are all by chance gets up to
     8 rolls. **Observed** (headless): new game, Hub squatters 1 of 3 left → 2 fresh; save 2, Squin's Town Guard 2 of 5 → 4 fresh; both the
     same after save and load.
-  - **Nests**: the pool starts at 0.7 × `nest resident population` (or the save's `pop2`); a load fills it to `floor(pop2)` members; every 4 s
+  - **Nests**: the pool starts at 0.7 × `nest resident population` (or the save's `pop2`); a load fills it to `floor(pop2)` members; every 2 s
     a loaded nest with room makes one squad (rolls keyed after the load's), unless a player character is within 1250, then it only weighs.
     A roll that finds no entry (all weights 0 or none fits the free budget) with no squad of the nest left alive sets `ded` for good, `tod`,
-    and posts "<nest> has been wiped out" (engine choice: "intact" = someone alive). A squad that lost someone takes its living out of `pop2`
+    and posts "<nest> has been wiped out" (engine choice: "intact" = someone alive); so does a pool spent below one member with no one alive. A squad that lost someone takes its living out of `pop2`
     when the nest unloads. Dead squads lying there still count against the template weights. **Observed** (headless): a swamp raptor nest
     (N 20, pool 14) refills an 8-duck squad after its two squads die; drained to 1 with all dead it is wiped out and saved with `ded`, `tod`,
     `pop2` 1.008, `popd2` 20.

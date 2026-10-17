@@ -337,7 +337,7 @@ towns' keys: `instance` = the entry id, `is nest` false, `building material`, `p
 Buildings name it by their `town` handle. Whether the loader takes the name from the record name is **Unknown**.
 
 Meitou writes the level towns' pool keys (`pop`, `popd`, `pop2`, `popd2`, `tod`, `started`, `ded`) for every town it made or loaded pools for, and
-reads them back ([off-screen tier](../simulation.md#off-screen-tier)). `tod` is Meitou's game hours since the world began; the original's unit is
+reads them back ([off-screen tier](../simulation.md#off-screen-tier)). `tod` is Meitou's game hours since the world was started or loaded (a loaded save restarts at 0); the original's unit is
 **Unknown** (no sampled state has a nonzero `tod`).
 
 ### Cross-checks against base data (the sample vs `GameDatabase` of the four base files)

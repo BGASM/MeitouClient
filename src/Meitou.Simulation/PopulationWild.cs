@@ -125,7 +125,11 @@ public sealed partial class PopulationSystem
             world.Player.KnowCamp(new CampView(site, town.Id, town.Name, faction?.Id ?? town.Faction ?? "", faction?.NotReal ?? false, nest.Position, flags), flags);
         }
         foreach (var nest in saved.Nests)
-            if (byInstance.TryGetValue(nest.Instance, out int site)) nestSaveIds[site] = (nest.Instance, nest.Handle);
+            if (byInstance.TryGetValue(nest.Instance, out int site))
+            {
+                nestSaveIds[site] = (nest.Instance, nest.Handle);
+                NestPools(world, wildSites[site]);   // a save's nest grows from now on, visited or not (rolled ones exist once they load)
+            }
     }
 
     /// <summary>The town-list entry and handle each nest site has in a save (a save's nests from the start; a rolled nest once a capture wrote it), so later saves reuse them.</summary>
