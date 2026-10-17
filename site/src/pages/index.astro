@@ -3,8 +3,8 @@ import Base from '../layouts/Base.astro';
 import DiscordIcon from '../components/DiscordIcon.astro';
 import GithubIcon from '../components/GithubIcon.astro';
 
-// Placeholder: the hero video again. Swap in the real performance video.
-const performanceVideo = '/bgvideo.webm';
+// The performance video: 30 fps WebM, no audio.
+const performanceVideo = '/fast-loading.webm';
 
 // Roadmap to 1.0.0 (feature parity with the base game), from ROADMAP.md, docs/simulation.md and CHANGELOG.md.
 // done: works in the game today. Partly finished areas are split into a done row and a missing row.
@@ -158,7 +158,7 @@ const pairs = [
         <h2>Improved loading times and performance</h2>
         <p>The game uses advanced streaming and optimization techniques to achieve minimal pop-in and no loading screens after loading a save.</p>
       </div>
-      <video class="perf-video" controls muted loop playsinline preload="metadata" poster="/bgvideo.jpg">
+      <video class="perf-video" controls muted loop playsinline preload="metadata" poster="/fast-loading.jpg">
         <source src={performanceVideo} type="video/webm" />
       </video>
     </div>
