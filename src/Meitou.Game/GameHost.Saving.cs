@@ -46,6 +46,8 @@ sealed partial class GameHost
             // The sandbox compares motion with the original on characters standing still: a hostile foe there must not start a fight by itself. The duel scripts its fight.
             Parts = IsSandbox || IsDuel ? Meitou.Simulation.StandardParts.All & ~Meitou.Simulation.StandardParts.Aggro : Meitou.Simulation.StandardParts.All,
             Aggro = new Meitou.Simulation.AggroSettings { RecordLog = true },
+            // NPCs that see a player character say a line as a speech bubble (docs/game/dialogue.md "Ambient conversations"); the sandbox and the duel stay silent.
+            Dialogue = new Meitou.Simulation.Dialogue.DialogueSettings { AmbientEvents = !IsSandbox && !IsDuel },
             Population = new Meitou.Simulation.PopulationSettings
             {
                 Background = interactive && !IsDuel, KeepRoamers = config.KeepRoamers, OffscreenFights = config.OffscreenFights, OffscreenHealing = config.OffscreenHealing,

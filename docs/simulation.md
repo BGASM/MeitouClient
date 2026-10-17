@@ -209,8 +209,7 @@ the player has one; requests (victory/loss chains, ally help) can follow.
 - **Assault**: in phase 1 a loaded campaign squad also fights (`Squad.War`, read by the aggro) everyone not of its faction in the target town when its
   `pt2` package is a Package_WarAssault (20, 32), else the target faction when the campaign is hostile. Looting, kidnapping and the cannibals'
   carrier rule (nothing carries yet) are not built.
-- **Announcement**: a loaded leader in phase 0 says `dialog announcement` once (camera and a target-faction member within 2500): its lines go
-  to the message log 2 + 0.12 × length seconds apart, or DA 12's wait (speech bubbles are not built), and their `interrupt` makes the next talk
+- **Announcement**: a loaded leader in phase 0 says `dialog announcement` once (camera and a target-faction member within 2500): its lines are said as speech bubbles 2 + 0.12 × length seconds apart, or DA 12's wait, and their `interrupt` makes the next talk
   with it the negotiation, also when its faction is hostile. After arriving it waits for the announcement and then while the negotiation is
   pending, at most 1 game hour (engine choice for the Unknown event-2 state); off screen it goes on. Dialogue DA 37 sets phase 1 (2 without a
   pt2 leader package), DA 38 phase 2; DA 39 (phase 3, unhandled in the original, unused in the data) is not built. **Observed** (headless, real
@@ -657,6 +656,7 @@ to the next tick. A hostile target is attacked instead.
   listed in [dialogue](game/dialogue.md#meitou-design).
 - **Conditions**: most DCs are computed; those needing state Meitou lacks (squad memory flags beyond "met", building locks, slavery, walls,
   missions, the personality functions, tech level, ranks) compute "no". `met` and "last seen" come from finished conversations (per squad). IN_MY_BUILDING uses the squad's home building and the lock rounds' extent.
+- **Speech bubbles**: `WorldSnapshot.Speech` lists the lines on show (`SpeechBubble`: speaker, text, large font); `PlayerInterface.DrawSpeech` draws them over the head. Sources and engine choices: [dialogue](game/dialogue.md#meitou-design).
 - **Personality**: the save's `personality` when above 0, else an engine roll from the record's PERSONALITY tags (`Personality`).
 - **Engine choices**: a childless NPC line shows `[Leave]`; a reply leading to another reply offers it alone; number keys pick choices.
 - **State**: last use per line, permanent chance rolls, event counters, met memory, interrupts and the open conversation are hashed, not

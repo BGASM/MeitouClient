@@ -25,6 +25,8 @@ public interface IDialogueSource
     DialogueRequest? PublishRequest();
     /// <summary>The character answers the player's Talk (it has event-1 dialogue).</summary>
     bool CanTalk(World world, int slot);
+    /// <summary>The lines on show over characters' heads (speech bubbles).</summary>
+    IReadOnlyList<SpeechBubble> PublishSpeech() => [];
 }
 
 public sealed class DialogueSettings
@@ -33,6 +35,16 @@ public sealed class DialogueSettings
     public float TalkRange { get; init; } = 60;
     /// <summary>Game seconds the talker has to reach the target before the order is dropped (engine choice).</summary>
     public float ApproachSeconds { get; init; } = 60;
+    /// <summary>
+    /// NPCs react to a player character they see with an ambient line (events 3 neutral, 66 enemy, 67 ally) as a speech bubble. Engine choice for the Unknown perception rules
+    /// (docs/game/dialogue.md "Ambient conversations"): off by default (the pinned scenarios), the game turns it on.
+    /// </summary>
+    public bool AmbientEvents { get; init; }
+    /// <summary>How near a player character must be to be seen, how often (ticks) the NPCs look, how many speak per look and the game hours before a squad reacts to the same character again (engine choices).</summary>
+    public float AmbientRange { get; init; } = 600;
+    public int AmbientEveryTicks { get; init; } = 30;
+    public int AmbientPerScan { get; init; } = 2;
+    public float AmbientRepeatHours { get; init; } = 0.5f;
 }
 
 /// <summary>
@@ -125,7 +137,9 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
 
     public void SlowWorld(World world)
     {
+        ExpireSpeech(world);
         if (bubbles.Count > 0) StepBubbles(world);
+        if (Settings.AmbientEvents && world.Tick % Settings.AmbientEveryTicks == 0) SeePlayers(world);
         if (!talker.IsNone && open is null)
         {
             var table = world.Characters;
@@ -316,7 +330,7 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
 
     public void Hash(ref StateHasher hasher)
     {
-        if (lastUse.Count == 0 && permanent.Count == 0 && counters.Count == 0 && met.Count == 0 && interrupts.Count == 0 && bubbles.Count == 0 && open is null && talker.IsNone) return;
+        if (lastUse.Count == 0 && permanent.Count == 0 && counters.Count == 0 && met.Count == 0 && interrupts.Count == 0 && bubbles.Count == 0 && ambientAt.Count == 0 && open is null && talker.IsNone) return;
         hasher.Add(0x44696167);
         hasher.Add(rolls);
         foreach (var (line, hours) in lastUse) { hasher.Add(Rng.StableHash(line)); hasher.Add(hours); }
@@ -325,6 +339,7 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
         foreach (var ((squad, whom), hours) in met) { hasher.Add(squad); hasher.Add(whom); hasher.Add(hours); }
         foreach (var (who, line) in interrupts) { hasher.Add(who); hasher.Add(Rng.StableHash(line)); }
         foreach (var b in bubbles) { hasher.Add(b.C.Npc); hasher.Add(Rng.StableHash(b.Line.StringId)); hasher.Add(b.DueTick); }
+        foreach (var ((squad, whom), hours) in ambientAt) { hasher.Add(squad); hasher.Add(whom); hasher.Add(hours); }
         hasher.Add(talker);
         hasher.Add(target);
         if (open is { } c)

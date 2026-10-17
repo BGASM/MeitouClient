@@ -134,6 +134,8 @@ public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> C
     public Trading.TradeView? Trade { get; init; }
     /// <summary>The open player conversation (null: none).</summary>
     public Dialogue.ConversationView? Conversation { get; init; }
+    /// <summary>The lines on show over characters' heads: speech bubbles (empty when nobody speaks).</summary>
+    public IReadOnlyList<Dialogue.SpeechBubble> Speech { get; init; } = [];
     /// <summary>The last thing a conversation asked the host to do (the host acts on each <see cref="Dialogue.DialogueRequest.Id"/> once).</summary>
     public Dialogue.DialogueRequest? DialogueRequest { get; init; }
     /// <summary>What the player knows of each placed town (<see cref="PlayerState.Towns"/>).</summary>
