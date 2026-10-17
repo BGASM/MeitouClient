@@ -7,8 +7,10 @@
 C#/.NET10 reimplementation of [Kenshi](https://lofigames.com/), aiming to run original content,
 mods and saves unchanged. **No game assets are shipped; an installed legal copy is required.**
 Early playable slice: streamed Vulkan world, characters/animation, movement/combat/body state,
-NPC population/partial AI, inventory/trade, saves and native UI. Remaining work:
-[ROADMAP.md](ROADMAP.md). Architecture/research: [docs index](docs/README.md).
+NPC population/partial AI, inventory/trade, saves and native UI. 
+
+Remaining work: [ROADMAP.md](ROADMAP.md) 
+Architecture/research: [docs index](docs/README.md)
 Website: [meitou.martinvlcek.sk](https://meitou.martinvlcek.sk/).
 
 ## Download and requirements
@@ -57,8 +59,6 @@ title screen, transitions and settings. Known fidelity gaps: [UI compatibility](
 
 ## Releases and license
 
-Manual Release workflow uses tools/scripts/package-release.ps1 (PowerShell7). Add the matching
-version section to [CHANGELOG.md](CHANGELOG.md); packaging uses it for release notes.
 GPL-3.0-or-later, with [license exception](LICENSE-EXCEPTION.md). Readers and game logic use
 interoperability facts; proprietary SDKs/original content/decompiled code are not distributed.
 Contribution rules: [AGENTS.md](AGENTS.md); current choices: [DECISIONS.md](DECISIONS.md).
