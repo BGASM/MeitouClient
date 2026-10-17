@@ -34,6 +34,21 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
     public const float ArriveRadius = 10;
     /// <summary>Formation offsets (3 units apart in the factory) are spread by this when followers stand beside the leader (the slot rules are Unknown).</summary>
     public const float FormationScale = 2.5f;
+
+    /// <summary>The farthest a formation offset reaches: the factory's own layout (eight to a row, 3 apart) ends near 22 units, however many are in the squad.</summary>
+    public const float MaxFormationOffset = 22;
+
+    /// <summary>
+    /// The offset (in factory units, which <see cref="FormationScale"/> spreads) of a follower standing <paramref name="fromLeader"/> away from its leader when its squad is put back
+    /// in the world (a save, a platoon coming into range). It keeps its place but not a stray: the offset is divided by the scale (else every reload would spread the
+    /// squad 2.5 times wider) and cut to <see cref="MaxFormationOffset"/>, so followers that had wandered off close up again.
+    /// </summary>
+    public static Vector2 OffsetOfPlace(Vector2 fromLeader)
+    {
+        var offset = fromLeader / FormationScale;
+        float length = offset.Length();
+        return length > MaxFormationOffset ? offset * (MaxFormationOffset / length) : offset;
+    }
     /// <summary>A follower farther than this from its slot asks for a path to it.</summary>
     public const float FollowSlack = 14;
     /// <summary>Seconds between a follower's path requests, and the wait after a failed one.</summary>

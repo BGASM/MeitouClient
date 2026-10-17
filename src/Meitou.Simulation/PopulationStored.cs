@@ -146,7 +146,7 @@ public sealed partial class PopulationSystem
         foreach (var id in squad.Members)
         {
             var at = table.Next[id.Slot].Position;
-            table.Cold(id.Slot)!.FormationOffset = new Vector2(at.X - lead.X, at.Z - lead.Z);
+            table.Cold(id.Slot)!.FormationOffset = MovementSystem.OffsetOfPlace(new Vector2(at.X - lead.X, at.Z - lead.Z));
         }
         world.Squads.Add(squad);
         // A resident in its bed takes it again.

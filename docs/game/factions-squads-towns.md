@@ -23,7 +23,7 @@ flag. A unique with no entry counts as alive, so a new game answers by the data 
 v0..v1, reversed range givesv0. Apply size multiplier/truncation/min1 unless dont-multiply.
 Create leader role2, random choosefrom then squad role0/squad2 role1, animals/animals2, slaves
 role4 as recursive squads, prisoners into available home cages. First member can become leader.
-Offsets `(3*(i%8),3*floor(i/8)+(i%2))`, animals2 spacing5. Age=max(0,r*animal-age-random-0.1+v2/100).
+Offsets `(3*(i%8),3*floor(i/8)+(i%2))`, animals2 spacing5. Meitou (engine choice, `MovementSystem.OffsetOfPlace`): a follower's slot is leader + offset x 2.5 (`FormationScale`); when a squad is put back in the world from a save or a stored platoon its offset is its distance from the leader divided by 2.5 and cut to 22 (the factory layout's reach), so a squad no longer spreads 2.5 times wider at every reload (**Observed** in the "weird bandits" save after the change: its 7 bandits stay within 75-95 units of the leader over 6000 ticks). How the original spaces followers (FACTION `squad formation`: Caravan, Military, Random) is **Unknown**. Age=max(0,r*animal-age-random-0.1+v2/100).
 Unique members go through one gate: [unique characters](#unique-characters).
 
 Generic weighted refs: v0=0 means100; exclude nonpositive weights and false world states,

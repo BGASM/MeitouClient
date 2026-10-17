@@ -341,7 +341,7 @@ internal static class SavedCharacters
         foreach (var id in squad.Members)
         {
             var at = world.Characters.Next[id.Slot].Position;
-            world.Characters.Cold(id.Slot)!.FormationOffset = new Vector2(at.X - lead.X, at.Z - lead.Z);
+            world.Characters.Cold(id.Slot)!.FormationOffset = MovementSystem.OffsetOfPlace(new Vector2(at.X - lead.X, at.Z - lead.Z));
         }
         world.Squads.Add(squad);
         sp.Touched = true;
