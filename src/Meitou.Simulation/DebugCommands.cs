@@ -53,12 +53,22 @@ static class DebugCheats
                 break;
             case DebugHeal heal when data is not null:
                 foreach (var id in heal.Characters)
-                    if (Body(world, data, id) is var (medical, ctx)) medical.Heal(ctx);
+                    if (Body(world, data, id) is ({ } medical, var ctx)) medical.Heal(ctx);
                 break;
             case DebugDamage damage when data is not null:
+                // Combat and the body pass read KO and death from the medical state; what they do only on the hit's events is done here.
+                var events = new List<MedicalEvent>();
                 foreach (var id in damage.Characters)
-                    if (Body(world, data, id) is var (medical, ctx) && medical.ChoosePart(ctx) is var part and >= 0)
-                        medical.ApplyHit(part, new HitDamage(damage.Cut, 0, 0), ctx);
+                {
+                    if (Body(world, data, id) is not ({ } medical, var ctx) || medical.ChoosePart(ctx) is not (var part and >= 0) || !table.TryResolveNext(id, out int slot)) continue;
+                    events.Clear();
+                    medical.ApplyHit(part, new HitDamage(damage.Cut, 0, 0), ctx, events);
+                    foreach (var e in events)
+                    {
+                        if (e.Kind is MedicalEventKind.Died or MedicalEventKind.KnockedOut) { MovementSystem.Stop(table, slot); table.Next[slot].Velocity = Vector3.Zero; }
+                        else if (e.Kind == MedicalEventKind.PartSevered) table.LimbsChanged.Enqueue((slot, medical.Parts[e.Part].Template.LimbSlot));
+                    }
+                }
                 break;
             case DebugGiveItem give when data is not null:
                 if (!table.TryResolveNext(give.Character, out int owner) || table.Cold(owner)?.Inventory is not { } inventory) break;
