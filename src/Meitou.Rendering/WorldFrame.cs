@@ -596,6 +596,8 @@ static class WorldFrame
         public ParticleRenderer? Particles;
         /// <summary>The movement marker the game interface shows after a ground move order (null in the viewer, or without <c>position.mesh</c>).</summary>
         public MoveMarkerRenderer? MoveMarker;
+        /// <summary>The navmesh debug view (null in the viewer; drawn while visible).</summary>
+        public NavmeshOverlayRenderer? NavmeshOverlay;
         /// <summary>The hover outline the game draws round the character under the mouse (null in the viewer); <see cref="HoverKey"/> picks the character by its draw-list key (null: none).</summary>
         public HoverOutlineRenderer? HoverOutline;
         public long? HoverKey;
@@ -652,6 +654,7 @@ static class WorldFrame
             Objects?.Dispose();
             Particles?.Dispose();
             MoveMarker?.Dispose();
+            NavmeshOverlay?.Dispose();
             Water?.Dispose();
             Surfaces?.Dispose();
             Reflection?.Dispose();
@@ -1416,6 +1419,12 @@ static class WorldFrame
         {
             var (markerNear, markerFar) = camera.Slices().Last();
             marker.Record(picture, width, height, markerPost.SceneDepth, markerPost.RenderWidth, markerPost.RenderHeight, view * camera.Projection(aspect, markerNear, markerFar), eye, sun);
+        }
+        // The navmesh debug view over the finished picture (Meitou only).
+        if (gpu.NavmeshOverlay is { Visible: true } navOverlay && gpu.Post is { Target: { } navPicture } navPost)
+        {
+            var (navNear, navFar) = camera.Slices().Last();
+            navOverlay.Record(navPicture, width, height, navPost.SceneDepth, navPost.RenderWidth, navPost.RenderHeight, view * camera.Projection(aspect, navNear, navFar), eye);
         }
         // The hover outline over the finished picture too (Meitou only): the mask drawn after the portraits, sorted against the near slice.
         if (gpu.HoverOutline is { } outline && gpu.HoverKey is not null && gpu.Characters?.HoverMask is { } hover && gpu.Post is { Target: { } hoverPicture } hoverPost)

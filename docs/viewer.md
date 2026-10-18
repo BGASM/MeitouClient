@@ -42,7 +42,7 @@ Panel skins have ragged translucent borders around a solid middle, so a slice co
 all-255 rectangle (inset 1 texel for bilinear), stretched to the control;
 0 with the UI hidden. It bounds what a UI depth stamp could skip.
 Viewer F1 switches all Faithful/Meitou; feature shortcuts use viewer bindings. Game keeps
-Space pause,F2..F4 speeds,F5 save,F9 load,F6 cinema,F7 hideUI and Ctrl+F9 FPS. Do not copy viewer
+Space pause,F2..F4 speeds,F5 save,F9 load,F6 cinema,F7 hideUI, Ctrl+F9 FPS and Shift+F11 navmesh view ([pathfinding](game/pathfinding.md#meitou-debug-view)). Do not copy viewer
 feature F-keys over game actions. F8/PrintScreen game screenshots; offscreen --screenshot is
 headless and settles streaming. User and cinematic bindings are separate.
 

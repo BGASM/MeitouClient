@@ -234,6 +234,12 @@ re-asked; its zones within `Lookahead` load early. **Observed**: Hub→(-36000,-
 - How the game uses `InteriorFilter` (its admit test is "uid < 0x10000", the same side the `ExteriorFilter` requires) and the
   composition of interior instance uids.
 - Which numeric job types the five job adders create (the settings each type uses are now known: 0 whole zone, 1 box
+### Meitou debug view
+
+Shift+F11 in the game (`GameHost.NavOverlay.cs`, `NavmeshOverlayRenderer`) draws the zones the walkers use now (`NavmeshWalkability.World`), 3 units
+above the mesh, over the finished picture and fainter where the scene hides it: polygons cyan (door polygons blue, seed-pruned red), mesh ends yellow,
+other edges faint. Rebuilt on a worker when the world changes. The original has no such view (`rebuild_navmesh` Ctrl+Shift+F11 only rebuilds).
+
   patch, 3 interior).
 - The terrain grid resolution of the generator (FUN_140a08a20); the material of `destroyed boundary` triangles; the
   building flag at +0x1f0 → +0x2c that gates carvers and part of the WALKABLE rule; the global seed list DAT_14212f470;

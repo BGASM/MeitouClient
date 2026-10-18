@@ -190,6 +190,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         player.Floaters = config.Floaters;
         player.MoveMarker = gpu.MoveMarker ??= MoveMarkerRenderer.Create(context, assets.Find);
         gpu.HoverOutline ??= new HoverOutlineRenderer(context);
+        gpu.NavmeshOverlay ??= new NavmeshOverlayRenderer(context);
         player.MeshHit = (id, origin, direction) => gpu.Characters?.RayHit(DrawKey(id), origin, direction);
         player.Floor = (() => viewedFloor, StepFloor);
         player.BuildHost = MakeBuildServices(heights);

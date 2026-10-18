@@ -194,6 +194,7 @@ sealed partial class GameHost
                 if (KeyMap.Map(k) is { } key)
                 {
                     if (shiftDown && key == EngineKey.F1) { Console.WriteLine(meitou.Toggle()); return; }
+                    if (shiftDown && key == EngineKey.F11) { ToggleNavOverlay(); return; }
                     if (player.BuildKey(key, shiftDown)) return;
                     session.Input.SetKey(key, true);
                     player.Key(key, shiftDown);
@@ -364,6 +365,7 @@ sealed partial class GameHost
             if (!cinemaHolds) FollowCamera();
             if (!cinemaHolds) EditorCamera();
             OpenPendingEditor();
+            UpdateNavOverlay();
             if (!cinemaHolds) ApplyTitleCamera();
             UpdateAudio(dt);
             if (TitleVisible && !warming) titleBattle?.Advance(frameDt);
