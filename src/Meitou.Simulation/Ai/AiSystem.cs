@@ -403,8 +403,8 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
                     {
                         if (chair)
                         {
-                            // On the chair itself at the floor's height, facing its way (engine choice: the original's sitting offset is not decoded).
-                            n.Position = new Vector3(claimed.Position.X, n.Position.Y, claimed.Position.Z);
+                            // On the seat's origin, with no offset, facing its way (docs/game/ai-tasks.md "Chairs"): the sitting clip carries the pose.
+                            n.Position = claimed.Position;
                             n.Yaw = claimed.Yaw;
                             mind.SitClip = claimed.SitClip;
                         }
