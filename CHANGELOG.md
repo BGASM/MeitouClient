@@ -3,6 +3,19 @@
 What changed in each release, newest first. The release workflow copies the section of the version it builds into the GitHub release
 notes and refuses to release a version without one: add a `## vX.Y.Z` section with one `- ` line per change before running it.
 
+## v0.13.0
+
+- Recruiting: NPCs who offer to join (hires, freed prisoners, escaped slaves, unique recruits) join your active squad, a new squad when it is full, up to 30 characters
+- Swimming: characters swim in deep water with their own speeds and animations, gain swimming XP, and walk along the seabed in shallow water
+- Limbs: severed limbs leave stumps and fall to the ground; fit or remove prosthetics in the limbs window; stumps and prosthetics are saved
+- Shackles: shackled characters can pick, cut or break them, and they are saved; bounty desks pay for a carried bounty target and the guard cages them
+- Town AI wanders, shops, sits at bar seats and mans town turrets, chosen the way the original game does
+- Portraits match vanilla: hurt flash, faded when down, combat, hunger, slave and prison states, and each character keeps its portrait in saves
+- Click a building to see its name, type, town, doors and shop in the HUD
+- Trader window matches vanilla: 18 x 18 stock and lighter item cells
+- UI fonts resize like Kenshi's and render crisper; item fill bars match vanilla
+- Navmesh: Shark's stilt-house stairs reach their decks, and the walkable area no longer changes with load order
+
 ## v0.12.2
 
 - Meitou UI is the default again
