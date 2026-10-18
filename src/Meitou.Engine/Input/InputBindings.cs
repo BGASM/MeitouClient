@@ -17,8 +17,8 @@ public enum InputAction
     /// <summary>The game speed_1, speed_2, speed_3 actions: 1x, 2x, 5x.</summary>
     Speed1, Speed2, Speed3,
     Screenshot, ToggleSettings,
-    /// <summary>The debug overlays: the key list, the frame statistics, the profiler chart (gpu, cpu, off).</summary>
-    ToggleKeys, ToggleStats, CycleProfiler,
+    /// <summary>The debug menu (the game's cheats), the frame statistics, the profiler chart (gpu, cpu, off).</summary>
+    ToggleDebugMenu, ToggleStats, CycleProfiler,
     /// <summary>The small frame-rate counter at the top left.</summary>
     ToggleFps,
     /// <summary>The game's quicksave and quickload (F5 and F9, docs/game/ui-input.md): the host saves to and loads from its own "quicksave" slot.</summary>
@@ -108,7 +108,7 @@ public sealed class InputBindings
         Set(InputAction.ToggleFps);   // Ctrl+F9 in the game (plain F9 is the game's quickload), so unbound here
         Set(InputAction.QuickSave, Key.F5);
         Set(InputAction.QuickLoad, Key.F9);
-        Set(InputAction.ToggleKeys, Key.F10);
+        Set(InputAction.ToggleDebugMenu, Key.F10);
         Set(InputAction.ToggleStats, Key.F11);
         Set(InputAction.CycleProfiler, Key.F12);
         Set(InputAction.Quit, Key.Escape);

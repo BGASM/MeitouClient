@@ -7,6 +7,26 @@ public sealed partial class MedicalState
 {
     // ------------------------------------------------------------------ hits
 
+    /// <summary>
+    /// The game's F10 debug heal (Meitou only, not the original's): every part whole (no wear, stun, bandage or splint), full blood, no wounds and no KO time left,
+    /// so the next body tick wakes the character. A dead character stays dead.
+    /// </summary>
+    public void Heal(in MedicalContext ctx)
+    {
+        if (Dead) return;
+        foreach (var p in Parts)
+        {
+            p.Wear = p.Stun = p.Bandage = p.Rig = 0;
+            p.Flesh = p.MaxHp;
+            p.HitMult = 1;
+            p.WasDown = false;
+        }
+        wounds.Clear();
+        Blood = Capacity(ctx);
+        BloodKo = false;
+        KoTimer = 0;
+    }
+
     float NextRoll(in MedicalContext ctx) => BodyRolls.Float(ctx.Seed, ctx.CharacterKey, BodyRolls.MedicalDomain, rollCounter++);
 
     /// <summary>

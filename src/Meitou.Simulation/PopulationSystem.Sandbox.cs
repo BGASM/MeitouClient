@@ -6,12 +6,15 @@ namespace Meitou.Simulation;
 
 public sealed partial class PopulationSystem
 {
+    /// <summary>Characters the F10 debug menu has spawned (<see cref="DebugSpawn"/>): each one's look variant.</summary>
+    int debugSpawns;
+
     /// <summary>
     /// The animation sandbox's spawn (the game host's <c>--sandbox</c>): one character made from <paramref name="recordId"/> at a place, alone in a squad of its own, standing idle.
     /// <paramref name="player"/> makes it one of the player's (the first call also sets the player faction, as <see cref="StartPlayer"/> does); otherwise it belongs to the
     /// first faction that is hostile to the player's. A <paramref name="variant"/> above 0 is a bystander with a look of its own: of the faction <paramref name="player"/> picks,
     /// in a squad of its own that is not the player's. <paramref name="faction"/> (a position in the factions) overrides both choices: the game's <c>--duel</c> makes two NPCs of one faction.
-    /// Before the first tick; only the sandbox, the game's <c>--crowd</c> test and its <c>--duel</c> call it.
+    /// Before the first tick or in the serial Inputs phase; only the sandbox, the game's <c>--crowd</c> test, its <c>--duel</c> and the F10 debug menu call it.
     /// </summary>
     /// <summary>The look <see cref="SpawnSandbox"/> gives a character (the same arguments, <paramref name="faction"/> the one it ends up with): the duel picks variants that wear a helmet.</summary>
     public CharacterAppearance? SandboxLook(ulong seed, string recordId, bool player, int variant, int faction)

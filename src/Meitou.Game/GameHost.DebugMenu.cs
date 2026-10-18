@@ -1,0 +1,149 @@
+using System.Globalization;
+using System.Numerics;
+using System.Text.RegularExpressions;
+using Meitou.Data.Fcs;
+using Meitou.Rendering;
+using Meitou.Simulation;
+using EngineKey = Meitou.Engine.Input.Key;
+
+namespace Meitou.Game;
+
+/// <summary>
+/// The F10 debug menu (Meitou only, docs/game/ui-input.md "Debug menu"): cheats sent to the world as <see cref="DebugCommand"/>s. Up/Down pick a row, typing fills its field,
+/// Enter applies it, Esc or F10 closes; while open it takes every key. Teleport and spawn use the camera's target (the middle of the screen); heal and damage the selected
+/// characters, else the inspected one.
+/// </summary>
+sealed partial class GameHost
+{
+    enum DebugRow { Teleport, SpawnNpc, GiveItem, Money, Heal, Damage }
+
+    static readonly string[] DebugLabels = ["Teleport selected here", "Spawn NPC (hostile)", "Give item (name x5)", "Money (+/- cats)", "Heal", "Damage (cut)"];
+    readonly string[] debugFields = ["", "", "", "1000", "", "20"];
+    readonly Dictionary<(bool Character, string Text), (string Id, string Name)?> debugMatches = [];
+    bool debugMenuOpen;
+    int debugRow;
+    string debugStatus = "";
+
+    static bool DebugHasField(int row) => (DebugRow)row is not (DebugRow.Teleport or DebugRow.Heal);
+
+    void DebugMenuKey(EngineKey key)
+    {
+        string field = debugFields[debugRow];
+        switch (key)
+        {
+            case EngineKey.Escape: debugMenuOpen = false; break;
+            case EngineKey.Up: debugRow = (debugRow + DebugLabels.Length - 1) % DebugLabels.Length; break;
+            case EngineKey.Down: debugRow = (debugRow + 1) % DebugLabels.Length; break;
+            case EngineKey.Backspace when field.Length > 0: debugFields[debugRow] = field[..^1]; break;
+            case EngineKey.Enter: debugStatus = DebugApply((DebugRow)debugRow, field.Trim()); break;
+        }
+    }
+
+    void DebugMenuText(char c)
+    {
+        if (DebugHasField(debugRow) && !char.IsControl(c)) debugFields[debugRow] += c;
+    }
+
+    string DebugApply(DebugRow row, string field)
+    {
+        var world = session.World;
+        long tick = world.Tick;
+        var selected = world.Player.Selection.ToArray();
+        CharacterId[] targets = selected.Length > 0 ? selected : world.Player.Inspected.IsNone ? [] : [world.Player.Inspected];
+        var here = session.Camera.Current.Target;
+        switch (row)
+        {
+            case DebugRow.Teleport:
+                if (selected.Length == 0) return "select characters first";
+                world.Commands.Enqueue(new DebugTeleport(selected, here) { Tick = tick });
+                return $"teleported {selected.Length} to {here.X:0}, {here.Z:0}";
+            case DebugRow.SpawnNpc:
+                if (DebugRecord(field, character: true) is not { } npc) return $"no character record matches '{field}'";
+                world.Commands.Enqueue(new DebugSpawn(npc.Id, new Vector2(here.X, here.Z)) { Tick = tick });
+                return $"spawned {npc.Name} at {here.X:0}, {here.Z:0}";
+            case DebugRow.GiveItem:
+                if (selected.Length == 0) return "select a character first";
+                var (name, quantity) = DebugItemField(field);
+                if (DebugRecord(name, character: false) is not { } item) return $"no item record matches '{name}'";
+                world.Commands.Enqueue(new DebugGiveItem(selected[0], item.Id, quantity) { Tick = tick });
+                return $"gave {quantity} x {item.Name}";
+            case DebugRow.Money:
+                if (!long.TryParse(field, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out long delta)) return "money: a whole number, e.g. 500 or -500";
+                world.Commands.Enqueue(new DebugMoney(delta) { Tick = tick });
+                return $"money {delta.ToString("+#;-#;0", CultureInfo.InvariantCulture)}";
+            case DebugRow.Heal:
+                if (targets.Length == 0) return "select or inspect a character first";
+                world.Commands.Enqueue(new DebugHeal(targets) { Tick = tick });
+                return $"healed {targets.Length}";
+            case DebugRow.Damage:
+                if (targets.Length == 0) return "select or inspect a character first";
+                if (!float.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out float cut) || !(cut > 0)) return "damage: a positive number";
+                world.Commands.Enqueue(new DebugDamage(targets, cut) { Tick = tick });
+                return $"{cut:0.#} cut damage to {targets.Length}";
+        }
+        return "";
+    }
+
+    /// <summary>"Hiver Beer x5": the name and the quantity (1 without one, at most 1000).</summary>
+    static (string Name, int Quantity) DebugItemField(string field)
+    {
+        var m = Regex.Match(field, @"^(.*?)\s+[x*]\s*(\d+)$", RegexOptions.IgnoreCase);
+        if (!m.Success) return (field, 1);
+        return (m.Groups[1].Value, int.TryParse(m.Groups[2].Value, CultureInfo.InvariantCulture, out int n) ? Math.Clamp(n, 1, 1000) : 1);
+    }
+
+    /// <summary>The character (or item) record a typed name means: its string id, the name exactly, else the shortest name containing it (ignoring case).</summary>
+    (string Id, string Name)? DebugRecord(string text, bool character)
+    {
+        text = text.Trim();
+        if (text.Length == 0 || scene.Database is not { } db) return null;
+        if (debugMatches.TryGetValue((character, text), out var cached)) return cached;
+        bool Fits(FcsRecordType t) => character ? t is FcsRecordType.CHARACTER or FcsRecordType.ANIMAL_CHARACTER : DebugGiveItem.ItemTypes.Contains(t);
+        var candidates = db.Records.Values.Where(r => Fits(r.Type));
+        var hit = db.Find(text) is { } exact && Fits(exact.Type) ? exact
+            : candidates.FirstOrDefault(r => string.Equals(r.Name, text, StringComparison.OrdinalIgnoreCase))
+            ?? candidates.Where(r => r.Name.Contains(text, StringComparison.OrdinalIgnoreCase)).OrderBy(r => r.Name.Length).ThenBy(r => r.Name, StringComparer.Ordinal).FirstOrDefault();
+        (string, string)? found = hit is null ? null : (hit.StringId, hit.Name);
+        debugMatches[(character, text)] = found;
+        return found;
+    }
+
+    void DrawDebugMenu(DebugOverlay o, int width, int height, float top)
+    {
+        var world = session.World;
+        var here = session.Camera.Current.Target;
+        var lines = new List<string>();
+        for (int i = 0; i < DebugLabels.Length; i++)
+        {
+            string line = (i == debugRow ? "> " : "  ") + DebugLabels[i];
+            if (DebugHasField(i))
+            {
+                string field = debugFields[i];
+                line = $"{line,-26} {field}{(i == debugRow ? "_" : "")}";
+                if ((DebugRow)i is DebugRow.SpawnNpc or DebugRow.GiveItem && field.Trim().Length > 0)
+                    line += DebugRecord((DebugRow)i == DebugRow.GiveItem ? DebugItemField(field.Trim()).Name : field, (DebugRow)i == DebugRow.SpawnNpc) is { } r ? $"   -> {r.Name}" : "   -> no match";
+            }
+            lines.Add(line);
+        }
+        string info = $"{world.Player.Selection.Count} selected   here {here.X:0}, {here.Z:0}   money c.{world.Player.Money.ToString("N0", CultureInfo.InvariantCulture)}";
+        const string Hint = "Up/Down pick   type to edit   Enter apply   Esc/F10 close";
+        var dim = new Vector4(0.7f, 0.75f, 0.8f, 1);
+        float pad = 10, x0 = 16, y0 = top + 16;
+        int chars = Math.Max(lines.Max(l => l.Length), Math.Max(info.Length, Math.Max(Hint.Length, debugStatus.Length)));
+        float w = chars * o.CharWidth + 2 * pad, h = (lines.Count + 5) * o.LineHeight + 2 * pad;
+        o.Rect(x0, y0, x0 + w, y0 + h, DebugOverlay.PanelColour);
+        float y = y0 + pad;
+        o.Text("Debug   (F10 closes)", x0 + pad, y, DebugOverlay.TextColour);
+        y += 1.5f * o.LineHeight;
+        for (int i = 0; i < lines.Count; i++, y += o.LineHeight)
+        {
+            if (i == debugRow) o.Rect(x0 + 4, y, x0 + w - 4, y + o.LineHeight, new Vector4(0.25f, 0.4f, 0.65f, 0.6f));
+            o.Text(lines[i], x0 + pad, y, DebugOverlay.TextColour);
+        }
+        y += 0.5f * o.LineHeight;
+        o.Text(info, x0 + pad, y, dim);
+        o.Text(Hint, x0 + pad, y + o.LineHeight, dim);
+        if (debugStatus.Length > 0) o.Text(debugStatus, x0 + pad, y + 2 * o.LineHeight, new Vector4(1f, 0.9f, 0.4f, 1));
+        o.Flush(width, height);
+    }
+}

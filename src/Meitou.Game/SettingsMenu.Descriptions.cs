@@ -102,7 +102,7 @@ sealed partial class SettingsMenu
         InputAction.Speed3 => "Run the simulation at five times normal speed.",
         InputAction.Screenshot => "Save an image of the current view.",
         InputAction.ToggleSettings => "Open or close this settings dialog.",
-        InputAction.ToggleKeys => "Show or hide the control reference overlay.",
+        InputAction.ToggleDebugMenu => "Open or close the debug menu: teleport, spawn, items, money, heal and damage.",
         InputAction.ToggleStats => "Show or hide frame statistics.",
         InputAction.CycleProfiler => "Cycle GPU, CPU and hidden profiler views.",
         InputAction.QuickSave => "Save the game to the quicksave slot.",

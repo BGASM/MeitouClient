@@ -306,6 +306,14 @@ included (the original keeps the slot); a site that disappears clears it. Not bu
 building windows, the Dismantle / pause / door buttons in the panel (the right-click menu has them), the For sale line, the Door and Building
 Condition bars, hover pointers over world buildings, and quick right-click orders on them.
 
+### Debug menu
+
+Meitou only (no original counterpart). F10 (`ToggleDebugMenu`, rebindable) opens a cheat list; while open it takes every key (Up/Down, typing, Enter, Esc).
+Rows send `DebugCommand`s, applied in the next tick's Inputs phase: teleport the selection to the camera target, spawn a character record there
+(own squad, first faction hostile to the player), give an item record (`name x5`) to the first selected, add or remove money (signed number),
+heal fully (`MedicalState.Heal`), one cut of n damage. Heal and damage fall back to the inspected character. Names match a record's string id,
+its exact name, else the shortest name containing the text. Replaces the game's F10 key list (the viewer keeps its own).
+
 ## Unknowns
 
 - Meaning of the listener's suspended field at +0x50 and of FUN_1409134c0 (possibly splash skip).

@@ -75,7 +75,7 @@ sealed partial class GameHost
         var overlay = DebugOverlay.TryCreate(display.Context);
         if (overlay is not null) { player.CreateUiPainter(overlay, assets.Find); ConnectItemIcons(); }
         if (gpu.Characters is { } portraits) { var (atlas, sampled) = portraits.PortraitAtlas; player.SetUiTexture(PlayerInterface.PortraitTexture, atlas, sampled); }
-        // The viewer's debug overlays (docs/engine.md): F10 the key list, F11 the frame statistics, F12 the profiler chart.
+        // The debug overlays (docs/engine.md): F10 the debug menu (GameHost.DebugMenu.cs), F11 the frame statistics, F12 the profiler chart.
         var profiler = overlay is null ? null : new FrameProfiler(display.Context, () => display.Context.GpuFrameMs);
         // The Faithful / Meitou switches; Shift+F1 turns Meitou off and back on (plain F2..F4 and F8 are the game's speed and screenshot keys), the Tab panel sets them one by one.
         var switches = WorldFrame.LiveSwitches(o, () => gpu, () => camera, () => render);
@@ -116,7 +116,6 @@ sealed partial class GameHost
         if (panel is not null && !Environment.GetCommandLineArgs().Any(a => a is "--meitou" or "--faithful"))
             foreach (var toggle in panel.Toggles)
                 if (config.Graphics.TryGetValue(SwitchKey(toggle.Label), out float v) && (v >= 0.5f) != toggle.Get()) toggle.Set(v >= 0.5f);
-        var keyItems = DebugOverlay.KeyItems(GameOptions.Usage);
         var stats = new List<string>();
         bool statsVisible = false, fpsVisible = false;
         string fpsText = "";
@@ -161,6 +160,13 @@ sealed partial class GameHost
                         if (settingsKey is EngineKey.F8 or EngineKey.PrintScreen) screenshotRequested = true;
                         else panel.KeyDown(settingsKey, shiftDown, keyboard.IsKeyPressed(SilkKey.ControlLeft) || keyboard.IsKeyPressed(SilkKey.ControlRight));
                     }
+                    return;
+                }
+                // F10 (rebindable) opens the debug menu, which then takes every key until it closes.
+                if (KeyMap.Map(k) is { } mapped && session.Bindings.Get(InputAction.ToggleDebugMenu).Contains(Binding.Of(mapped))) { debugMenuOpen = !debugMenuOpen; return; }
+                if (debugMenuOpen)
+                {
+                    if ((k == SilkKey.KeypadEnter ? EngineKey.Enter : KeyMap.Map(k)) is { } menuKey) DebugMenuKey(menuKey);
                     return;
                 }
                 // Ctrl+C copies the free camera's position as a viewer camera code, Ctrl+V flies the free camera to the code in the clipboard.
@@ -211,6 +217,7 @@ sealed partial class GameHost
             {
                 if (Covered) return;
                 if (panel?.Visible == true) panel.TextInput(value);
+                else if (debugMenuOpen) DebugMenuText(value);
                 else player.UiText(value);
             };
         }
@@ -292,7 +299,6 @@ sealed partial class GameHost
                 actions.Pressed(InputAction.ToggleFreeCamera)) player.Follow = null;
             if (actions.Pressed(InputAction.ToggleSettings) && panel is not null) panel.Visible = !panel.Visible;
             if (actions.Pressed(InputAction.Screenshot)) screenshotRequested = true;
-            if (actions.Pressed(InputAction.ToggleKeys) && overlay is not null) overlay.Visible = !overlay.Visible;
             if (actions.Pressed(InputAction.ToggleStats)) statsVisible = !statsVisible;
             if (actions.Pressed(InputAction.ToggleFps)) fpsVisible = !fpsVisible;
             if (actions.Pressed(InputAction.QuickSave)) quickSaveRequested = true;
@@ -443,12 +449,7 @@ sealed partial class GameHost
                         panelsBottom = top + h - 8;   // the panels add their own 16 px margin
                     }
                     if (statsVisible && stats.Count > 0) panelsBottom = overlay.Panel(size.X, size.Y, "Meitou   (F11 hides this)", stats, panelsBottom);
-                    if (overlay.Visible)
-                    {
-                        int width = keyItems.Max(i => i.Length) + 2;
-                        var lines = keyItems.Select(item => KeyState(item.Split(' ')[0]) is { } state ? item.PadRight(width) + state : item).ToList();
-                        overlay.Draw(size.X, size.Y, "Keys   (F10 hides this)", lines, panelsBottom);
-                    }
+                    if (debugMenuOpen) DrawDebugMenu(overlay, size.X, size.Y, panelsBottom);
                     profiler?.Draw(overlay, size.X, size.Y);
                 }
                 if (ui) panel?.Draw(size.X, size.Y);
@@ -551,29 +552,6 @@ sealed partial class GameHost
         }
 
         static string SwitchKey(string label) => "Meitou: " + label;
-
-        string? FullScreenState() => BorderlessFullScreen.IsOn(window) ? "borderless" : "window";
-
-        // The state shown beside a key in the F10 list, by the item's first word.
-        string? KeyState(string key)
-        {
-            static string OnOff(bool on) => on ? "on" : "off";
-            return key switch
-            {
-                ";" => OnOff(session.Camera.IsFree),
-                "Space" => session.Simulation.IsPaused ? "paused" : "running",
-                "F2/F3/F4" => $"x{session.TimeScale:0}",
-                "Tab" => OnOff(panel?.Visible == true),
-                "F12" => profiler?.Showing.ToString().ToLowerInvariant(),
-                "Shift+F1" => meitou.On ? "Meitou" : "Faithful",
-                "Alt+Enter" => FullScreenState(),
-                "Ctrl+F9" => OnOff(fpsVisible),
-                "F11" => OnOff(statsVisible),
-                "F6" => OnOff(cinema.EditorVisible),
-                "F7" => OnOff(interfaceHidden),
-                _ => null,
-            };
-        }
     }
 
     /// <summary>Panel rows that are the session's state, not graphics settings: kept out of <c>graphics</c> in meitou.user.json (vsync and full screen have their own keys).</summary>

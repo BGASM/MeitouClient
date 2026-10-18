@@ -98,7 +98,10 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
     public void Inputs(World world, IReadOnlyList<SimCommand> commands)
     {
         foreach (var c in commands)
+        {
             if (c is FocusCommand f) focus = f.Position;
+            else if (c is DebugSpawn spawn) SpawnSandbox(world, spawn.Record, spawn.At, player: false, variant: ++debugSpawns);
+        }
 
         var ready = new List<BuiltTown>();
         while (built.TryDequeue(out var b)) ready.Add(b);
