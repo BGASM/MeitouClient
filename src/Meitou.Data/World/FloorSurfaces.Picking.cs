@@ -76,7 +76,7 @@ public sealed partial class FloorSurfaces
         return normal.LengthSquared() > 1e-12f && MathF.Abs(normal.Y) >= normal.Length() * MathF.Cos(40 * MathF.PI / 180);
     }
 
-    static float? RayTriangle(Vector3 origin, Vector3 direction, Vector3 a, Vector3 b, Vector3 c)
+    internal static float? RayTriangle(Vector3 origin, Vector3 direction, Vector3 a, Vector3 b, Vector3 c)
     {
         var edge = b - a;
         var cross = Vector3.Cross(direction, c - a);

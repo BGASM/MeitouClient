@@ -76,6 +76,26 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
     /// </summary>
     public int FloorAt(Vector3 feet) => floors?.Value.FloorAt(feet) ?? 0;
 
+    // The interior mask collision's triangles in world space (three corners each): the indoor space itself, concave where the building is.
+    Vector3[] maskCorners = [];
+
+    /// <summary>
+    /// Where a ray first meets the indoor space (the <c>interior mask</c> collision) within <paramref name="maxDistance"/>, or null: what hides the characters and
+    /// items inside or behind a building seen from outside from the pointer.
+    /// </summary>
+    public float? MaskHit(Vector3 origin, Vector3 direction, float maxDistance)
+    {
+        if (maskCorners.Length == 0) return null;
+        var min = new Vector3(Footprint.Min(p => p.X), YMin, Footprint.Min(p => p.Y));
+        var max = new Vector3(Footprint.Max(p => p.X), YMax, Footprint.Max(p => p.Y));
+        if (!FloorSurfaces.RayBox(origin, direction, min, max, maxDistance)) return null;
+        float? best = null;
+        for (int i = 0; i + 2 < maskCorners.Length; i += 3)
+            if (FloorSurfaces.RayTriangle(origin, direction, maskCorners[i], maskCorners[i + 1], maskCorners[i + 2]) is { } t && t <= maxDistance && (best is null || t < best))
+                best = t;
+        return best;
+    }
+
     /// <summary>A movement pick on this building's collision at or below the viewed floor.</summary>
     public (float Distance, Vector3 Position)? MoveHit(Vector3 origin, Vector3 direction, int floor, float maxDistance)
     {
@@ -97,13 +117,15 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
         var node = WorldObjectLayout.InstanceTransform(position, rotation, new Vector3(scale > 0 ? scale : 1));
         var points = new List<Vector2>();
         var meshes = new List<string>();
+        var corners = new List<Vector3>();
         float yMin = float.MaxValue, yMax = float.MinValue;
         foreach (var r in building.GetReferences("interior mask"))
         {
             if (db.Find(r.TargetStringId) is not { Type: FcsRecordType.BUILDING_PART } mask) continue;
             if (mask.GetPath("phs or mesh") is { } meshPath && meshPath.Contains(".mesh", StringComparison.OrdinalIgnoreCase)) meshes.Add(meshPath);
-            if (collision.Vertices(mask.GetPath("xml collision")) is not { } vertices) continue;
-            foreach (var v in vertices)
+            if (collision.Mesh(mask.GetPath("xml collision")) is not { } shape) continue;
+            foreach (int i in shape.Indices) corners.Add(Vector3.Transform(shape.Vertices[i], node));
+            foreach (var v in shape.Vertices)
             {
                 var w = Vector3.Transform(v, node);
                 points.Add(new Vector2(w.X, w.Z));
@@ -121,6 +143,7 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
             Cavernous = building.GetBool("cavernous"),
             MaskMeshes = meshes,
             Node = node,
+            maskCorners = [.. corners],
             floors = new Lazy<FloorSurfaces>(() => FloorSurfaces.For(db, building, placementId, position, rotation, node, collision)),
         };
     }

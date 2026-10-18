@@ -671,6 +671,19 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         return best;
     }
 
+    /// <summary>
+    /// The nearest distance along the ray at which it enters a loaded building seen from outside (not in <see cref="InteriorView"/>), within
+    /// <paramref name="maxDistance"/>: characters and items beyond it are hidden from the pointer. Null when none is in the way.
+    /// </summary>
+    public float? ClosedBuildingHit(Vector3 origin, Vector3 direction, float maxDistance)
+    {
+        float? best = null;
+        foreach (var zone in streamer.AllZones)
+            foreach (var room in zone.Interiors)
+                if (!InteriorView.ContainsKey(room.PlacementId) && room.MaskHit(origin, direction, best ?? maxDistance) is { } t) best = t;
+        return best;
+    }
+
     /// <summary>The indoor volume of a loaded building that contains <paramref name="p"/> (widened by <paramref name="margin"/>), or null.</summary>
     public InteriorVolume? InteriorAt(Vector3 p, float margin = 0)
     {

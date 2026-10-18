@@ -8,16 +8,21 @@ sealed partial class PlayerInterface
     /// <summary>How near the pointer an item's projected middle must be, in pixels (an engine choice: the items have no pick mesh).</summary>
     const float GroundItemPickPixels = 24;
 
-    /// <summary>The ground item whose middle (half a unit above where it lies) projects nearest the pixel within <see cref="GroundItemPickPixels"/>, if any.</summary>
+    /// <summary>
+    /// The ground item whose middle (half a unit above where it lies) projects nearest the pixel within <see cref="GroundItemPickPixels"/>, if any; one inside or
+    /// behind a building seen from outside does not count.
+    /// </summary>
     int? PickGroundItem(Vector2 pixel)
     {
+        if (Ray(pixel) is not { } ray) return null;
         int? best = null;
         float bestDistance = GroundItemPickPixels;
         foreach (var g in session.CurrentSnapshot.GroundItems)
         {
-            if (Project(g.Position + new Vector3(0, 0.5f, 0)) is not { } at) continue;
+            var middle = g.Position + new Vector3(0, 0.5f, 0);
+            if (Project(middle) is not { } at) continue;
             float d = Vector2.Distance(at, pixel);
-            if (d < bestDistance) (best, bestDistance) = (g.Id, d);
+            if (d < bestDistance && !Hidden(ray, Vector3.Distance(ray.Origin, middle))) (best, bestDistance) = (g.Id, d);
         }
         return best;
     }
