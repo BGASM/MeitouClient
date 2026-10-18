@@ -100,11 +100,11 @@ sealed partial class PlayerInterface
     }
 
     /// <summary>Adds a text panel's lines over the arranged widget <paramref name="panel"/>: one row per line, the label from 3 % of the width, the value right-aligned to 96 %.</summary>
-    static void AddLines(List<UiControl> controls, string panel, IReadOnlyList<HudLine> lines, float rowHeight, float? fontPixels = null)
+    static void AddLines(List<UiControl> controls, string panel, IReadOnlyList<HudLine> lines, float rowHeight, float? fontPixels = null, string font = "Kenshi_StandardFont_Medium")
     {
         if (controls.FirstOrDefault(c => c.Name == panel) is not { } host) return;
         var area = host.Bounds;
-        var properties = new Dictionary<string, string> { ["FontName"] = "Kenshi_StandardFont_Medium" };
+        var properties = new Dictionary<string, string> { ["FontName"] = font };
         if (fontPixels is { } pixels) properties["FontPixels"] = Math.Max(8, (int)MathF.Round(pixels)).ToString(CultureInfo.InvariantCulture);
         for (int i = 0; i < lines.Count; i++)
         {
@@ -135,7 +135,8 @@ sealed partial class PlayerInterface
         string faction = FactionName?.Invoke(lead.Faction) ?? "";
         AddLines(controls, "NameText", [new(lead.Name, faction, TitleColour, TitleColour)], row, sidePixels);
         AddLines(controls, "StateText", StateLines(lead), row, sidePixels);
-        AddLines(controls, "StatsText", StatsLines(lead), row, sidePixels);
+        // The base game draws the stats rows in the painted face (Observed: glyph shapes and widths match Sentencia at its resized 22 pt).
+        AddLines(controls, "StatsText", StatsLines(lead), row, font: "Kenshi_PaintedTextFont_Medium");
         if (infoExpanded) AddLines(controls, "ExtendedStatsText", ExtendedLines(lead, SpeedUnit).Select(line => line with
             { Label = line.Label.ToUpperInvariant(), LabelColour = MainColour }).ToArray(), row, sidePixels);
         foreach (var (bar, name, arrows) in medicalRows)

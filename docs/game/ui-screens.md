@@ -81,6 +81,9 @@ Layer Middle, per-frame update FUN_140728d50 (**Observed**):
 
 **Observed** (user base-game reference): squad portrait frames occupy about 72% of the tab
 page height, leaving space below; Meitou uses this ratio, shrinking further for a full row.
+The HUD stats rows (`StatsText`: MARTIAL ARTS ...) are drawn in the painted face, Sentencia at its resized 22 pt, 15.3 px at 1080 p
+(**Observed**: glyph shapes and widths in a base-game screenshot; [mygui.md](../formats/mygui.md) for the resize); Meitou uses
+`Kenshi_PaintedTextFont_Medium` there.
 JOBS and RANGED start enabled (user-reported original defaults).
 **Verified** (`Kenshi_MainPanel.layout`): `OrdersChaseButton` is captioned JOBS; Meitou binds it
 to Jobs, independent of the saved `chase mode` flag whose relationship is **Unknown**.

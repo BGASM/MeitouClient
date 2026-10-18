@@ -110,7 +110,7 @@ i.e. everything).
 | `Movement marker` | bool | 1 | Show movement marker | The green marker where you click |
 | `Rotation marker` | bool | 1 | Show rotation marker | The green marker while rotating the camera |
 | `floaters` | int 0 … 2 | 1 | Show damage floaters: Off = 0, Simple info = 1, Full info = 2 | Damage numbers; only shown within 4000 units (squared distance 1.6e7, FUN_1406508d0); 2 splits them by damage type. Layout: [ui-screens](../game/ui-screens.md#8-damage-floaters); stored at options +0x7c |
-| `font size2` | int (stored as float); slider −10 … 32 | 3 | Font Size | GUI font size; applied by its own handler. How the number maps to a size is **Unknown** |
+| `font size2` | int (stored as float); slider −10 … 32 | 3 | Font Size | GUI font size: added in points to every font's MyGUI default height ([mygui.md](mygui.md)) |
 | `tutorials` | bool | 1 | Tutorials | In-game tutorials ("Reset Tutorials" is a button, not a key) |
 | `censorship` | bool | 0 | Language censorship | Filters swearing in dialogue (FUN_14067e8b0) |
 | `language` | string, locale code | see text | none in options | The locale folder `locale/<code>/` used for translations |
@@ -206,7 +206,7 @@ the game calls `Root::restoreConfig` / `saveConfig` (**Verified**), which use th
 - What town display state 4 is (set for reflections at levels 3 and 4), and when the water programs are rebuilt after
   `water reflection` changes to or from 0.
 - The reflection camera's far clip before FUN_1403e7490 first runs (Ogre's default assumed).
-- The number and pixel format of the decal textures; the unit of the `attacks` timers; the `font size2` mapping.
+- The number and pixel format of the decal textures; the unit of the `attacks` timers.
 - Whether anything reads `civilians`.
 - In-session effect of `feature range` 7 or 8 (above the loader's clamp).
 

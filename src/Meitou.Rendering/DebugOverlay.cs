@@ -85,9 +85,13 @@ public sealed unsafe class DebugOverlay : IDisposable
 
     DebugOverlay(GpuContext gpu, byte[] font, float pixelHeight = 16) : this(gpu, font, pixelHeight, false) { }
 
-    DebugOverlay(GpuContext gpu, byte[] font, float pixelHeight, bool uiFont)
+    /// <summary>Glyphs baked without oversampling and placed on whole pixels (<see cref="FromUiFont"/>).</summary>
+    readonly bool snapped;
+
+    DebugOverlay(GpuContext gpu, byte[] font, float pixelHeight, bool uiFont, bool snapped = false)
     {
         Gpu = gpu;
+        this.snapped = snapped;
         (PixelHeight, AtlasSize) = (pixelHeight, pixelHeight > 32 ? 2048 : uiFont ? 1024 : 512);
         var pixels = new byte[AtlasSize * AtlasSize];
         if (uiFont)
@@ -103,7 +107,7 @@ public sealed unsafe class DebugOverlay : IDisposable
                     throw new InvalidOperationException("Could not create the UI font atlas.");
                 try
                 {
-                    StbTrueType.stbtt_PackSetOversampling(pack, 2, 2);
+                    StbTrueType.stbtt_PackSetOversampling(pack, snapped ? 1u : 2u, snapped ? 1u : 2u);
                     // Negative sizes specify em pixels, matching UI/CSS font sizes, rather than ascender-to-descender height.
                     if (StbTrueType.stbtt_PackFontRange(pack, f, 0, -PixelHeight, FirstChar, CharCount, g) == 0)
                         throw new InvalidOperationException("The UI font atlas is too small.");
@@ -153,7 +157,8 @@ public sealed unsafe class DebugOverlay : IDisposable
     /// <param name="pixelHeight">The size the glyphs are baked at: about the size the face is drawn at keeps it sharp.</param>
     public static DebugOverlay FromFont(GpuContext gpu, string path, float pixelHeight = 16) => new(gpu, File.ReadAllBytes(path), pixelHeight);
 
-    public static DebugOverlay FromUiFont(GpuContext gpu, string path, float pixelHeight) => new(gpu, File.ReadAllBytes(path), pixelHeight, true);
+    /// <summary>A UI face baked at <paramref name="pixelHeight"/> em pixels. <paramref name="snapped"/>: glyphs baked at 1x and placed on whole pixels, so each texel lands on one screen pixel (sharper; for fonts the original draws with <c>Antialias</c> false).</summary>
+    public static DebugOverlay FromUiFont(GpuContext gpu, string path, float pixelHeight, bool snapped = false) => new(gpu, File.ReadAllBytes(path), pixelHeight, true, snapped);
 
     public float MeasureText(string text, float scale = 1)
     {
@@ -320,7 +325,8 @@ public sealed unsafe class DebugOverlay : IDisposable
             if (packedGlyphs is { } packed)
             {
                 var pg = packed[index];
-                Quad(x + pg.xoff * scale, baseline + pg.yoff * scale, x + pg.xoff2 * scale, baseline + pg.yoff2 * scale,
+                float gx = snapped ? MathF.Round(x) : x, gy = snapped ? MathF.Round(baseline) : baseline;
+                Quad(gx + pg.xoff * scale, gy + pg.yoff * scale, gx + pg.xoff2 * scale, gy + pg.yoff2 * scale,
                     pg.x0 / (float)AtlasSize, pg.y0 / (float)AtlasSize, pg.x1 / (float)AtlasSize, pg.y1 / (float)AtlasSize, colour);
                 x += pg.xadvance * scale;
                 continue;

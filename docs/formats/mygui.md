@@ -41,10 +41,23 @@ Sources: the configured Kenshi install's `data/gui/`, the existing
   `Exo2-SemiBold.ttf` (Small/MediumSmall/Medium/Large sizes 14/16/20/24), painted
   variants use `Sentencia_1.ttf` (20/25/28). `Kenshi_UI_Messages` uses
   `MailartRubberstamp-Regular.ttf`, size 110; all specify resolution 50.
-  The painter resolves each resource's source and bakes em pixels as
-  `Size * Resolution / 72`, scaled with viewport height. Native hinting,
-  monochrome rasterisation and the complete Unicode ranges remain unimplemented;
-  exact original rasterisation is **Unknown**.
+  All standard and painted fonts set `Antialias` false and `Hinting` use_native.
+- **Verified** (decompile `FUN_1403e81a0`, run after loading and on the Font Size
+  option): the game resets every loaded `ResourceTrueTypeFont` to
+  `Size = (int)getDefaultHeight() + font size2` (settings.cfg, default 3), still in
+  points at the resource's resolution; the default height is taken from the
+  font as first loaded. MyGUI 3.2.3 (MyGUI.log) makes the default height ascent +
+  descent in pixels. **Observed** (user screenshots at 1080 p, text widths): the
+  heights fit FreeType's grid-fitted metrics, hhea ascender rounded up plus
+  descender rounded down at the fractional em (each at least the OS/2 Windows value
+  at the rounded ppem): Sentencia 25 pt draws at 22 pt (15.3 px), Exo2 20 pt stays
+  20 pt (13.9 px). Rounding to the integer ppem instead (head flag bit 3) gives
+  20 pt for Sentencia and does not fit. Meitou: `KenshiFontSize` (default 3).
+- The painter bakes each resource at its resized `Size * Resolution / 72` em
+  pixels, scaled with viewport height; `Antialias` false fonts are baked at 1x and
+  drawn on whole pixels. Native hinting, true monochrome rasterisation (unhinted
+  thresholding was tried: broken strokes) and the full Unicode ranges remain
+  unimplemented.
 - Main in-game UI applies a user-requested minimum of 16 em pixels at 1080 lines,
   scaled with viewport height, including resource fonts and explicit pixel sizes.
   Larger headings retain their sizes. Short captions centre the line box and clip

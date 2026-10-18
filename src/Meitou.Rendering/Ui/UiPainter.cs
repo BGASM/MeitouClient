@@ -14,7 +14,16 @@ public sealed class UiPainter : IDisposable
     readonly Func<string, string?> resolve;
     DebugOverlay? standardFont, paintedFont, titleFont;
     Dictionary<int, DebugOverlay>? pixelFonts;
-    readonly Dictionary<(string Source, int Pixels), DebugOverlay> resourceFonts = [];
+    readonly Dictionary<(string Source, int Pixels, bool Snapped), DebugOverlay> resourceFonts = [];
+    readonly Dictionary<(string Path, float Size, float Resolution), float> fontSizes = [];
+
+    /// <summary>The point size the original draws font resource <paramref name="path"/> at (<see cref="KenshiFontSize"/>).</summary>
+    float EffectiveFontSize(string path, float size, float resolution)
+    {
+        if (!fontSizes.TryGetValue((path, size, resolution), out float effective))
+            fontSizes[(path, size, resolution)] = effective = KenshiFontSize.Effective(File.ReadAllBytes(path), size, resolution);
+        return effective;
+    }
     /// <summary>The standard and painted faces baked at <see cref="LargePixels"/>: lettering scaled well past the 16 px atlases is drawn from these, so it stays sharp.</summary>
     DebugOverlay? standardLarge, paintedLarge;
     const float LargePixels = 48;
@@ -215,11 +224,12 @@ public sealed class UiPainter : IDisposable
                     System.Globalization.CultureInfo.InvariantCulture, out float number) && float.IsFinite(number) && number > 0 ? number : fallback;
                 if (Property("Source") is { } source && resolve(source) is { } sourcePath)
                 {
-                    // TrueType resource sizes are points at the resource's DPI. Bake at the resulting em pixel size.
+                    // TrueType resource sizes are points at the resource's DPI, resized as the original does on load. Bake at the resulting em pixel size.
+                    float resolution = Number("Resolution", 50);
                     int resourcePixels = Math.Clamp((int)MathF.Round(Math.Max(minimumTextPixels,
-                        Number("Size", 20) * Number("Resolution", 50) / 72 * (c.TextScale ?? height / 1080f))), 6, 192);
-                    var key = (sourcePath, resourcePixels);
-                    if (!resourceFonts.TryGetValue(key, out var exact)) resourceFonts[key] = exact = DebugOverlay.FromUiFont(overlay.Gpu, sourcePath, resourcePixels);
+                        EffectiveFontSize(sourcePath, Number("Size", 20), resolution) * resolution / 72 * (c.TextScale ?? height / 1080f))), 6, 192);
+                    var key = (sourcePath, resourcePixels, Property("Antialias") == "false");
+                    if (!resourceFonts.TryGetValue(key, out var exact)) resourceFonts[key] = exact = DebugOverlay.FromUiFont(overlay.Gpu, sourcePath, resourcePixels, key.Item3);
                     font = exact;
                     font.Target = overlay.Target;
                     scale = 1;
