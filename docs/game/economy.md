@@ -203,7 +203,8 @@ money, mark the entry claimed (it never pays twice) and show "Received c.{1} rew
 - **Dialogue** `DA_PAY_BOUNTY` (10) (`FUN_140680560` case 10): pays for the body the talking player carries, with the speaker's
   booking faction; then the speaker takes the body (tasks 213 `LIFT_PERSON_SNATCHING_ALLOWED` and 112 `FIND_CAGE_AND_PUT_IN`).
   Base data uses it in `EV_PLAYER_TALK_TO_ME` dialogues gated by `DC_CARRYING_BOUNTY_ALIVE` / `_DEAD` (e.g. "shek bounty desk"),
-  together with `DA_ARREST_TARGETS_CARRIED_PERSON` (30) and +relations (**Verified** by probe of the merged data).
+  together with `DA_ARREST_TARGETS_CARRIED_PERSON` (30) and +relations (**Verified** by probe of the merged data). The two effects come in either
+  order (shek desk: alive 10, 30, 4; dead 30, 10, 4; **Verified** same probe), so the body is still carried when 10 runs. Meitou: [simulation](../simulation.md#arrest-and-jail).
 
 ### 11.5 Bail and sentence
 

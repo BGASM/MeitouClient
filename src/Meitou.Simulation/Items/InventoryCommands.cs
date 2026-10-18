@@ -59,6 +59,7 @@ public static class InventoryCommands
         var item = root.All().ElementAtOrDefault(token.Index);
         if (item is null || item.Record != token.Record || item.Section != token.Section || item.X != token.X || item.Y != token.Y || item.Quantity != token.Quantity || item.Quality != token.Quality ||
             !(IsMovableSection(item.Section) || IsLimbSection(item.Section)) || !(IsMovableSection(section) || IsLimbSection(section))) return false;
+        if (item.LockedOn && section != item.Section) return false;   // worn locked shackles stay on
         var owner = root.Items.Contains(item) ? root : root.Backpack?.Contents;
         var target = section == "backpack_content" ? root.Backpack?.Contents : root;
         // A bag cannot contain itself or another container; moving it preserves all its contents.

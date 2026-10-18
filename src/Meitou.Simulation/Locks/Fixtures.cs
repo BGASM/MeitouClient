@@ -23,7 +23,7 @@ public enum FixtureKind : byte
 public enum DoorMotion : byte { Closed = 0, Open = 1, Opening = 2, Closing = 3 }
 
 /// <summary>
-/// The lock object of docs/game/locks.md "Lock object": one structure for doors, lockable buildings, cages (and, later, shackles). The pick timer lives on the lock, as in
+/// The lock object of docs/game/locks.md "Lock object": one structure for doors, lockable buildings, cages and shackles. The pick timer lives on the lock, as in
 /// the original; <see cref="Rolls"/> counts the rolls made on it, the counter of its stateless random stream.
 /// </summary>
 public sealed class LockState

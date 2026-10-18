@@ -103,6 +103,8 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     public bool InCombat { get; init; }
     /// <summary>Wears locked armour (shackles, <see cref="Items.ItemInstance.IsLocked"/>): the portrait's <c>Slave</c> overlay.</summary>
     public bool Shackled { get; init; }
+    /// <summary>Its worn shackles are locked (<see cref="Locks.LockSystem.WornShackles"/>): the context menu offers Unlock Shackles, Use Tools and Use Strength.</summary>
+    public bool ShacklesLocked { get; init; }
     /// <summary>The number that turns its portrait camera (<see cref="CharacterCold.PortraitSerial"/>).</summary>
     public uint PortraitSerial { get; init; }
     /// <summary>The character this one carries (none when not carrying).</summary>

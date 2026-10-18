@@ -428,7 +428,7 @@ unload, hashed only once non-empty. Facts: [locks](game/locks.md), [economy 11.5
   (`World.GameHours`) + `SentenceLength`; served when start + length <= now; no bounty with the cage owner: none (served).
 - **Lockpicking** (`Lockpicking`, serial; the player's order is in [Arrest and jail](#arrest-and-jail)): `Step` per task update (pending crime,
   timer on the lock, seeded roll by the lock's roll counter, XP), `Allowed` (min chance; engine: conscious, an arm, not
-  carried, not on a pole), `Break` (strength > 3 x hardness). Not built: shackles (item locks), cutting, bashing doors.
+  carried, not on a pole), `Break` (strength > 3 x hardness). Not built: cutting locks other than shackles, bashing doors.
 
 ## Arrest and jail
 
@@ -475,7 +475,7 @@ Arrests, the recognition meter and the marker are hashed only while set. What a 
 - **Put in Cage / claim** (`PutInCageOrder`, verb on a body a selected character carries; engine): the carrier walks to the
   best free cage within 1500 (`FindCage`; others' cages reserved), `LetGo` + `Imprison` as an arrest does, then `Claim`
   (11.4 caging tests; the slaver exception never applies): the cage owner's unclaimed entry, halved for a dead captive, is
-  paid and marked claimed ("Received c.N reward."). A new order or 3 failed walks end it. The dialogue hand-over is not built.
+  paid and marked claimed ("Received c.N reward."). A new order or 3 failed walks end it.
 - **Spawn bounties** (`SpawnBounties`, 11.2): rolled for new NPCs (not the player's, not sandbox spawns) under `Spawn` keyed
   by the character id, one fuzz roll for all its factions; no `bounty factions` -> "the empire" (fcs.def), engine: the
   faction named United Cities. Inspecting an NPC shows its bounty in the HUD's bounty panel.
@@ -485,7 +485,16 @@ Arrests, the recognition meter and the marker are hashed only while set. What a 
   (`Engaged`), re-ordered while the target is up and within 3000. When it is down, carried, caged or out of reach the hunt
   ends: no cage (11.8), and that hunter leaves that target alone for 600 game seconds (engine). Hunts and cagings are
   hashed only while any exist; restarted after a load ([Saves](#saves)).
-- Not built: slaves, shackles (kidnapped captives: [Kidnapping](#kidnapping)), jailed NPCs from spawn data (template `prisoners`, `SquadFactory`).
+- **Bounty desk** (dialogue, [economy 11.4](game/economy.md#114-claiming)): `DA_PAY_BOUNTY` (`ArrestSystem.PayBounty`) pays the carried body's
+  unclaimed entry for the speaker's booking faction (halved dead) and marks it claimed; `DA_ARREST_TARGETS_CARRIED_PERSON` (`TakeOver`) runs
+  after the line's other effects (data lists them in either order): the carrier lets go and the speaker starts an arrest in the lift
+  phase, so it carries the body to a cage as above (none: dropped).
+- **Shackles** (`Locks/LockSystem.Shackles.cs`, [locks](game/locks.md)): ARMOUR `is locked` items get a `LockState` (`ItemInstance.Lock`);
+  `LockedOn` (effectively locked, worn) refuses moving, unequipping and selling. `ShackleOrder` (verbs Unlock Shackles / Use Tools /
+  Use Strength) sends the first eligible worker (the wearer or a mate within 25): pick (`Lockpicking.Step` rules), cut (needs a tool,
+  `item function` 9; the best is consumed when hardness reaches 0) or break (strength > 3 x hardness). Another faction's wearer: a pending
+  code 7. The lock is saved on the item (`lock lvl`, `locked`, `broken`, `hardness`). Shackled characters show the portrait Slave overlay.
+- Not built: slaves (putting shackles on; kidnapped captives: [Kidnapping](#kidnapping)), jailed NPCs from spawn data (template `prisoners`, `SquadFactory`).
 
 
 ## Kidnapping

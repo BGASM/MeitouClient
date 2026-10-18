@@ -40,6 +40,9 @@ public sealed class ItemFactory(GameDatabase db, GameConstants constants)
             Type = info.Type,
             EquipmentSection = info.Type == FcsRecordType.ARMOUR && Db.Find(info.Id) is { } armour ? SectionOf(armour) : "",
             IsLocked = info.Type == FcsRecordType.ARMOUR && Db.Find(info.Id) is { } locked && locked.GetBool("is locked"),
+            Lock = info.Type == FcsRecordType.ARMOUR && Db.Find(info.Id) is { } shackles && shackles.GetBool("is locked")
+                ? new Locks.LockState { Level = Math.Clamp(shackles.Ints.GetValueOrDefault("lock level"), 0, 100), Hardness = shackles.Floats.GetValueOrDefault("hardness"), Locked = true }
+                : null,
             Quantity = Math.Max(quantity, 1),
             Quality = quality,
             ItemFunction = info.Function,

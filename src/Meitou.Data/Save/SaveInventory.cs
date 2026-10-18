@@ -24,10 +24,15 @@ public sealed class SaveItem
     public float Damage { get; init; }
     public float Wear { get; init; }
     public float Stun { get; init; }
+    /// <summary>Shackles' lock (LockedArmour, docs/game/locks.md "Save keys"): <c>lock lvl</c>, <c>locked</c>, <c>broken</c>, <c>hardness</c>; null for other items.</summary>
+    public SaveItemLock? Lock { get; init; }
     /// <summary>A container's contents (the INVENTORY_STATE its one instance names); null for other items.</summary>
     public List<SaveItem>? Contents { get; init; }
     public FcsRecord? Source { get; init; }
 }
+
+/// <summary>An item's lock as saved; <see cref="Locked"/> is written true only while the lock is effectively locked (as the original's writer, <c>FUN_14029ffd0</c>).</summary>
+public readonly record struct SaveItemLock(int Level, bool Locked, bool Broken, float Hardness);
 
 /// <summary>Reads and writes the items of an INVENTORY_STATE inside one save file (a platoon's).</summary>
 public static class SaveInventory
@@ -75,6 +80,7 @@ public static class SaveInventory
         Damage = r.Floats.GetValueOrDefault("dam"),
         Wear = r.Floats.GetValueOrDefault("wear"),
         Stun = r.Floats.GetValueOrDefault("stun"),
+        Lock = r.Ints.TryGetValue("lock lvl", out int lockLevel) ? new SaveItemLock(lockLevel, r.Bools.GetValueOrDefault("locked"), r.Bools.GetValueOrDefault("broken"), r.Floats.GetValueOrDefault("hardness")) : null,
         Contents = contents,
         Source = r,
     };
@@ -131,6 +137,13 @@ public static class SaveInventory
         // A prosthetic's condition: written where the record had it or it is not zero.
         foreach (var (k, v) in new[] { ("dam", item.Damage), ("wear", item.Wear), ("stun", item.Stun) })
             if (v != 0 || r.Floats.ContainsKey(k)) r.Floats[k] = v;
+        if (item.Lock is { } l)
+        {
+            r.Ints["lock lvl"] = l.Level;
+            r.Bools["locked"] = l.Locked;
+            r.Bools["broken"] = l.Broken;
+            r.Floats["hardness"] = l.Hardness;
+        }
         r.Bools["in inventory"] = true;
         return r;
     }

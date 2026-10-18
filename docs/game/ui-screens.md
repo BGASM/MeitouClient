@@ -122,7 +122,7 @@ the user's base-game save atlas shows a near-frontal face.
   changes by direction × frame time × 2. At 0 the direction flips to +1, and at 1 it flips back to −1. That is a full 0 → 1 → 0 cycle
   every second. Without flag 2, or with flag 4, the alpha stays at 1.
 - **Unknown:** what the AI `+0xb0` float means. AI slot 25 (the eat desire) also suppresses itself while it is > 0, so it reads as
-  "danger seen". Also unknown: what `+0x279 & 7` holds. Also unknown: which equipment slots inventory sections 9 and 5 are.
+  "danger seen". Also unknown: what `+0x279 & 7` holds. Sections 9 and 5 are the ARMOUR `slot` values of the shackle records (`Prisoner Shackles` 9, `Hive Prisoner Shackles` 5; **Observed**).
 - A portrait is re-rendered when its flags change, when its character changes, or when PortraitData `+0x30` / `+0x58` is set.
 - A cell wider than 94 px switches `NameText` to a larger font.
 
@@ -375,7 +375,7 @@ decompile unless marked; Meitou's adapter is `PlayerInterface.Map.cs`.
     window open it moves the item to the other window.
     - *Use first* (`FUN_14070d070`): only an item whose class returns itself from item slot 94 (offset 0x2f0) has a use. The default returns nothing (**Verified**: the Item, Weapon, Armour, Gear
       and MapItem vtables all share it, so food, medkits and ordinary gear never reach it); `LockedArmour` (shackles) does, and its right click opens the context menu on it (`FUN_1407a6bc0`, verbs such as
-      Unlock Shackles, Use Tools, Use Strength: [locks](locks.md)). A right click on food does not eat it. Not built (no worn shackles in an inventory).
+      Unlock Shackles, Use Tools, Use Strength: [locks](locks.md)). A right click on food does not eat it. Meitou offers the shackle verbs on the character's context menu instead.
     - *Fence prompt* (`FUN_140715290`): a stolen item (it has an owner of kind 1 or 0x22 other than the seller's faction) that a trader who is not a knowing fence would buy is held back
       while a modal asks "You have a {1}% chance of getting caught selling this stolen item.\nFence it anyway?" (title "Fencing Item"), {1} = 100 - floor(100 x chance + 0.5) with the chance of
       `FUN_140793490`; it is asked only when that chance is below 1. While it is open further clicks are swallowed; Yes repeats the click (or the drop), anything else drops it. The drag-and-drop sale

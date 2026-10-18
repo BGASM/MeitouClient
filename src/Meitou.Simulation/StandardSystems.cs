@@ -207,6 +207,7 @@ public static class StandardSystems
         Meitou.Simulation.Dialogue.DialogueSystem? talk = null;
         if (Has(StandardParts.Dialogue)) systems.Add(talk = new Meitou.Simulation.Dialogue.DialogueSystem(data, o.Dialogue, population));
         if (talk is not null && population is not null) (population.Announcer, population.PendingTalk) = (talk.Announce, talk.HasInterrupt);
+        if (talk is not null) talk.Arrests = arrest;
         return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Kidnap = kidnap, Crime = crime, Arrest = arrest, Locks = locks, Trade = trade, Ai = ai, Construction = construction, Ragdolls = ragdolls, Dialogue = talk };
     }
 }

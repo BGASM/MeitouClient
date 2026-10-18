@@ -58,6 +58,15 @@ sealed partial class PlayerInterface
             if (prison.Locked) verbs.Add(("Pick Lock", () => Say(new Meitou.Simulation.Locks.PickLockOrder(selection, id) { Tick = session.World.Tick })));
             else if (selection.Contains(id)) verbs.Add(("Get Out", () => Say(new Meitou.Simulation.Locks.GetOutOrder([id]) { Tick = session.World.Tick })));
         }
+        // Locked shackles (the original's verbs 201, 185, 186): pick the lock, saw them off with a tool, or break them by strength; the wearer's own or a mate's (another faction's: a crime).
+        if (target.ShacklesLocked && target.Body is not { Dead: true })
+        {
+            verbs.Add(("Unlock Shackles", () => Say(new Meitou.Simulation.Locks.ShackleOrder(Workers(), id, Meitou.Simulation.Locks.ShackleWork.Pick) { Tick = session.World.Tick })));
+            verbs.Add(("Use Tools", () => Say(new Meitou.Simulation.Locks.ShackleOrder(Workers(), id, Meitou.Simulation.Locks.ShackleWork.Cut) { Tick = session.World.Tick })));
+            verbs.Add(("Use Strength", () => Say(new Meitou.Simulation.Locks.ShackleOrder(Workers(), id, Meitou.Simulation.Locks.ShackleWork.Break) { Tick = session.World.Tick })));
+            // The wearer works its own shackles when it is selected, else the selection.
+            IReadOnlyList<CharacterId> Workers() => selection.Contains(id) ? [id] : selection;
+        }
         // Out of an unlocked cage a mate lifts the prisoner, awake or down (out of another faction's cage a crime for both, locks.md "Cages and beds").
         if (target.Prison is { Locked: false } && !selection.Contains(id) && target.CarriedBy.IsNone && carriers.Length == 0)
             verbs.Add(("Pick Up", () => Say(new Meitou.Simulation.Carrying.PickUpOrder([], id) { Tick = session.World.Tick })));

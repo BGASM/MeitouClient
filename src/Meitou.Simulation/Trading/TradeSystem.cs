@@ -306,6 +306,7 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
         var tc = world.Characters.Cold(t)!;
         var squad = world.Squads.Find(tc.SquadId)!;
         if (Find(cold.Inventory!, sell.Item) is not { } item || !InventoryCommands.IsMovableSection(item.Section)) return;
+        if (item.LockedOn) { world.Post("This item is locked in place and cannot be removed."); return; }
         var m = Market(world);
         int units = Affordable(m, item, Math.Clamp(sell.Quantity, 1, item.Quantity), true, shop!.Terms, cold.Faction, squad.Money);
         if (units == 0)

@@ -40,6 +40,7 @@ public sealed partial class LockSystem(GameConstants constants, BodyOptions opti
                         if (!table.TryResolveNext(id, out int s) || table.Cold(s) is not { IsPlayer: true, Medical.Incapacitated: false } c || !c.CarriedBy.IsNone) continue;
                         if (c.IsImprisoned && c.InWhat != cage.Id) continue;   // a prisoner reaches only its own cage
                         c.PickingLock = cage.Id;
+                        c.Shackles = null;
                         if (!c.IsImprisoned) MovementSystem.GoTo(table, s, new Vector2(cage.Position.X, cage.Position.Z), c.RunSpeed);
                         break;   // one picker per order (the nearest is not looked for: the first listed)
                     }
@@ -53,6 +54,9 @@ public sealed partial class LockSystem(GameConstants constants, BodyOptions opti
                         else if (c.IsPlayer) world.Post("It's locked.");
                     }
                     break;
+                case ShackleOrder shackles:
+                    ShackleInput(world, shackles);
+                    break;
                 case ToggleDoorsOrder or ToggleDoorLocksOrder:
                     DoorInputs(world, command);
                     break;
@@ -64,6 +68,7 @@ public sealed partial class LockSystem(GameConstants constants, BodyOptions opti
     {
         Doors(world);
         Rounds(world);
+        ShackleWorkers(world);
         var table = world.Characters;
         var next = table.Next;
         for (int s = 0; s < table.HighWater; s++)

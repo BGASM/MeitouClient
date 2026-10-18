@@ -23,7 +23,7 @@ public enum PickOutcome : byte
 /// <summary>
 /// Lockpicking, breaking (docs/game/locks.md "Lockpicking", "Cutting and breaking"): the service the pick-lock order and the AI's tasks call each update of the task, in serial
 /// phases only (it changes the lock, the picker's stats and its pending crime). The roll comes from the world seed, the fixture's id and the lock's roll counter.
-/// Picking shackles (an item lock) is not built yet; it would call the same rules with the item's <see cref="LockState"/>.
+/// Shackles (an item's lock) use the same rules: <see cref="StepShackles"/>, <see cref="CutShackles"/>, <see cref="BreakShackles"/>.
 /// </summary>
 public sealed class Lockpicking(GameConstants constants, BodyOptions options)
 {
@@ -65,17 +65,23 @@ public sealed class Lockpicking(GameConstants constants, BodyOptions options)
         if (target.Lock is not { EffectivelyLocked: true } l) return PickOutcome.Open;
         if (c is null || !Allowed(world, c, l.Level)) return PickOutcome.NotAllowed;
         Crime(world, picker, c, target, crimes);
+        var outcome = Roll(world, c, l, Rng.StableHash(target.Id), dt);
+        if (outcome == PickOutcome.Success) world.Fixtures.Touch(target);
+        return outcome;
+    }
+
+    /// <summary>Adds <paramref name="dt"/> to the lock's pick time and, once it passes the next-roll time, rolls (success unlocks; failure waits uniform 5-20 s) and trains lockpicking.</summary>
+    PickOutcome Roll(World world, CharacterCold c, LockState l, ulong key, float dt)
+    {
         l.PickTime += dt;
         if (l.PickTime < l.NextRoll) return PickOutcome.Picking;
         l.PickTime = 0;
-        ulong key = Rng.StableHash(target.Id);
         ulong counter = (ulong)++l.Rolls * 2;
         bool success = Rng.Float(Rng.Hash(world.Seed, key, RngPurpose.Lock, counter)) < RollChance(c, l.Level);
         if (success)
         {
             l.Locked = false;
             l.NextRoll = LockState.FirstRoll;
-            world.Fixtures.Touch(target);
         }
         else
         {
@@ -83,6 +89,68 @@ public sealed class Lockpicking(GameConstants constants, BodyOptions options)
         }
         if (c.Stats is { } stats && c.Race is { } race) xp.Lockpicking(stats, race, success);
         return success ? PickOutcome.Success : PickOutcome.Failed;
+    }
+
+    /// <summary>The rolls of <paramref name="wearer"/>'s shackles <paramref name="item"/>: keyed by the wearer and the item's record.</summary>
+    static ulong ShackleKey(CharacterId wearer, Items.ItemInstance item) => Rng.Key(wearer) ^ Rng.StableHash(item.Record);
+
+    /// <summary>
+    /// One update of picking shackles (Task_PickLock_Shackles 201, the same rules as a cage's lock): the picker's own (a caged picker takes the -10) or another character's, which
+    /// books code 7 against the wearer's faction.
+    /// </summary>
+    public PickOutcome StepShackles(World world, int picker, CharacterId wearer, Items.ItemInstance item, float dt, CrimeSystem? crimes = null)
+    {
+        var c = world.Characters.Cold(picker);
+        if (item.Lock is not { EffectivelyLocked: true } l) return PickOutcome.Open;
+        if (c is null || !Allowed(world, c, l.Level)) return PickOutcome.NotAllowed;
+        ShackleCrime(world, picker, wearer, crimes);
+        return Roll(world, c, l, ShackleKey(wearer, item), dt);
+    }
+
+    /// <summary>The effective strength the cut and break tests use (the stat-scale term taken as 1, locks.md Unknowns).</summary>
+    static float Strength(CharacterCold c) => (c.Stats?[StatsEnumerated.Strength] ?? 0) * (c.Medical?.StatMultiplier(StatsEnumerated.Strength) ?? 1);
+
+    /// <summary>The best tool the character carries (ITEM <c>item function</c> 9, the condition <c>hasTools</c>: Hacksaw, Tools), by quality; null: "I don't have any tools".</summary>
+    public static Items.ItemInstance? BestTool(CharacterCold c) =>
+        c.Inventory?.All().Where(i => i.ItemFunction == ToolFunction).OrderByDescending(i => i.Quality).FirstOrDefault();
+
+    /// <summary>ITEM <c>item function</c> of a tool (<c>hasTools</c> tests the inventory for it, <b>Verified</b>: <c>FUN_1405989e0</c>).</summary>
+    public const int ToolFunction = 9;
+
+    /// <summary>
+    /// One update of cutting shackles (Task_CutShackles 185, <b>Observed</b>): hardness falls by <c>clamp(0.01 x strength, 0.05, 0.2) x dt x 2</c>; at 0 the best tool is used up and the
+    /// lock is broken (true). False while still cutting. Books the picking crime.
+    /// </summary>
+    public bool CutShackles(World world, int cutter, CharacterId wearer, Items.ItemInstance item, float dt, CrimeSystem? crimes = null)
+    {
+        var c = world.Characters.Cold(cutter);
+        if (c is null || item.Lock is not { Broken: false } l) return false;
+        ShackleCrime(world, cutter, wearer, crimes);
+        l.Hardness -= Math.Clamp(0.01f * Strength(c), 0.05f, 0.2f) * dt * 2;
+        if (l.Hardness > 0) return false;
+        l.Hardness = 0;
+        if (BestTool(c) is { } tool) c.Inventory!.RemoveOne(tool);
+        l.Broken = true;
+        return true;
+    }
+
+    /// <summary>Breaks shackles by force (Task_BruteForceShackles 186, <b>Observed</b>): at once when strength &gt; 3 x hardness (true, "*Crunck*"), else "I'm not strong enough to do that".</summary>
+    public bool BreakShackles(World world, int breaker, CharacterId wearer, Items.ItemInstance item, CrimeSystem? crimes = null)
+    {
+        var c = world.Characters.Cold(breaker);
+        if (c is null || item.Lock is not { Broken: false } l) return false;
+        ShackleCrime(world, breaker, wearer, crimes);
+        if (Strength(c) <= 3 * l.Hardness) return false;
+        l.Broken = true;
+        return true;
+    }
+
+    /// <summary>Another character's shackles: code 7 against the wearer's faction (the original reads its slave owner's; <see cref="CrimeSystem.SetPending"/> refuses own-faction victims).</summary>
+    static void ShackleCrime(World world, int worker, CharacterId wearer, CrimeSystem? crimes)
+    {
+        var table = world.Characters;
+        if (crimes is null || wearer == table.IdOf(worker) || !table.TryResolveNext(wearer, out int w) || table.Cold(w) is not { } victim) return;
+        crimes.SetPending(world, worker, CrimeCode.Terrorism, victim.Faction, wearer, CrimeSystem.MinTimer);
     }
 
     /// <summary>

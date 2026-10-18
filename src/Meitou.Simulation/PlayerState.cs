@@ -142,6 +142,8 @@ public sealed class PlayerSystem(PopulationData? data = null) : ITickSystem
                         {
                             if (!MoveLimb(cold, inventory, move)) world.Post("Cannot fit or remove that limb: it needs a missing limb of its side, or the slot changed.");
                         }
+                        else if (inventory.All().ElementAtOrDefault(move.Item.Index) is { LockedOn: true } && move.Section != move.Item.Section)
+                            world.Post("This item is locked in place and cannot be removed. You can try to pick the lock, find a saw, or use brute strength.");
                         else if (!Items.InventoryCommands.Move(inventory, move.Item, move.Section, move.X, move.Y))
                             world.Post("Cannot move that item: the slot is occupied, incompatible or the inventory changed.");
                         else if (Items.InventoryCommands.IsEquipmentSection(move.Item.Section) || Items.InventoryCommands.IsEquipmentSection(move.Section))

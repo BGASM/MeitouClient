@@ -75,6 +75,7 @@ public sealed partial class World
                 InCombat = cold?.InCombat ?? false,
                 Shackled = cold?.Inventory is { } worn && worn.Items.Any(item => item.IsLocked && item.Section != "main"),
                 PortraitSerial = cold?.PortraitSerial ?? 0,
+                ShacklesLocked = Locks.LockSystem.WornShackles(cold) is not null,
                 Orders = cold?.Orders ?? CharacterOrders.None,
                 RunSpeed = cold?.RunSpeed ?? SpeedMode.Free,
                 Scale = cold is { Fighter.IsAnimal: true, Medical: { } size } ? size.ScaleK : 1,

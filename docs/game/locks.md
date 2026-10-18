@@ -91,11 +91,14 @@ Save sample (autosave of the owner's game, 51 zone files): `lock lvl` values spa
 
 ## Cutting and breaking (285 / 185 cut, 286 / 186 break)
 
+On shackles the context-menu verbs are "Unlock Shackles" (201), "Use Tools" (185) and "Use Strength" (186) (`FUN_14079b2d0`, **Observed**).
+A locked shackle cannot be unequipped: "This item is locked in place and cannot be removed. You can try to pick the lock, find a saw, or use brute strength."
+
 Same targets as picking; Task_CutLock / Task_BruteForceLock share the shackle tasks' update (**Verified** vtables).
 
 - **Cut** (`Task_CutShackles` slot 2, **Observed**): needs `hasTools` (state 122). Each update: hardness -=
   `clamp(0.01 x a x b, 0.05, 0.2) x dt x 2`, where `a x b` is the strength-based product of the break test below. At <= 0 the
-  best tool item (item kind 9) is consumed (aborts if none), the lock's broken flag is set, "Shackles broken!" (also for locks).
+  best tool is consumed (a tool: ITEM `item function` 9, e.g. Hacksaw; `hasTools` `FUN_1405989e0` tests item `+0x124 == 9`, **Verified**) (aborts if none), the lock's broken flag is set, "Shackles broken!" (also for locks).
   The bar shows hardness x 10. Same crime rule as picking (2 for own-target / buildings, 7 for another character).
 - **Break** (`Task_BruteForceShackles` slot 2, **Observed**): instant; succeeds when effective strength x stat scale > 3 x hardness,
   else "I'm not strong enough to do that". Sets broken, "*Crunck*".
@@ -175,6 +178,8 @@ Building records in `zone/*.zone` (**Verified** keys by census of 51 zone files,
 as `lock lvl`, `locked`, `broken`, `hardness` (written for every functional building, lock or not); each door `i` with the
 suffix `i`: `state<i>`, `doa<i>`, `broken<i>`, `gatecode<i>`, `wants lock<i>`, and its lock `lock lvl<i>`, `locked<i>`,
 `hardness<i>`. `locked` is saved true only when the lock is effectively locked; on load, level and `locked` are taken only when the saved `lock lvl` is above 0.
+Shackles: the item's INVENTORY_ITEM_STATE record carries the same four keys (`LockedArmour` vfunc 75 writes, 76 reads through
+`uses_locked_hardness`, **Observed**), with the same load rule.
 
 ## Unknown
 
@@ -182,7 +187,7 @@ suffix `i`: `state<i>`, `doa<i>`, `broken<i>`, `gatecode<i>`, `wants lock<i>`, a
 | --- | --- |
 | Noise or witness alert from a failed pick (nothing traced besides the pending crime and sounds) | none beyond the pending crime |
 | Whether KO'd, carried or restrained characters may pick (no explicit test besides task conditions) | require conscious, free arms, not on a pole |
-| Item kind 9 and the tool quality field used by cutting | treat tool items as kind 9, use the best |
+| Which tool cutting consumes when several are carried | the highest-quality one |
 | Exact strength terms of cut/break (`FUN_1406457e0(stats, 1, ...)` x stat-scale virtual) | effective strength x 1 |
 | Whether an awake prisoner can be lifted out of an unlocked cage (`FUN_14034fbe0`'s callers not traced) | allowed; the carry rules then knock out a non-friendly one on the shoulder and set a friendly one down |
 | Whether non-owners path around locked doors | a building whose doors are all effectively locked is closed for every path; closed unlocked doors are passable |

@@ -18,6 +18,10 @@ public sealed class ItemInstance
     public string EquipmentSection { get; init; } = "";
     /// <summary>ARMOUR <c>is locked</c> (the original makes it a <c>LockedArmour</c>: shackles); worn, it shows the portrait's <c>Slave</c> overlay (docs/game/ui-screens.md "Portrait cells").</summary>
     public bool IsLocked { get; init; }
+    /// <summary>Shackles' lock (level = ARMOUR <c>lock level</c> clamped 0..100, its <c>hardness</c>, locked when made: <c>FUN_14089a440</c>); null for other items.</summary>
+    public Locks.LockState? Lock { get; set; }
+    /// <summary>Worn and effectively locked: the item cannot be taken off, sold or moved (LockedArmour's tooltip: "locked in place and cannot be removed").</summary>
+    public bool LockedOn => Lock is { EffectivelyLocked: true } && InventoryCommands.IsEquipmentSection(Section);
     public string MaterialId { get; set; } = "";
     public string CompanyId { get; set; } = "";
     /// <summary>Where it is: <c>main</c>, <c>shirt</c>, <c>head</c>, <c>boots</c>, <c>armour</c>, <c>legs</c>, <c>hip</c>, <c>back</c>, <c>backpack_attach</c> (a worn backpack), <c>backpack_content</c> (inside it).</summary>

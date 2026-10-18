@@ -186,6 +186,45 @@ public sealed partial class ArrestSystem
         return amount;
     }
 
+    /// <summary>
+    /// The bounty desk's <c>DA_PAY_BOUNTY</c> (10, <c>FUN_140680560</c>, economy.md 11.4, <b>Observed</b>): the body <paramref name="carrier"/> carries pays its unclaimed entry for the
+    /// speaker's booking faction, halved (truncated) when dead, into the player's money, and the entry is marked claimed. Returns what it paid (0: nothing).
+    /// </summary>
+    public int PayBounty(World world, CharacterId speaker, CharacterId carrier)
+    {
+        var table = world.Characters;
+        if (!table.TryResolveNext(speaker, out int s) || table.Cold(s) is not { } sc || !table.TryResolveNext(carrier, out int c) || table.Cold(c) is not { IsPlayer: true } cc) return 0;
+        if (!table.TryResolveNext(cc.Carrying, out int b) || table.Cold(b) is not { IsPlayer: false } bc || bc.Faction == world.Player.Faction) return 0;
+        int booking = Crimes.Factions.BookingOf(sc.Faction);
+        if (booking < 0 || bc.Bounties?.Of(booking) is not { Amount: > 0, Claimed: false } entry) return 0;
+        int amount = bc.Medical is { Dead: true } ? entry.Amount / 2 : entry.Amount;
+        world.Player.Money += amount;
+        entry.Claimed = true;
+        world.Post($"Received c.{amount} reward.");
+        world.EmitSound(SoundKind.BountyPaid, c, table.Next[c].Position);
+        Note(world, ArrestEventKind.Claimed, carrier, cc.Carrying, booking, amount);
+        return amount;
+    }
+
+    /// <summary>
+    /// <c>DA_ARREST_TARGETS_CARRIED_PERSON</c> (30, economy.md 11.7, <b>Observed</b>): <paramref name="carrier"/> drops the body it carries and <paramref name="guard"/> takes it over: he lifts
+    /// it and carries it to a free cage as an arrest does (no cage: he drops it). False: no body, or the guard is busy.
+    /// </summary>
+    public bool TakeOver(World world, CharacterId guard, CharacterId carrier)
+    {
+        var table = world.Characters;
+        if (Carry is null || !table.TryResolveNext(guard, out int g) || table.Cold(g) is not { IsPlayer: false, Medical.Incapacitated: false, Carrying.IsNone: true } gc || Busy(guard)) return false;
+        if (!table.TryResolveNext(carrier, out int c) || table.Cold(c) is not { } cc || !table.TryResolveNext(cc.Carrying, out int t) || table.Cold(t) is not { } tc) return false;
+        var target = cc.Carrying;
+        Carry.LetGo(world, c);
+        var arrest = new Arrest { Guard = guard, Target = target, Faction = gc.Faction, Phase = ArrestPhase.Fight };
+        arrests.Add(arrest);
+        gc.Engaged = true;
+        if (tc.Medical is { Incapacitated: true } && Carry.BeginPickUp(world, g, target)) arrest.Phase = ArrestPhase.Lift;
+        Note(world, ArrestEventKind.Arrest, guard, target, gc.Faction, tc.Bounties?.AmountFor(gc.Faction) ?? 0);
+        return true;
+    }
+
     // ------------------------------------------------------------------ bounty hunters
 
     /// <summary>The bounty a hunter of <paramref name="faction"/> sees on <paramref name="c"/>: the unclaimed entry of its faction's booking faction (<see cref="CrimeFactions.BookingOf"/>).</summary>
