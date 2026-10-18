@@ -36,10 +36,28 @@ Havok paths, local steering and unloaded-platoon movement are distinct code path
 V=lerp(speedMin,speedMax,athletics/100)*(0.5+0.5*slot115). Path agent sets top-speed velocity
 immediately; pathfind-acceleration brakes before corners, not a universal acceleration ramp.
 Combat/follow steering ramps15/s, with turning/backward/arrival caps. Combat-move-speed multiplier
-and water factors0.75/0.5/0.4 apply separately. No independent slope-speed term was found.
+and water factors0.75/0.5/0.4 apply separately (`FUN_14065dba0`, by water state 1/2/3; Meitou does not apply them yet). No independent slope-speed term was found.
 
-Water states use Y+2 and size thresholds at6/15 belowY100. Shallow caps45; non-swimmers walk
-bottom at2*walk speed, swimmers waist=walk and deep uses swim factors/minimums. Disabled legs,
+### Water states
+
+**Verified** (`FUN_1405c7fd0`, `FUN_140886460`, `FUN_140885eb0`; Meitou `Speed.WaterState/InWater/Swim`, `MovementSystem.WaterStateAt`):
+- State of a character at height Y with body size g (`vtable 0x390`, 1 for humans): 0 when Y+2 is above 100 (the water level). Else 3 (deep) when 15g+Y <= 100,
+  2 (waist) when 6g+Y <= 100, else 1 (shallow) only for a race with `swims` (race +0x79), otherwise 0. A carried character uses its carrier's.
+- Top speed S replaces the run speed: state 1 caps it at 45; in 2/3 a race that does **not** swim (skeletons, fishmen, robots) walks the bottom at 2 x race `walk speed`; a swimmer's
+  state-2 speed is its `walk speed`, its state-3 speed the swim speed.
+- Swim speed = clamp(`swim speed mult` x swimming x 0.02, 6, 25) x leg x hunger x limb-item (all four limbs, stat 23) x encumbrance factors x 0.6 per unusable arm, at least 4; 1 with no usable
+  arm. A human swims at 6 whatever its skill.
+- Training: in state 3 swimming gains 5 XP (10 carrying) per second instead of athletics.
+- Animation: category 4 (SWIMMING) records (`swim`, `swim carry`, `swim carry left`, `swim idle`) are the swimming clips; getting up in deep water plays `swim idle`.
+
+**Observed/engine choice:** the original's Y is the height it stands at, in water the seabed; Meitou keeps a character on the navmesh's flat water surface (Y about 100), so the depth is read from
+the terrain under it while Y is within 2 of the water level (a deck above that is dry), and size is taken as 1. Only the drawn height follows the original's idea (`World.DrawnPosition`,
+`Speed.WadingHeight`): the seabed, and for a swimmer never below 100 - 15g = 85, exactly where the deep state begins, so wading and swimming join without a jump. **Observed** (`male_skeleton`): the swim clips' `Bip01` sits
+about 12 above the origin (`swim2` +2 over the 9.99 binding height), so a swimmer whose origin is on the surface floats; at 85 its pelvis is about 3 under the surface. A deck within 2 of the water level counts as water (engine limit).
+**Unknown:** what `+0x2f8` (nonzero returns 0) and `+0x3d4` (carried) of the character are exactly; swim offset (`+0x68`) use; the HUD/AI `me swim` gating
+([ai-tasks.md](ai-tasks.md)) and animals' swimming.
+
+Disabled legs,
 body states and stealth modify distinct branches. Movement modes0 walk,1 cap55,2/3 cap999;
 mode3 follows group's slowest. The HUD sets them as character orders 2/1/0/0x10 → modes 0/1/2/3
 (Walk/Jog/Run/Group; **Verified**, character vtable slot 0x308 FUN_1405caa50, [ui-screens.md](ui-screens.md)). Whether
@@ -216,7 +234,7 @@ re-asked; its zones within `Lookahead` load early. **Observed**: Hub→(-36000,-
   update faces (path mode switches at runtime).
 - Havok tagfile field layouts for the face/edge arrays beyond sizes (16 / 20 bytes).
 - Whether player-faction characters default to speed mode 2 and how the faction field +0x250 is defined; the +0x2f8 / +0x3d4
-  fields of the water state function.
+  fields of the water state function ([Water states](#water-states)).
 
 ### Builder constants (engine choices)
 

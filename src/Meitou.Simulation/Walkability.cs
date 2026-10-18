@@ -32,6 +32,8 @@ public interface IWalkability
     float GroundHeight(float x, float z, float nearY) => GroundHeight(x, z);
     /// <summary>Whether a character now at height <paramref name="nearY"/> may stand at world X/Z (a surface only far above it, such as a wall top, does not count).</summary>
     bool IsWalkable(float x, float z, float nearY) => IsWalkable(x, z);
+    /// <summary>The terrain's own height at world X/Z, also under the water (where <see cref="GroundHeight(float, float)"/> is the flat water surface): the depth of the water is the water level minus this.</summary>
+    float TerrainHeight(float x, float z) => GroundHeight(x, z);
 }
 
 /// <summary>

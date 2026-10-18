@@ -68,6 +68,8 @@ public sealed class NavmeshWalkability : IWalkability
     /// <summary>As <see cref="GroundHeight(float, float)"/>, for a character at height <paramref name="nearY"/>: the highest surface at most <see cref="StandRise"/> above it.</summary>
     public float GroundHeight(float x, float z, float nearY) => TryStand(world, x, z, nearY, out float y) ? y : Ground(world, x, z);
 
+    public float TerrainHeight(float x, float z) => Ground(world, x, z);
+
     public bool IsWalkable(float x, float z)
     {
         var w = world;

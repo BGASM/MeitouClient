@@ -1,3 +1,4 @@
+using System.Numerics;
 using Meitou.Data.Gameplay.Bodies;
 
 namespace Meitou.Simulation;
@@ -6,6 +7,17 @@ public sealed partial class World
 {
     internal Partition PartitionAt(int i) => partitions[i];
     internal EffectBuffer BufferAt(int i) => buffers[i];
+
+    /// <summary>
+    /// Where a character is drawn: a character on the water, which the simulation keeps on the navmesh's flat surface, is lowered to the seabed or, swimming, to <see cref="Bodies.Speed.WadingHeight"/>
+    /// (the same surface test as <see cref="MovementSystem"/>'s water state: within <see cref="Bodies.Speed.WaterSlack"/> of the water level). Not a carried or a downed body.
+    /// </summary>
+    Vector3 DrawnPosition(CharacterCold? cold, Vector3 at)
+    {
+        if (cold is not { Race: { } race, Medical: not { Incapacitated: true } } || !cold.CarriedBy.IsNone || at.Y > Meitou.Data.World.WorldWater.Height + Bodies.Speed.WaterSlack) return at;
+        float terrain = Walkability.TerrainHeight(at.X, at.Z);
+        return terrain < at.Y ? at with { Y = Bodies.Speed.WadingHeight(terrain, 1, race.Swims) } : at;
+    }
 
     /// <summary>Builds the <see cref="WorldSnapshot"/> of the tick that just ended from the state it left in <see cref="CharacterTable.Previous"/>.</summary>
     void Publish()
@@ -30,7 +42,7 @@ public sealed partial class World
             bool sneaking = cold is { IsPlayer: true } && (cold.Orders & CharacterOrders.Sneak) != 0;
             var watchers = sneaking ? WatchersOf(cold!) : [];
             if (floaters is { } healQueue && cold is { IsPlayer: true, Medical: { } healer }) PublishHeal(healQueue, i, cold, healer, state[i].Position);
-            list.Add(new CharacterSnapshot(id, cold?.Appearance, state[i].Position, state[i].Yaw, cold?.Animation is { } anim && animations is not null ? animations.Publish(anim) : AnimationLayers.For(state[i].Animation, state[i].AnimationTime))
+            list.Add(new CharacterSnapshot(id, cold?.Appearance, DrawnPosition(cold, state[i].Position), state[i].Yaw, cold?.Animation is { } anim && animations is not null ? animations.Publish(anim) : AnimationLayers.For(state[i].Animation, state[i].AnimationTime))
             {
                 Faction = cold?.Faction ?? -1,
                 WeaponDrawn = cold is not null && cold.DrawnWeapon != Meitou.Data.Gameplay.WeaponKinds.None,

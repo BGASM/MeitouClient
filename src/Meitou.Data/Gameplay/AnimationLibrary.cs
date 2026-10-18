@@ -274,11 +274,13 @@ public sealed class AnimationLibrary
     // The leg health values the records' ranges are cut at (sorted, distinct), per leg. A stance is cached by the interval of these its leg values fall
     // in, not by the values: they change every tick of an injury that heals or rots, and a key per value would grow the caches without bound.
     readonly float[] leftBounds, rightBounds;
+    readonly int[] swimming;
 
     public AnimationLibrary(IEnumerable<AnimationDefinition> definitions)
     {
         all = [.. definitions];
         for (int i = 0; i < all.Count; i++) if (all[i].Technique) techniques.TryAdd(all[i].Id, i);
+        swimming = [.. Enumerable.Range(0, all.Count).Where(i => all[i].Category == SwimmingCategory && !all[i].Technique)];
         leftBounds = Bounds(all.SelectMany(d => new[] { d.LeftLegMin, d.LeftLegMax }));
         rightBounds = Bounds(all.SelectMany(d => new[] { d.RightLegMin, d.RightLegMax }));
     }
@@ -338,7 +340,12 @@ public sealed class AnimationLibrary
             .Concat(db.OfType(FcsRecordType.COMBAT_TECHNIQUE)
                 .Where(r => r.GetInt("animal") > 8)
                 .OrderBy(r => r.StringId, StringComparer.Ordinal)
-                .Select(r => AnimationDefinition.FromTechnique(r) with { Category = AnimalCategory })));
+                .Select(r => AnimationDefinition.FromTechnique(r) with { Category = AnimalCategory }))
+            // The swimming records (category 4: swim, swim carry, swim idle) last of all, again so no earlier index moves; only <see cref="SwimMovement"/> and <see cref="SwimIdle"/> choose them.
+            .Concat(db.OfType(FcsRecordType.ANIMATION)
+                .Where(r => !r.GetBool("disabled") && r.GetInt("category") == SwimmingCategory && r.GetInt("weather type") == 0)
+                .OrderBy(r => r.StringId, StringComparer.Ordinal)
+                .Select(AnimationDefinition.From)));
         library.BuildAnimals(db);
         return library;
     }
@@ -422,6 +429,40 @@ public sealed class AnimationLibrary
     public const int RangedCategory = 8;
     /// <summary>The ANIMATION category of <c>carry me</c> (3 in the data; the enum name is not known here).</summary>
     public const int CarriedCategory = 3;
+    /// <summary>CharacterAnimCategory 4, SWIMMING (<b>Verified</b>, docs/animation.md): what a character in deep water plays instead of the normal clips.</summary>
+    public const int SwimmingCategory = 4;
+
+    /// <summary>
+    /// Adds to <paramref name="into"/> the swimming movement clips (category 4, whole body, <c>move speed</c> set) that fit <paramref name="stance"/>, to play at speed <paramref name="v"/>,
+    /// weighed and normalised like <see cref="Movement"/> (the carrying booleans pick <c>swim carry</c> and <c>swim carry left</c>). Nothing is added when none fits (a sword in the left hand).
+    /// </summary>
+    public void SwimMovement(float v, in AnimationStance stance, List<(int Index, float Weight)> into)
+    {
+        int first = into.Count;
+        float total = 0;
+        foreach (int i in swimming)
+        {
+            var d = all[i];
+            if (d.Idle || d.MoveSpeed == 0 || d.Area != AnimationArea.All || !d.FitsExceptLegs(stance)) continue;
+            float w = d.SpeedWeight(v) * d.LegWeight(stance.LeftLeg, stance.RightLeg);
+            if (!(w > 0)) continue;
+            into.Add((i, w));
+            total += w;
+        }
+        for (int k = first; k < into.Count; k++) into[k] = (into[k].Index, into[k].Weight / total);
+    }
+
+    /// <summary>The swimming idle (<c>swim idle</c>: the first whole-body category 4 idle that fits the stance, a carrier's carrying booleans ignored: there is none for carrying); -1 when none fits.</summary>
+    public int SwimIdle(in AnimationStance stance)
+    {
+        var s = stance with { CarryingLeft = false, CarryingRight = false };
+        foreach (int i in swimming)
+        {
+            var d = all[i];
+            if (d.Idle && d.Area == AnimationArea.All && d.Fits(s)) return i;
+        }
+        return -1;
+    }
 
     readonly System.Collections.Concurrent.ConcurrentDictionary<(AnimationArea, AnimationStance), int[]> candidates = new();
     readonly System.Collections.Concurrent.ConcurrentDictionary<AnimationStance, (int Index, float Weight)[]> idles = new();

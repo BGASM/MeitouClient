@@ -100,6 +100,8 @@ sealed partial class PlayerInterface
             if (!c.Selected || EditorOpen) continue;
             var centre = where(c);
             Vector2? previous = null, first = null;
+            // A swimmer is drawn that far down (Speed.WadingHeight) so its body lies in the water: its ring stays on the surface.
+            if (centre.Y <= Meitou.Data.World.WorldWater.Height - Meitou.Simulation.Bodies.Speed.DeepWaterDepth + 0.01f) centre.Y = Meitou.Data.World.WorldWater.Height;
             for (int i = 0; i <= 24; i++)
             {
                 float a = i * MathF.Tau / 24;

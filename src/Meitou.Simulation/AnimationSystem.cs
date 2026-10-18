@@ -333,6 +333,8 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
             else if (LyingClip >= 0) wanted.Add((LyingClip, 1));
             a.Idle = -1;
         }
+        // In deep water a race that swims plays its swimming clips (category 4), the ordinary ones where none fits.
+        else if (!fullTechnique && technique < 0 && !carried && cold is { WaterState: 3, Race.Swims: true } && Swim(a, stance, speed, lower)) { }
         else if (!fullTechnique)
         {
             moving = MathF.Abs(speed) >= MovingSpeed;
@@ -388,6 +390,26 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         }
 
         return Settle(a, wanted, legs, lift, liftTime, technique, fight, speed, dt, Lengths, 1, seed, key, tick);
+    }
+
+    /// <summary>
+    /// The swimming clips to play (<see cref="AnimationLibrary.SwimMovement"/> while it moves, else <see cref="AnimationLibrary.SwimIdle"/>) added to <paramref name="wanted"/>; false, with
+    /// nothing added, when the data has none that fit. They are unsynched whole-body clips, so there is no walking phase to follow (engine choice; which clip the original plays, <c>FUN_1405c7fd0</c> level 3, is <b>Verified</b> only for getting up).
+    /// </summary>
+    bool Swim(CharacterAnimation a, in AnimationStance stance, float speed, List<(int Index, float Weight)> wanted)
+    {
+        if (MathF.Abs(speed) >= MovingSpeed)
+        {
+            Library.SwimMovement(speed, stance, wanted);
+            if (wanted.Count > 0) { a.Idle = -1; return true; }
+        }
+        if (Library.SwimIdle(stance) is >= 0 and var idle)
+        {
+            wanted.Add((idle, 1));
+            a.Idle = -1;
+            return true;
+        }
+        return false;
     }
 
     /// <summary>

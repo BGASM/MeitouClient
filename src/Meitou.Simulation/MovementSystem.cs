@@ -1,4 +1,6 @@
 using System.Numerics;
+using Meitou.Data.World;
+using Meitou.Simulation.Bodies;
 
 namespace Meitou.Simulation;
 
@@ -15,7 +17,7 @@ namespace Meitou.Simulation;
 /// <item>Paths: a character that wants one is flagged in Think; the Schedule step of the next tick asks the <see cref="PathService"/>;
 /// an answer is applied in a serial step, so a path is never read while it is replaced.</item>
 /// </list>
-/// Not modelled yet (Unknown or later): water states and swimming, slopes (the original has no slope penalty), the combat speed
+/// Water states cap or replace the top speed (<see cref="WaterStateAt"/>, <see cref="Speed.InWater"/>). Not modelled yet (Unknown or later): slopes (the original has no slope penalty), the combat speed
 /// multiplier, road routes for far trips, the formation slot rules (Unknown).
 /// <item>Turning (engine choice; the original's rate is Unknown): the heading a path is followed along turns at most <see cref="TurnRate"/>, and the
 /// speed is scaled by the cosine of what is left of the turn (none beyond 90 degrees), so a character turns about on the spot before it runs off.</item>
@@ -326,6 +328,8 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
             var dir = Vector2.Zero;
             float desired = 0;
             bool finished = false;
+            int water = WaterStateAt(walk, p.Position, cold);
+            cold.WaterState = (byte)water;
 
             if (((MoveFlags)n.Flags & MoveFlags.HasPath) != 0 && n.PathCursor < cold.Path.Length)
             {
@@ -344,7 +348,8 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                     byte mode = cold.ModeOverride ?? n.Mode;
                     // A carrier in walk mode is raised to run mode (the original's speed selector, Observed; docs/game/carry-loot.md "Speed and weight").
                     if (mode == SpeedMode.Walk && !cold.Carrying.IsNone) mode = SpeedMode.Run;
-                    desired = cold.SpeedOverride > 0 ? cold.SpeedOverride : MathF.Min(n.MaxSpeed, SpeedMode.Cap(mode, n.WalkSpeed));
+                    float top = water > 0 && cold.Race is { } race ? Speed.InWater(water, n.MaxSpeed, race, cold.SwimSpeed) : n.MaxSpeed;
+                    desired = cold.SpeedOverride > 0 ? cold.SpeedOverride : MathF.Min(top, SpeedMode.Cap(mode, n.WalkSpeed));
                     if (mode == SpeedMode.Group && cold.SpeedOverride <= 0) desired = MathF.Min(desired, SlowestOfSquad(world, cold));
                     if ((cold.Orders & CharacterOrders.Sneak) != 0 && cold.SpeedOverride <= 0) desired = MathF.Min(desired, Orders.SneakSpeed(desired, Orders.Stealth(cold)));
                 }
@@ -425,7 +430,7 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                         Reroute(world, ref n, cold, now: true);
                         goto moved;
                     }
-                    // Blocked (water): drop the path and wait before trying again.
+                    // Blocked (no surface to walk on there): drop the path and wait before trying again.
                     speed = 0;
                     n.Flags = (ushort)(n.Flags & ~(ushort)MoveFlags.HasPath);
                     n.TaskTime = FailedPathWait;
@@ -437,6 +442,18 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
             n.Animation = (ushort)(speed < 1 ? 0 : speed <= n.WalkSpeed + 1 ? 1 : 2);
             n.AnimationTime = n.Animation == p.Animation ? p.AnimationTime + dt : 0;
         }
+    }
+
+    /// <summary>
+    /// The water state of a character (<see cref="Speed.WaterState"/>, a race's own characters only, not a carried body): the original reads the height it stands at, which in water is the
+    /// seabed, while here a character on the water keeps the navmesh's flat water surface for its height, so the depth is taken from the terrain below while it is at the surface
+    /// (<see cref="Speed.WaterSlack"/> over the water level; a deck or floor higher up counts as dry). The race's size scale is taken as 1 (what humans have, <b>Observed</b>).
+    /// </summary>
+    static int WaterStateAt(IWalkability walk, Vector3 at, CharacterCold cold)
+    {
+        if (cold.Race is not { } race || !cold.CarriedBy.IsNone) return 0;
+        float standY = at.Y <= WorldWater.Height + Speed.WaterSlack ? MathF.Min(at.Y, walk.TerrainHeight(at.X, at.Z)) : at.Y;
+        return Speed.WaterState(standY, 1, race.Swims);
     }
 
     /// <summary>Asks for the path to the goal again (partition-safe: the character's own state), at most every <see cref="ProvisionalRepathSeconds"/> unless <paramref name="now"/>.</summary>

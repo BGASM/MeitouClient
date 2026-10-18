@@ -69,7 +69,8 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
             events.Clear();
             medical.Tick(HoursPerTick, ctx, events);
             n.MaxSpeed = Speed.Run(race, stats, medical, encumbrance);
-            TrainOnTheMove(stats, race, medical, in n, encumbrance, world.TickSeconds);
+            cold.SwimSpeed = Speed.Swim(race, stats, medical, encumbrance);
+            TrainOnTheMove(stats, race, medical, in n, cold.WaterState == 3, carrying, encumbrance, world.TickSeconds);
             if ((cold.Orders & CharacterOrders.Sneak) != 0 && !medical.Incapacitated)
             {
                 // An exposure older than a second (a looker's scan interval with room to spare) has lapsed.
@@ -106,15 +107,17 @@ public sealed class BodySystem(GameConstants constants, BodyOptions? options = n
 
     /// <summary>
     /// XP outside combat (character-stats.md "Levelling"; the movement tick <c>FUN_1408c6660</c>): athletics while running, strength while carrying a load. A character counts as
-    /// running when it moves faster than its race walk speed (+1); whether walking trains too is <b>Unknown</b> (the doc names running). Strength rises only when the load
+    /// running when it moves faster than its race walk speed (+1); whether walking trains too is <b>Unknown</b> (the doc names running). In deep water (<paramref name="deepWater"/>)
+    /// swimming trains instead of athletics (<b>Verified</b>, <c>FUN_1408c6660</c>). Strength rises only when the load
     /// encumbers it, and only while it moves. The speed the stat sees is the velocity the movement system left this tick.
     /// </summary>
-    void TrainOnTheMove(CharacterStats stats, RaceData race, MedicalState medical, in CharacterHot n, float encumbrance, float dt)
+    void TrainOnTheMove(CharacterStats stats, RaceData race, MedicalState medical, in CharacterHot n, bool deepWater, bool carrying, float encumbrance, float dt)
     {
         if (medical.Incapacitated) return;
         float speed = MathF.Sqrt(n.Velocity.X * n.Velocity.X + n.Velocity.Z * n.Velocity.Z);
         if (speed < 1) return;
-        if (speed > n.WalkSpeed + 1) xp.AthleticsFromRunning(stats, race, encumbrance, speed / MathF.Max(n.MaxSpeed, 1), dt);
+        if (deepWater) xp.SwimmingInWater(stats, race, carrying, dt);
+        else if (speed > n.WalkSpeed + 1) xp.AthleticsFromRunning(stats, race, encumbrance, speed / MathF.Max(n.MaxSpeed, 1), dt);
         if (encumbrance < 1) xp.StrengthFromCarrying(stats, race, encumbrance, dt);
     }
 

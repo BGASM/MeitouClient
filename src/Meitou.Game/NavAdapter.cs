@@ -18,6 +18,7 @@ sealed class NavAdapter(NavmeshWalkability nav) : IAgentWalkability, Meitou.Simu
     public Meitou.Simulation.Locks.DoorSpot? DoorSpotOf(string buildingRecordId, int doorIndex) => nav.DoorGeometry?.Spot(buildingRecordId, doorIndex);
     public float GroundHeight(float x, float z) => nav.GroundHeight(x, z);
     public bool IsWalkable(float x, float z) => nav.IsWalkable(x, z);
+    public float TerrainHeight(float x, float z) => nav.TerrainHeight(x, z);
     public float GroundHeight(float x, float z, float nearY) => nav.GroundHeight(x, z, nearY);
     public bool IsWalkable(float x, float z, float nearY) => nav.IsWalkable(x, z, nearY);
     public PathResult FindPath(Vector3 from, Vector3 to) => nav.FindPath(from, to);

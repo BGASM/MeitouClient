@@ -95,6 +95,9 @@ public sealed class CharacterCold
     public float SpeedOverride { get; set; }
     /// <summary>The path cost factor of water for this character (race <c>water avoidance</c>, halved for the player faction; 0: default).</summary>
     public float WaterFactor { get; set; }
+    /// <summary>The water state 0..3 (<see cref="Meitou.Simulation.Bodies.Speed.WaterState"/>) <see cref="MovementSystem"/> found at the character's position, and its swim speed (<see cref="Meitou.Simulation.Bodies.Speed.Swim"/>) <see cref="BodySystem"/> keeps up to date. Derived each tick: not hashed, not saved.</summary>
+    public byte WaterState { get; set; }
+    public float SwimSpeed { get; set; }
     /// <summary>What it carries (null for animals and anything without a race): <see cref="Meitou.Simulation.Items.FeedSystem"/> eats from it, <see cref="BodySystem"/> weighs it.</summary>
     public Meitou.Simulation.Items.Inventory? Inventory { get; set; }
     /// <summary>The tick from which a hungry NPC without food may be given a ration again.</summary>
