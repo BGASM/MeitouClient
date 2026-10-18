@@ -27,6 +27,12 @@ opaque, discard-free colour only for no-cutout/non-fading parts. Draw solids fir
 cutout/dither shaders for other batches. Cache native state per program so solid/fading variants
 do not evict one another. Depth/caster coverage must remain compatible with colour.
 
+## Building sign highlight
+
+`WorldObjectRenderer.HighlightSigns` splits real parts with owning BUILDING `is sign` into yellow-tinted
+batches using `FlatColour`, retaining textures, cutouts, lighting, depth and LOD fades. Shadow batches,
+distant stand-ins and placement ghosts keep their normal appearance. Input/evidence: [controls](game/ui-input.md#building-sign-highlight).
+
 ## Player buildings and the placement ghost
 
 Sites and finished buildings of `WorldSnapshot.Buildings` are runtime placements (`WorldObjects.AddRuntime/RemoveRuntime`,

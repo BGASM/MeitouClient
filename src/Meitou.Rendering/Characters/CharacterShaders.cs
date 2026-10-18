@@ -274,7 +274,9 @@ static class CharacterShaders
                 float k = alpha * 0.5, k2 = k * k, vis = 1.0 / (lh * lh * (1.0 - k2) + k2);
                 float fv = (0.4 + (1.0 - 0.4) * fresnel) * vis;
                 float specular = nl * D * fv / PI;
-                colour = clamp(albedo * (PI * nl * 0.6) + specular, 0.0, 1.0);
+                // The editor's stage (a fog distance of -2, CharacterRenderer.DrawStage) adds a sky-over-ground ambient so the side the light misses is not black; icons have none.
+                vec3 stageAmbient = view.fogDistance < -1.5 ? 0.9 * mix(vec3(0.22, 0.20, 0.18), vec3(0.42, 0.45, 0.50), 0.5 + 0.5 * n.y) : vec3(0.0);
+                colour = clamp(albedo * (PI * nl * 0.6 + stageAmbient) + specular, 0.0, 1.0);
             }
             else
             {

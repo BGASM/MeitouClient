@@ -89,6 +89,7 @@ public sealed unsafe class VulkanPresenter : IDisposable
     /// <summary>Copies the backbuffer into the swapchain image (flipped), submits the frame and presents it.</summary>
     public void Present()
     {
+        StageClock.BeginSubmission();
         if (!acquiredImage || Backbuffer is not { } src) { ctx.EndFrame(); return; }
         var dst = images[imageIndex];
         int w = src.Desc.Width, h = src.Desc.Height;
@@ -126,6 +127,7 @@ public sealed unsafe class VulkanPresenter : IDisposable
         long presentStart = Stopwatch.GetTimestamp();
         lock (device.QueueLock) r = PresentFunction != null ? PresentFunction(device.GraphicsQueue, &info) : khr.QueuePresent(device.GraphicsQueue, &info);
         PresentTicks += Stopwatch.GetTimestamp() - presentStart;
+        StageClock.Lap(StageClock.DriverWait, gpuTimestamp: false);
         if (r is Result.ErrorOutOfDateKhr or Result.SuboptimalKhr) stale = true;
         else VulkanException.Check(r, "vkQueuePresentKHR");
         acquiredImage = false;

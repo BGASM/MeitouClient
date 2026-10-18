@@ -26,8 +26,8 @@ public interface IDialogueSource
 {
     ConversationView? PublishConversation();
     DialogueRequest? PublishRequest();
-    /// <summary>The character answers the player's Talk (it has event-1 dialogue).</summary>
-    bool CanTalk(World world, int slot);
+    /// <summary>The character answers the player's Talk (it has event-1 dialogue, and with <paramref name="talker"/> given, a line of it passes now).</summary>
+    bool CanTalk(World world, int slot, CharacterId? talker = null);
     /// <summary>The lines on show over characters' heads (speech bubbles).</summary>
     IReadOnlyList<SpeechBubble> PublishSpeech() => [];
 }
@@ -231,8 +231,21 @@ public sealed partial class DialogueSystem : ITickSystem, IStateHashed, IDialogu
         return dialogue.SetFor(cold.RecordId, squad?.TemplateId, squad is not null && squad.Leader == world.Characters.IdOf(slot), cold.IsPlayer, animal, playerFaction);
     }
 
-    public bool CanTalk(World world, int slot) => world.Characters.Cold(slot) is { IsPlayer: false }
-        && (interrupts.ContainsKey(world.Characters.IdOf(slot)) || SetOf(world, slot).For(DialogueEvents.PlayerTalkToMe).Count > 0);
+    public bool CanTalk(World world, int slot, CharacterId? talker = null)
+    {
+        if (world.Characters.Cold(slot) is not { IsPlayer: false }) return false;
+        var npc = world.Characters.IdOf(slot);
+        if (interrupts.ContainsKey(npc)) return true;
+        var roots = SetOf(world, slot).For(DialogueEvents.PlayerTalkToMe);
+        if (roots.Count == 0) return false;
+        if (talker is not { } player) return true;
+        // A dry run of Start's pick (it rolls dice and memoizes permanent chances: both put back), so the menu never offers a Talk that ends in "has nothing to say".
+        var (savedRolls, known) = (rolls, permanent.Keys.ToList());
+        bool says = Pick(world, new Conversation { Npc = npc, Player = player, Event = DialogueEvents.PlayerTalkToMe }, roots) is not null;
+        rolls = savedRolls;
+        foreach (var key in permanent.Keys.Except(known).ToList()) permanent.Remove(key);
+        return says;
+    }
 
     static bool IsNpcSide(Talker t) => t is Talker.Me or Talker.Interjector1 or Talker.Interjector2 or Talker.Interjector3 or Talker.WholeSquad;
 

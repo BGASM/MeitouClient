@@ -44,6 +44,12 @@ Throughput is approximately the slower of overlapping CPU/GPU work, rather than 
 A faster GPU stage may leave a CPU-bound frame unchanged. Parallel CPU stage sums are not
 elapsed time. Evaluate cached-shadow redraws by tail latency as well as mean cost.
 
+The frame profiler splits the tail into `ui` (overlays/UI), `submit` (window-copy recording and frame
+submission), and `driver-wait` (present call, including queue-lock waits; CPU only). CPU values are
+elapsed time, not CPU utilisation; submission may also block inside the driver. GPU `ui` ends before
+the window copy; GPU `submit` measures that copy and the command tail, not the CPU submission call.
+Offscreen frames have no present wait. Render-thread benchmark totals exclude `driver-wait`.
+
 ## Geometry and pass diagnostics
 
 `--bench-tris` reports pass triangle counts and projected size distributions. Inspect main-view,

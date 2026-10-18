@@ -193,6 +193,7 @@ sealed partial class GameHost(GameInstall install, WorldScene scene, AssetLocato
         gpu.NavmeshOverlay ??= new NavmeshOverlayRenderer(context);
         player.MeshHit = (id, origin, direction) => gpu.Characters?.RayHit(DrawKey(id), origin, direction);
         player.Floor = (() => viewedFloor, StepFloor);
+        player.BuildingMoveHit = (origin, direction, distance) => gpu.Objects?.MoveHit(origin, direction, viewedFloor, distance);
         player.BuildHost = MakeBuildServices(heights);
         player.FactionName = faction => popData is { } d && faction >= 0 && faction < d.Factions.Count ? d.Factions[faction].Name : null;
         player.HostileFaction = faction => popData is not { } d || session.World.Player.Faction is not (>= 0 and var mine) || !d.Relations.Contains(faction) || d.Relations.IsHostile(mine, faction);

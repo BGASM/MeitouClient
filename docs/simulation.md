@@ -700,12 +700,12 @@ ghost, commands), `Building/PlacementCheck.cs`, `Building/BuildMenu.cs` (categor
 
 `TradeSystem`: trader-squad stock/purse/restock, open trade, buying/selling/fencing. Charge,
 quality, culture, market, forbidden/stolen factors follow [economy.md](game/economy.md).
-A squad shop holds one 20 x 20 stock grid (the `Shopkeepers Backpack` size); `ArrangeStock` arranges it. Shop state is hashed; open UI trade is not world state. Building shops/production/research remain
+A squad shop holds one 18 x 18 stock grid (the building storage size and the vanilla trader window width); `ArrangeStock` arranges it. Shop state is hashed; open UI trade is not world state. Building shops/production/research remain
 incomplete. Transfers and money changes must succeed together.
 
 ## Dialogue
 
-`DialogueSystem` (game facts: [dialogue](game/dialogue.md)). The context menu's Talk (for an NPC with event-1 dialogue) sends `TalkOrder`: the
+`DialogueSystem` (game facts: [dialogue](game/dialogue.md)). The context menu's Talk (only when a dry run of the line pick, dice and memo put back, finds something to say) sends `TalkOrder`: the
 talker walks up (60 units, engine choice; 60 s to arrive), the NPC is held, then event 1 fires and the NPC's dialogue set (record, squad
 template, leader role; `DialogueDatabase`) is chosen from by score, line checks and a seeded pick. The NPC line is said (text, tokens and
 word swaps, effects at once); passing replies become choices, an NPC-side child a single `[...]`. The host opens `Kenshi_ConversationPanel`
@@ -726,7 +726,7 @@ to the next tick. A hostile target is attacked instead.
   uniform clear (Meitou has no uniforms).
 - **Conditions**: most DCs are computed; those needing state Meitou lacks (squad memory flags beyond "met", building locks, slavery, walls,
   missions, the personality functions, tech level, ranks) compute "no". `met` and "last seen" come from finished conversations (per squad). IN_MY_BUILDING uses the squad's home building and the lock rounds' extent.
-- **Speech bubbles**: `WorldSnapshot.Speech` lists the lines on show (`SpeechBubble`: speaker, text, large font); `PlayerInterface.DrawSpeech` draws them over the head. Sources and engine choices: [dialogue](game/dialogue.md#meitou-design).
+- **Speech bubbles**: `WorldSnapshot.Speech` lists the lines on show (`SpeechBubble`: speaker, text, large font); `PlayerInterface.AddSpeech` draws them over the head. Sources and engine choices: [dialogue](game/dialogue.md#meitou-design).
 - **Personality**: the save's `personality` when above 0, else an engine roll from the record's PERSONALITY tags (`Personality`).
 - **Engine choices**: a childless NPC line shows `[Leave]`; a reply leading to another reply offers it alone; number keys pick choices.
 - **State**: last use per line, permanent chance rolls, event counters, met memory, interrupts and the open conversation are hashed, not

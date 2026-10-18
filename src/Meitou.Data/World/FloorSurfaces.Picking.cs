@@ -1,0 +1,111 @@
+using System.Numerics;
+
+namespace Meitou.Data.World;
+
+public sealed partial class FloorSurfaces
+{
+    /// <summary>
+    /// The nearest collision hit on floors up to the viewed floor. Walls drop the destination onto a floor beneath the hit;
+    /// stairs and landings retain their collision height. Hidden upper floors do not intercept the ray.
+    /// </summary>
+    public (float Distance, Vector3 Position)? MoveHit(Vector3 origin, Vector3 direction, int floor, float maxDistance)
+    {
+        (float Distance, Vector3 Position)? best = null;
+        foreach (var s in surfaces)
+        {
+            if (s.Floor > floor || !RayBox(origin, direction, new(s.Min.X, s.YMin, s.Min.Y), new(s.Max.X, s.YMax, s.Max.Y), maxDistance)) continue;
+            for (int i = 0; i + 2 < s.Corners.Length; i += 3)
+            {
+                var a = s.Corners[i]; var b = s.Corners[i + 1]; var c = s.Corners[i + 2];
+                if (RayTriangle(origin, direction, a, b, c) is not { } t || t > maxDistance || best is { } previous && t >= previous.Distance) continue;
+                var hit = origin + direction * t;
+                if (Walkable(a, b, c)) best = (t, hit);
+                else
+                {
+                    // Move just inside the wall so round-off at its boundary does not drop the pick outside the floor.
+                    var inside = hit + new Vector3(direction.X, 0, direction.Z) * 0.1f;
+                    if (FloorBelow(inside, floor) is { } destination) best = (t, destination);
+                }
+            }
+        }
+        return best;
+    }
+
+    Vector3? FloorBelow(Vector3 point, int floor)
+    {
+        Vector3? best = null;
+        const float wallReach = 4;
+        foreach (var s in surfaces)
+        {
+            if (s.Floor > floor || point.X < s.Min.X - wallReach || point.X > s.Max.X + wallReach || point.Z < s.Min.Y - wallReach || point.Z > s.Max.Y + wallReach) continue;
+            for (int i = 0; i + 2 < s.Corners.Length; i += 3)
+            {
+                var a = s.Corners[i]; var b = s.Corners[i + 1]; var c = s.Corners[i + 2];
+                if (!Walkable(a, b, c)) continue;
+                var q = new Vector2(point.X, point.Z);
+                Vector3 target;
+                if (HeightAt(a, b, c, q) is { } y) target = new(q.X, y, q.Y);
+                else
+                {
+                    // The floor may start inside a thick wall; snap only across that small gap.
+                    float nearest = wallReach * wallReach;
+                    Vector3? edge = null;
+                    for (int k = 0; k < 3; k++)
+                    {
+                        var p = s.Corners[i + k]; var end = s.Corners[i + (k + 1) % 3];
+                        var delta = new Vector2(end.X - p.X, end.Z - p.Z);
+                        float along = delta.LengthSquared() < 1e-9f ? 0 : Math.Clamp(Vector2.Dot(q - new Vector2(p.X, p.Z), delta) / delta.LengthSquared(), 0, 1);
+                        var candidate = Vector3.Lerp(p, end, along);
+                        float distance = Vector2.DistanceSquared(q, new(candidate.X, candidate.Z));
+                        if (distance > nearest) continue;
+                        (nearest, edge) = (distance, candidate);
+                    }
+                    if (edge is not { } e) continue;
+                    target = e;
+                }
+                if (target.Y <= point.Y + 0.5f && (best is null || target.Y > best.Value.Y)) best = target;
+            }
+        }
+        return best;
+    }
+
+    // Match the navigation slope limit; collision meshes can have either winding.
+    static bool Walkable(Vector3 a, Vector3 b, Vector3 c)
+    {
+        var normal = Vector3.Cross(b - a, c - a);
+        return normal.LengthSquared() > 1e-12f && MathF.Abs(normal.Y) >= normal.Length() * MathF.Cos(40 * MathF.PI / 180);
+    }
+
+    static float? RayTriangle(Vector3 origin, Vector3 direction, Vector3 a, Vector3 b, Vector3 c)
+    {
+        var edge = b - a;
+        var cross = Vector3.Cross(direction, c - a);
+        float determinant = Vector3.Dot(edge, cross);
+        if (MathF.Abs(determinant) < 1e-7f) return null;
+        var offset = origin - a;
+        float u = Vector3.Dot(offset, cross) / determinant;
+        var q = Vector3.Cross(offset, edge);
+        float v = Vector3.Dot(direction, q) / determinant;
+        if (u < -1e-5f || v < -1e-5f || u + v > 1.00001f) return null;
+        float t = Vector3.Dot(c - a, q) / determinant;
+        return t >= 0 ? t : null;
+    }
+
+    internal static bool RayBox(Vector3 origin, Vector3 direction, Vector3 min, Vector3 max, float distance)
+    {
+        float near = 0, far = distance;
+        for (int i = 0; i < 3; i++)
+        {
+            if (MathF.Abs(direction[i]) < 1e-9f)
+            {
+                if (origin[i] < min[i] || origin[i] > max[i]) return false;
+                continue;
+            }
+            float a = (min[i] - origin[i]) / direction[i], b = (max[i] - origin[i]) / direction[i];
+            near = MathF.Max(near, MathF.Min(a, b));
+            far = MathF.Min(far, MathF.Max(a, b));
+            if (near > far) return false;
+        }
+        return true;
+    }
+}

@@ -85,6 +85,11 @@ inside the bounds of `Storm_House_01_Interior-stairs` (`is stairs`, only in `int
 without the list that storey and the Watchtower `2-Newwworld-INGAME` floors +130/+190/+290 were unkept; with it paths from the door seed reach them.
 **Doors**: every part of a `doors`-list building is group 5. **Observed** (35 door records): only
 `Defensive Gate level 4/5 Door` lack `is door`, yet open in game; without the rule Squin was sealed.
+**Entrance seeds** (engine choice): cross the door's width axis, then use the lowest collision floor with agent-height headroom.
+**Observed** (35 base door records and their box collision extents): `door navmesh axis` 0 selects exporter X width, 1 exporter Y width;
+using that width as the crossing direction leaves Shark's Swamp House `321-Newwworld-INGAME` room unseeded.
+Its platform has overlapping upward faces near Y122/133; the lower face lacks headroom. A zone21.42 route from
+(-47010,133,48970) to (-46960,133,49005) crosses its doorway with the corrected markers/floor selection (`meitou-tools navmesh`).
 **Inner seams** (engine choice): Recast welds polygon vertices only within 2 height cells, and a step's corner height can come out
 differently on each side, so a stair foot and the ground beside it can share an X/Z edge without being neighbours. The stitcher
 joins open edges of one tile that coincide reversed and are within the climb at both ends. **Observed** (zone 21.42, `meitou-tools navmesh`):
@@ -159,8 +164,8 @@ re-asked; its zones within `Lookahead` load early. **Observed**: Hub→(-36000,-
     ± 100 units (10 Havok) vertically (FUN_1406cd7f0 collects them as (x, y, z, r)). Square, not round.
   - **Seeds** (`regionSeedPoints`, Havok space). Exterior jobs:
     - doors (exterior jobs of both types): for each building in the zone with a door whose outer marker point (door
-      building +0x3bc) is inside the box and not below the water level, that point. `door navmesh axis` (FUN_14029cc90) picks the local axis of the door
-      shape along which two marker points are set on either side of the door and dropped to the ground with a ray: the
+      building +0x3bc) is inside the box and not below the water level, that point. `door navmesh axis` (FUN_14029cc90) selects a local axis used to
+      place two markers on either side of the door (exact direction mapping **Unknown**), dropped to the ground with a ray: the
       outer one is this exterior seed, the inner one (+0x3c8) the interior seed (10 BUILDING records use axis 1, the
       rest 0, **Verified** count).
     - job type 0 (whole zone): the zone's `seeds.def` points (bucketed per zone when loaded, FUN_1403c5050; 4,585 points

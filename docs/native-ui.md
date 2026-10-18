@@ -67,6 +67,12 @@ UiHost.Diagnostic; failed contribution omitted atomically, others continue. Modu
 outside registration. HUD uses actual snapshot aggregates, shared portrait rendering and original
 screen input in both modes, including I/C/M/T/Y shortcuts, map pan/zoom/orders and modal pause.
 Inventory/stat interactions and current gaps are tracked in parity ledger.
+The painter collects vertices into one upload/rendering and merges adjacent batches with matching
+texture, sampling mode and scissor, retaining painter order. A scissor becomes the full viewport only
+when all batch vertices lie inside it. Full GPU barriers/shared state occur at pass boundaries.
+Font paths are cached; immutable text geometry is keyed by caption/position/scale/colour and capped
+per font at 512 entries/1 MiB. Shape vertices are written in blocks. Opaque union area is reused
+until its rectangle sequence changes. Standalone debug-overlay flushes still own their pass.
 Inventory drags draw the cell's icon/count at its footprint size and original grab point,
 above windows without intercepting drops; the source hides until release/cancellation.
 Escape/right click cancels; changing the source snapshot or closing its window cancels too.

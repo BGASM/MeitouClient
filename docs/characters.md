@@ -141,7 +141,8 @@ exe decompile unless marked; Meitou: `CharacterDraft` (data), `EditCharacter` / 
   zooms (zoom -= wheel x sens x dt x 0.6, clamped). **Observed**: FACE and HAIR tabs give head mode, BODY the body mode; changing mode or
   character resets angles and zoom. **Unknown**: default angles, pitch limits, speeds, body default zoom (set at run time).
   Meitou (`EditorOrbit`, `CharacterRenderer.Editor`, `PlayerInterface.EditorBackdrop`): while the editor is open the world is not drawn; the
-  renderer draws the edited character alone into a stage texture (transparent, key light), the interface puts `SandyGround.dds` and the
+  renderer draws the edited character alone into a stage texture (transparent, key light plus a hemispheric ambient, an engine choice: the stage
+  shader branch for a fog distance of -2; icons keep none), the interface puts `SandyGround.dds` and the
   texture behind the panels, centred between them. Drag with any button orbits, wheel zooms, mode/character change resets; limits, speeds and
   start angles are engine choices (`EditorOrbit`). **Blend**: a slider moves the character along: when a new preview look is ready it is drawn
   as the mix of the old and new values over 0.12 s, the interval of the throttled rebuild (`CharacterRenderer.Blend`): body shape, posture

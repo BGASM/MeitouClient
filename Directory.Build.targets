@@ -1,0 +1,14 @@
+<Project>
+
+  <!-- Local vendor binaries stay outside source control; both executable projects need the same runtime. -->
+  <PropertyGroup>
+    <StreamlineRuntimePath Condition="'$(StreamlineRuntimePath)' == ''">$(MEITOU_STREAMLINE_PATH)</StreamlineRuntimePath>
+    <StreamlineRuntimePath Condition="'$(StreamlineRuntimePath)' == ''">$(MSBuildThisFileDirectory)dlss-runtime</StreamlineRuntimePath>
+  </PropertyGroup>
+
+  <ItemGroup Condition="('$(MSBuildProjectName)' == 'Meitou.Game' or '$(MSBuildProjectName)' == 'Meitou.ModelViewer') and Exists('$(StreamlineRuntimePath)/sl.interposer.dll')">
+    <None Include="$(StreamlineRuntimePath)/sl.interposer.dll;$(StreamlineRuntimePath)/sl.common.dll;$(StreamlineRuntimePath)/sl.dlss.dll;$(StreamlineRuntimePath)/nvngx_dlss.dll;$(StreamlineRuntimePath)/NvLowLatencyVk.dll"
+          Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

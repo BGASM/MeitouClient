@@ -37,6 +37,52 @@ public class WwisePlayerInstallTests
     }
 
     [Fact]
+    public async Task Repeated_footsteps_release_their_containers_and_do_not_restart_on_later_switch_changes()
+    {
+        using var player = Player();
+        await player.LoadBank("SFX_General_Bank").WaitAsync(TestContext.Current.CancellationToken);
+        const ulong character = 2000;
+        player.SetSwitch("Surface_Material", "Sand", character);
+        player.SetSwitch("Armor_Worn", "None", character);
+        for (int i = 0; i < 30; i++)
+        {
+            player.Post("Footsteps", character);
+            Run(player, 1);
+        }
+        Run(player, 2);
+        Assert.Equal(0, player.Stats.Voices);
+        Assert.Equal(0, player.Stats.Instances);
+
+        player.SetSwitch("Surface_Material", "Metal", character);
+        Run(player, 0.1);
+        Assert.Equal(0, player.Stats.Voices);
+        Assert.Equal(0, player.Stats.Instances);
+    }
+
+    [Fact]
+    public async Task A_surface_change_does_not_cut_off_a_footstep_already_playing()
+    {
+        using var player = Player();
+        await player.LoadBank("SFX_General_Bank").WaitAsync(TestContext.Current.CancellationToken);
+        const ulong character = 2000;
+        player.SetSwitch("Surface_Material", "Sand", character);
+        player.SetSwitch("Armor_Worn", "None", character);
+        player.Post("Footsteps", character);
+        var block = new float[AudioOutput.BlockFrames * 2];
+        player.Mix(block, AudioOutput.BlockFrames);
+        Assert.True(player.Stats.Voices > 0);
+        int voices = player.Stats.Voices;
+
+        // An unassigned surface makes an incorrect live re-selection stop the current sound without replacing it.
+        player.SetSwitch("Surface_Material", "Unassigned_Test_Surface", character);
+        Array.Clear(block);
+        player.Mix(block, AudioOutput.BlockFrames);
+        Assert.Equal(voices, player.Stats.Voices);
+        Run(player, 2);
+        Assert.Equal(0, player.Stats.Instances);
+    }
+
+    [Fact]
     public async Task Entering_the_desert_by_day_plays_its_bed_and_one_shots_and_leaving_fades_them_out()
     {
         using var player = Player();

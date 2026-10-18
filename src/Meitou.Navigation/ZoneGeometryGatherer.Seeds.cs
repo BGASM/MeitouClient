@@ -8,7 +8,7 @@ namespace Meitou.Navigation;
 internal sealed partial class ZoneGeometryGatherer
 {
     /// <summary>
-    /// The seed points either side of a door: the door shape's centre moved along its local axis <c>door navmesh axis</c> past its faces, then dropped to the ground
+    /// The seed points either side of a door: the door shape's centre moved across its width axis past its faces, then dropped to the ground
     /// (docs: the original takes the outer marker as an exterior seed and the inner one as the interior's). Only box doors are handled.
     /// </summary>
     void AddDoorSeeds(ZoneGeometry g, GameRecord door, PreparedShape shape, Matrix4x4 node)
@@ -27,7 +27,7 @@ internal sealed partial class ZoneGeometryGatherer
 
     /// <summary>
     /// The two marker points either side of a box door, in the order the callers try them (the side of the negative axis direction first, which decides ties):
-    /// the shape's centre moved along its local axis <c>door navmesh axis</c> past its faces. False for a shape that is not a box or is degenerate.
+    /// the shape's centre moved perpendicular to its width (<c>door navmesh axis</c>) past its faces. False for a shape that is not a box or is degenerate.
     /// </summary>
     static bool DoorMarkers(GameRecord door, PreparedShape shape, Matrix4x4 node, out Vector3 behind, out Vector3 ahead)
     {
@@ -36,11 +36,12 @@ internal sealed partial class ZoneGeometryGatherer
         var v = shape.Vertices.Select(p => Vector3.Transform(p, node)).ToArray();
         int axis = Math.Clamp(door.GetInt("door navmesh axis"), 0, 2);
         var along = axis switch { 0 => v[1] - v[0], 1 => v[2] - v[0], _ => v[4] - v[0] };
-        float half = along.Length() / 2;
-        if (half < 1e-3f) return false;
-        var dir = along / (2 * half);
+        var normal = Vector3.Cross(along, Vector3.TransformNormal(Vector3.UnitY, node));
+        if (normal.LengthSquared() < 1e-6f) return false;
+        var dir = Vector3.Normalize(normal);
         var centre = Vector3.Zero;
         foreach (var p in v) centre += p / 8;
+        float half = v.Max(p => MathF.Abs(Vector3.Dot(p - centre, dir)));
         behind = centre + dir * -1f * (half + DoorSeedOffset);
         ahead = centre + dir * 1f * (half + DoorSeedOffset);
         return true;

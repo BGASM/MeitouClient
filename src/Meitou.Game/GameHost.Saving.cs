@@ -171,7 +171,7 @@ sealed partial class GameHost
         StartSceneLoad(player.TitleOpen,
             Stage("read", () => read = Task.Run(() => SaveGame.Load(folder))),
             Stage("build", () => SwapInSave(read!, interactive: true, out summary)),
-            Stage("finishing", () => { SettleNewWorld(); FinishLoadNotice(summary); return null; }));
+            Stage("finishing", () => { SettleNewWorld(); player.FollowSelected(); FinishLoadNotice(summary); return null; }));
     }
 
     /// <summary>

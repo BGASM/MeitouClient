@@ -66,7 +66,7 @@ internal sealed partial class ZoneGeometryGatherer
     /// complement of the interior hull as carvers (the hull's inverted volume: everything outside it is removed). The box is a square of whole tiles.
     /// Null when the building has no usable hull.
     /// </summary>
-    public ZoneGeometry? GatherInterior(InteriorSite site, float tileWorld, float pad = 12)
+    public ZoneGeometry? GatherInterior(InteriorSite site, float tileWorld, float pad = 12, float agentHeight = 18)
     {
         var node = NodeMatrix(site.Record, site.Position, site.Placement.Rotation);
         var points = new List<Vector3>();
@@ -113,7 +113,20 @@ internal sealed partial class ZoneGeometryGatherer
         {
             var s = g.Seeds[i];
             if (!float.IsNaN(s.Y)) continue;
-            g.Seeds[i] = RayDown(g, s.X, s.Z, highest: false, yMin - 10, 0, g.TriangleCount, out float y) ? new Vector3(s.X, y, s.Z) : new Vector3(s.X, yMin, s.Z);
+            float bottom = yMin - 10;
+            float height = yMin;
+            // A raised platform may contain several upward faces. Recast discards a lower one with too little
+            // headroom; seeding it would prune the room above instead of preserving its walkable floor.
+            while (RayDown(g, s.X, s.Z, highest: false, bottom, 0, g.TriangleCount, out float y) && y <= yMax)
+            {
+                if (!RayDown(g, s.X, s.Z, highest: false, y + 0.1f, 0, g.TriangleCount, out float ceiling, anyArea: true) || ceiling - y >= agentHeight)
+                {
+                    height = y;
+                    break;
+                }
+                bottom = y + 0.1f;
+            }
+            g.Seeds[i] = new Vector3(s.X, height, s.Z);
         }
         return g;
     }

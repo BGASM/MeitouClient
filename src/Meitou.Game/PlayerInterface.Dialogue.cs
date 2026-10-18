@@ -11,7 +11,7 @@ namespace Meitou.Game;
 /// Conversations (docs/game/dialogue.md "UI", docs/simulation.md "Dialogue"), the same in both UI modes: while the world publishes a conversation the original's conversation panel
 /// (<c>Kenshi_ConversationPanel</c>) is open, modal, so the game is paused as the original pauses it. The NPC panel shows the speaker's name and line, the player panel the talker's name,
 /// the money and the choices (colours <c>DialogueTextOption</c> #b3b3b3, <c>DialogueTextOptionHover</c> #00ff00 from <c>kenshi_colours.xml</c>); a click on a choice says it, Esc or
-/// closing leaves the conversation. The portraits are left empty (the portrait atlas holds only the squad).
+/// closing leaves the conversation. The portraits are the speaker's and the player character's, drawn into the last two cells of the portrait atlas.
 /// </summary>
 sealed partial class PlayerInterface
 {
@@ -60,6 +60,9 @@ sealed partial class PlayerInterface
         b.Text["PlayerName"] = talk.PlayerName;
         b.Text["NpcDialog"] = talk.Text;
         b.Properties["NpcDialog"] = new Dictionary<string, string> { ["Static"] = "true", ["WordWrap"] = "true", ["TextAlign"] = "Left Top" };
+        // The choices are drawn as buttons and the NPC frame grows to its text, so the two boxes' template scroll bars would only be empty tracks.
+        foreach (var name in new[] { "NpcDialog", "PlayerDialog" })
+            foreach (var bar in faithfulScreens.Layout("dialogue").Find(name)?.Children.Where(w => w.Type == "ScrollBar") ?? []) b.HiddenWidgets.Add(bar);
         b.Text["MoneyLabelText"] = "Money:";
         b.Text["MoneyAmountText"] = "c." + talk.PlayerMoney.ToString("N0", CultureInfo.InvariantCulture);
     }
@@ -67,6 +70,7 @@ sealed partial class PlayerInterface
     /// <summary>The choices, one line each down the player panel's dialog area.</summary>
     void AddDialogueChoices(List<UiControl> controls)
     {
+        AddDialoguePortraits(controls);
         if (session.CurrentSnapshot.Conversation is not { } talk || controls.FirstOrDefault(c => c.Name == "PlayerDialog") is not { } area) return;
         float line = MathF.Max(16, area.Bounds.Height / 7);
         for (int i = 0; i < talk.Choices.Count; i++)

@@ -51,7 +51,8 @@ headless and settles streaming. User and cinematic bindings are separate.
 Cinema/CameraPath stores viewer keys in %LOCALAPPDATA%/Meitou/viewer-shots.json; game keys separate.
 Ctrl+numpad1..9 saves; numpad1..9 cuts. Enter play/stop,0 loop,+/- timing*1.25,/ time-follow,
 . list,Ctrl+. delete (editor Delete-all requires second click3s). PageUp/Down FOV±2.5deg,
-10..100,Home50. F6 editor supports scrub/retime0.05s/reorder/ease, add/update/delete and recording.
+10..100,Home50 (viewer and --duel; elsewhere in the game PageUp/Down are floor_up/down).
+F6 editor supports scrub/retime0.05s/reorder/ease, add/update/delete and recording.
 Keys include eye,yaw,pitch,log-distance,lens,hour; Hermite time spline unwraps yaw/hour, stops
 at easing/open endpoints and joins loops. Unequal timing can overshoot; use easing where needed.
 Record-path samples manual flight each second plus endpoints. Numpad* letterbox2.39:1/clean view.

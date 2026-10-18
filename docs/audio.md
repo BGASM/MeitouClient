@@ -269,7 +269,10 @@ host running without sound.
   - **Sounds** loop by their loop property (0 forever). **Random/sequence containers**: continuous ones (flags bit 3) play one child after
     another (back to back; transition mode 3 waits the transition time), forever or for the loop count; step ones play one child. Random
     picks by weight, skipping the last *avoid repeat* picks. **Layer containers** play all children, each scaled by its layer's crossfade
-    curve. **Switch containers** play the children of the current state and swap them with their fades when it changes.
+    curve. **Switch containers** with `ContinuousValidation` swap children with fades on state changes and wait even when silent;
+    step switches select once per play and end with their children. **Verified** against `SFX_General_Bank` in `WwisePlayerInstallTests`:
+    repeated footsteps release all roots; a surface change does not interrupt a playing footstep or restart finished ones. Step/continuous semantics:
+    [Wwise guide](https://www.audiokinetic.com/en/public-library/2024.1.5_8803/?id=defining_contents_and_behavior_of_switch_containers&source=Help).
   - **Gains** add up from the sound to the top of the hierarchy: volume properties (dB), a random roll in each node's ranges per play,
     RTPC curves of the game parameters, then the output bus and its parents (bus volume, the slider curves). Volume curves store y as
     linear gain − 1 (below). Pitch (cents) resamples; low-pass runs a one-pole filter.

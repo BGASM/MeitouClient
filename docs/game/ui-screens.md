@@ -80,7 +80,7 @@ which are descriptive (RTTI knows `MessageBoxManager::Box`; the constructor of a
 Layer Middle, per-frame update FUN_140728d50 (**Observed**):
 
 **Observed** (user base-game reference): squad portrait frames occupy about 72% of the tab
-page height, leaving space below; Meitou uses this ratio, shrinking further for a full row.
+page height, leaving space below; Meitou uses 0.76 of the page height (frame ~125 px vs ~118 px at the same HUD scale, from the user's two screenshots; **Observed**), shrinking further for a full row.
 
 ### Portrait cells
 
@@ -134,6 +134,13 @@ The HUD stats rows (`StatsText`: MARTIAL ARTS ...) are drawn in the painted face
 (**Observed**: glyph shapes and widths in a base-game screenshot; [mygui.md](../formats/mygui.md) for the resize); Meitou uses
 `Kenshi_PaintedTextFont_Medium` there.
 JOBS and RANGED start enabled (user-reported original defaults).
+HUD text size: `Kenshi_StandardFont_Medium` (the MyGUI default font, `core_settings.xml`) is Exo2 SemiBold 20 pt at 50 dpi, a 13.9 px
+em (**Verified**, `kenshi_fonts.xml`). The base game draws HUD text at that size at 1080 p (**Observed**: user screenshots; Meitou's
+former 16 px floor came out 10-15 % wider). Meitou uses it as the in-game minimum and for the HUD panel and body-part lines.
+HUD text colours (**Observed**, ink sampled from a base-game screenshot): StatsText labels (MARTIAL ARTS ...) are grey ~#69625e,
+taken as the skins' `0.4 0.380392 0.356863` (#66615b, also the orders buttons' text); the jobs hint is ~#483b30, which is
+Secondary at the `JobsPanelInfo` EditBox's `Alpha` 0.5 (**Verified** property, `Kenshi_MainPanel.layout`): MyGUI multiplies a
+widget's alpha into its children (`InheritsAlpha`, default true), and the text is drawn by the EditBox template's client.
 **Verified** (`Kenshi_MainPanel.layout`): `OrdersChaseButton` is captioned JOBS; Meitou binds it
 to Jobs, independent of the saved `chase mode` flag whose relationship is **Unknown**.
 
@@ -352,8 +359,8 @@ decompile unless marked; Meitou's adapter is `PlayerInterface.Map.cs`.
 - **Observed** in the vanilla screenshot supplied on 2026-10-15 (Wolf, Thieves Backpack, Armour King): the character title is the character's name; the bag title is its item name;
   the shop title is the trader's name. The character pockets contain 8 columns by 10 rows of square cells. The bag is left of the character, stock right of it, with an independent
   vertical scrollbar. Equipment icons occupy their cell footprints; empty clothing slots are red, other empty cells pale. Stack counts are plain numbers in the lower-right corner;
-  stock prices are not printed over every icon. Meitou additionally draws a thin charge bar down the left edge of a single food item or charged tool (item function
-  other than 0: medkit, splint kit, robot repair), green when full to red when spent (`ItemInstance.ChargeFraction`); whether the original shows one is **Unknown**. The bag has a 10-by-14 grid with a fitted frame and an ARRANGE footer without the generic layout's editor capacity/type fields.
+  stock prices are not printed over every icon. A white line over a black full-width track (about 3 px at 1080p) along the bottom edge of a single food item or charged tool (item function
+  other than 0: medkit, splint kit, robot repair), as long as the charge left (`ItemInstance.ChargeFraction`); the 2026-10-18 vanilla trader screenshot (Swamper Barman) shows it full under food stacks, **Observed** (whether it shrinks is **Unknown**). The bag has a 10-by-14 grid with a fitted frame and an ARRANGE footer without the generic layout's editor capacity/type fields.
   The character parchment has separate label/value rows: Total Weight, a burden description, Disguise, Slave of, Looks like slave. **Unknown**: exact runtime sizing/rounding,
   burden description thresholds, and race/mod overrides of the pocket dimensions. Meitou uses 8 by 10 for new pockets and retains taller loaded inventories when saved items require it.
 - **Trader window** (code `PlayerInterface.Trade.cs`):
@@ -369,8 +376,8 @@ decompile unless marked; Meitou's adapter is `PlayerInterface.Map.cs`.
   - Stock grid size (**Observed**, `FUN_140953850`, the shop wrapper's constructor): the trader's `backpack_content` is one merged section, `columns` wide and `ceil(cells / columns)` high.
     Columns start at 18. A shop run by a building takes the widest storage section among the building's containers (at least 18) and the sum of their cells; a squad trader, or a building
     shop without cells, is 18 x 18 (the squad's backpack sections are collected but add no cells). The base game's buildings all store 18 x 18 (`storage size width/height`, the editor default;
-    367 records with a size, none wider; `gamedata.base`), its backpacks 8 x 8 to 20 x 20. Meitou's 20 x 20 squad stock is therefore already wider than a vanilla squad trader's 18; building shops
-    (more rows, scrolled) are not built. The 28 columns the 2026-10-17 screenshot seems to show are **Unknown** (a modded building, or a cell size other than 25 px).
+    367 records with a size, none wider; `gamedata.base`), its backpacks 8 x 8 to 20 x 20. Meitou's squad stock is 18 x 18, the width the 2026-10-18 screenshot shows (18 columns, scrolled rows); building shops
+    (more rows) are not built. The 28 columns the 2026-10-17 screenshot seems to show are **Unknown** (a modded building, or a cell size other than 25 px).
   - Right click (**Observed**, `FUN_140716a40` wires the section widgets, `FUN_1407169a0` the release, `FUN_140714a20` the right-button handler, `FUN_140713d20` the move): with a second inventory
     window open it moves the item to the other window.
     - *Use first* (`FUN_14070d070`): only an item whose class returns itself from item slot 94 (offset 0x2f0) has a use. The default returns nothing (**Verified**: the Item, Weapon, Armour, Gear

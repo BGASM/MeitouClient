@@ -141,12 +141,17 @@ static partial class WorldApp
             if (!series.TryGetValue(metric, out var s)) series[metric] = s = Enumerable.Repeat(double.NaN, frames).ToArray();
             s[k] = add && !double.IsNaN(s[k]) ? s[k] + v : v;
         }
-        string[] stageNames = [.. StageClock.Names.Select((n, i) => i == 11 ? "present" : n)];
+        string[] stageNames = StageClock.Names;
         var profiler = new FrameProfiler(context, () => context.GpuFrameMs);
         profiler.OnGpuFrame = (tag, stages, total) =>
         {
             double sum = 0;
-            for (int s = 0; s < stageNames.Length; s++) { Set("gpu:" + stageNames[s], tag, stages[s]); sum += stages[s]; }
+            for (int s = 0; s < stageNames.Length; s++)
+            {
+                if (StageClock.CpuOnly(s)) continue;
+                Set("gpu:" + stageNames[s], tag, stages[s]);
+                sum += stages[s];
+            }
             Set("gpu:other", tag, Math.Max(total - sum, 0));
             Set("gpu:total", tag, Math.Max(total, sum));
         };
@@ -221,7 +226,7 @@ static partial class WorldApp
             for (int s = 0; s < cpuStages; s++)
             {
                 Set("cpu:" + StageClock.Names[s], k, StageClock.Ms[s]);
-                if (s != 11) cpuSum += StageClock.Ms[s];
+                if (s != StageClock.DriverWait) cpuSum += StageClock.Ms[s];
             }
             Set("cpu:total", k, cpuSum);
         }
@@ -323,12 +328,12 @@ static partial class WorldApp
     }
 
     // The stages in the order a frame runs them (as the profiler lists them).
-    static readonly int[] StageOrder = [0, 1, 2, StageClock.UpdChars, 3, StageClock.Uploads, StageClock.Cull, StageClock.Bake, 12, 14, 4, 5, 6, 7, 8, StageClock.Characters, 9, StageClock.Shafts, StageClock.Fog, 13, 10, 11];
+    static readonly int[] StageOrder = [0, 1, 2, StageClock.UpdChars, 3, StageClock.Uploads, StageClock.Cull, StageClock.Bake, 12, 14, 4, 5, 6, 7, 8, StageClock.Characters, 9, StageClock.Shafts, StageClock.Fog, 13, 10, StageClock.Ui, StageClock.Submit, StageClock.DriverWait];
 
     /// <summary>Print order of the metrics: the frame, the GPU total and stages in frame order, the post sections, the render thread's total and stages.</summary>
     static int MetricOrder(string key)
     {
-        int Stage(string prefix) => Array.IndexOf(StageOrder, Array.IndexOf(StageClock.Names, key[prefix.Length..] == "present" ? "gpu-wait" : key[prefix.Length..]));
+        int Stage(string prefix) => Array.IndexOf(StageOrder, Array.IndexOf(StageClock.Names, key[prefix.Length..] == "present" ? "ui" : key[prefix.Length..]));
         if (key == "frame") return 0;
         if (key == "gpu:total") return 1;
         if (key.StartsWith("gpu:", StringComparison.Ordinal)) return 10 + (Stage("gpu:") is var g and >= 0 ? g : 50);

@@ -36,12 +36,16 @@ public static class MyGuiPresentation
     public static IReadOnlyList<UiControl> Arrange(MyGuiLayout layout, int width, int height, UiBindings bindings, IReadOnlyList<string> layers)
     {
         var result = new List<UiControl>();
-        void Visit(MyGuiWidget w, UiRect parent, UiRect clip, bool parentEnabled = true)
+        void Visit(MyGuiWidget w, UiRect parent, UiRect clip, bool parentEnabled = true, float parentAlpha = 1)
         {
             if (bindings.Hidden.Contains(w.Name) || bindings.HiddenWidgets.Contains(w)) return;
             var props = new Dictionary<string, string>(w.Properties, StringComparer.Ordinal);
             if (bindings.Properties.TryGetValue(w.Name, out var overrides)) foreach (var p in overrides) props[p.Key] = p.Value;
             if (props.GetValueOrDefault("Visible") == "false") return;
+            // MyGUI multiplies a widget's Alpha into its children unless they set InheritsAlpha false (an EditBox's text is its template client's).
+            float alpha = (props.GetValueOrDefault("InheritsAlpha") == "false" ? 1 : parentAlpha)
+                * (float.TryParse(props.GetValueOrDefault("Alpha"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float own) ? Math.Clamp(own, 0, 1) : 1);
+            if (alpha < 1) props["Alpha"] = alpha.ToString(System.Globalization.CultureInfo.InvariantCulture);
             var bounds = bindings.Positions.TryGetValue(w.Name, out var positioned) ? positioned
                 : bindings.RelativePositions.TryGetValue(w, out var relative) ? relative.RelativeTo(parent, true) : w.RealPosition ? w.Position.RelativeTo(parent, true)
                 : props.TryGetValue("TemplateReferenceWidth", out var rw) && props.TryGetValue("TemplateReferenceHeight", out var rh)
@@ -70,7 +74,7 @@ public static class MyGuiPresentation
             {
                 var pages = w.Children.Where(c => c.Type == "TabItem" && !bindings.Hidden.Contains(c.Name) && !bindings.HiddenWidgets.Contains(c)).ToArray();
                 int selected = Math.Clamp(bindings.SelectedTabs.GetValueOrDefault(w.Name), 0, Math.Max(0, pages.Length - 1));
-                foreach (var child in w.Children.Where(c => c.Type != "TabItem")) Visit(child, bounds, childClip, enabled);
+                foreach (var child in w.Children.Where(c => c.Type != "TabItem")) Visit(child, bounds, childClip, enabled, alpha);
                 // The buttons go in the skin's HeaderPlace (MyGUI's TabControl part), ButtonWidth wide unless ButtonAutoWidth.
                 var header = result.LastOrDefault(c => c.Properties.GetValueOrDefault("TemplateOwner") == w.Name && c.Properties.GetValueOrDefault("TemplatePart") == "HeaderPlace")?.Bounds
                     ?? new UiRect(bounds.X, bounds.Y, bounds.Width, 30);
@@ -80,9 +84,9 @@ public static class MyGuiPresentation
                     result.Add(new(w.Name + "@tab" + i, "Button", new(header.X + i * tabWidth, header.Y, tabWidth, header.Height),
                         bindings.Text.GetValueOrDefault(w.Name + "@tab" + i) ?? pages[i].Properties.GetValueOrDefault("Caption") ?? pages[i].Name, $"mygui:tab:{w.Name}:{i}", "Kenshi_SquadTabButton1Skin", enabled,
                         new Dictionary<string, string> { ["State"] = i == selected ? "normal_checked" : "normal", ["FontName"] = "Kenshi_PaintedTextFont_Medium", ["TextAlign"] = "Center" }, default, Clip: clip));
-                if (pages.Length > 0) Visit(pages[selected], bounds, childClip, enabled);
+                if (pages.Length > 0) Visit(pages[selected], bounds, childClip, enabled, alpha);
             }
-            else foreach (var child in w.Children) Visit(child, bounds, childClip, enabled);
+            else foreach (var child in w.Children) Visit(child, bounds, childClip, enabled, alpha);
             if (bindings.Lists.TryGetValue(w.Name, out var items))
             {
                 var client = result.LastOrDefault(c => c.Properties.GetValueOrDefault("TemplateOwner") == w.Name && c.Properties.GetValueOrDefault("TemplatePart") == "Client");

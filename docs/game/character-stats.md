@@ -52,6 +52,10 @@ First aid fills bandage; healing consumes it. Medkits, robot repair and beds app
 skills/charges/rates. Limb replacements modify part health and stat factors; missing limbs,
 stumps and robot wear are not interchangeable. Race tables own HP/blood/hunger/heal/XP inputs.
 
+**Observed** (`wade`, player Metaru's MEDICAL_STATE): injured parts have flesh + bandage ≈100,
+stun0 and bleeding0; the wounds are already treated. First Aid has nothing left to bandage;
+the HUD's yellow layer shows the treated damage awaiting passive recovery.
+
 **Verified** carried person adds CONSTANTS weight30, independent of body/race/inventory.
 **Observed** capacity C=1.2*strength*strength-injury-mult+15; encumbrance
 clamp((C-0.05W)/(0.95W),0,1), 1 through W<=C and0 at W>=20C. It affects speed, hunger, XP/dodge.
@@ -252,13 +256,13 @@ replaced, 3 crushed) and the fitted item (holder `FUN_1400cd3f0`; **Verified** b
   drops the RACE `severed limbs` item of the slot at `bone name 2` and opens a wound.
 - A stump shows the RACE `limb replacement` record whose `slot` is 50 + k (`uses_limb_replacement`); a crushed
   limb attaches no mesh. Hidden body vertices: [characters.md](../characters.md#hidden-body-parts-verified--140075600--140071f90--140531cc0-hlsl-skinhlsl).
+- Meitou in play: fitted items sit in the inventory's `*_replace` sections (the limbs window), weigh nothing, are not traded and
+  are saved only through MEDICAL_STATE `limbs`. Dropping a LIMB_REPLACEMENT whose `slot` is 50 + k on slot k fits it when limb k is a
+  stump; dragging it out removes it. Whether the original also fits over a crushed limb is **Unknown** (Meitou refuses).
 
 | Slot | Fields | Stat numbers |
 | --- | --- | --- |
 | all | `swimming mult`, `HP` (/`HP 1`), `unarmed damage bonus` (/`... 1`), `overall mult` | 23, part HP |
-- Meitou in play: fitted items sit in the inventory's `*_replace` sections (the limbs window), weigh nothing, are not traded and
-  are saved only through MEDICAL_STATE `limbs`. Dropping a LIMB_REPLACEMENT whose `slot` is 50 + k on slot k fits it when limb k is a
-  stump; dragging it out removes it. Whether the original also fits over a crushed limb is **Unknown** (Meitou refuses).
 | arms | `strength mult`, `dexterity mult`, `thievery mult` (applied to both 10 and 37), `ranged mult` | 1, 18, 10 and 37, 35 |
 | legs | `athletics mult`, `stealth mult` | 17, 16 |
 

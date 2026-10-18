@@ -54,6 +54,9 @@ building`, `destroyed`, `foliage`, `broken`, `power on`, `gets battery`; float `
 `batterycharge`; int `version`270, `floornum`, `flags`; handles `handle*`, `town*`, `residents*`,
 `isInsideBuilding*`, `mounted*`, each suffix TYPE/C/CS/I/S. Strings `name`, `owner faction ID`,
 `squad template`, `residents template`. Faction58697-rebirth.mod is unresolved in28 states.
+A turret's `mounted` handle (TYPE BUILDING) names its parent by C/I = that building state's
+`handleC`/`handleI` in the same zone (**Verified**: Shark's harpoon turret `7523` names the
+`Residential` tower it stands on, zone 21.42).
 
 Building state writer/reader (**Verified** by code, no player-built building in the sample saves): Building slot 17
 `FUN_140552320` writes, slot 18 `FUN_140552b70` and slot 112 `FUN_140555650` read; the shared part is slot 111

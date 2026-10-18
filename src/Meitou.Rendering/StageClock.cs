@@ -8,11 +8,15 @@ namespace Meitou.Rendering;
 /// </summary>
 static class StageClock
 {
-    public static readonly string[] Names = ["upd-terrain", "upd-objects", "upd-foliage", "sky-prepare", "reflection", "sky-draw", "terrain", "objects", "foliage", "water", "post", "gpu-wait", "shadows", "particles", "gi", "uploads", "cull", "bake", "shafts", "fog", "characters", "upd-chars"];
+    public static readonly string[] Names = ["upd-terrain", "upd-objects", "upd-foliage", "sky-prepare", "reflection", "sky-draw", "terrain", "objects", "foliage", "water", "post", "ui", "shadows", "particles", "gi", "uploads", "cull", "bake", "shafts", "fog", "characters", "upd-chars", "submit", "driver-wait"];
 
     // Stages 15 to 17 exist on the GPU only: the pre-frame command buffer's uploads (what it holds besides the next two), the foliage and grass culls and the
     // impostor bakes, timed by stamps in that buffer (FrameProfiler.PreStamp). The render thread has no lap for them. 18 and 19 are the light shafts and the fog volumes, 20 and 21 the characters' colour and motion draws and their update.
     public const int Uploads = 15, Cull = 16, Bake = 17, Shafts = 18, Fog = 19, Characters = 20, UpdChars = 21, Post = 10;
+    public const int Ui = 11, Submit = 22, DriverWait = 23;
+    public static int LastStage { get; private set; }
+    public static bool SubmissionStarted { get; private set; }
+    public static bool CpuOnly(int stage) => stage == DriverWait;
     public static bool GpuOnly(int stage) => stage is Uploads or Cull or Bake;
     public static readonly double[] Ms = new double[Names.Length];
     public static bool Active;
@@ -39,16 +43,32 @@ static class StageClock
         if (Active && (uint)stage < (uint)JobMs.Length) JobMs[stage] += ticks * 1000.0 / Stopwatch.Frequency;
     }
 
-    public static void Start() { Active = true; Array.Clear(Ms); Array.Clear(JobMs); last = Stopwatch.GetTimestamp(); OnStart?.Invoke(); }
+    public static void Start() { Active = true; SubmissionStarted = false; LastStage = -1; Array.Clear(Ms); Array.Clear(JobMs); last = Stopwatch.GetTimestamp(); OnStart?.Invoke(); }
+
+    // Called before the window copy, or before submission for an offscreen frame.
+    public static void BeginSubmission()
+    {
+        if (!Active || SubmissionStarted) return;
+        Lap(Ui);
+        SubmissionStarted = true;
+    }
+
+    public static void EndFrame()
+    {
+        // Submission has closed the commands; a GPU timestamp here would open the next frame.
+        Lap(LastStage is Submit or DriverWait ? LastStage : Ui, "gpu-wait", gpuTimestamp: false);
+        Active = false;
+    }
 
     /// <summary>Ends <paramref name="stage"/>'s span; <paramref name="label"/> is what the pass meter names the row (default the stage's name), for a stage that laps more than once.</summary>
-    public static void Lap(int stage, string? label = null)
+    public static void Lap(int stage, string? label = null, bool gpuTimestamp = true)
     {
         if (!Active) return;
         long now = Stopwatch.GetTimestamp();
         Ms[stage] += (now - last) * 1000.0 / Stopwatch.Frequency;
         last = now;
-        Profiler?.Stamp(stage);
+        LastStage = stage;
+        if (gpuTimestamp) Profiler?.Stamp(stage);
         OnClose?.Invoke(label ?? Names[stage], false);
     }
 

@@ -96,7 +96,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
             else if (QuickOrder(p)?.Do is var quick && ContextPress(p, quick)) { }
             else if (quick is not null) quick();
             else if (GroundItemClick(p)) { }
-            else if (Ray(p) is { } ray && GroundHit(ray.Origin, ray.Direction) is { } hit)
+            else if (Ray(p) is { } ray && MoveHit(ray.Origin, ray.Direction) is { } hit)
             {
                 Move(hit, shift);
                 PlaceMarker(hit);
@@ -115,10 +115,14 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     {
         if (SelectedIds() is not { Count: > 0 } selection) return null;
         if (PickTrader(p) is { } trader) return ("talk", trader, () => Say(new Meitou.Simulation.Trading.OpenTrade(selection[0], trader) { Tick = session.World.Tick }));
+        // A non-hostile character with something to say is talked to (the same Talk as the context menu's).
+        if (PickTarget(p) is { } talkee && !Hostile(talkee) && session.World.CanTalk(talkee, selection[0]))
+            return ("talk", talkee, () => Say(new Meitou.Simulation.Dialogue.TalkOrder(selection[0], talkee) { Tick = session.World.Tick }));
         // While sneaking, a right click on an NPC is a stealth knock-out (the original's tutorial: "right click on an NPC while sneaking").
-        if (PickTarget(p) is { } mark && session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == mark) is { StealthKoChance: not null })
+        // Only a hostile character is attacked this way; a neutral is left alone (the context menu still offers the attack).
+        if (PickTarget(p) is { } mark && Hostile(mark) && session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == mark) is { StealthKoChance: not null })
             return ("attk", mark, () => Say(new Meitou.Simulation.Carrying.StealthKoOrder(selection, mark) { Tick = session.World.Tick }));
-        if (PickTarget(p) is { } victim) return ("attk", victim, () => Say(new Meitou.Simulation.Combat.AttackOrder(selection, victim) { Tick = session.World.Tick }));
+        if (PickTarget(p) is { } victim && Hostile(victim)) return ("attk", victim, () => Say(new Meitou.Simulation.Combat.AttackOrder(selection, victim) { Tick = session.World.Tick }));
         if (PickHurtAlly(p) is { } patient) return ("med", patient, () => Say(new Meitou.Simulation.FirstAid.TreatOrder(selection, patient) { Tick = session.World.Tick }));
         if (PickDowned(p, ownOnly: true) is { } ally) return ("lift", ally, () => Say(new Meitou.Simulation.Carrying.PickUpOrder([], ally) { Tick = session.World.Tick }));
         return null;
@@ -192,7 +196,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         UpdateMap();
         if (!final) UpdateBuild();
         if (!steering || OverHud(mouse)) return;
-        if (Ray(mouse) is not { } ray || GroundHit(ray.Origin, ray.Direction) is not { } hit) return;
+        if (Ray(mouse) is not { } ray || MoveHit(ray.Origin, ray.Direction) is not { } hit) return;
         PlaceMarker(hit);   // the marker follows the cursor every frame; the order only once a tick
         if (!final && session.World.Tick == steerTick) return;
         if (final && session.World.Tick == steerTick && hit == steerTarget) return;
@@ -214,6 +218,12 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         if (index < 0 || index >= members.Count) return;
         Select([members[index]], shift);
         if (doubleTap) CentreOn(members[index]);
+    }
+
+    /// <summary>Centres the camera on the lead selected character and follows it (after a load, which drops the follow).</summary>
+    public void FollowSelected()
+    {
+        if (Selected().FirstOrDefault() is { } lead) CentreOn(lead.Id);
     }
 
     void CentreOn(CharacterId id, bool follow = true)

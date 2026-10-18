@@ -92,6 +92,7 @@ public sealed unsafe partial class GpuContext
     {
         if (!Frame.Open) return;
         if (PassOpen) throw new InvalidOperationException("EndFrame with a host pass open");
+        StageClock.BeginSubmission();
         int slot = Device.Frames.Slot;
         var end = Frame.Timestamps.Allocate();
         if (end.IsValid)
@@ -114,6 +115,7 @@ public sealed unsafe partial class GpuContext
         long t0 = Stopwatch.GetTimestamp();
         Device.Frames.EndFrame(wait, waitStages, signal, before: upload);
         SubmitTicks += Stopwatch.GetTimestamp() - t0;
+        StageClock.Lap(StageClock.Submit, gpuTimestamp: false);
     }
 
     /// <summary>Submits what is recorded and waits for the GPU (readbacks); a frame is open again afterwards when one was before.</summary>

@@ -53,6 +53,7 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         public bool BackCull;
         /// <summary>The placement ghost: 0 not, 1 valid (green), 2 invalid (red), 3 queued (blue) (<see cref="BatchKind.Ghost"/>).</summary>
         public int Ghost;
+        public bool Highlight;
         public bool Manual;
         /// <summary>Some instance is mid cross-fade (or a town's per-vertex fade): its draws need the program with the dither <c>discard</c>.</summary>
         public bool Fading;
@@ -120,6 +121,8 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
 
     /// <summary>Instances drawn by the last <see cref="Draw"/>.</summary>
     public int DrawnInstances { get; private set; }
+    /// <summary>Colour real building parts owned by a BUILDING with <c>is sign</c> yellow while the highlight action is held.</summary>
+    public bool HighlightSigns { get; set; }
     public long DrawnTriangles { get; private set; }
     public int DrawCalls { get; private set; }
     /// <summary>Real instances the last <see cref="Draw"/> left out because of their part distance (<see cref="ObjectRanges.PartRenderingDistance"/>)
@@ -649,6 +652,20 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
     /// </summary>
     public IReadOnlyDictionary<string, int> InteriorView { get; set; } = new Dictionary<string, int>();
 
+    /// <summary>The nearest loaded building's movement destination, using collision up to the viewed floor, before the terrain.</summary>
+    public Vector3? MoveHit(Vector3 origin, Vector3 direction, int floor, float maxDistance)
+    {
+        Vector3? best = null;
+        foreach (var zone in streamer.AllZones)
+            foreach (var room in zone.Interiors)
+                if (room.MoveHit(origin, direction, floor, maxDistance) is { } hit)
+                {
+                    maxDistance = hit.Distance;
+                    best = hit.Position;
+                }
+        return best;
+    }
+
     /// <summary>The indoor volume of a loaded building that contains <paramref name="p"/> (widened by <paramref name="margin"/>), or null.</summary>
     public InteriorVolume? InteriorAt(Vector3 p, float margin = 0)
     {
@@ -871,6 +888,7 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         m.M34 = inst.Placed.Interior || inst.Placed.ParentPlacementId is not null && InteriorAt(m.Translation) is not null ? 1 : 0;
         // Another spare component, M44: 1, or for a construction site the height of its scaffold clip plane (BuildingLodShaders.ScaffoldBase + world Y).
         bool site = false;
+        bool highlight = HighlightSigns && !depthPass && !inst.Stand && inst.Placed.Owner.GetBool("is sign");
         if (construction is { Count: > 0 } && !inst.Stand && construction.TryGetValue(inst.Placed.ParentPlacementId ?? inst.Placed.PlacementId, out float built))
         {
             float scaleY = new Vector3(m.M21, m.M22, m.M23).Length();
@@ -879,20 +897,20 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         }
         if (!blend.IsBlending)
         {
-            Add(gpu, inst.Materials!, blend.Lower, m, 0, weight >= 0.999f ? 2 : weight, value, inst.Placed.Interior, site);
+            Add(gpu, inst.Materials!, blend.Lower, m, 0, weight >= 0.999f ? 2 : weight, value, inst.Placed.Interior, site, highlight: highlight);
             return;
         }
-        Add(gpu, inst.Materials!, blend.Upper, m, 0, blend.T * weight, value, inst.Placed.Interior, site);
-        Add(gpu, inst.Materials!, blend.Lower, m, blend.T * weight, weight, value, inst.Placed.Interior, site);
+        Add(gpu, inst.Materials!, blend.Upper, m, 0, blend.T * weight, value, inst.Placed.Interior, site, highlight: highlight);
+        Add(gpu, inst.Materials!, blend.Lower, m, blend.T * weight, weight, value, inst.Placed.Interior, site, highlight: highlight);
     }
 
-    void Add(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, Matrix4x4 m, float lo, float hi, float near, bool backCull = false, bool site = false, int ghost = 0)
+    void Add(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, Matrix4x4 m, float lo, float hi, float near, bool backCull = false, bool site = false, int ghost = 0, bool highlight = false)
     {
         var manual = gpu.Manual[level];
         // Fully visible: lo 0 and hi 2 (the shader keeps everything when hi >= 1 and lo is 0). With the early depth test off every batch is "fading": the old merging.
         // A construction site discards the fragments above its clip plane, so it needs the program with a discard as well.
         bool fading = !EarlyDepth.Enabled || lo > 0 || hi < 1 || site;
-        var batch = BatchFor(manual ?? gpu, materials, manual is null ? level : 0, (fading ? BatchKind.Fading : BatchKind.Solid) | (backCull ? BatchKind.BackCull : 0) | ghost);
+        var batch = BatchFor(manual ?? gpu, materials, manual is null ? level : 0, (fading ? BatchKind.Fading : BatchKind.Solid) | (backCull ? BatchKind.BackCull : 0) | ghost | (highlight ? BatchKind.Highlight : 0));
         batch.Manual = manual is not null;
         if (batch.Count == 0) { active.Add(batch); batch.Near = near; } else if (near < batch.Near) batch.Near = near;
         m.M14 = lo;
@@ -909,6 +927,7 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         public const int BackCull = 4;
         /// <summary>Flags: the placement ghost, valid or invalid (<see cref="Batch.Ghost"/>).</summary>
         public const int Ghost = 8, GhostBad = 16, GhostQueued = 32;
+        public const int Highlight = 64;
     }
 
     Batch BatchFor(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, int kind)
@@ -916,7 +935,8 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         var key = (gpu, materials, level, kind);
         if (!batchMap.TryGetValue(key, out var batch))
             batchMap[key] = batch = new Batch { Mesh = gpu, Materials = materials, Level = level, Town = kind == BatchKind.Town,
-                Fading = (kind & ~(BatchKind.BackCull | BatchKind.Ghost | BatchKind.GhostBad | BatchKind.GhostQueued)) != BatchKind.Solid, BackCull = (kind & BatchKind.BackCull) != 0,
+                Fading = (kind & ~(BatchKind.BackCull | BatchKind.Ghost | BatchKind.GhostBad | BatchKind.GhostQueued | BatchKind.Highlight)) != BatchKind.Solid, BackCull = (kind & BatchKind.BackCull) != 0,
+                Highlight = (kind & BatchKind.Highlight) != 0,
                 Ghost = (kind & BatchKind.GhostQueued) != 0 ? 3 : (kind & BatchKind.GhostBad) != 0 ? 2 : (kind & BatchKind.Ghost) != 0 ? 1 : 0 };
         return batch;
     }
@@ -1105,6 +1125,7 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
                     Material(ref d, gp, pm, options);
                     // The placement ghost: the shader tints a draw whose flat colour is non-zero.
                     if (b.Ghost != 0) d.Push.FlatColour = b.Ghost == 1 ? new Vector3(0.35f, 1f, 0.45f) : b.Ghost == 2 ? new Vector3(1f, 0.3f, 0.25f) : new Vector3(0.5f, 0.7f, 1f);
+                    if (b.Highlight) d.Push.FlatColour = new Vector3(1f, 1f, 0f);
                     // A part whose diffuse map is not resident yet is drawn plain grey (pop-in the benchmark counts).
                     if (!depthPass && options.Textures && d.Diffuse == 0 && pm.WantsDiffuse) untexturedDraws++;
                     d.Solid = !depthPass && !b.Fading && d.Push.AlphaThreshold == 0f;

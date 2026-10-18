@@ -16,11 +16,11 @@ public sealed class FrameProfiler : IDisposable
     public enum Mode { Off, Gpu, Cpu }
 
     public const int History = 300;
-    const int Slots = 4, MaxStamps = 128, MaxPre = 96, Stages = 22;
+    const int Slots = 4, MaxStamps = 128, MaxPre = 96, Stages = 24;
     // Series: the stages by StageClock index, then the GPU time outside the stamped stages (uploads, overlay), then the total.
     const int Other = Stages, Total = Stages + 1, Series = Stages + 2;
-    // The stages in the order a frame runs them; 11 is the overlay and the copy to the window after the scene (on the GPU), the submit and present (on the render thread).
-    static readonly int[] Order = [0, 1, 2, StageClock.UpdChars, 3, StageClock.Uploads, StageClock.Cull, StageClock.Bake, 12, 14, 4, 5, 6, 7, 8, StageClock.Characters, 9, StageClock.Shafts, StageClock.Fog, 13, 10, 11, Other, Total];
+    // The GPU's submit span is the window copy/tail; driver-wait is CPU only.
+    static readonly int[] Order = [0, 1, 2, StageClock.UpdChars, 3, StageClock.Uploads, StageClock.Cull, StageClock.Bake, 12, 14, 4, 5, 6, 7, 8, StageClock.Characters, 9, StageClock.Shafts, StageClock.Fog, 13, 10, StageClock.Ui, StageClock.Submit, StageClock.DriverWait, Other, Total];
 
     static readonly Vector4[] Colours =
     [
@@ -30,6 +30,7 @@ public sealed class FrameProfiler : IDisposable
         new(0.45f, 0.35f, 0.25f, 1), new(1.00f, 0.75f, 0.20f, 1), new(0.85f, 0.95f, 0.45f, 1),
         new(0.70f, 0.55f, 0.40f, 1), new(0.80f, 0.30f, 0.55f, 1), new(0.55f, 0.90f, 0.70f, 1), new(0.85f, 0.70f, 0.95f, 1), new(0.95f, 0.75f, 0.60f, 1),
         new(0.95f, 0.45f, 0.65f, 1), new(0.70f, 0.50f, 0.95f, 1),
+        new(0.30f, 0.80f, 0.70f, 1), new(0.90f, 0.65f, 0.35f, 1),
         new(0.50f, 0.50f, 0.50f, 1), new(1.00f, 1.00f, 1.00f, 1),
     ];
 
@@ -37,6 +38,7 @@ public sealed class FrameProfiler : IDisposable
     readonly int[,] stampStage = new int[Slots, MaxStamps];
     readonly int[] stampCount = new int[Slots];
     readonly bool[] pending = new bool[Slots];
+    readonly bool[] submitted = new bool[Slots];
     int slot;
 
     // The pre-frame command buffer's own chain of stamps (uploads, culls, bakes; PreStamp): per slot the stamp and the stage that owns the time since the one before.
@@ -96,7 +98,7 @@ public sealed class FrameProfiler : IDisposable
         return h;
     }
 
-    static string Label(int series) => series switch { Other => "other", Total => "total", 11 => "present", _ => StageClock.Names[series] };
+    static string Label(int series) => series switch { Other => "other", Total => "total", _ => StageClock.Names[series] };
 
     /// <summary>Before the frame's first stage (after the wait for a free frame, so that wait is not counted).</summary>
     public void BeginFrame()
@@ -118,8 +120,8 @@ public sealed class FrameProfiler : IDisposable
     {
         // Its GPU stamp would land in the next frame's commands: the CPU lap only.
         StageClock.Profiler = null;
-        StageClock.Lap(11);
-        StageClock.Active = false;
+        StageClock.EndFrame();
+        submitted[slot] = StageClock.SubmissionStarted;
         pending[slot] = stampCount[slot] > 1;
         StampsLastFrame = stampCount[slot] + preCount[slot];
         slotWhole[slot] = native.CurrentFrameStamps;   // complete when the context has ended the frame already (else the total falls back to gpuFrameMs)
@@ -285,10 +287,10 @@ public sealed class FrameProfiler : IDisposable
             sum += ms;
             previous = now;
         }
-        // The tail after the last stage (the overlay, the profiler's own chart, the copy to the window): "present".
+        // UI ends before the window copy. Without a submission boundary the tail still belongs to UI.
         if (arena.TryRead(whole.End, out ulong tailEnd) && tailEnd >= previous)
         {
-            gpuFrame[11] += (tailEnd - previous) / 1e6;
+            gpuFrame[submitted[s] ? StageClock.Submit : StageClock.Ui] += (tailEnd - previous) / 1e6;
             sum += (tailEnd - previous) / 1e6;
         }
         // The frame's own total (first to last stamp); the context's latest completed frame is only a stand-in and, with frames in flight, another frame.
@@ -385,7 +387,7 @@ public sealed class FrameProfiler : IDisposable
         // VRAM is read every 30 frames (a driver call), shown in the header and as the pie at the top right.
         if (vramAge-- <= 0) { vram = native.Device.VideoMemory(); vramSlices = VramSlices(); vramAge = 30; }
         DrawVramPie(overlay, width);
-        overlay.Text($"Profiler: {(showGpu ? "GPU" : "render thread")} ms per stage, last {History} frames   (F12: {(showGpu ? "cpu" : "off")})   " +
+        overlay.Text($"Profiler: {(showGpu ? "GPU" : "render thread (includes driver waits)")} ms per stage, last {History} frames   (F12: {(showGpu ? "cpu" : "off")})   " +
             $"vram {vram.Used / 1073741824.0:0.00} of {vram.Budget / 1073741824.0:0.0} GB", x0 + pad, y0 + pad, DebugOverlay.TextColour);
 
         // Legend at the right: swatch, stage, mean of the last frames on the CPU and the GPU.
@@ -399,7 +401,7 @@ public sealed class FrameProfiler : IDisposable
             float top = ly + (i + 1) * lh;
             overlay.Rect(lx, top + 4, lx + swatch, top + 4 + swatch, Colours[s]);
             string c = s == Other || StageClock.GpuOnly(s) ? "-" : Mean(cpu[s], cpuHead, cpuCount, meanFrames).ToString("0.00", CultureInfo.InvariantCulture);
-            string g = gpuCount == 0 ? "-" : Mean(gpu[s], gpuHead, gpuCount, meanFrames).ToString("0.00", CultureInfo.InvariantCulture);
+            string g = gpuCount == 0 || StageClock.CpuOnly(s) ? "-" : Mean(gpu[s], gpuHead, gpuCount, meanFrames).ToString("0.00", CultureInfo.InvariantCulture);
             overlay.Text($"{Label(s),-12}{c,10}{g,10}", lx + swatch + 6, top, DebugOverlay.TextColour);
         }
 
@@ -409,6 +411,7 @@ public sealed class FrameProfiler : IDisposable
         float max = 0;
         foreach (int s in Order)
         {
+            if (showGpu && StageClock.CpuOnly(s)) continue;
             if (!showGpu && (s == Other || StageClock.GpuOnly(s))) continue;
             for (int i = 0; i < count; i++) max = Math.Max(max, hist[s][i]);
         }
@@ -429,6 +432,7 @@ public sealed class FrameProfiler : IDisposable
             // Oldest at the left; the newest frame at the right edge.
             foreach (int s in Order)
             {
+                if (showGpu && StageClock.CpuOnly(s)) continue;
                 if (!showGpu && (s == Other || StageClock.GpuOnly(s))) continue;
                 var series = hist[s];
                 float thickness = s == Total ? 2f : 1.5f;

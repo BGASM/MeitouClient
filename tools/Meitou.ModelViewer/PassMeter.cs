@@ -26,7 +26,7 @@ sealed class PassMeter : IDisposable
     // The columns after the native counters: Stopwatch ticks.
     static readonly int Fence = Native, Submit = Native + 1, Acquire = Native + 2, Present = Native + 3;
     static readonly double TickMs = 1000.0 / Stopwatch.Frequency;
-    /// <summary>Label of the lap that ends a frame (StageClock stage 11).</summary>
+    /// <summary>Label of the final CPU lap that closes a frame.</summary>
     const string EndLabel = "gpu-wait";
 
     sealed class Row(string key, string name, string? parent)
@@ -170,7 +170,7 @@ sealed class PassMeter : IDisposable
                 frameRows.Add((GetRow(label + "/rest", label, "rest"), restCpu, rest));
             }
             pendingSubs.Clear();
-            if (!end) Stamp(label, false);
+            if (!end && ctx.Frame.Open) Stamp(label, false);
             tMajor = t;
             Array.Copy(now, sMajor, N);
         }
@@ -204,8 +204,7 @@ sealed class PassMeter : IDisposable
         {
             row.Cpu += c;
             for (int i = 0; i < N; i++) row.C[i] += counters[i];
-            if (row.Parent is null && row.Name != EndLabel) cpu += c;
-            if (row.Parent is null && row.Name == EndLabel) cpu += counters[Submit] * TickMs;   // the submit
+            if (row.Parent is null && row.Name is not (EndLabel or "driver-wait")) cpu += c;
         }
         frameCpu.Add(cpu);
     }
@@ -288,7 +287,7 @@ sealed class PassMeter : IDisposable
         Line(total, "");
         var sorted = frameCpu.OrderBy(x => x).ToList();
         double gpuFrame = gpuFrames > 0 ? gpuFrameSum / gpuFrames : double.NaN;
-        sb.AppendLine($"passes    frame render-thread cpu (rows but {EndLabel}, plus the submit): mean {Fmt(frameCpu.Average())}, p50 {Fmt(sorted[sorted.Count / 2])}, p95 {Fmt(sorted[Math.Min((int)(sorted.Count * 0.95), sorted.Count - 1)])} ms; gpu frame (first to last timestamp) {Fmt(gpuFrame)} ms");
+        sb.AppendLine($"passes    frame render-thread cpu (rows except {EndLabel} and driver-wait): mean {Fmt(frameCpu.Average())}, p50 {Fmt(sorted[sorted.Count / 2])}, p95 {Fmt(sorted[Math.Min((int)(sorted.Count * 0.95), sorted.Count - 1)])} ms; gpu frame (first to last timestamp) {Fmt(gpuFrame)} ms");
         output.Write(sb.ToString());
         // For scripts: PASSCSV|tag|row|parent|cpu|gpu|counters... (per-frame means; the tick columns in ms).
         output.WriteLine($"PASSCSVHEAD|{string.Join("|", GpuStats.CounterNames)}|fenceMs|submitMs|acquireMs|presentMs");

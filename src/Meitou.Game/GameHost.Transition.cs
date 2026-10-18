@@ -109,6 +109,15 @@ sealed partial class GameHost
             session.CurrentSnapshot.Characters.All(c => c.Appearance is null || characters.IsPrepared(c.Appearance));
         bool sceneReady = TitleVisible ? TitleSceneReady : populationReady && charactersReady &&
             gpu.Streamer is not { Idle: false } && !(gpu.Objects?.Pending > 0) && !(gpu.Foliage?.Pending > 0);
+        if (pendingCreation is not null && !TitleVisible && charactersReady)
+        {
+            // A new game shows the character editor before the world: the loading screen lifts once the squad is drawable, no sky arrival, and the world's own warm-up
+            // runs when the editor closes (ResumeAfterCreation).
+            (warming, skyArrival, presentationHour) = (false, null, null);
+            loading?.Finish();
+            ReportLoading($"the squad was ready in {warmSeconds:0.0} s; the editor opens first");
+            return;
+        }
         if (!sceneReady)
         {
             smoothSeconds = readySeconds = 0;

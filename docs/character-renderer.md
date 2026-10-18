@@ -35,6 +35,8 @@ Portraits use the same content/shading with a dedicated camera/render target; av
 world draw state. Asset/appearance failure must not corrupt another instance or portrait.
 Portrait cells redraw only when their character, appearance, size, camera serial or streamed
 texture images/swizzle change; animation and frame counts do not invalidate the cached still.
+Atlas layout (Meitou): squad members take cells 0-29; the conversation window's speaker and player
+character take the last two (30, 31) while a conversation is open.
 Item icons (`CharacterRenderer.Icons.cs`) are the same: an item's mesh drawn through the item shader into a texture of its own, as a pseudo-instance that the world and shadow views skip;
 the camera, lighting and sizes are in [game/ui-screens.md](game/ui-screens.md) "Item icons".
 Harness `--crowd` exercises instance scaling; compare pose/upload/draw/shadow separately.

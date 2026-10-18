@@ -127,7 +127,7 @@ Same targets as picking; Task_CutLock / Task_BruteForceLock share the shackle ta
   `DESTINATION_IS_ACCESSIBLE` and 60 `LOCATION_IS_ACCESSIBLE` in list B, which tasks 85 / 84 (Task_OpenDoor) make true by opening
   the door ([ai-tasks](ai-tasks.md)). Nothing closes a door behind a walker: only the lock tasks list a closed door (`!52`), and no
   AI package lists tasks 73/75 (**Observed**: TaskData and package census). How states 59/60 pick their door is **Unknown**.
-- **Door panel** (player's building): open/close button `FUN_140546fb0`: an open door closes; otherwise an effectively locked
+- **Door panel** (player's building, the HUD lines of a selected house: [ui-screens](ui-screens.md#selected-building)): open/close button `FUN_140546fb0`: an open door closes; otherwise an effectively locked
   one is unlocked first, then opened (**Verified**).
 - **Player lock toggle** (`FUN_140547060`, **Verified**): flips `wants lock` (sound `Lock_Building` / `Unlock_Building`); locking a
   closed door sets the lock at once, unlocking clears it; an open door locks when it next closes (the update above).

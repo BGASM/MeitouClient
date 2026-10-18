@@ -39,7 +39,7 @@ sealed partial class PlayerInterface
             verbs.Add(($"Pay bail (c.{bail.ToString("N0", CultureInfo.InvariantCulture)})", () => Say(new Meitou.Simulation.Crime.PayBailOrder(id) { Tick = session.World.Tick })));
         if (!down && !target.IsPlayer)
         {
-            if (session.World.CanTalk(id)) verbs.Add(("Talk", () => Say(new Meitou.Simulation.Dialogue.TalkOrder(selection[0], id) { Tick = session.World.Tick })));
+            if (session.World.CanTalk(id, selection[0])) verbs.Add(("Talk", () => Say(new Meitou.Simulation.Dialogue.TalkOrder(selection[0], id) { Tick = session.World.Tick })));
             if (target.IsTrader) verbs.Add(("Trade", () => Say(new Meitou.Simulation.Trading.OpenTrade(selection[0], id) { Tick = session.World.Tick })));
             // Meitou's stand-in for a plastic surgeon's dialogue line (DA_CHARACTER_EDITOR, docs/characters.md "Plastic surgeons"): the editor on the first selected character.
             if (target.SurgeryCost is { } cost) verbs.Add((cost > 0 ? $"Plastic Surgery (c.{cost.ToString("N0", CultureInfo.InvariantCulture)})" : "Plastic Surgery", () => AskSurgery(selection[0], target, cost)));

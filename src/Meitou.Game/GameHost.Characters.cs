@@ -71,11 +71,19 @@ sealed partial class GameHost
     {
         if (gpu.Characters is not { } characters) return;
         characters.PortraitRequests.Clear();
-        if (!player.UiVisible || player.TitleOpen) return;
-        var members = player.SquadBarMembers();
+        if (player.TitleOpen) return;
         // The serial turns each portrait's camera.
-        for (int i = 0; i < members.Count; i++)
-            characters.PortraitRequests.Add(new PortraitRequest(DrawKey(members[i].Id), i, members[i].PortraitSerial));
+        if (player.UiVisible)
+        {
+            var members = player.SquadBarMembers();
+            for (int i = 0; i < members.Count; i++)
+                characters.PortraitRequests.Add(new PortraitRequest(DrawKey(members[i].Id), i, members[i].PortraitSerial));
+        }
+        if (player.DialoguePortraitCharacters() is var (npc, talker))
+        {
+            if (!npc.IsNone) characters.PortraitRequests.Add(new PortraitRequest(DrawKey(npc), PlayerInterface.DialogueNpcCell, player.PortraitSerial(npc)));
+            if (!talker.IsNone) characters.PortraitRequests.Add(new PortraitRequest(DrawKey(talker), PlayerInterface.DialoguePlayerCell, player.PortraitSerial(talker)));
+        }
     }
 
     void FillDrawListCore(CharacterDrawList list)

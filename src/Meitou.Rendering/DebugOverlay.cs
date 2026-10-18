@@ -74,6 +74,8 @@ public sealed unsafe class DebugOverlay : IDisposable
     readonly float baselineOffset;
     readonly List<float> batch = [];
     const int Stride = 8;
+    readonly Dictionary<(string Text, float X, float Top, float Scale, Vector4 Colour), (float[] Vertices, float Width)> textGeometry = [];
+    int cachedTextFloats;
 
     public float LineHeight { get; }
     public float CharWidth { get; }
@@ -314,6 +316,14 @@ public sealed unsafe class DebugOverlay : IDisposable
     public float TextScaled(string s, float x, float top, Vector4 colour, float scale)
     {
         if (imageBatch is not null) throw new InvalidOperationException("Flush UI images before queuing text.");
+        var key = (s, x, top, scale, colour);
+        // Font atlases are immutable. Bound the cache even for scrolling text and continuously changing counters.
+        if (textGeometry.TryGetValue(key, out var cached))
+        {
+            batch.AddRange(cached.Vertices.AsSpan());
+            return cached.Width;
+        }
+        int first = batch.Count;
         float start = x, baseline = top + (packedGlyphs is null ? PixelHeight : baselineOffset) * scale;
         int previous = -1;
         foreach (char c in s)
@@ -337,16 +347,31 @@ public sealed unsafe class DebugOverlay : IDisposable
                 g.x0 / (float)AtlasSize, g.y0 / (float)AtlasSize, g.x1 / (float)AtlasSize, g.y1 / (float)AtlasSize, colour);
             x += g.xadvance * scale;
         }
-        return x - start;
+        float width = x - start;
+        int added = batch.Count - first;
+        if (added <= 16384)
+        {
+            if (textGeometry.Count >= 512 || cachedTextFloats + added > 262144)
+            {
+                textGeometry.Clear();
+                cachedTextFloats = 0;
+            }
+            textGeometry[key] = (CollectionsMarshal.AsSpan(batch)[first..].ToArray(), width);
+            cachedTextFloats += added;
+        }
+        return width;
     }
 
     /// <summary>Draws everything queued since the last flush over <see cref="Target"/> (viewport <paramref name="width"/> × <paramref name="height"/>).</summary>
     public void Flush(int width, int height, Meitou.Data.Ui.UiRect? clip = null)
+        => Flush(width, height, clip, null);
+
+    /// <summary>Widget and font batches share one rendering; scissors and draw order still change per flush.</summary>
+    internal void Flush(int width, int height, Meitou.Data.Ui.UiRect? clip, OverlayPass? pass)
     {
         if (batch.Count == 0 || width <= 0 || height <= 0 || Target is null) { batch.Clear(); imageBatch = null; return; }
         // A native segment of its own. It is begun first: the overlay is also drawn after a frame ended (a screenshot's key list), and the
         // segment opens the frame whose constants hold the vertices.
-        var cmd = Gpu.BeginNative("debug overlay");
         var t = PassTargets.Of(Target, null).At(new Viewport(0, 0, width, height, 0, 1));
         if (clip is { } rect)
         {
@@ -356,6 +381,14 @@ public sealed unsafe class DebugOverlay : IDisposable
             int top = (int)Math.Floor(clipped.Y), bottom = (int)Math.Ceiling(clipped.Y + clipped.Height);
             t = t with { Scissor = new Rect2D(new Offset2D(left, height - bottom), new Extent2D((uint)(right - left), (uint)(bottom - top))) };
         }
+        if (pass is not null)
+        {
+            pass.Add(this, CollectionsMarshal.AsSpan(batch), imageBatch, t.Scissor);
+            batch.Clear();
+            imageBatch = null;
+            return;
+        }
+        var cmd = Gpu.BeginNative("debug overlay");
         cmd.BeginRendering(t.Rendering);
         program.Set(uScreen, (float)width, height);
         program.Set(uImage, imageBatch is null ? 0 : 1);
@@ -374,7 +407,8 @@ public sealed unsafe class DebugOverlay : IDisposable
         ];
         var pipeline = Gpu.Pipelines.Get(state.Pipeline(program.Program, program.VertexLayout(attributes), PrimitiveTopology.TriangleList, t.Formats, "debug overlay"));
         cmd.BindPipeline(pipeline);
-        cmd.BindVertexBuffers(0, program.VertexBuffers(attributes, 0, 3));
+        Span<BufferBinding> buffers = [attributes[0]!.Value.Buffer, attributes[1]!.Value.Buffer, attributes[2]!.Value.Buffer];
+        cmd.BindVertexBuffers(0, buffers);
         program.Flush(cmd);
         cmd.Draw((uint)(floats.Length / Stride));
         cmd.EndRendering();
@@ -383,6 +417,101 @@ public sealed unsafe class DebugOverlay : IDisposable
         imageBatch = null;
     }
 
+    /// <summary>Collects painter-ordered batches, coalescing adjacent compatible draws into one upload and rendering.</summary>
+    internal sealed class OverlayPass(GpuContext gpu, int width, int height) : IDisposable
+    {
+        readonly List<float> vertices = [];
+        readonly List<Run> runs = [];
+        DebugOverlay? renderer;
+        Texture? target;
+        readonly record struct Run(SampledTexture Texture, bool Image, Rect2D Scissor, int First, int Count);
+
+        public OverlayPass Reset(int newWidth, int newHeight)
+        {
+            width = newWidth; height = newHeight;
+            vertices.Clear(); runs.Clear(); renderer = null; target = null;
+            return this;
+        }
+
+        public void Add(DebugOverlay owner, ReadOnlySpan<float> data, SampledTexture? image, Rect2D clip)
+        {
+            if (owner.Gpu != gpu || target is not null && target != owner.Target)
+                throw new InvalidOperationException("An overlay pass must share its GPU and target.");
+            renderer ??= owner;
+            target = owner.Target;
+            // If no geometry reaches outside this scissor, the full viewport clips it identically.
+            // Different widget clips can then share a draw without changing their pixels.
+            bool contained = true, solid = true;
+            float left = clip.Offset.X, right = left + clip.Extent.Width;
+            float bottom = height - clip.Offset.Y, top = bottom - clip.Extent.Height;
+            for (int i = 0; i < data.Length; i += Stride)
+            {
+                contained &= data[i] >= left && data[i] <= right && data[i + 1] >= top && data[i + 1] <= bottom;
+                solid &= data[i + 2] < 0;
+            }
+            if (contained) clip = new Rect2D(default, new Extent2D((uint)width, (uint)height));
+            var texture = image ?? owner.atlasSampled;
+            bool isImage = image.HasValue;
+            int first = vertices.Count / Stride, count = data.Length / Stride;
+            vertices.AddRange(data);
+            if (runs.Count > 0)
+            {
+                var last = runs[^1];
+                if (SameClip(last.Scissor, clip) && (solid || last.Texture == texture && last.Image == isImage))
+                {
+                    runs[^1] = last with { Count = last.Count + count };
+                    return;
+                }
+            }
+            runs.Add(new(texture, isImage, clip, first, count));
+        }
+
+        static bool SameClip(Rect2D a, Rect2D b) => a.Offset.X == b.Offset.X && a.Offset.Y == b.Offset.Y
+            && a.Extent.Width == b.Extent.Width && a.Extent.Height == b.Extent.Height;
+
+        public void Dispose()
+        {
+            if (renderer is not { } painter || target is null || runs.Count == 0) return;
+            var cmd = gpu.BeginNative("UI overlay");
+            var targets = PassTargets.Of(target, null).At(new Viewport(0, 0, width, height, 0, 1));
+            cmd.BeginRendering(targets.Rendering);
+            try
+            {
+                var state = DrawState.For(targets.Formats, gpu.Device.DepthClamp, blend: new BlendState(true, BlendFactor.SrcAlpha, BlendFactor.OneMinusSrcAlpha));
+                state.Record(cmd, targets);
+                var data = CollectionsMarshal.AsSpan(vertices);
+                var upload = gpu.Frame.Constants.Allocate((ulong)(data.Length * 4), 16);
+                MemoryMarshal.AsBytes(data).CopyTo(new Span<byte>(upload.Pointer, data.Length * 4));
+                Span<LegacyProgram.Attribute?> attributes =
+                [
+                    new(new BufferBinding(upload.Handle, upload.Offset), Format.R32G32Sfloat, Stride * 4, false),
+                    new(new BufferBinding(upload.Handle, upload.Offset + 8), Format.R32G32Sfloat, Stride * 4, false),
+                    new(new BufferBinding(upload.Handle, upload.Offset + 16), Format.R32G32B32A32Sfloat, Stride * 4, false),
+                ];
+                var program = painter.program;
+                var pipeline = gpu.Pipelines.Get(state.Pipeline(program.Program, program.VertexLayout(attributes), PrimitiveTopology.TriangleList, targets.Formats, "UI overlay"));
+                cmd.BindPipeline(pipeline);
+                Span<BufferBinding> buffers = [attributes[0]!.Value.Buffer, attributes[1]!.Value.Buffer, attributes[2]!.Value.Buffer];
+                cmd.BindVertexBuffers(0, buffers);
+                program.Set(painter.uScreen, (float)width, height);
+                var scissor = targets.Scissor;
+                foreach (var run in runs)
+                {
+                    if (!SameClip(scissor, run.Scissor)) { cmd.SetScissor(run.Scissor); scissor = run.Scissor; }
+                    program.Set(painter.uImage, run.Image ? 1 : 0);
+                    program.Bind(painter.samplerAtlas, run.Texture);
+                    program.Flush(cmd);
+                    cmd.Draw((uint)run.Count, firstVertex: (uint)run.First);
+                }
+            }
+            finally
+            {
+                cmd.EndRendering();
+                gpu.EndNative(cmd);
+                vertices.Clear(); runs.Clear(); renderer = null; target = null;
+            }
+        }
+    }
     /// <summary>Queues a texture rectangle. Flush before switching between image and font batches.</summary>
     public void Image(SampledTexture texture, Vector4 destination, Vector4 uv, Vector4 colour)
     {
@@ -410,7 +539,10 @@ public sealed unsafe class DebugOverlay : IDisposable
     /// <summary>Queues a solid triangle (pixels, top-left origin).</summary>
     public void Triangle(Vector2 a, Vector2 b, Vector2 c, Vector4 colour)
     {
-        Emit(a.X, a.Y, -1, 0, colour); Emit(b.X, b.Y, -1, 0, colour); Emit(c.X, c.Y, -1, 0, colour);
+        var vertices = Reserve(3);
+        vertices[0] = new(new(a.X, a.Y, -1, 0), colour);
+        vertices[1] = new(new(b.X, b.Y, -1, 0), colour);
+        vertices[2] = new(new(c.X, c.Y, -1, 0), colour);
     }
 
     /// <summary>Queues a solid line segment <paramref name="thickness"/> pixels wide.</summary>
@@ -420,19 +552,37 @@ public sealed unsafe class DebugOverlay : IDisposable
         float length = d.Length();
         if (length < 1e-3f) return;
         var n = new Vector2(-d.Y, d.X) / length * (thickness * 0.5f);
-        Emit(x0 + n.X, y0 + n.Y, -1, 0, colour); Emit(x1 + n.X, y1 + n.Y, -1, 0, colour); Emit(x1 - n.X, y1 - n.Y, -1, 0, colour);
-        Emit(x0 + n.X, y0 + n.Y, -1, 0, colour); Emit(x1 - n.X, y1 - n.Y, -1, 0, colour); Emit(x0 - n.X, y0 - n.Y, -1, 0, colour);
+        OverlayVertex a = new(new(x0 + n.X, y0 + n.Y, -1, 0), colour), b = new(new(x1 + n.X, y1 + n.Y, -1, 0), colour);
+        OverlayVertex c = new(new(x1 - n.X, y1 - n.Y, -1, 0), colour), e = new(new(x0 - n.X, y0 - n.Y, -1, 0), colour);
+        var vertices = Reserve(6);
+        vertices[0] = a; vertices[1] = b; vertices[2] = c;
+        vertices[3] = a; vertices[4] = c; vertices[5] = e;
     }
 
     void Quad(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, Vector4 c)
     {
-        Emit(x0, y0, u0, v0, c); Emit(x1, y0, u1, v0, c); Emit(x1, y1, u1, v1, c);
-        Emit(x0, y0, u0, v0, c); Emit(x1, y1, u1, v1, c); Emit(x0, y1, u0, v1, c);
+        OverlayVertex a = new(new(x0, y0, u0, v0), c), b = new(new(x1, y0, u1, v0), c);
+        OverlayVertex d = new(new(x1, y1, u1, v1), c), e = new(new(x0, y1, u0, v1), c);
+        var vertices = Reserve(6);
+        vertices[0] = a; vertices[1] = b; vertices[2] = d;
+        vertices[3] = a; vertices[4] = d; vertices[5] = e;
     }
 
     void Emit(float x, float y, float u, float v, Vector4 c)
     {
-        batch.Add(x); batch.Add(y); batch.Add(u); batch.Add(v); batch.Add(c.X); batch.Add(c.Y); batch.Add(c.Z); batch.Add(c.W);
+        Reserve(1)[0] = new(new(x, y, u, v), c);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    readonly record struct OverlayVertex(Vector4 PositionUv, Vector4 Colour);
+
+    Span<OverlayVertex> Reserve(int count)
+    {
+        int start = batch.Count;
+        int added = count * Stride;
+        batch.EnsureCapacity(start + added);
+        CollectionsMarshal.SetCount(batch, start + added);
+        return MemoryMarshal.Cast<float, OverlayVertex>(CollectionsMarshal.AsSpan(batch).Slice(start, added));
     }
 
     public void Dispose()

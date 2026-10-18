@@ -137,6 +137,11 @@ verb 25 "First Aid" (pointer mode 1 `med`, [pointers](#mouse-pointers); Meitou's
 
 ### Movement marker
 
+**Observed** (owner's base-game example): right-clicking a building targets its floor rather than terrain behind it.
+Meitou movement picks loaded buildings' floor/stair collision up to the viewed floor before terrain; wall hits drop to the floor below
+(up to 4 units across wall thickness). Clicks, queued moves and held-button steering share this destination and marker.
+Buildings without a readable interior mask/floor collision still use terrain; the original's pick filters: [building picking](#building-picking-and-selection).
+
 **Observed** (decompile): a ground move order shows an entity of `position.mesh` (a downward cone over a flat ring, 0.29 × 1.56 units)
 scaled 8 on its scene node, at the ray's ground point (the terrain-click handler FUN_140800250, show FUN_1407f2660). Built in FUN_1407f9530:
 a clone (`movemarker`) of `debug_marker`, pass 0 set to alpha blending (`setSceneBlending(0)`, SBT_TRANSPARENT_ALPHA). Each frame FUN_1407f92d0 sets the fragment constant
@@ -166,7 +171,7 @@ hit with no walkable point sets `invalidmove` (`FUN_140800250`). Which other hov
 
 Meitou (`PlayerInterface.Pointer.cs`, engine choices): the window's own cursor is hidden and the pointer drawn last in the frame (not in
 screenshots or cinema takes). It follows the quick right-click order, so it never disagrees with the click: with a selection, over a
-trader `talk`, another living character `attk` (neutrals too: the quick order does not check hostility yet), an own hurt character `med`, an own downed one `lift`, else a loose item (`pick_item`, a right click picks it up: [ground items](../simulation.md)); Ctrl over a downed character
+trader or a non-hostile character with a talk dialogue (`World.CanTalk`) `talk`, a hostile living character `attk` (any other non-hostile one: no quick order, `arrow`, white outline, a right click moves), an own hurt character `med`, an own downed one `lift`, else a loose item (`pick_item`, a right click picks it up: [ground items](../simulation.md)); Ctrl over a downed character
 `lift`, Alt `search`; otherwise, over the interface, the settings panel or the loading screen, `arrow`. The free camera hides it (as mode 0's
 `invisible`). Interface → Hardware mouse (`HardwareMouse` in meitou.user.json, default off as the game's `hardware_mouse`; settings.cfg is
 not read) shows the Windows cursor instead, applied at once.
@@ -179,6 +184,16 @@ label, pointer and outline take the nearest character whose posed mesh the ray m
 box per bone (vertices by their strongest weight; an unskinned part one box), grown 0.4 units; the boxes are posed by the live bone palette,
 so people and animals pick over their whole drawn body, a ragdoll where it lies. **Verified** (sandbox probe, 2026-10-16): a person hits from the feet to 18 units
 up and misses at 22; a bonedog hits up to 10. A character the renderer does not draw falls back to a capsule 18 units tall.
+
+### Building sign highlight
+
+**Observed** (owner's original-game report): holding Alt highlights building signs in yellow.
+**Observed** (merged installed game data, reader survey): BUILDING `is sign` is true on `993-gamedata.base`
+(Sign Medic) and `3436-otto.mod` (sign3_bar); category `sign` alone is insufficient (`972-gamedata.base`, Weapon Sign, has the flag false).
+Meitou's rebindable `Highlight` action defaults to either Alt key. While held in the focused gameplay view,
+real parts whose owning BUILDING has `is sign` receive a yellow tint, including layout objects and both LODs
+during a transition. Release restores their materials. Loading, menus, hidden UI, free camera and cinema suppress it.
+Rendering details: [objects](../render-objects.md#building-sign-highlight).
 
 ### Hover outline
 

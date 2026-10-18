@@ -19,6 +19,10 @@ Motion uses previous camera/depth plus moving-object/grass paths; near/far depth
 must use the corresponding projection. `sun-motion` adds clock-driven sky motion near the sun.
 Reset temporal histories after cuts, target resize or incompatible setting changes.
 
+Game/viewer builds and publishes copy the five Streamline/DLSS DLLs from `MEITOU_STREAMLINE_PATH`
+or the git-ignored root `dlss-runtime/` folder when present; `-p:StreamlineRuntimePath=...`
+overrides the source. Both Debug and Release use it. Release packaging supplies its own runtime.
+
 ## SSAO, fog and layers
 
 SSAO reads near depth; character mask controls character occlusion (default strength0.25).

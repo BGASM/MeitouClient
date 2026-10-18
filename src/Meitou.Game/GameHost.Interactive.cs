@@ -124,12 +124,12 @@ sealed partial class GameHost
         int fpsWindowFrames = 0;
         // The cinematic camera (docs/viewer.md "Cinematic camera", F6 its editor): while it flies, previews or cuts to a key it holds the drawn
         // camera and the rig's state is not applied; the first camera input after that hands the camera back to the rig (CameraRig.TakeOver).
-        // The hour is the game clock's (time does not follow the keys); PageUp/PageDown/Home set the lens while the editor is open and in the free camera.
+        // The hour is the game clock's (time does not follow the keys); Home puts the lens back while the editor is open, in the free camera and on a camera the cinema holds.
         var cinema = new Cinema(() => camera, () => (float)session.Clock.HourOfDay, null, () => BorderlessFullScreen.IsOn(window), () => BorderlessFullScreen.Toggle(window),
-            Cinema.GameFile, lensKeysAlways: false);
+            Cinema.GameFile, lensKeysAlways: IsDuel);   // the duel has no floors: PageUp/PageDown zoom the lens there
         bool cinemaHolds = false, interfaceHidden = false;
         cinema.Moved = () => cinemaHolds = true;
-        // PageUp/PageDown step the floor in the strategy camera: in the free camera and on a camera the cinema holds they set the lens (Home puts it back).
+        // PageUp/PageDown are the game's floor keys and never the cinema's (its lens keys are the viewer's); Home puts the lens back in these cameras.
         cinema.LensKeys = () => session.Camera.IsFree || cinemaHolds;
         cinema.Load();
 
@@ -276,9 +276,17 @@ sealed partial class GameHost
             else if (e.Widget == "ExitGameButton") quit = true;
         };
         bool cinemaWasPlaying = false, cinemaWasRecording = false;
+        bool highlightHeld = false;
+        bool windowFocused = true;
+        window.FocusChanged += focused =>
+        {
+            windowFocused = focused;
+            if (!focused) { highlightHeld = false; session.Input.ReleaseAll(); }
+        };
         session.Ticked += actions =>
         {
-            if (actions.Pressed(InputAction.Quit)) quit = true;
+            highlightHeld = actions.Held(InputAction.Highlight);
+            if (actions.Pressed(InputAction.Quit) && !IsDuel) quit = true;   // the duel is for filming: Esc must not close it
             // Panning (or leaving for the free camera) lets go of the character the camera follows; turning and zooming keep it.
             if (actions.Held(InputAction.MoveForward) || actions.Held(InputAction.MoveBack) || actions.Held(InputAction.MoveLeft) || actions.Held(InputAction.MoveRight) ||
                 actions.Pressed(InputAction.ToggleFreeCamera)) player.Follow = null;
@@ -289,8 +297,9 @@ sealed partial class GameHost
             if (actions.Pressed(InputAction.ToggleFps)) fpsVisible = !fpsVisible;
             if (actions.Pressed(InputAction.QuickSave)) quickSaveRequested = true;
             if (actions.Pressed(InputAction.QuickLoad)) quickLoadRequested = true;
-            // PageUp / PageDown step the viewed floor, except while they set the cinema's lens (its editor, the free camera, a camera it holds).
-            if (!cinema.LensKeysLive) { if (actions.Pressed(InputAction.FloorUp)) StepFloor(1); if (actions.Pressed(InputAction.FloorDown)) StepFloor(-1); }
+            // PageUp / PageDown step the viewed floor in every camera: the cinema does not take them.
+            if (actions.Pressed(InputAction.FloorUp)) StepFloor(1);
+            if (actions.Pressed(InputAction.FloorDown)) StepFloor(-1);
             if (actions.Pressed(InputAction.CycleProfiler) && profiler is not null) profiler.Showing = (FrameProfiler.Mode)(((int)profiler.Showing + 1) % 3);
             // The camera the cinema left (a cut, a scrub, the end of a flight) goes back to the rig at the first camera input: the free camera at
             // that eye (only it can stand anywhere), or with ; the strategy camera where the view meets the ground. A flight in progress keeps it.
@@ -356,6 +365,7 @@ sealed partial class GameHost
             animSeconds += frameDt;
             animClock = true;
             UpdateNav();
+            UpdateNavOverlay();
             UpdateBuildings();
             if (!cinemaHolds) ApplyCamera(session.CameraAt());
             cinema.Advance(cinema.FrameTime(dt));   // a flight through the keys moves the camera (and takes it from the rig)
@@ -365,7 +375,7 @@ sealed partial class GameHost
             if (!cinemaHolds) FollowCamera();
             if (!cinemaHolds) EditorCamera();
             OpenPendingEditor();
-            UpdateNavOverlay();
+            ResumeAfterCreation();
             if (!cinemaHolds) ApplyTitleCamera();
             UpdateAudio(dt);
             if (TitleVisible && !warming) titleBattle?.Advance(frameDt);
@@ -383,6 +393,9 @@ sealed partial class GameHost
             bool Held(SilkKey a, SilkKey b) => silkInput.Keyboards.Any(k => k.IsKeyPressed(a) || k.IsKeyPressed(b));
             player.CtrlHeld = Held(SilkKey.ControlLeft, SilkKey.ControlRight);
             player.AltHeld = Held(SilkKey.AltLeft, SilkKey.AltRight);
+            if (gpu.Objects is { } signObjects)
+                signObjects.HighlightSigns = highlightHeld && windowFocused && !Covered && !session.Camera.IsFree &&
+                    panel?.Visible != true && !interfaceHidden && !cinema.Clean && !cinemaHolds && !cinema.EditorVisible;
             bool pointerWorld = pointerMouse is not null && !Covered && !g.NoPopulation && !(PanelLive() && panel?.Visible == true) && !cinema.Contains(pointerAt);
             bool freeLook = pointerWorld && session.Camera.IsFree;
             // Hover outline (Advanced, Meitou only): not in the free camera, with the interface hidden, or in saved pictures.

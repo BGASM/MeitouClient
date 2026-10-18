@@ -73,7 +73,7 @@ static partial class WorldApp
             if (gpu.Foliage is { } fol) { gaps.Add((fol.NearestIncompleteZone, fol.NearestUnlaidZone, fol.NearestMissingMesh, fol.NearestMissingGrass)); impostorPop.Add(fol.ImpostorPopIn); }
             if (gpu.Objects is { } objs) { var (untextured, refining, held, coarse) = objs.TakePopStats(); objectPop.Add((untextured, refining, held, coarse, objs.MeshesAwaitingDetail)); }
             if (!pipelined) context.Finish();
-            if (spikeProfiler is null) StageClock.Lap(11);
+            if (spikeProfiler is null) StageClock.EndFrame();
             spikeProfiler?.EndFrame();
             double ms = pipelined ? interval.Elapsed.TotalMilliseconds : frameWatch.Elapsed.TotalMilliseconds;
             interval.Restart();

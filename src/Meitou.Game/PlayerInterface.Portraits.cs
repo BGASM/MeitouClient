@@ -20,8 +20,31 @@ sealed partial class PlayerInterface
     /// <summary>The cell layout's size (Kenshi_PortraitCharacter: 136 x 136); the parts below are placed in its pixels.</summary>
     const float PortraitLayoutSize = 136;
 
+    /// <summary>The atlas cells after the squad's: the conversation window's speaker and player character.</summary>
+    public const int DialogueNpcCell = PortraitCells - 2, DialoguePlayerCell = PortraitCells - 1;
+
     /// <summary>The characters the squad bar shows, in order: the host has their portraits drawn into the atlas cells of the same index.</summary>
-    public IReadOnlyList<CharacterSnapshot> SquadBarMembers() => [.. session.CurrentSnapshot.Characters.Where(c => c.IsPlayer).Take(PortraitCells)];
+    public IReadOnlyList<CharacterSnapshot> SquadBarMembers() => [.. session.CurrentSnapshot.Characters.Where(c => c.IsPlayer).Take(DialogueNpcCell)];
+
+    /// <summary>The speaker and the player character of the open conversation, whose portraits the host draws into <see cref="DialogueNpcCell"/> and <see cref="DialoguePlayerCell"/>.</summary>
+    public (CharacterId Npc, CharacterId Player)? DialoguePortraitCharacters() =>
+        session.CurrentSnapshot.Conversation is { } talk ? (talk.Speaker.IsNone ? talk.Npc : talk.Speaker, talk.Player) : null;
+
+    /// <summary>The number that turns a character's portrait camera (<see cref="CharacterSnapshot.PortraitSerial"/>; 0 for one not in the snapshot).</summary>
+    public uint PortraitSerial(CharacterId id) => session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id)?.PortraitSerial ?? 0;
+
+    /// <summary>The conversation window's two portraits over the layout's <c>NpcPortrait</c> and <c>PlayerPortrait</c> frames.</summary>
+    void AddDialoguePortraits(List<UiControl> controls)
+    {
+        foreach (var (name, cell) in new[] { ("NpcPortrait", DialogueNpcCell), ("PlayerPortrait", DialoguePlayerCell) })
+        {
+            if (controls.FirstOrDefault(c => c.Name == name) is not { } frame) continue;
+            int column = cell % CharacterRenderer.PortraitColumns, row = cell / CharacterRenderer.PortraitColumns, size = CharacterRenderer.PortraitSize;
+            controls.Add(new($"{name}-image", "ImageBox", frame.Bounds, "", "", "", true,
+                new Dictionary<string, string> { ["ImageTexture"] = PortraitTexture, ["ImageFlipV"] = "true", ["ImageRect"] = FormattableString.Invariant($"{column * size} {row * size} {size} {size}") },
+                Vector4.Zero, Pickable: false, Clip: frame.Clip));
+        }
+    }
 
     /// <summary>Gives the interface a texture drawn at run time (the portrait atlas) under <paramref name="name"/>.</summary>
     public void SetUiTexture(string name, Texture texture, SampledTexture sampled) => uiPainter?.SetTexture(name, texture, sampled);
@@ -32,8 +55,8 @@ sealed partial class PlayerInterface
         if (members.Count == 0) return;
         // The tab's page (the layout's TabItem rectangle inside SquadPanel).
         var page = new UiRect(panel.X + panel.Width * 0.0183727f, panel.Y + panel.Height * 0.206897f, panel.Width * 0.965879f, panel.Height * 0.737069f);
-        // The original leaves space below portraits instead of filling the tab page (docs/game/ui-screens.md).
-        float size = Math.Min(page.Height * 0.72f, page.Width / members.Count), k = size / PortraitLayoutSize;
+        // The original leaves space below portraits instead of filling the tab page (docs/game/ui-screens.md); 0.76 matches its frame size (Observed).
+        float size = Math.Min(page.Height * 0.76f, page.Width / members.Count), k = size / PortraitLayoutSize;
         var camera = session.Camera.Current;
         PrunePortraitFlashes(members);
         for (int i = 0; i < members.Count; i++)

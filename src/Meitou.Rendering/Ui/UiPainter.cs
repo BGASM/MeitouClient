@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Meitou.Data.Textures;
 using Meitou.Data.Ui;
 using Meitou.Rendering.Gpu;
@@ -24,6 +25,13 @@ public sealed class UiPainter : IDisposable
             fontSizes[(path, size, resolution)] = effective = KenshiFontSize.Effective(File.ReadAllBytes(path), size, resolution);
         return effective;
     }
+    readonly Dictionary<string, string?> fontPaths = new(StringComparer.Ordinal);
+
+    string? FontPath(string name)
+    {
+        if (!fontPaths.TryGetValue(name, out var path)) fontPaths[name] = path = resolve(name);
+        return path;
+    }
     /// <summary>The standard and painted faces baked at <see cref="LargePixels"/>: lettering scaled well past the 16 px atlases is drawn from these, so it stays sharp.</summary>
     DebugOverlay? standardLarge, paintedLarge;
     const float LargePixels = 48;
@@ -33,6 +41,9 @@ public sealed class UiPainter : IDisposable
     /// <summary>Which texels of each uploaded texture are fully opaque, by name (<see cref="OpaqueCoverage"/>); textures given on the GPU have none and never count.</summary>
     readonly Dictionary<string, OpacityMask> masks = new(StringComparer.Ordinal);
     readonly List<UiRect> opaqueRects = new();
+    readonly List<UiRect> previousOpaqueRects = new();
+    double opaqueArea;
+    DebugOverlay.OverlayPass? overlayPass;
 
     /// <summary>
     /// The share of the viewport (0..1) under fully opaque pieces of the last <see cref="Draw"/>: solid backgrounds and atlas slices whose
@@ -80,9 +91,13 @@ public sealed class UiPainter : IDisposable
         catch { Dispose(); throw; }
     }
 
+    /// <summary>The width in pixels of <paramref name="text"/> in the standard face at <paramref name="emPixels"/> (to fit a panel to its text before it is drawn).</summary>
+    public float MeasureStandard(string text, float emPixels) => (standardFont ?? overlay).MeasureText(text, emPixels / 16f);
+
     public void Draw(IReadOnlyList<UiControl> controls, int width, int height, Vector2 mouse, string? active, float minimumTextPixels = 0)
     {
         for (int uploads = 0; uploads < IconUploadsPerFrame && decodedIcons.TryDequeue(out var icon); uploads++) Upload(icon.Name, icon.Image);
+        using var pass = (overlayPass ??= new DebugOverlay.OverlayPass(overlay.Gpu, width, height)).Reset(width, height);
         foreach (var c in controls)
         {
             var b = c.Bounds;
@@ -99,7 +114,7 @@ public sealed class UiPainter : IDisposable
                 overlay.Rect(b.X, b.Y, b.X + b.Width, b.Y + b.Height, colour);
                 if (colour.W >= 1) opaqueRects.Add(b.Intersect(clip));
             }
-            overlay.Flush(width, height, clip);
+            overlay.Flush(width, height, clip, pass);
             if (c.Type == "ImageBox" && MyGuiImages.Resolve(resources, c.Properties) is { } image && (!image.Texture.StartsWith(IconPrefix, StringComparison.Ordinal) || textures.ContainsKey(image.Texture)) && (!image.Texture.StartsWith(RenderedIconPrefix, StringComparison.Ordinal) || RenderedIconReady(image.Texture)))
             {
                 var loaded = LoadTexture(image.Texture);
@@ -138,7 +153,7 @@ public sealed class UiPainter : IDisposable
                     overlay.Image(loaded.Sampled, new(b.X, b.Y, b.X + b.Width, b.Y + b.Height),
                         new(source.X / loaded.Texture.Desc.Width, v0, (source.X + source.Width) / loaded.Texture.Desc.Width, v1), tint);
                 if (angle == 0 && tint.W >= 1 && masks.TryGetValue(image.Texture, out var imageMask)) AddOpaque(imageMask, source, b, clip, allowCore: !flip && !bordered);
-                overlay.Flush(width, height, clip);
+                overlay.Flush(width, height, clip, pass);
             }
             if (resources.Skins.TryGetValue(c.Skin, out var skin) && textures.TryGetValue(skin.Texture, out var atlas))
             {
@@ -183,11 +198,11 @@ public sealed class UiPainter : IDisposable
                         (source.Y + (y1 - dest.Y) / dest.Height * source.Height) / th), tint);
                     if (tint.W >= 1 && atlasMask is not null) AddOpaque(atlasMask, source, dest, clip, allowCore: true);
                 }
-                overlay.Flush(width, height, clip);
+                overlay.Flush(width, height, clip, pass);
             }
             if (c.Type == "Button" && c.Enabled && c.Action == active && c.ActiveColour is { } accent)
                 overlay.Rect(b.X + 4, b.Y + b.Height - 4, b.X + b.Width - 4, b.Y + b.Height - 2, accent);
-            overlay.Flush(width, height, clip);
+            overlay.Flush(width, height, clip, pass);
             bool focused = c.Properties.GetValueOrDefault("Focused") == "true";
             if (c.Caption.Length == 0 && !focused) continue;
             // MyGUI shows a button caption only through a text part of its skin: a button skin of image parts alone (the map's centre button, "O") shows none.
@@ -206,7 +221,7 @@ public sealed class UiPainter : IDisposable
             font.Target = overlay.Target;
             float scale = c.TextScale ?? (c.Skin.Length > 0 ? Math.Clamp(height / 1080f, 0.5f, 1.5f) : 1);
             // Settings request a font baked at its physical pixel size rather than scaling the 16px atlas.
-            if (int.TryParse(c.Properties.GetValueOrDefault("FontPixels"), out int pixels) && resolve("Exo2-SemiBold.ttf") is { } fontPath)
+            if (int.TryParse(c.Properties.GetValueOrDefault("FontPixels"), out int pixels) && FontPath("Exo2-SemiBold.ttf") is { } fontPath)
             {
                 pixels = Math.Clamp(Math.Max(pixels, (int)MathF.Round(minimumTextPixels)), 8, 96);
                 var fonts = pixelFonts ??= [];
@@ -222,7 +237,7 @@ public sealed class UiPainter : IDisposable
                 string? Property(string key) => fontResource.Elements("Property").FirstOrDefault(p => (string?)p.Attribute("key") == key)?.Attribute("value")?.Value;
                 float Number(string key, float fallback) => float.TryParse(Property(key), System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture, out float number) && float.IsFinite(number) && number > 0 ? number : fallback;
-                if (Property("Source") is { } source && resolve(source) is { } sourcePath)
+                if (Property("Source") is { } source && FontPath(source) is { } sourcePath)
                 {
                     // TrueType resource sizes are points at the resource's DPI, resized as the original does on load. Bake at the resulting em pixel size.
                     float resolution = Number("Resolution", 50);
@@ -272,20 +287,29 @@ public sealed class UiPainter : IDisposable
                     float caretX = origin + font.MeasureText(text[..caret], scale);
                     overlay.Rect(caretX, y, caretX + 1, y + font.LineHeight * scale, textColour);
                 }
-                overlay.Flush(width, height, textClip);
+                overlay.Flush(width, height, textClip, pass);
             }
             foreach (string line in lines)
             {
                 float textWidth = font.MeasureText(line, scale);
                 float x = textArea.X + (align.Contains("Right", StringComparison.Ordinal) ? textArea.Width - textWidth : align.Split(' ').Any(a => a is "Center" or "HCenter") ? (textArea.Width - textWidth) / 2 : 0);
                 if (new Meitou.Data.Ui.UiRect(x, y, textWidth, font.LineHeight * scale).Intersect(textClip).Width > 0)
+                {
+                    if (c.Properties.GetValueOrDefault("TextShadow") == "true") font.TextScaled(line, x + 1, y + 1, new(0, 0, 0, textColour.W), scale);
                     font.TextScaled(line, x, y, textColour, scale);
+                }
                 y += font.LineHeight * scale;
             }
-            font.Flush(width, height, textClip);
+            font.Flush(width, height, textClip, pass);
         }
-        overlay.Flush(width, height);
-        OpaqueCoverage = width > 0 && height > 0 ? (float)(UnionArea(opaqueRects) / ((double)width * height)) : 0;
+        overlay.Flush(width, height, null, pass);
+        if (!CollectionsMarshal.AsSpan(opaqueRects).SequenceEqual(CollectionsMarshal.AsSpan(previousOpaqueRects)))
+        {
+            previousOpaqueRects.Clear();
+            previousOpaqueRects.AddRange(opaqueRects);
+            opaqueArea = UnionArea(opaqueRects);
+        }
+        OpaqueCoverage = width > 0 && height > 0 ? (float)(opaqueArea / ((double)width * height)) : 0;
         opaqueRects.Clear();
     }
 

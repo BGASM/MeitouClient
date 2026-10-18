@@ -18,7 +18,7 @@ internal static class NavMeshPipeline
         if (!interiors) return exterior;
         var watch = Stopwatch.StartNew();
         float tileWorld = settings.TileCells * settings.CellSize;
-        var geometries = gatherer.InteriorSites(geometry.Zone).Select(s => gatherer.GatherInterior(s, tileWorld)).Where(g => g is not null).Select(g => g!).ToList();
+        var geometries = gatherer.InteriorSites(geometry.Zone).Select(s => gatherer.GatherInterior(s, tileWorld, agentHeight: settings.AgentHeight)).Where(g => g is not null).Select(g => g!).ToList();
         var single = settings with { Threads = 1 };
         var built = new ZoneNavMesh[geometries.Count];
         Parallel.For(0, geometries.Count, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1) }, i =>

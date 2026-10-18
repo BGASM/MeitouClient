@@ -29,7 +29,7 @@ internal sealed unsafe partial class CharacterRenderer
 
     /// <summary>
     /// Draws <see cref="StageRequest"/>'s character with its live pose (after <see cref="Update"/>, outside any pass). The light is the key light of the portraits, from the camera's
-    /// side, above and to the left (the original's trivial lighting, <c>rtt.hlsl</c>, has one directional light and the environment; its convention is <b>Unknown</b>).
+    /// side, above and to the left, plus a hemispheric ambient (the shader's stage branch, a fog distance of -2) (the original's trivial lighting, <c>rtt.hlsl</c>, has one directional light and the environment; its convention is <b>Unknown</b>).
     /// </summary>
     public void DrawStage()
     {
@@ -55,7 +55,7 @@ internal sealed unsafe partial class CharacterRenderer
             var left = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, toEye));
             var light = Vector3.Normalize(toEye + 0.7f * Vector3.UnitY + 0.4f * left);
             portraitLive = index;
-            try { DrawView(new ViewConstants { ViewProjection = view * projection, Eye = eye, LightDir = light, FogDistance = -1 }, eye, []); }
+            try { DrawView(new ViewConstants { ViewProjection = view * projection, Eye = eye, LightDir = light, FogDistance = -2 }, eye, []); }
             finally { portraitLive = -1; }
         }
         Gpu.EndHostPass(cmd);

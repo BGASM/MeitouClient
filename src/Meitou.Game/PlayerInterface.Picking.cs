@@ -3,10 +3,21 @@ using Meitou.Simulation;
 
 namespace Meitou.Game;
 
-/// <summary>Picking: the ray through a pixel, where it meets the ground, which character it touches, the box select.</summary>
+/// <summary>Picking: the ray through a pixel, its floor or terrain destination, which character it touches, the box select.</summary>
 sealed partial class PlayerInterface
 {
     // ---- geometry ----
+
+    /// <summary>The host's building-floor pick, limited to the terrain hit's distance.</summary>
+    public Func<Vector3, Vector3, float, Vector3?>? BuildingMoveHit { get; set; }
+
+    /// <summary>The movement destination on a building floor, or the terrain when no building is in front of it.</summary>
+    public Vector3? MoveHit(Vector3 origin, Vector3 direction)
+    {
+        var terrain = GroundHit(origin, direction);
+        float distance = terrain is { } hit ? Vector3.Distance(origin, hit) : 40000;
+        return BuildingMoveHit?.Invoke(origin, direction, distance) ?? terrain;
+    }
 
     /// <summary>The picking ray through a pixel: the near-plane point and the unit direction.</summary>
     public (Vector3 Origin, Vector3 Direction)? Ray(Vector2 pixel)

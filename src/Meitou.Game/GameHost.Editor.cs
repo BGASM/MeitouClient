@@ -26,10 +26,28 @@ sealed partial class GameHost
     /// <summary>Opens the editor on the new game's squad once the world shows and the squad is in the snapshot.</summary>
     void OpenPendingEditor()
     {
-        if (pendingCreation is not { } squad || Covered) return;
+        if (pendingCreation is not { } squad || sceneLoad is not null || warming) return;
         if (!squad.All(id => session.CurrentSnapshot.Characters.Any(c => c.Id == id))) return;
         pendingCreation = null;
+        creationWarmOwed = true;
         if (!player.OpenEditor(EditKind.Creation, squad)) session.World.Commands.Enqueue(new FinishCreation { Tick = session.World.Tick });
+    }
+
+    /// <summary>The world has not been warmed up yet: the new game's editor came first (see <see cref="CoveredFrame"/>).</summary>
+    bool creationWarmOwed;
+
+    /// <summary>
+    /// Once the new game's editor has closed: the edits are applied by a tick, then the loading screen comes back while the world warms up, as a load without an editor does.
+    /// </summary>
+    void ResumeAfterCreation()
+    {
+        if (!creationWarmOwed || pendingCreation is not null || player.EditorOpen || sceneLoad is not null) return;
+        creationWarmOwed = false;
+        if (loading is null) return;
+        session.World.RunTick();
+        loading.Restart();
+        loadingSteps = SceneSteps;
+        BeginWarm();
     }
 
     /// <summary>

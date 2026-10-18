@@ -67,6 +67,16 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
     /// </summary>
     public int FloorAt(Vector3 feet) => floors?.Value.FloorAt(feet) ?? 0;
 
+    /// <summary>A movement pick on this building's collision at or below the viewed floor.</summary>
+    public (float Distance, Vector3 Position)? MoveHit(Vector3 origin, Vector3 direction, int floor, float maxDistance)
+    {
+        if (Footprint.Length < 3 || floors is null) return null;
+        var min = new Vector3(Footprint.Min(p => p.X), YMin, Footprint.Min(p => p.Y));
+        var max = new Vector3(Footprint.Max(p => p.X), YMax, Footprint.Max(p => p.Y));
+        return FloorSurfaces.RayBox(origin, direction, min, max, maxDistance)
+            ? floors.Value.MoveHit(origin, direction, floor, maxDistance) : null;
+    }
+
     /// <summary>
     /// The volume of a building placed at <paramref name="position"/> / <paramref name="rotation"/>, or null when it has no <c>interior mask</c> part with a
     /// readable collision file, or is a gateway (walked under, not entered). <paramref name="collision"/> loads a record's collision path (shared, cached).
@@ -128,7 +138,7 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
 /// The floor collision of a building in the interior view, in world space, to tell which floor a character stands on (docs/formats/zones.md "Interior view"):
 /// the shapes of its ordinary parts (collision groups 9..12, floor 0..3) and its stairs (15..18), the groups the game's downward ray tests.
 /// </summary>
-public sealed class FloorSurfaces
+public sealed partial class FloorSurfaces
 {
     /// <summary>One part's triangles (three corners each) with its floor, whether it is stairs, its height range and its X/Z box.</summary>
     sealed record Surface(int Floor, bool Stairs, Vector3[] Corners, float YMin, float YMax, Vector2 Min, Vector2 Max);

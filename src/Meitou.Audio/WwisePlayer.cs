@@ -502,7 +502,11 @@ public sealed partial class WwisePlayer : IDisposable
     {
         uint current;
 
-        public override void Start() => Switch();
+        public override void Start()
+        {
+            Switch();
+            if (!node.ContinuousValidation && Children.Count == 0) End();
+        }
 
         void Switch()
         {
@@ -518,16 +522,20 @@ public sealed partial class WwisePlayer : IDisposable
 
         public override void StateChanged(uint group)
         {
+            if (Done || Stopping) return;
             base.StateChanged(group);
-            if (group != node.GroupId || Done) return;
+            if (!node.ContinuousValidation || group != node.GroupId) return;
             uint state = Player.TryGetGroupValue(group, GameObject, out var s) ? s : node.DefaultSwitch;
             if (state == current) return;
             foreach (var c in Children) c.Stop(Math.Max(0, node.NodeParameters.FirstOrDefault(p => p.NodeId == c.Node.Id).FadeOut) / 1000f);
             Switch();
         }
 
-        // Stays while its parent plays, even with nothing to play for the current state.
-        protected override void ChildEnded(Instance child) { }
+        // Continuous switches wait for future states; step switches finish with their last child.
+        protected override void ChildEnded(Instance child)
+        {
+            if (!node.ContinuousValidation) base.ChildEnded(child);
+        }
     }
 
     /// <summary>

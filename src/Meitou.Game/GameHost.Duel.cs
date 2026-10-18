@@ -14,8 +14,8 @@ namespace Meitou.Game;
 /// </summary>
 sealed partial class GameHost
 {
-    /// <summary>The built-in spot (the owner's pick, 2026-10-13): on a flat rock mesa in the dunes (top about 1350), about 60 units from its south (+Z) cliff and 370 east of the rock spire at its west end, the setting sun beyond (−X).</summary>
-    public static readonly Vector2 DuelSpot = new(35400, -111920);
+    /// <summary>The built-in spot (the owner's pick, 2026-10-13): on a flat rock mesa in the dunes (top about 1350), about 160 units from its south (+Z) cliff and 370 east of the rock spire at its west end, the setting sun beyond (−X).</summary>
+    public static readonly Vector2 DuelSpot = new(35400, -112020);
     /// <summary>The duel's hour, held still: the sun about 5 degrees above the horizon (SkyClock: sunrise 5, sunset 23, latitude 54).</summary>
     public const float DuelHour = 22;
     /// <summary>The CHARACTER record both fighters are made from (the base game's Samurai Heavy: Samurai Armour and Helmet, legplates, boots, a nodachi), and the faction whose looks they get.</summary>

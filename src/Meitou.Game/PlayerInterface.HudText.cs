@@ -14,6 +14,9 @@ sealed partial class PlayerInterface
     // The palette of data/gui/colours/kenshi_colours.xml (Verified): Main, Secondary (the text default), Title, Bad, Good, Alert.
     internal static readonly string MainColour = Hex("afa68b"), TitleColour = Hex("492620"), BadColour = Hex("59231a"), GoodColour = Hex("a8b774"), AlertColour = Hex("000000");
 
+    /// <summary>The stats panel's labels (MARTIAL ARTS, STRENGTH, ...): the grey of the orders buttons' text, not Main (docs/game/ui-screens.md).</summary>
+    internal static readonly string StatLabelColour = "0.4 0.380392 0.356863";
+
     static string Hex(string rgb) => string.Join(' ', Enumerable.Range(0, 3).Select(i =>
         (int.Parse(rgb.AsSpan(i * 2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture) / 255f).ToString("0.###", CultureInfo.InvariantCulture)));
 
@@ -56,7 +59,7 @@ sealed partial class PlayerInterface
     {
         int value = (int)s.Value, change = value - (int)s.Base;
         string text = change == 0 ? value.ToString(CultureInfo.InvariantCulture) : change < 0 ? $"{value} ({change})" : $"{value} (+{change})";
-        return new HudLine(s.Label.ToUpperInvariant(), text, MainColour, change < 0 ? BadColour : change > 0 ? GoodColour : null);
+        return new HudLine(s.Label.ToUpperInvariant(), text, StatLabelColour, change < 0 ? BadColour : change > 0 ? GoodColour : null);
     })];
 
     /// <summary>The unit of the run speed in the information panel (Interface settings; the game shows mph).</summary>
@@ -184,7 +187,7 @@ sealed partial class PlayerInterface
             {
                 float max = Math.Max(part.Maximum, 1e-3f), health = part.Flesh + part.Rig - part.Stun;
                 string arrows = health < -max ? "!!!   " : health < 0 ? "<<   " : "";
-                rows.Add((part.Name, health / max, 0, (max - part.Stun) / max, ((int)MathF.Floor(health + 0.1f)).ToString(CultureInfo.InvariantCulture), arrows, part.Robotic));
+                rows.Add((part.Name, health / max, (health + part.Bandage) / max, (max - part.Stun) / max, ((int)MathF.Floor(health + 0.1f)).ToString(CultureInfo.InvariantCulture), arrows, part.Robotic));
             }
             float hunger = body.Hunger;
             rows.Add(("Hunger", hunger - 2, hunger - 1, hunger, ((int)(hunger * 100)).ToString(CultureInfo.InvariantCulture), hunger < 2 ? "<!   " : "<   ", false));
