@@ -596,6 +596,8 @@ static class WorldFrame
         public ParticleRenderer? Particles;
         /// <summary>The movement marker the game interface shows after a ground move order (null in the viewer, or without <c>position.mesh</c>).</summary>
         public MoveMarkerRenderer? MoveMarker;
+        /// <summary>The buildings' interior masks the terrain is cut by (made with the first frame that has objects; docs/render-terrain.md "Interior cut").</summary>
+        public InteriorMaskRenderer? InteriorMask;
         /// <summary>The navmesh debug view (null in the viewer; drawn while visible).</summary>
         public NavmeshOverlayRenderer? NavmeshOverlay;
         /// <summary>The hover outline the game draws round the character under the mouse (null in the viewer); <see cref="HoverKey"/> picks the character by its draw-list key (null: none).</summary>
@@ -654,6 +656,7 @@ static class WorldFrame
             Objects?.Dispose();
             Particles?.Dispose();
             MoveMarker?.Dispose();
+            InteriorMask?.Dispose();
             NavmeshOverlay?.Dispose();
             Water?.Dispose();
             Surfaces?.Dispose();
@@ -1297,6 +1300,13 @@ static class WorldFrame
         bool skyHidden = gpu.Sky.SkyFogSkip && gpu.FogVolumes is { SkyHidden: true };
         if (skyHidden) gpu.Sky.SkipMainSky();
         else gpu.Sky.PrepareClouds(skyProjection, rw, rh, gpu.Sky.Eye, fogVolumes: gpu.FogVolumes is { UsedData: > 0 });
+        // The interior masks with the near slice's camera, before the scene's passes (the terrain of that slice reads them).
+        if (render.Objects && gpu.Objects is { } maskObjects && camera.Slices().FirstOrDefault(s => s.Near <= camera.Near) is { Far: > 0 } maskSlice)
+        {
+            gpu.InteriorMask ??= new InteriorMaskRenderer(maskObjects.Gpu, maskObjects);
+            gpu.InteriorMask.Record(view * Jitter.Apply(camera.Projection(aspect, maskSlice.Near, maskSlice.Far), jitter, rw, rh), eye, post.RenderWidth, post.RenderHeight);
+        }
+        else if (gpu.InteriorMask is { } unused) unused.Record(default, eye, 0, 0);
         host.Open(5, post.WithShadingRate(post.SceneTargets), new Vk.ClearColorValue(light.FogColour.X, light.FogColour.Y, light.FogColour.Z, 0), clearDepth: true);   // alpha 0: no character (the SSAO mask)
         if (!skyHidden) gpu.Sky.Draw(skyProjection, colours);
         StageClock.Lap(5);
@@ -1327,7 +1337,9 @@ static class WorldFrame
             host.Stage(6);
             var fogCull = gpu.FogVolumes;
             gpu.Terrain.FogCull = fogCull;
+            gpu.Terrain.InteriorCut = nearSlice ? gpu.InteriorMask : null;
             gpu.Terrain.Draw(viewProjection, eye, frustum, render, light, defer: TerrainLateColour.Enabled);   // the colour comes after the foliage (DrawDeferred) when on
+            gpu.Terrain.InteriorCut = null;
             gpu.Terrain.FogCull = null;
             StageClock.Lap(6);
             host.Stage(7);

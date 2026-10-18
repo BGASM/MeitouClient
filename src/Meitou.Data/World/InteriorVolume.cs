@@ -24,6 +24,15 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
     public bool Cavernous { get; init; }
 
     /// <summary>
+    /// The <c>interior mask</c> parts' render meshes (record paths, <c>phs or mesh</c>), placed with <see cref="Node"/>: what the game draws into its
+    /// interior depth range to cut the terrain and foliage inside (docs/render-terrain.md "Interior cut"). Not the trigger hull above.
+    /// </summary>
+    public IReadOnlyList<string> MaskMeshes { get; init; } = [];
+
+    /// <summary>The building's node (position, rotation, <c>scale</c>) the mask meshes are placed with.</summary>
+    public Matrix4x4 Node { get; init; } = Matrix4x4.Identity;
+
+    /// <summary>
     /// Whether the volume is straight below or above the ground point (<paramref name="x"/>, <paramref name="z"/>): its footprint contains it, whatever the height.
     /// What a ray cast down from far above hits (the game's building test for the interior ambience).
     /// </summary>
@@ -87,10 +96,12 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
         float scale = building.GetFloat("scale", 1);
         var node = WorldObjectLayout.InstanceTransform(position, rotation, new Vector3(scale > 0 ? scale : 1));
         var points = new List<Vector2>();
+        var meshes = new List<string>();
         float yMin = float.MaxValue, yMax = float.MinValue;
         foreach (var r in building.GetReferences("interior mask"))
         {
             if (db.Find(r.TargetStringId) is not { Type: FcsRecordType.BUILDING_PART } mask) continue;
+            if (mask.GetPath("phs or mesh") is { } meshPath && meshPath.Contains(".mesh", StringComparison.OrdinalIgnoreCase)) meshes.Add(meshPath);
             if (collision.Vertices(mask.GetPath("xml collision")) is not { } vertices) continue;
             foreach (var v in vertices)
             {
@@ -108,6 +119,8 @@ public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, flo
             Ambience = building.GetInt("interior ambience"),
             Integrity = building.GetFloat("interior integrity", 100),
             Cavernous = building.GetBool("cavernous"),
+            MaskMeshes = meshes,
+            Node = node,
             floors = new Lazy<FloorSurfaces>(() => FloorSurfaces.For(db, building, placementId, position, rotation, node, collision)),
         };
     }

@@ -37,7 +37,7 @@ use every rendered triangle as collision or infer PhysX actor dynamics from appe
 | `xml collision` | BUILDING_PART | the part's static collision, a PhysX NxuStream XML file |
 | `destroyed collision` | BUILDING_PART | replaces `xml collision` while the building is destroyed (and the part has a `destroyed mesh`) |
 | `phs or mesh` | BUILDING_PART | the **render** mesh; collision never comes from it |
-| `interior mask` | BUILDING | a part whose `xml collision` is the indoor trigger hull |
+| `interior mask` | BUILDING | a part whose `xml collision` is the indoor trigger hull; its `phs or mesh` is the render mask that cuts terrain ([render-terrain](../render-terrain.md#interior-cut)) |
 | `destroyed boundary` | BUILDING | navmesh cutter for a destroyed interior (PhysX XML) |
 | `collision` | FOLIAGE_MESH | the foliage piece's collision (XML; `.phs` allowed by the schema, none used) |
 | `physics file` | items | dropped-item physics (not used by the navmesh) |

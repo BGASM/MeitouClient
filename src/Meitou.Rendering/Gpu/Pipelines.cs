@@ -34,8 +34,8 @@ public sealed class VertexLayout : IEquatable<VertexLayout>
 /// docs/render-gi.md), written only by programs whose fragment shader declares that output.</summary>
 public readonly record struct AttachmentFormats(Format Colour, Format Depth, int Samples = 1, bool ShadingRate = false, Format Extra = Format.Undefined);
 
-/// <summary>GL's blend: one factor pair for colour and alpha, add.</summary>
-public readonly record struct BlendState(bool Enable, BlendFactor Src = BlendFactor.One, BlendFactor Dst = BlendFactor.Zero)
+/// <summary>GL's blend: one factor pair for colour and alpha, add (or <paramref name="ColourOp"/> / <paramref name="AlphaOp"/>, e.g. min and max).</summary>
+public readonly record struct BlendState(bool Enable, BlendFactor Src = BlendFactor.One, BlendFactor Dst = BlendFactor.Zero, BlendOp ColourOp = BlendOp.Add, BlendOp AlphaOp = BlendOp.Add)
 {
     public static readonly BlendState Off = new(false);
 }
@@ -131,8 +131,8 @@ public static unsafe class PipelineFactory
         attachments[0] = new PipelineColorBlendAttachmentState
         {
             BlendEnable = blendState.Enable,
-            SrcColorBlendFactor = blendState.Src, DstColorBlendFactor = blendState.Dst, ColorBlendOp = BlendOp.Add,
-            SrcAlphaBlendFactor = blendState.Src, DstAlphaBlendFactor = blendState.Dst, AlphaBlendOp = BlendOp.Add,
+            SrcColorBlendFactor = blendState.Src, DstColorBlendFactor = blendState.Dst, ColorBlendOp = blendState.ColourOp,
+            SrcAlphaBlendFactor = blendState.Src, DstAlphaBlendFactor = blendState.Dst, AlphaBlendOp = blendState.AlphaOp,
             ColorWriteMask = colourMask,
         };
         // The extra attachment (location 1) is never blended: written by the programs that declare it (extraMask), else left as it is.

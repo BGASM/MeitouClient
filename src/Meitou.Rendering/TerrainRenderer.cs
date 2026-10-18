@@ -104,6 +104,8 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
         patchColour = new TerrainProgram(gpu, sets, TerrainShaders.PatchVertexNative(), TerrainShaders.FragmentNative(), "terrain");
         patchDepth = new TerrainProgram(gpu, sets, TerrainShaders.PatchVertexNative(), TerrainShaders.DepthFragmentNative(), "terrain depth");
         patchPrepass = new TerrainProgram(gpu, sets, TerrainShaders.PatchVertexNative(), TerrainShaders.PrepassFragmentNative(), "terrain prepass");
+        patchColourCut = new TerrainProgram(gpu, sets, TerrainShaders.PatchVertexNative(), TerrainShaders.FragmentNative(interiorCut: true), "terrain interior cut");
+        patchPrepassCut = new TerrainProgram(gpu, sets, TerrainShaders.PatchVertexNative(), TerrainShaders.PrepassFragmentNative(interiorCut: true), "terrain prepass interior cut");
         meshColour = new TerrainProgram(gpu, sets, TerrainShaders.MeshVertexNative(), TerrainShaders.MeshFragmentNative(), "terrain meshes");
         meshSolid = new TerrainProgram(gpu, sets, TerrainShaders.MeshVertexNative(), TerrainShaders.MeshFragmentSolidNative(), "terrain meshes solid");
         meshDepth = new TerrainProgram(gpu, sets, TerrainShaders.MeshInstancedDepthVertexNative(), TerrainShaders.DepthFragmentNative(), "terrain mesh depth");
@@ -261,6 +263,7 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
 
         SortNearestFirst(eye);
         PreparePatches(current);
+        SplitInteriorCut(secondary ? null : InteriorCut);
         if (nodes.Count > 0)
         {
             if (options.Wireframe != 2)
@@ -269,11 +272,15 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
                 if (defer && !secondary && options.Wireframe == 0)
                 {
                     // Depth only now, the colour after the objects and foliage (DrawDeferred): the colour program then runs only where the terrain is what is seen.
-                    RecordPatches(patchPrepass, "terrain prepass", PatchMode.Prepass);
+                    RecordPatches(patchPrepass, "terrain prepass", PatchMode.Prepass, plainCount);
+                    if (cutCount > 0) RecordPatches(patchPrepassCut, "terrain prepass interior cut", PatchMode.Prepass, cutCount, cutDraws);
                     (latePending, lateFrame) = (true, frame);
                 }
                 else
-                    RecordPatches(patchColour, "terrain", PatchMode.Solid);
+                {
+                    RecordPatches(patchColour, "terrain", PatchMode.Solid, plainCount);
+                    if (cutCount > 0) RecordPatches(patchColourCut, "terrain interior cut", PatchMode.Solid, cutCount, cutDraws);
+                }
                 DrawnChunks += nodes.Count;
                 DrawnTriangles += patchTriangles;
             }
@@ -282,7 +289,8 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
                 // The debug outline (Wireframe 1 and 2): the same patches as lines in a dark grey, pulled towards the eye as GL's polygon offset (-1, -1) did.
                 PrepareConstants(material: true, patches: true);
                 constants.Wireframe = 1;
-                RecordPatches(patchColour, "terrain wireframe", PatchMode.Wireframe);
+                RecordPatches(patchColour, "terrain wireframe", PatchMode.Wireframe, plainCount);
+                RecordPatches(patchColour, "terrain wireframe", PatchMode.Wireframe, cutCount, cutDraws);
             }
         }
     }
@@ -301,7 +309,42 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
         latePending = false;
         frame = lateFrame;
         PrepareConstants(material: true, patches: true);
-        RecordPatches(patchColour, "terrain", PatchMode.Late);
+        RecordPatches(patchColour, "terrain", PatchMode.Late, plainCount);
+        if (cutCount > 0) RecordPatches(patchColourCut, "terrain interior cut", PatchMode.Late, cutCount, cutDraws);
+    }
+
+    /// <summary>
+    /// The interior cut of the main view (docs/render-terrain.md "Interior cut"; set by the world frame around its near slice's terrain draws, null otherwise): the
+    /// mask's depth range, read by the cut programs, which only the patches overlapping a drawn building take (a <c>discard</c> costs the early depth test).
+    /// </summary>
+    internal InteriorMaskRenderer? InteriorCut { get; set; }
+
+    PatchDraw[] cutDraws = new PatchDraw[64];
+    int plainCount, cutCount;
+    uint cutMask;
+
+    /// <summary>Moves the patches whose square overlaps a building of <paramref name="cut"/>'s (when it drew any) out of <see cref="patchDraws"/>
+    /// into <see cref="cutDraws"/>, both kept nearest first: <see cref="plainCount"/> and <see cref="cutCount"/>.</summary>
+    void SplitInteriorCut(InteriorMaskRenderer? cut)
+    {
+        int n = nodes.Count;
+        (plainCount, cutCount) = (n, 0);
+        if (cut is not { Active: true }) return;
+        cutMask = cut.Index;
+        var boxes = cut.Boxes;
+        int kept = 0;
+        for (int i = 0; i < n; i++)
+        {
+            var d = patchDraws[i];
+            float x0 = d.Push.Node.X, z0 = d.Push.Node.Y, s = d.Push.Node.Z;
+            bool overlaps = false;
+            foreach (var (min, max) in boxes)
+                if (x0 <= max.X && x0 + s >= min.X && z0 <= max.Y && z0 + s >= min.Y) { overlaps = true; break; }
+            if (!overlaps) { patchDraws[kept++] = d; continue; }
+            if (cutCount == cutDraws.Length) Array.Resize(ref cutDraws, cutDraws.Length * 2);
+            cutDraws[cutCount++] = d;
+        }
+        plainCount = kept;
     }
 
     double[] nodeKeys = [];
@@ -359,7 +402,7 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
 
     readonly NativeFrame nativeFrame;
     readonly Silk.NET.Vulkan.DescriptorSetLayout constantsLayout;
-    readonly TerrainProgram patchColour, patchDepth, patchPrepass, meshColour, meshSolid, meshDepth;   // meshSolid: meshColour without the cross-fade discard (EarlyDepth)
+    readonly TerrainProgram patchColour, patchDepth, patchPrepass, patchColourCut, patchPrepassCut, meshColour, meshSolid, meshDepth;   // meshSolid: meshColour without the cross-fade discard (EarlyDepth)
     readonly ulong uniformAlign;
     readonly uint standIn2D, standInArray, standInUInt;
 
@@ -476,6 +519,7 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
             c.Debug = options.Debug;
             c.Grid = options.Grid ? 1u : 0u;
             if (patches && TerrainLayerSkip.Enabled) c.CliffEps = TerrainLayerSkip.CliffEps;
+            c.InteriorMask = patches && cutCount > 0 ? cutMask : standIn2D;
             c.FarStart = options.MaterialDistance * 0.8f;
             c.FarEnd = options.MaterialDistance;
             var t = textures;
@@ -606,8 +650,11 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     /// dynamic state, the sets, the pipeline, the grid's vertex and index buffers once; per node its push constants and the draw of its index
     /// range.
     /// </summary>
-    void RecordPatches(TerrainProgram p, string label, PatchMode mode = PatchMode.Solid)
+    void RecordPatches(TerrainProgram p, string label, PatchMode mode = PatchMode.Solid, int count = -1, PatchDraw[]? draws = null)
     {
+        if (count < 0) count = nodes.Count;
+        if (count == 0) return;
+        draws ??= patchDraws;
         // Prepare (wave 4, docs/renderer-native.md 6.2): the pass's targets and state now, the pipeline, the sets, the draws, into a job.
         var targets = gpu.CurrentTargets();
         var state = PatchState(gpu.CurrentState(), mode);
@@ -618,9 +665,8 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
         var view = View();
         job.Frame = nativeFrame.Prepare(in view);
         (job.ConstantSet, job.ConstantOffset) = PrepareConstantsBinding();
-        int count = nodes.Count;
         if (job.Draws.Length < count) job.Draws = new PatchDraw[Math.Max(count, job.Draws.Length * 2)];
-        patchDraws.AsSpan(0, count).CopyTo(job.Draws);
+        draws.AsSpan(0, count).CopyTo(job.Draws);
         job.Count = count;
         gpu.Record(label, job);
     }
@@ -1110,7 +1156,7 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
         fineTexture.Dispose();
         foreach (var r in retired) r.Texture.Dispose();
         if (ownsTextures) textures?.Dispose();
-        foreach (var p in new[] { patchColour, patchDepth, patchPrepass, meshColour, meshSolid, meshDepth }) p.Dispose();
+        foreach (var p in new[] { patchColour, patchDepth, patchPrepass, patchColourCut, patchPrepassCut, meshColour, meshSolid, meshDepth }) p.Dispose();
         rockBake?.Dispose();
         gpu.Bindless.Free(BindlessKind.Texture2D, standIn2D);
         gpu.Bindless.Free(BindlessKind.Texture2DArray, standInArray);

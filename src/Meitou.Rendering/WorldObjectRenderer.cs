@@ -705,6 +705,28 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         return null;
     }
 
+    /// <summary>The loaded buildings with interior mask meshes whose footprint comes within <paramref name="range"/> of <paramref name="eye"/> (X/Z), into <paramref name="into"/>.</summary>
+    internal void InteriorMasks(Vector3 eye, float range, List<InteriorVolume> into)
+    {
+        into.Clear();
+        var q = new Vector2(eye.X, eye.Z);
+        foreach (var zone in streamer.AllZones)
+        {
+            if (zone.Interiors.Count == 0 || ObjectStreamer.ZoneDistance(zone.X0, zone.Z0, eye) > range + 200) continue;
+            foreach (var v in zone.Interiors)
+            {
+                if (v.MaskMeshes.Count == 0 || v.Footprint.Length == 0) continue;
+                float nearest = float.MaxValue;
+                foreach (var p in v.Footprint) nearest = MathF.Min(nearest, Vector2.DistanceSquared(p, q));
+                if (nearest <= range * range || v.ContainsGround(eye.X, eye.Z)) into.Add(v);
+            }
+        }
+    }
+
+    /// <summary>Finds a file a record names (an install-relative path, or a bare name the asset locator knows), or null.</summary>
+    internal string? FindRecordFile(string recordPath) =>
+        Meitou.Data.Physics.CollisionPaths.Resolve(objects.Install, recordPath) ?? assets.Find(Path.GetFileName(recordPath.Replace('\\', '/')));
+
     /// <summary>Use room-scale probes only while the camera target is in or beside a viewed building.</summary>
     internal Vector3? GiInteriorFocus(Vector3 target)
     {
