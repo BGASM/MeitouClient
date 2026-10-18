@@ -22,11 +22,18 @@ internal static partial class ZoneNavMeshBuilder
         var links = new List<int>?[meshes.Sum(m => m?.npolys ?? 0)];
         // Border edges per tile and side (0: -X, 1: +Z, 2: +X, 3: -Z, as Recast numbers them).
         var borders = new List<BorderEdge>[meshes.Length, 4];
+        // Recast welds two polygons' vertices only within 2 height cells, and a step's corner height can come out differently from either side,
+        // so a stair foot and the ground beside it may share an edge in X/Z yet not be neighbours. Such open edges of a tile, coinciding in reverse
+        // and within the climb at both ends, are joined here (docs/game/pathfinding.md, "Own builder").
+        int climbCells = (int)MathF.Floor(s.MaxClimb / s.CellHeight);
+        var open = new Dictionary<(int, int, int, int), (int Polygon, int Edge, int Ia, int Ib)>();
+        var seams = new List<(int P, int E, int Q, int F)>();
 
         for (int tile = 0; tile < meshes.Length; tile++)
         {
             var m = meshes[tile];
             if (m is null) continue;
+            open.Clear();
             int nvp = m.nvp;
             int vBase = vertices.Count, pBase = polygons.Count;
             for (int i = 0; i < m.nverts; i++)
@@ -53,6 +60,17 @@ internal static partial class ZoneNavMeshBuilder
                             borders[tile, side] ??= [];
                             borders[tile, side]!.Add(new BorderEdge { Polygon = pBase + p, Edge = k });
                         }
+                        else
+                        {
+                            // An open inner edge may face one whose end vertex Recast did not weld (see the seam pass below).
+                            if (open.TryGetValue((xb, zb, xa, za), out var other) && Math.Abs(m.verts[ia * 3 + 1] - m.verts[other.Ib * 3 + 1]) <= climbCells
+                                && Math.Abs(m.verts[ib * 3 + 1] - m.verts[other.Ia * 3 + 1]) <= climbCells)
+                            {
+                                open.Remove((xb, zb, xa, za));
+                                seams.Add((pBase + p, k, other.Polygon, other.Edge));
+                            }
+                            else open[(xa, za, xb, zb)] = (pBase + p, k, ia, ib);
+                        }
                     }
                     else if ((n & 0x8000) != 0)
                     {
@@ -68,6 +86,9 @@ internal static partial class ZoneNavMeshBuilder
                 areas.Add((byte)m.areas[p]);
             }
         }
+
+        foreach (var (p, e, q, f) in seams)
+            if (areas[p] != NavArea.Null && areas[q] != NavArea.Null) { neighbours[p][e] = q; neighbours[q][f] = p; }
 
         // Recast winds polygons clockwise seen from above (+Y toward the viewer, Z down the page); our tests want the other way.
         bool flip = false;
