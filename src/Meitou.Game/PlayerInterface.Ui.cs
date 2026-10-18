@@ -215,6 +215,7 @@ sealed partial class PlayerInterface
                     Vector4.Zero, new Vector4(0.89f, 0.84f, 0.71f, 1), TextScale: Height / 720f));
         }
         AddInventoryDrag(controls);
+        AddNameTags(controls);
         AddSpeech(controls);
         AddContextMenu(controls);
         pointerOverUi = faithfulScreens.Contains(mouse) || MyGuiPresentation.HitTest(controls, mouse.X, mouse.Y) is not null;

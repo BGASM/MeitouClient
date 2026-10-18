@@ -1,4 +1,5 @@
 using System.Numerics;
+using Meitou.Data.Ui;
 using Meitou.Rendering;
 using Meitou.Simulation;
 
@@ -46,33 +47,38 @@ sealed partial class PlayerInterface
     }
 
     /// <summary>
-    /// The name tag over each of the player's characters within the original's range (docs/game/perception.md "Spotting a sneaker"), with the stealth diamond
-    /// left of the name while it sneaks.
+    /// The name tag over each of the player's characters within the original's range: the <c>Kenshi_CharacterNamePanel</c> layout (<b>Verified</b>), 0.1057 x 0.0296 of the
+    /// screen, the name centred in <c>Kenshi_StandardFont_Large</c> with a shadow in the middle 0.655, and while the character sneaks the <c>Stealth</c> icon on the left in
+    /// the state's tag colour. The name is white when the character is selected and grey otherwise (<c>NameTagSelected</c> / <c>NameTagUnselected</c>, <b>Observed</b>);
+    /// the light level icon is not drawn (no light model). The panel stands on the head like a speech bubble does (the original's anchor is not mapped).
     /// </summary>
-    void DrawNameTags(DebugOverlay o)
+    void AddNameTags(List<UiControl> controls)
     {
-        float scale = Math.Clamp(Height / 1080f, 0.75f, 1.5f);
+        float width = Width * 0.105729f, height = Height * 0.0296296f, scale = Height / 1080f;
+        int n = 0;
         foreach (var c in session.CurrentSnapshot.Characters)
         {
-            if (!c.IsPlayer || EditorOpen || c.CarriedBy != CharacterId.None) continue;
+            if (!c.IsPlayer || c.Name.Length == 0 || EditorOpen || c.CarriedBy != CharacterId.None) continue;
             var feet = where(c);
             if (Vector3.DistanceSquared(Eye, feet) >= NameTagRangeSquared) continue;
             if (Project(feet + new Vector3(0, CharacterHeight + 4, 0)) is not { } head) continue;
-            float half = c.Name.Length > 0 ? o.MeasureText(c.Name, scale) / 2 : 0;
+            float x = head.X - width / 2, y = head.Y - 4 * scale - height;
+            controls.Add(new($"nametag-{n}", "TextBox", new(x + width * 0.187192f, y, width * 0.655172f, height), c.Name, "", "", true,
+                new Dictionary<string, string>
+                {
+                    ["FontName"] = "Kenshi_StandardFont_Large", ["TextAlign"] = "Center", ["TextShadow"] = "true", ["TextColour"] = c.Selected ? "1 1 1" : "0.702 0.702 0.702",
+                }, Vector4.Zero, Pickable: false));
             if (c.Stealth is { } state)
             {
                 var tint = state switch { StealthExposure.Detected => TagSeen, StealthExposure.Noticed => TagAlmostSeen, _ => TagHidden };
-                var dark = new Vector4(0, 0, 0, 0.6f);
-                var d = new Vector2(-half - (half > 0 ? 14 : 0), 0) + head;
-                o.Triangle(d + new Vector2(0, -9), d + new Vector2(-9, 0), d + new Vector2(9, 0), dark);
-                o.Triangle(d + new Vector2(0, 9), d + new Vector2(9, 0), d + new Vector2(-9, 0), dark);
-                o.Triangle(d + new Vector2(0, -7), d + new Vector2(-7, 0), d + new Vector2(7, 0), tint);
-                o.Triangle(d + new Vector2(0, 7), d + new Vector2(7, 0), d + new Vector2(-7, 0), tint);
+                controls.Add(new($"nametag-stealth-{n}", "ImageBox", new(x, y + height * 0.09375f, width * 0.187192f, height * 0.84375f), "", "", "", true,
+                    new Dictionary<string, string>
+                    {
+                        ["ImageResource"] = "Kenshi_CharacterNameTags", ["ImageGroup"] = "Stealth", ["ImageName"] = "Stealth",
+                        ["Colour"] = FormattableString.Invariant($"{tint.X} {tint.Y} {tint.Z} 1"),
+                    }, default, Pickable: false));
             }
-            if (c.Name.Length == 0) continue;
-            float x = head.X - half, y = head.Y - 8 * scale;
-            o.TextScaled(c.Name, x + 1, y + 1, new Vector4(0, 0, 0, 0.8f), scale);
-            o.TextScaled(c.Name, x, y, DebugOverlay.TextColour, scale);
+            n++;
         }
     }
 }
