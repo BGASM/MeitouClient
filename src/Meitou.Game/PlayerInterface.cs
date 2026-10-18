@@ -206,6 +206,8 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
 
     /// <summary>The character the strategy camera follows (a double tap of its number key, F, or a double click on its squad button); panning the camera lets go.</summary>
     public CharacterId? Follow { get; set; }
+    /// <summary>The host's camera flight to a double-clicked squad member (Advanced settings "Character flights"); false: centre on it at once.</summary>
+    public Func<CharacterId, bool>? FlyTo { get; set; }
     // The last number key and when it was pressed: the same key again within DoubleTapSeconds centres on the character (docs/game/ui-input.md, events 100..120).
     Key lastSelectKey;
     long lastSelectAt;
@@ -217,7 +219,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         var members = PlayerCharacters();
         if (index < 0 || index >= members.Count) return;
         Select([members[index]], shift);
-        if (doubleTap) CentreOn(members[index]);
+        if (doubleTap && FlyTo?.Invoke(members[index]) != true) CentreOn(members[index]);
     }
 
     /// <summary>Centres the camera on the lead selected character and follows it (after a load, which drops the follow).</summary>

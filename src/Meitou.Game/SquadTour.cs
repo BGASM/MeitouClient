@@ -8,13 +8,14 @@ namespace Meitou.Game;
 /// Numpad / in the game (docs/viewer.md "Squad tour"): the camera flies from squad member to squad member in portrait order, keeping the
 /// view's yaw, pitch and distance at each stop. Each hop is an arc: the camera climbs first (pulling back and looking more steeply down),
 /// crosses at height and comes down onto the next member, who is tracked while they move. Presentation only; nothing is saved.
+/// <see cref="Fly"/> is the same hop to one character (a double click on a far squad member, Advanced settings "Character flights").
 /// </summary>
 sealed class SquadTour
 {
     /// <summary>Seconds the camera stays on each member before the next hop.</summary>
     const float Hold = 1.5f;
-    /// <summary>Seconds each hop takes, whatever its length.</summary>
-    const float HopSeconds = 3;
+    /// <summary>Seconds each hop takes, whatever its length (Advanced settings "Character flight time").</summary>
+    public float HopSeconds { get; set; } = UserConfig.DefaultFlightSeconds;
     /// <summary>The arc's extra boom at its top, per unit of ground crossed (at least <see cref="MinLift"/> times the view's own distance).</summary>
     const float LiftPerDistance = 0.55f, MinLift = 1.5f;
     /// <summary>How much steeper the camera looks down at the top of an arc (radians), and its limit.</summary>
@@ -33,12 +34,26 @@ sealed class SquadTour
     {
         stops.Clear();
         stops.AddRange(members);
-        (yaw, pitch, distance) = (camera.Yaw, camera.Pitch, camera.Distance);
+        if (!Active) (yaw, pitch, distance) = (camera.Yaw, camera.Pitch, camera.Distance);   // a new flight mid-flight keeps the view it left from
         next = 0;
         if (stops.Count > 0 && position(stops[0]) is { } first && Ground(first - camera.Target) < 0.25f * distance) next = 1;
         Active = next < stops.Count;
         if (Active) BeginHop(camera, position);
     }
+
+    /// <summary>One hop from the camera's view to <paramref name="id"/>, ending on it.</summary>
+    public void Fly(WorldCamera camera, CharacterId id, Func<CharacterId, Vector3?> position)
+    {
+        stops.Clear();
+        stops.Add(id);
+        if (!Active) (yaw, pitch, distance) = (camera.Yaw, camera.Pitch, camera.Distance);   // a new flight mid-flight keeps the view it left from
+        next = 0;
+        Active = true;
+        BeginHop(camera, position);
+    }
+
+    /// <summary>The member the camera is on or flying to.</summary>
+    public CharacterId? Current => next < stops.Count ? stops[next] : stops.Count > 0 ? stops[^1] : null;
 
     public void Stop() => Active = false;
 
@@ -51,7 +66,6 @@ sealed class SquadTour
         {
             if (position(stops[next - 1]) is { } held) camera.Target = held;
             if (time < Hold) return true;
-            if (next >= stops.Count) { Active = false; return false; }
             BeginHop(camera, position);
             if (!Active) return false;
         }
@@ -68,7 +82,7 @@ sealed class SquadTour
         camera.Yaw = yaw;
         camera.Pitch = pitch + (MathF.Max(MathF.Min(pitch + PitchLift, MaxPitch), pitch) - pitch) * lift;
         camera.Distance = MathF.Min(distance + height * lift, camera.ViewDistance * 0.5f);
-        if (s >= 1) { next++; holding = true; time = 0; }
+        if (s >= 1) { next++; holding = true; time = 0; if (next >= stops.Count) { Active = false; return false; } }
         return true;
     }
 

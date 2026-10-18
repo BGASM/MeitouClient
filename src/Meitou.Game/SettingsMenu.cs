@@ -19,6 +19,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         () => config.MainMenuTransitionSpeed, v => config.MainMenuTransitionSpeed = v, "0.00'x'");
     readonly Slider inGameTransitionSpeed = new("In-game transition speed", SkyArrival.MinSpeed, SkyArrival.MaxSpeed,
         () => config.InGameTransitionSpeed, v => config.InGameTransitionSpeed = v, "0.00'x'");
+    readonly Slider characterFlightTime = new("Character flight time", 0.5f, 6, () => config.CharacterFlightSeconds, v => config.CharacterFlightSeconds = v, "0.0' s'");
     Slider[]? audioSliders;
     /// <summary>The seven audio sliders of the original's options (docs/formats/settings.md); each writes <see cref="UserConfig.Audio"/> and calls <see cref="AudioChanged"/>.</summary>
     Slider[] AudioSliders => audioSliders ??= [
@@ -206,6 +207,9 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
             result.Add(new("In-game scene transitions", "Sky flight for save loads/new games during play (Meitou UI).",
                 Toggle: new("In-game scene transitions", () => config.InGameTransitions, v => config.InGameTransitions = v)));
             result.Add(new(inGameTransitionSpeed.Label, "Higher values make the camera ascend and descend faster.", Slider: inGameTransitionSpeed));
+            result.Add(new("Character flights", "A double click on a squad member far from the view (or a double tap of their number) flies the camera there in an arc instead of cutting.",
+                Toggle: new("Character flights", () => config.CharacterFlights, v => config.CharacterFlights = v, Remaster: true, OnOff: true)));
+            result.Add(new(characterFlightTime.Label, "Seconds a character flight takes, and each hop of the squad tour (numpad /).", Slider: characterFlightTime));
             foreach (var action in values.Actions)
                 result.Add(new(action.Label, "Delete cached billboards; they are rebuilt when needed.", Run: () =>
                 {
@@ -414,6 +418,8 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         config.InGameTransitions = true;
         config.MainMenuTransitionSpeed = 1.5f;
         config.InGameTransitionSpeed = 1.5f;
+        config.CharacterFlights = true;
+        config.CharacterFlightSeconds = UserConfig.DefaultFlightSeconds;
         AttackSlotsSlider.Set(UserConfig.MeitouAttackSlots);
         config.LateDefences = true;
         LateDefencesChanged?.Invoke(true);

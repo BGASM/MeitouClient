@@ -134,12 +134,25 @@ sealed partial class GameHost
         // Numpad / flies the camera across the squad in portrait order (docs/viewer.md "Squad tour"); it holds the camera like the cinema does.
         var tour = new SquadTour();
         Vector3? TourPosition(CharacterId id) => session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is { } c ? DrawnPosition(c) : null;
+        bool tourFollows = false;
         void EndTour()
         {
             tour.Stop();
             cinemaHolds = false;
             session.Camera.TakeOver(new CameraState(camera.Eye, camera.Forward, Vector3.UnitY, camera.Target, camera.Yaw, camera.Pitch, camera.Distance, true), strategy: true);
+            if (tourFollows) player.Follow = tour.Current;   // a double-clicked member is followed, as a cut to it would be
         }
+        // A double click on a squad member more than FlightDistance from the view flies there (Advanced settings "Character flights").
+        player.FlyTo = id =>
+        {
+            if (!config.CharacterFlights || IsDuel || session.Camera.IsFree || cinema.Playing || cinema.Recording || TourPosition(id) is not { } at) return false;
+            if (new Vector2(at.X - camera.Target.X, at.Z - camera.Target.Z).Length() <= UserConfig.FlightDistance) return false;
+            player.Follow = null;
+            tour.HopSeconds = config.CharacterFlightSeconds;
+            tour.Fly(camera, id, TourPosition);
+            (cinemaHolds, tourFollows) = (true, true);
+            return true;
+        };
 
         var silkInput = Silk.NET.Input.InputWindowExtensions.CreateInput(window);
         Vector2? lastMouse = null;
@@ -209,6 +222,8 @@ sealed partial class GameHost
                     else if (!cinema.Playing && !cinema.Recording)
                     {
                         player.Follow = null;
+                        tour.HopSeconds = config.CharacterFlightSeconds;
+                        tourFollows = false;
                         tour.Start(camera, [.. player.SquadBarMembers().Select(c => c.Id)], TourPosition);
                         if (tour.Active) cinemaHolds = true;
                         else Console.WriteLine("squad tour: nobody else in the squad to fly to");
