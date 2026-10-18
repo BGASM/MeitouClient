@@ -104,7 +104,8 @@ internal sealed partial class ZoneGeometryGatherer
     {
         var node = NodeMatrix(building, position, rotation);
 
-        var placed = WorldObjectLayout.Building(db, building, placementId, position, rotation, new BuildingState(destroyed));
+        // The `interior` list is part of the physical building as drawn (interior stairs: Storm House, docs/game/pathfinding.md "Interiors").
+        var placed = WorldObjectLayout.Building(db, building, placementId, position, rotation, new BuildingState(destroyed) { WithInterior = !destroyed });
         var doors = building.GetReferences("doors").Select(r => r.TargetStringId).ToHashSet();
         foreach (var mesh in placed)
         {

@@ -16,6 +16,8 @@ full/partial/interior/stitch jobs. 3x3 active-zone loads and runtime stitching o
 hkRootLevelContainer; hkaiNavMesh faces16bytes/edges20, graph/streaming/mediator/static-tree objects.
 Named variants NavMesh,Graph,Mediator,Hash then interior groups with Info=`uidhex;x;y;z`.
 294 tiles contain1249 interiors; Info positions are absolute world units, possibly outside tile.
+**Observed** (tile20.32, Storm House `600815`): an interior group is NavMesh,Graph,Mediator,Info,Hash; its vertices are
+0.1-scale offsets from the Info point, which lies below and outside the min corner of the building's interior hull (~55 in X/Z, 66 in Y).
 Tile vertices zone-local at0.1 scale (tile0.0 waterY10, width460.8). Seeds.def is4585 float3,
 55020 bytes/no header; Y=-99 unspecified height. Hash mismatch/missing tile triggers generation.
 **Observed** hash_combine over building positions/rotation/filter fields, zone value last;
@@ -76,6 +78,11 @@ reference evidence, not a runtime dependency or proof of DotRecast polygon parit
 
 **Furniture** comes from building layouts (`BuildingLayouts`), none when destroyed. **Verified**
 (Hub, `meitou-tools navmesh`): parts with collision 189→309.
+**Interior parts**: the `interior` list (laid out like `parts` after the same position-seeded reseed, as drawn) is collision too,
+none when destroyed; it holds interior stairs and upper floors. **Verified** (tile20.32 interior `600815`, the Hub Storm House
+`4933-Newwworld-INGAME`): the original mesh ramps +4→+68 over (+30..+65, −45..−5) from the origin to the roof storey at +69..+72,
+inside the bounds of `Storm_House_01_Interior-stairs` (`is stairs`, only in `interior`). **Observed** (scratch NavSystem probe):
+without the list that storey and the Watchtower `2-Newwworld-INGAME` floors +130/+190/+290 were unkept; with it paths from the door seed reach them.
 **Doors**: every part of a `doors`-list building is group 5. **Observed** (35 door records): only
 `Defensive Gate level 4/5 Door` lack `is door`, yet open in game; without the rule Squin was sealed.
 **Inner seams** (engine choice): Recast welds polygon vertices only within 2 height cells, and a step's corner height can come out
