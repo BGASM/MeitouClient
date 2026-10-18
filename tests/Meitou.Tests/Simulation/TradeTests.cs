@@ -136,11 +136,11 @@ public class TradeTests
 
         // Sell it back: the sell price (a trade item at full price, junk at half).
         var mine = b.View.Goods.Single();
-        b.Say(new SellItem(mine.Token, 1) { Tick = 0, X = 11, Y = 19 });   // dropped on the stock's last cell
+        b.Say(new SellItem(mine.Token, 1) { Tick = 0, X = 11, Y = 17 });   // dropped on the stock's last row
         b.World.RunTicks(1);
         Assert.Equal(1000 - first.UnitPrice + mine.Price, b.World.Player.Money);
         Assert.Empty(b.Bag(hero).All());
-        Assert.Contains(shop.Stock.Items, i => (i.X, i.Y) == (11, 19));
+        Assert.Contains(shop.Stock.Items, i => (i.X, i.Y) == (11, 17));
 
         // Too poor: nothing moves.
         b.World.Player.Money = 0;
