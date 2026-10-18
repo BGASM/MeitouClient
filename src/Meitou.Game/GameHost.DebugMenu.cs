@@ -10,21 +10,21 @@ namespace Meitou.Game;
 
 /// <summary>
 /// The F10 debug menu (Meitou only, docs/game/ui-input.md "Debug menu"): cheats sent to the world as <see cref="DebugCommand"/>s. Up/Down pick a row, typing fills its field,
-/// Enter applies it, Esc or F10 closes; while open it takes every key. Teleport and spawn use the camera's target (the middle of the screen); heal and damage the selected
-/// characters, else the inspected one.
+/// Enter applies it, Esc or F10 closes; while open it takes every key. Teleport and spawn use the camera's target (the middle of the screen); heal, max skills and damage the
+/// selected characters, else the inspected one.
 /// </summary>
 sealed partial class GameHost
 {
-    enum DebugRow { Teleport, SpawnNpc, GiveItem, Money, Heal, Damage }
+    enum DebugRow { Teleport, SpawnNpc, GiveItem, Money, Heal, MaxSkills, Damage }
 
-    static readonly string[] DebugLabels = ["Teleport selected here", "Spawn NPC (hostile)", "Give item (name x5)", "Money (+/- cats)", "Heal", "Damage (cut)"];
-    readonly string[] debugFields = ["", "", "", "1000", "", "20"];
+    static readonly string[] DebugLabels = ["Teleport selected here", "Spawn NPC (hostile)", "Give item (name x5)", "Money (+/- cats)", "Heal", "Max out skills", "Damage (cut)"];
+    readonly string[] debugFields = ["", "", "", "1000", "", "", "20"];
     readonly Dictionary<(bool Character, string Text), (string Id, string Name)?> debugMatches = [];
     bool debugMenuOpen;
     int debugRow;
     string debugStatus = "";
 
-    static bool DebugHasField(int row) => (DebugRow)row is not (DebugRow.Teleport or DebugRow.Heal);
+    static bool DebugHasField(int row) => (DebugRow)row is not (DebugRow.Teleport or DebugRow.Heal or DebugRow.MaxSkills);
 
     void DebugMenuKey(EngineKey key)
     {
@@ -75,6 +75,10 @@ sealed partial class GameHost
                 if (targets.Length == 0) return "select or inspect a character first";
                 world.Commands.Enqueue(new DebugHeal(targets) { Tick = tick });
                 return $"healed {targets.Length}";
+            case DebugRow.MaxSkills:
+                if (targets.Length == 0) return "select or inspect a character first";
+                world.Commands.Enqueue(new DebugMaxSkills(targets) { Tick = tick });
+                return $"every stat 100 for {targets.Length}";
             case DebugRow.Damage:
                 if (targets.Length == 0) return "select or inspect a character first";
                 if (!float.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out float cut) || !(cut > 0)) return "damage: a positive number";

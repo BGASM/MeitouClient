@@ -1,5 +1,6 @@
 using System.Numerics;
 using Meitou.Data.Fcs;
+using Meitou.Data.Gameplay.Bodies;
 using Meitou.Simulation.Bodies;
 
 namespace Meitou.Simulation;
@@ -15,6 +16,9 @@ public sealed record DebugTeleport(IReadOnlyList<CharacterId> Characters, Vector
 
 /// <summary>Heals the characters fully (<see cref="MedicalState.Heal"/>).</summary>
 public sealed record DebugHeal(IReadOnlyList<CharacterId> Characters) : DebugCommand;
+
+/// <summary>Sets every stat of the characters to 100.</summary>
+public sealed record DebugMaxSkills(IReadOnlyList<CharacterId> Characters) : DebugCommand;
 
 /// <summary>One cut of <see cref="Cut"/> damage to each character, on a part chosen as a blow's is.</summary>
 public sealed record DebugDamage(IReadOnlyList<CharacterId> Characters, float Cut) : DebugCommand;
@@ -54,6 +58,11 @@ static class DebugCheats
             case DebugHeal heal when data is not null:
                 foreach (var id in heal.Characters)
                     if (Body(world, data, id) is ({ } medical, var ctx)) medical.Heal(ctx);
+                break;
+            case DebugMaxSkills max:
+                foreach (var id in max.Characters)
+                    if (table.TryResolveNext(id, out int skilled) && table.Cold(skilled)?.Stats is { } stats)
+                        for (var s = StatsEnumerated.None + 1; s < StatsEnumerated.End; s++) stats[s] = 100;
                 break;
             case DebugDamage damage when data is not null:
                 // Combat and the body pass read KO and death from the medical state; what they do only on the hit's events is done here.
