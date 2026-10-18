@@ -747,7 +747,7 @@ member on the package cadence, and the wanderer walks to the nearest town. Seats
 interior furniture with a CHAIR functionality (`HomeSpotKind.Chair`; never a standing node), free
 in that building this pass; relaxing falls back to a bar node, then a general node, sitting around
 has none and is not wanted without a chair (without a home it sits where it is). A seated character
-is moved onto the chair, faces its yaw and plays the functionality's clip ("sitting chair", pillows
+is moved onto the chair, faces the seat's way ([ai-tasks](game/ai-tasks.md), "Chairs") and plays the functionality's clip ("sitting chair", pillows
 "sitting idle"). A town's bars and shops are
 the buildings whose residents (the squads living there, else the level data's `residents template`)
 have designation BAR or a shop (`AiSystem.RefreshPlaces`). Walks to nodes, beds and seats pass the
@@ -759,8 +759,8 @@ point within 12 (`IWalkability.FloorNear`), and no step goes down into such a ho
 [pathfinding](game/pathfinding.md)). The Storm House's upper storey (+66) is on the navmesh except under its beds, whose
 spots therefore stand on the floor below (Observed, 2026-10-18 probe). Engine choices: patrolling town acts as
 wandering (its task class is undecoded); a committed goal chosen again after its commitment ran out
-starts over with a new target; the sitting offset and facing on a chair are undecoded (its origin and
-yaw); training and throne furniture of 275's mask are not used; shops stand customers at a general
+starts over with a new target; the sitting offset on a chair and a throne's facing offset are undecoded
+(its origin and yaw are used); training and throne furniture of 275's mask are not used; shops stand customers at a general
 node, else a guard post, else any node; the first bar of a town is the package's; a home or seat given up
 after three failed walks is tried again when a new goal is taken up, and a member that gave its seat up
 leaves it to the next.

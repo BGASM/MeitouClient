@@ -101,6 +101,8 @@ public static class TownBuildings
     public const int CageFunction = 8;
     /// <summary>BUILDING_FUNCTIONALITY <c>function</c> 17, BF_CHAIR: stools, benches, sitting pillows and spots (docs/game/ai-tasks.md "Town goals").</summary>
     public const int ChairFunction = 17;
+    /// <summary>BF_TABLE, BF_CORPSE_DISPOSAL, BF_REFINERY: what a free seat faces (<see cref="SeatYaw"/>).</summary>
+    public const int TableFunction = 16, CorpseDisposalFunction = 11, RefineryFunction = 4;
 
     /// <summary>The buildings by town placement id (<see cref="TownPlacement.InstanceId"/>), each list in placement order.</summary>
     public static Dictionary<string, List<TownBuilding>> Build(GameDatabase db, WorldLevelData levels, BuildingLayouts? layouts, Func<double, double, float> terrainHeight)
@@ -146,6 +148,8 @@ public static class TownBuildings
                 if (layouts.Find(record, state.GetString("interior layout name"), exterior: false) is { } interior)
                 {
                     int index = 0;
+                    List<Vector3>? faced = null;
+                    List<(int Spot, int Flags)>? seats = null;
                     foreach (var item in layouts.Items(interior))
                     {
                         var (at, rotation) = BuildingLayouts.Place(resolved.Position, b.Rotation, item);
@@ -154,15 +158,21 @@ public static class TownBuildings
                         var function = kind is null ? FunctionOf(db, item.Building, functions) : null;
                         if (kind is { } k) spots.Add(new HomeSpot(k, at, YawOf(rotation)) { NodeType = node ? item.Building.GetInt("node type") : -1 });
                         else if (function?.GetInt("function") == ChairFunction)
+                        {
+                            (seats ??= []).Add((spots.Count, function.GetInt("flags")));
                             spots.Add(new HomeSpot(HomeSpotKind.Chair, at, YawOf(rotation))
                             {
                                 SitClip = function.GetReferences("animation").Select(r => db.Find(r.TargetStringId)?.Name).FirstOrDefault(n => n is not null),
                             });
+                        }
+                        if (function?.GetInt("function") is TableFunction or CorpseDisposalFunction or RefineryFunction) (faced ??= []).Add(at);
                         else if (FunctionOf(db, item.Building, functions)?.GetInt("function") == CageFunction || item.Building.GetBool("has lock"))
                             (fixtures ??= []).Add(new TownFixture($"{b.Key}/{index}", item.Building.StringId,
                                 FunctionOf(db, item.Building, functions)?.GetInt("function") == CageFunction, at, YawOf(rotation)));
                         index++;
                     }
+                    if (seats is not null && faced is not null)
+                        foreach (var (s, flags) in seats) spots[s] = spots[s] with { Yaw = SeatYaw(spots[s], flags, faced) };
                 }
             }
             if (!result.TryGetValue(town.InstanceId, out var list)) result[town.InstanceId] = list = [];
@@ -244,6 +254,20 @@ public static class TownBuildings
         }
         cache[building.StringId] = found;
         return found;
+    }
+
+    /// <summary>
+    /// The way a seat is sat facing (docs/game/ai-tasks.md "Chairs"): by its functionality's <c>flags</c>, 0 its own facing (<paramref name="seat"/>'s yaw), 1 towards
+    /// the nearest of <paramref name="faced"/> (the building's tables, corpse disposals and refineries), 2 its own facing or the opposite one, whichever has that one in front.
+    /// </summary>
+    static float SeatYaw(HomeSpot seat, int flags, List<Vector3> faced)
+    {
+        if (flags is not (1 or 2)) return seat.Yaw;
+        var nearest = faced.MinBy(p => Vector3.DistanceSquared(p, seat.Position));
+        var to = new Vector2(nearest.X - seat.Position.X, nearest.Z - seat.Position.Z);
+        if (to.LengthSquared() < 1e-6f) return seat.Yaw;
+        if (flags == 1) return MathF.Atan2(to.X, to.Y);
+        return Vector2.Dot(new Vector2(MathF.Sin(seat.Yaw), MathF.Cos(seat.Yaw)), to) >= 0 ? seat.Yaw : MathF.IEEERemainder(seat.Yaw + MathF.PI, MathF.Tau);
     }
 
     /// <summary>The simulation's yaw (0 along +Z, turning towards +X) of a rotation.</summary>
