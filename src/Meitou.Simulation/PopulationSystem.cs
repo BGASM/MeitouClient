@@ -334,6 +334,7 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         {
             var squad = SpawnSquad(world, built, site, radius);
             state.Squads.Add(squad.Id);   // slave squads are planned (built.Plan.Slaves) but not spawned yet
+            MakePrisoners(world, built, squad, site, radius, state);
         }
         if (town.Squads.Count > 0) MadeTown(world, town.Site, town.Squads.Where(s => s.Home is not null).Select(s => s.Members.Count));
         int housed = town.Squads.Count(s => s.Home is not null);
@@ -341,6 +342,40 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         townLog.Add($"{site.Town.Name}: {town.Squads.Count} squad(s), {town.Squads.Sum(s => s.Members.Count)} characters; {housed} at home in " +
             $"{town.Squads.Where(s => s.Home is not null).Select(s => s.Home).Distinct().Count()} of {site.Buildings.Count(b => b.CanHouse)} houses, {town.Squads.Count - housed} elsewhere" +
             (housed < town.Squads.Count ? $" ({string.Join(", ", town.Squads.Where(s => s.Home is null).Select(s => s.Plan.Template.Name))})" : ""));
+    }
+
+    /// <summary>
+    /// A housed squad's <c>prisoners</c> (the squad factory <c>FUN_140583a10</c>, <b>Observed</b>; docs/simulation.md "Cages, beds and locks"): only with a home building, each entry
+    /// a squad of its template's <c>faction</c> (else the owner squad's), each member imprisoned in a random free cage of the home, its lock set. <b>Engine choices</b>: members
+    /// beyond the free cages are not made (the original drops one and stops placing); the prisoners are held without a sentence (<see cref="CharacterCold.Kidnapped"/>), so no
+    /// release round frees them and no bail is offered (the original's served test for them is <b>Unknown</b>).
+    /// </summary>
+    void MakePrisoners(World world, BuiltSquad owner, Squad squad, TownSite site, float radius, SiteState state)
+    {
+        var links = owner.Plan.Template.Prisoners;
+        if (links.Count == 0 || owner.Home is not { } home) return;
+        var table = world.Characters;
+        var cages = world.Fixtures.OfBuilding(home.Key).Where(f => f.Kind == Locks.FixtureKind.Cage && Locks.FixtureRegistry.IsFree(table, f)).ToList();
+        ulong homeKey = Rng.StableHash(home.Key);
+        int picks = 0;
+        for (int e = 0; e < links.Count && cages.Count > 0; e++)
+        {
+            if (data.Db.Find(links[e].Id) is not { } record || !SquadFactory.IsTemplate(record)) continue;
+            var faction = (uint)squad.Faction < (uint)data.Factions.Count ? data.Factions[squad.Faction] : null;
+            ulong key = Rng.Mix(SeedSalts.PrisonerSquad ^ homeKey ^ (ulong)e << 48);
+            var at = new Vector2(cages[0].Position.X, cages[0].Position.Z);
+            if (BuildOne(SquadTemplate.From(record), squad.Faction, faction, key, world.Seed, at) is not { } built) continue;
+            if (built.Members.Count > cages.Count) built = built with { Members = built.Members.Take(cages.Count).ToList() };
+            var prisoners = SpawnSquad(world, built with { NearY = cages[0].Position.Y + SpotLift }, site, radius);
+            state.Squads.Add(prisoners.Id);
+            foreach (var id in prisoners.Members)
+            {
+                int pick = Rng.Int(Rng.Hash(world.Seed, homeKey, RngPurpose.Spawn, SeedSalts.PrisonerCage + (ulong)picks++), cages.Count);
+                var cage = cages[pick];
+                cages.RemoveAt(pick);
+                if (world.Fixtures.Imprison(world, id, cage)) table.Cold(id.Slot)!.Kidnapped = true;
+            }
+        }
     }
 
     readonly List<string> townLog = [];

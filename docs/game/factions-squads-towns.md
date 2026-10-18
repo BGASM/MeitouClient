@@ -23,6 +23,9 @@ flag. A unique with no entry counts as alive, so a new game answers by the data 
 v0..v1, reversed range givesv0. Apply size multiplier/truncation/min1 unless dont-multiply.
 Create leader role2, random choosefrom then squad role0/squad2 role1, animals/animals2, slaves
 role4 as recursive squads, prisoners into available home cages. First member can become leader.
+**Prisoners** (`FUN_140583a10`, **Observed**): only with a home building; its cages (`BuildingFinder_CagesWithinBuilding`) are counted, then each `prisoners` entry makes a
+platoon of the entry's `faction` (else the owner's) whose members each go into a random remaining cage (`FUN_140330600`, lock set) with `Character+0x190 = 9999999` (meaning
+**Unknown**); with no cage left, one member is removed and placing stops. A squad that made prisoner or slave squads gets no building shop ([economy](economy.md#shops-and-transactions)).
 Offsets `(3*(i%8),3*floor(i/8)+(i%2))`, animals2 spacing5. Meitou (engine choice, `MovementSystem.OffsetOfPlace`): a follower's slot is leader + offset x 2.5 (`FormationScale`); when a squad is put back in the world from a save or a stored platoon its offset is its distance from the leader divided by 2.5 and cut to 22 (the factory layout's reach), so a squad no longer spreads 2.5 times wider at every reload (**Observed** in the "weird bandits" save after the change: its 7 bandits stay within 75-95 units of the leader over 6000 ticks). How the original spaces followers (FACTION `squad formation`: Caravan, Military, Random) is **Unknown**. Age=max(0,r*animal-age-random-0.1+v2/100).
 Unique members go through one gate: [unique characters](#unique-characters).
 

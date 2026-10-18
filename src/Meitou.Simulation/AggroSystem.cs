@@ -309,7 +309,8 @@ public sealed class AggroSystem(FactionRelations relations, AggroSettings? setti
         // order is the grid's fixed one. Either way it is a function of the state. A sneaker farther than the best still gets its spot meter.
         bool better = taunts != s.BestTaunts ? taunts : d2 < s.BestD2;
         if (!better && !sneaking) return;
-        if (s.Table.Cold(slot) is not { Medical.Incapacitated: false } c) return;
+        // A caged prisoner is nobody's target (engine choice: the original's sensed-list filter is not decoded; town cages hold enemies of their guards).
+        if (s.Table.Cold(slot) is not { Medical.Incapacitated: false, IsImprisoned: false } c) return;
         // Wanted characters are the arrest system's (Crime.ArrestSystem): the police spot, fine or arrest them there.
         bool enemy = s.Stance != Ai.AiStance.Passive
             && (IsEnemy(s.Relations, s.Faction, c.Faction) || s.Stance == Ai.AiStance.AggressiveNeutrals && IsNeutral(s.Relations, s.Faction, c.Faction) || WarEnemy(s.War, s.Faction, c.Faction, other.Position));

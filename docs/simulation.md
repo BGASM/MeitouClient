@@ -498,7 +498,11 @@ Arrests, the recognition meter and the marker are hashed only while set. What a 
   Use Strength) sends the first eligible worker (the wearer or a mate within 25): pick (`Lockpicking.Step` rules), cut (needs a tool,
   `item function` 9; the best is consumed when hardness reaches 0) or break (strength > 3 x hardness). Another faction's wearer: a pending
   code 7. The lock is saved on the item (`lock lvl`, `locked`, `broken`, `hardness`). Shackled characters show the portrait Slave overlay.
-- Not built: slaves (putting shackles on; kidnapped captives: [Kidnapping](#kidnapping)), jailed NPCs from spawn data (template `prisoners`, `SquadFactory`).
+- **Spawn prisoners** (`PopulationSystem.MakePrisoners`; facts: [squad factory](game/factions-squads-towns.md#squad-factory)): a housed squad's `prisoners` templates are made
+  as squads of the template's faction (else the owner's) and each member is imprisoned in a random free cage of the home building. Engine choices: members beyond the free cages
+  are not made; they are held without a sentence (`Kidnapped`: no release round, no bail, getting out is no escape). Observed: Cat (`Dust King Prisoner`) caged in the Dust King
+  Tower's watchtower; Tengu's Vault and the Tower of Abuse have no cages in their homes, so none are made. A caged prisoner is no aggro target (engine choice).
+- Not built: slaves (putting shackles on; kidnapped captives: [Kidnapping](#kidnapping)).
 
 
 ## Kidnapping
