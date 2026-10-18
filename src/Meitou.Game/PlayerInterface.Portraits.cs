@@ -34,17 +34,22 @@ sealed partial class PlayerInterface
         var page = new UiRect(panel.X + panel.Width * 0.0183727f, panel.Y + panel.Height * 0.206897f, panel.Width * 0.965879f, panel.Height * 0.737069f);
         // The original leaves space below portraits instead of filling the tab page (docs/game/ui-screens.md).
         float size = Math.Min(page.Height * 0.72f, page.Width / members.Count), k = size / PortraitLayoutSize;
+        var camera = session.Camera.Current;
+        PrunePortraitFlashes(members);
         for (int i = 0; i < members.Count; i++)
         {
             var m = members[i];
             float left = page.X + i * size, top = page.Y;
             UiRect At(float x, float y, float w, float h) => new(left + x * k, top + y * k, w * k, h * k);
-            bool hurt = m.Body is { } body && (body.Unconscious || body.Dead);
-            controls.Add(new($"portrait-back-{i}", "ImageBox", At(0, 0, 135, 135), "", "", "", true,
-                new Dictionary<string, string> { ["ImageResource"] = "Kenshi_PortraitImage", ["ImageGroup"] = "Background", ["ImageName"] = hurt ? "Hurt" : "Normal" }, Vector4.Zero));
+            // The layout's depths, back to front: background, back overlay, portrait, front overlay, name, frame.
+            var state = PortraitStateOf(m, camera.Eye, camera.Target);
+            controls.Add(PortraitImage($"portrait-back-{i}", At(0, 0, 135, 135), "Background", (state & PortraitState.Hurt) != 0 ? "Hurt" : "Normal", PortraitFlash(m.Id, state)));
+            if (BackOverlayName(state) is { Length: > 0 } back) controls.Add(PortraitImage($"portrait-back-overlay-{i}", At(6, 5, 124, 124), "BackOverlay", back));
             int column = i % CharacterRenderer.PortraitColumns, row = i / CharacterRenderer.PortraitColumns, cell = CharacterRenderer.PortraitSize;
-            controls.Add(new($"portrait-{i}", "ImageBox", At(6, 6, 124, 123), "", "", "", true,
-                new Dictionary<string, string> { ["ImageTexture"] = PortraitTexture, ["ImageFlipV"] = "true", ["ImageRect"] = FormattableString.Invariant($"{column * cell} {row * cell} {cell} {cell}") }, Vector4.Zero));
+            var portrait = new Dictionary<string, string> { ["ImageTexture"] = PortraitTexture, ["ImageFlipV"] = "true", ["ImageRect"] = FormattableString.Invariant($"{column * cell} {row * cell} {cell} {cell}") };
+            if ((state & PortraitState.Faded) != 0) portrait["Alpha"] = "0.25";
+            controls.Add(new($"portrait-{i}", "ImageBox", At(6, 6, 124, 123), "", "", "", true, portrait, Vector4.Zero));
+            if (FrontOverlayName(state) is { Length: > 0 } front) controls.Add(PortraitImage($"portrait-front-overlay-{i}", At(6, 6, 124, 123), "FrontOverlay", front));
             controls.Add(new($"portrait-name-{i}", "TextBox", At(4, 4, 128, 126), m.Name, "", "Kenshi_TextboxStandardText", true,
                 new Dictionary<string, string> { ["TextAlign"] = "HCenter Bottom", ["TextColour"] = "1 1 1", ["TextShadow"] = "true" }, Vector4.Zero, Pickable: false));
             controls.Add(new($"member-{i}", "Button", At(0, 0, 136, 136), "", "meitou:member", "Kenshi_PortraitFrameSkin", true,

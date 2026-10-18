@@ -73,9 +73,9 @@ sealed partial class GameHost
         characters.PortraitRequests.Clear();
         if (!player.UiVisible || player.TitleOpen) return;
         var members = player.SquadBarMembers();
-        // The serial turns each portrait's camera (the original uses a number of the character's; this is the id's, stable for the character).
+        // The serial turns each portrait's camera.
         for (int i = 0; i < members.Count; i++)
-            characters.PortraitRequests.Add(new PortraitRequest(DrawKey(members[i].Id), i, (uint)members[i].Id.Slot * 2654435761u ^ (uint)members[i].Id.Generation));
+            characters.PortraitRequests.Add(new PortraitRequest(DrawKey(members[i].Id), i, members[i].PortraitSerial));
     }
 
     void FillDrawListCore(CharacterDrawList list)

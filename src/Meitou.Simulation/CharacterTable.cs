@@ -112,6 +112,11 @@ public sealed class CharacterCold
     public float FootprintRadius { get; set; }
     /// <summary>The character is in a fight (set by the combat system): the animation stance takes the combat clips.</summary>
     public bool InCombat { get; set; }
+    /// <summary>
+    /// The number that turns its portrait camera (docs/game/ui-screens.md "Portrait cells"): the save's <c>portrait_serial</c>, else its handle's serial; a character the game makes
+    /// gets random × 4e9 at <see cref="CharacterTable.Spawn"/>, as the original rolls one per character.
+    /// </summary>
+    public uint? PortraitSerial { get; set; }
     /// <summary>The character is running away (set and cleared by the <see cref="FleeSystem"/>, serial phases only): it neither looks for fights nor answers attacks.</summary>
     public bool Fleeing { get; set; }
     /// <summary>
@@ -300,6 +305,7 @@ public sealed class CharacterTable
         state.Alive = true;
         state.Generation = generation;
         cold.SpawnedTick = tick;
+        cold.PortraitSerial ??= (uint)(Rng.Float(Rng.Mix(Rng.Key(new CharacterId(slot, generation)) ^ (ulong)tick * 0x9E3779B97F4A7C15UL)) * 4e9f);
         next[slot] = state;
         // Outside a tick there is no "last tick" to keep apart from the new one.
         if (!inTick) previous[slot] = state;

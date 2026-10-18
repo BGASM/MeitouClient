@@ -114,7 +114,7 @@ the user's base-game save atlas shows a near-frontal face.
 | 4 | dead or unconscious (slot 107: `+0x5bc` / `+0x5b9`), carried (`+0x3d4`), or in a bed (`+0x2f8 == 1`) | `PortraitImage` alpha 0.25 (faded); this also stops the flash |
 | 8 | in combat (`FUN_140436610(c, 1)`) | `BackOverlay` `Combat` |
 | 0x80 | hunger (`+0x4b8`) < 1.25 | `BackOverlay` `Hunger`, only when not in combat |
-| 0x10 | the inventory holds an item in section 9 or 5 that answers yes to its slot 94 (`FUN_1405c8a10`); read as the slave shackles/collar, **Observed** | `FrontOverlay` `Slave` |
+| 0x10 | the inventory holds, in section 9 or 5, an item whose slot 94 answers non-null (`FUN_1405c8a10`). Only `LockedArmour` overrides slot 94. The item loader makes a `LockedArmour` for ARMOUR with `is locked` (`FUN_140580750`). That is, shackles. | `FrontOverlay` `Slave` |
 | 0x20 | imprisoned (`+0x2f8 == 2`, cage or restraint) | `FrontOverlay` `Prison` (wins over Slave) |
 | 0x40 | `+0x279 & 7` | `FrontOverlay` `Eaten` (wins over both) |
 
@@ -122,9 +122,14 @@ the user's base-game save atlas shows a near-frontal face.
   changes by direction × frame time × 2. At 0 the direction flips to +1, and at 1 it flips back to −1. That is a full 0 → 1 → 0 cycle
   every second. Without flag 2, or with flag 4, the alpha stays at 1.
 - **Unknown:** what the AI `+0xb0` float means. AI slot 25 (the eat desire) also suppresses itself while it is > 0, so it reads as
-  "danger seen". Also unknown: what `+0x279 & 7` holds, and what slot 94 tests.
+  "danger seen". Also unknown: what `+0x279 & 7` holds. Also unknown: which equipment slots inventory sections 9 and 5 are.
 - A portrait is re-rendered when its flags change, when its character changes, or when PortraitData `+0x30` / `+0x58` is set.
 - A cell wider than 94 px switches `NameText` to a larger font.
+
+Meitou (`PlayerInterface.PortraitStates.cs`):
+- The serial is `CharacterCold.PortraitSerial`. It is read and written as `portrait_serial` (or taken from the handle's serial), and rolled at spawn otherwise.
+- "In danger" is taken to mean "in a fight". The `Eaten` flag is never set.
+- Shackles are worn ARMOUR with `is locked`, which the original makes a `LockedArmour`.
 The HUD stats rows (`StatsText`: MARTIAL ARTS ...) are drawn in the painted face, Sentencia at its resized 22 pt, 15.3 px at 1080 p
 (**Observed**: glyph shapes and widths in a base-game screenshot; [mygui.md](../formats/mygui.md) for the resize); Meitou uses
 `Kenshi_PaintedTextFont_Medium` there.

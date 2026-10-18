@@ -223,6 +223,8 @@ internal static class SavedCharacters
         if (cold.IsPlayer && sc.GameState is { } orders) Orders.Read(orders, cold);
         // In a bed or a cage, and the sentence (docs/simulation.md "Cages, beds and locks"); the fixture binds when its town registers.
         HeldSave.Read(sc.GameState, cold, context.Handles, context.InstanceOf);
+        // The portrait camera's number: the saved one, else the handle's serial (CharacterAnimal::vfunc_18).
+        cold.PortraitSerial = sc.GameState is { } portrait && portrait.Ints.TryGetValue("portrait_serial", out int serial) ? (uint)serial : (uint)sc.Handle.S;
         cold.Save.InSomething = cold.InSomething;
         cold.Save.InWhat = cold.InWhat;
         // The body: the saved stats and medical state go to the body systems, the rest of the assembly (inventory, fighter) is made as for a new character.

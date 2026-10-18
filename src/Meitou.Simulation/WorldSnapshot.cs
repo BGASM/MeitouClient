@@ -99,6 +99,12 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     public bool PickingLock { get; init; }
     /// <summary>Lying in a bed (<see cref="Locks.HeldState.Bed"/>).</summary>
     public bool InBed { get; init; }
+    /// <summary>In a fight (<see cref="CharacterCold.InCombat"/>): the portrait's <c>Combat</c> overlay.</summary>
+    public bool InCombat { get; init; }
+    /// <summary>Wears locked armour (shackles, <see cref="Items.ItemInstance.IsLocked"/>): the portrait's <c>Slave</c> overlay.</summary>
+    public bool Shackled { get; init; }
+    /// <summary>The number that turns its portrait camera (<see cref="CharacterCold.PortraitSerial"/>).</summary>
+    public uint PortraitSerial { get; init; }
     /// <summary>The character this one carries (none when not carrying).</summary>
     public CharacterId Carrying { get; init; } = CharacterId.None;
     /// <summary>The goal the AI is acting out, in the game's words (<c>Patrolling town</c>, <c>Shopkeeper</c>); null when the AI does not run the character now.</summary>

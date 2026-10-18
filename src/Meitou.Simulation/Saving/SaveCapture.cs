@@ -326,6 +326,7 @@ public static partial class SaveCapture
             DialogueSave.Write(g, cold);
             if (orders) Orders.Write(g, cold);
             HeldSave.Write(g, cold, link, world.Fixtures, buildings);
+            if (cold.PortraitSerial is { } portraitSerial) g.Ints["portrait_serial"] = (int)portraitSerial;
         }
 
         // Body: stats and medical state, from the host, else the loaded ones, else (for a new character) defaults.

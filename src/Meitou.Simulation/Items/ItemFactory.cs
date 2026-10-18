@@ -39,6 +39,7 @@ public sealed class ItemFactory(GameDatabase db, GameConstants constants)
             Name = info.Name,
             Type = info.Type,
             EquipmentSection = info.Type == FcsRecordType.ARMOUR && Db.Find(info.Id) is { } armour ? SectionOf(armour) : "",
+            IsLocked = info.Type == FcsRecordType.ARMOUR && Db.Find(info.Id) is { } locked && locked.GetBool("is locked"),
             Quantity = Math.Max(quantity, 1),
             Quality = quality,
             ItemFunction = info.Function,
