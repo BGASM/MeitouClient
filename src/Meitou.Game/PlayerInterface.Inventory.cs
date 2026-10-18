@@ -27,7 +27,7 @@ sealed partial class PlayerInterface
         }
         if (!picked.Control.Properties.TryGetValue("InventoryItem", out var index) || Selected().FirstOrDefault() is not { ItemGrid: { } grid } lead) return false;
         var item = grid.Items.FirstOrDefault(i => i.Index == int.Parse(index, CultureInfo.InvariantCulture));
-        if (item is null || !InventoryCommands.IsMovableSection(item.Section)) return false;
+        if (item is null || !(InventoryCommands.IsMovableSection(item.Section) || InventoryCommands.IsLimbSection(item.Section))) return false;
         inventoryDrag = (lead.Id, item, Grab());
         Sound("Item_Lift", item: item.Record);
         return true;
@@ -69,6 +69,14 @@ sealed partial class PlayerInterface
                     trade.Stock.Select(s => (s.X, s.Y, s.Width, s.Height)), out int cx, out int cy))
                 (sx, sy) = (cx, cy);
             Sell(trade, token, item.Quantity, sx, sy);
+            return;
+        }
+        if (hit.Screen == "limbs")
+        {
+            // A prosthetic dropped on a slot of the limbs window: fitted there (the sim checks the side and that the limb is missing).
+            var controls = faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent).First(f => f.Id == hit.Screen).Controls;
+            if (controls.LastOrDefault(c => InventoryCommands.IsLimbSection(c.Name) && c.Bounds.Contains(p.X, p.Y) && (c.Clip?.Contains(p.X, p.Y) ?? true)) is { } slot)
+                Say(new MoveInventoryItem(drag.Character, token, slot.Name, 0, 0) { Tick = session.World.Tick });
             return;
         }
         if (hit.Screen is not ("inventory" or "bag") || Selected().FirstOrDefault(c => c.Id == drag.Character)?.ItemGrid is not { } own) return;

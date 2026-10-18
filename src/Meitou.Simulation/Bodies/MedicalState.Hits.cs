@@ -128,6 +128,26 @@ public sealed partial class MedicalState
         return true;
     }
 
+    /// <summary>
+    /// Takes the prosthetic off limb slot <paramref name="slot"/> (the reverse of <see cref="FitReplacement"/>): its item keeps <c>dam</c> = maximum - flesh, the part's wear and stun;
+    /// the part becomes a stump with flesh 5, wear and stun 0. Null when the slot has no prosthetic.
+    /// </summary>
+    public Items.ItemInstance? RemoveReplacement(int slot)
+    {
+        if (LimbPart(slot) is not { Limb: LimbState.Replaced } p) return null;
+        var item = p.ReplacementItem;
+        if (item is not null) (item.LimbDamage, item.LimbWear, item.LimbStun) = (MathF.Max(0, p.MaxHp - p.Flesh), p.Wear, p.Stun);
+        p.Limb = LimbState.Stump;
+        p.Replacement = null;
+        p.ReplacementItem = null;
+        p.ReplacementQuality = 0;
+        p.Wear = 0;
+        p.Stun = 0;
+        p.Flesh = 5;
+        p.WasDown = p.IsDown;
+        return item;
+    }
+
     // ------------------------------------------------------------------ KO and death
 
     void StartKo(in MedicalContext ctx, List<MedicalEvent>? events) => ApplyKo(KoTime(ctx), events);

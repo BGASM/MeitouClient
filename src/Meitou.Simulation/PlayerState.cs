@@ -138,7 +138,11 @@ public sealed class PlayerSystem(PopulationData? data = null) : ITickSystem
                 case Items.MoveInventoryItem move:
                     if (table.TryResolveNext(move.Character, out int owner) && table.Cold(owner) is { IsPlayer: true, Inventory: { } inventory } cold)
                     {
-                        if (!Items.InventoryCommands.Move(inventory, move.Item, move.Section, move.X, move.Y))
+                        if (Items.InventoryCommands.IsLimbSection(move.Item.Section) || Items.InventoryCommands.IsLimbSection(move.Section))
+                        {
+                            if (!MoveLimb(cold, inventory, move)) world.Post("Cannot fit or remove that limb: it needs a missing limb of its side, or the slot changed.");
+                        }
+                        else if (!Items.InventoryCommands.Move(inventory, move.Item, move.Section, move.X, move.Y))
                             world.Post("Cannot move that item: the slot is occupied, incompatible or the inventory changed.");
                         else if (Items.InventoryCommands.IsEquipmentSection(move.Item.Section) || Items.InventoryCommands.IsEquipmentSection(move.Section))
                             assembly?.RefreshEquipment(cold);
@@ -162,6 +166,34 @@ public sealed class PlayerSystem(PopulationData? data = null) : ITickSystem
     }
 
     public void SlowWorld(World world) => world.Player.Prune(world.Characters);
+
+    /// <summary>
+    /// A prosthetic dragged into or out of the limbs window (docs/game/character-stats.md "Limb replacements and robots"): into a slot it is fitted when that limb is a stump and the
+    /// item's <c>slot</c> is that limb; out of one it is taken off and the limb becomes a stump. A move between two limb slots is refused.
+    /// </summary>
+    bool MoveLimb(CharacterCold cold, Items.Inventory inventory, Items.MoveInventoryItem move)
+    {
+        if (data is null || cold.Medical is not { } medical) return false;
+        int from = Items.InventoryCommands.LimbSlotOf(move.Item.Section), to = Items.InventoryCommands.LimbSlotOf(move.Section);
+        if (from >= 0 && to >= 0) return false;
+        var item = inventory.All().ElementAtOrDefault(move.Item.Index);
+        if (item is null) return false;
+        if (to >= 0)
+        {
+            if (data.Items.Limb(item.Record) is not { } limb || limb.LimbSlot != to || medical.LimbPart(to) is not { Limb: Bodies.LimbState.Stump }) return false;
+            if (!Items.InventoryCommands.Move(inventory, move.Item, move.Section, move.X, move.Y)) return false;
+            medical.FitReplacement(limb, item, item.LimbDamage, item.LimbWear, item.LimbStun);
+            (item.LimbDamage, item.LimbWear, item.LimbStun) = (0, 0, 0);
+        }
+        else
+        {
+            if (medical.LimbPart(from) is not { Limb: Bodies.LimbState.Replaced } part || part.ReplacementItem != item) return false;
+            if (!Items.InventoryCommands.Move(inventory, move.Item, move.Section, move.X, move.Y)) return false;
+            medical.RemoveReplacement(from);
+        }
+        assembly?.RefreshEquipment(cold);
+        return true;
+    }
 
     /// <summary>A map item of a player character's inventory: its towns become discovered and recently discovered, and it is used up; with nothing new it stays.</summary>
     void ReadMap(World world, Items.ReadMapItem read)

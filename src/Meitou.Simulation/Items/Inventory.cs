@@ -22,11 +22,11 @@ public sealed class Inventory(int width, int height)
     /// <summary>The worn backpack, if any.</summary>
     public ItemInstance? Backpack => Items.Find(i => i.Section == "backpack_attach");
 
-    /// <summary>The weight of everything in this inventory (not including a carried person).</summary>
+    /// <summary>The weight of everything in this inventory (not including a carried person or fitted prosthetics, which vanilla keeps outside the inventory).</summary>
     public float ContentWeight()
     {
         float w = 0;
-        foreach (var i in Items) w += i.Weight;
+        foreach (var i in Items) if (!InventoryCommands.IsLimbSection(i.Section)) w += i.Weight;
         return w;
     }
 

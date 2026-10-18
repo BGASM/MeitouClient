@@ -54,17 +54,19 @@ public static class SavedKit
         item.MaterialId = s.MaterialId;
         item.CompanyId = s.CompanyId;
         item.Charges = s.Charges;
+        (item.LimbDamage, item.LimbWear, item.LimbStun) = (s.Damage, s.Wear, s.Stun);
         item.Saved = s.Source;
         return item;
     }
 
     /// <summary>The inventory as saved items, a container with its contents; each keeps the record it was read from (<see cref="ItemInstance.Saved"/>).</summary>
-    public static List<SaveItem> FromInventory(Inventory inventory) => [.. inventory.Items.Select(FromItem)];
+    public static List<SaveItem> FromInventory(Inventory inventory) => [.. inventory.Items.Where(i => !InventoryCommands.IsLimbSection(i.Section)).Select(FromItem)];
 
     internal static SaveItem FromItem(ItemInstance i) => new()
     {
         BaseId = i.Record, MaterialId = i.MaterialId, CompanyId = i.CompanyId, Section = i.Section, X = i.X, Y = i.Y, Quantity = i.Quantity, Level = i.Level,
         ItemFunction = i.ItemFunction, Quality = i.Quality, Charges = i.Charges, Source = i.Saved,
+        Damage = i.LimbDamage, Wear = i.LimbWear, Stun = i.LimbStun,
         Contents = i.Contents is { } bag ? FromInventory(bag) : null,
     };
 

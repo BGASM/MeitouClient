@@ -122,6 +122,13 @@ sealed class CharacterAssembly(PopulationData data)
         cold.Stats = stats;
         cold.Medical = medical;
         cold.Inventory = inventory ?? data.Items.Build(record, cold.Appearance?.Loadout);
+        // Fitted prosthetics show in the limbs window: their items sit in the inventory's limb sections (saved apart, SavedLimbs).
+        for (int k = 0; k < 4 && cold.Inventory is { } carried; k++)
+            if (medical.LimbPart(k)?.ReplacementItem is { } fitted && !carried.Items.Contains(fitted))
+            {
+                (fitted.Section, fitted.X, fitted.Y) = (Meitou.Data.Gameplay.Bodies.LimbReplacement.SlotOf(k), 0, 0);
+                carried.Items.Add(fitted);
+            }
         cold.Fighter = FighterOf(record, cold.Inventory);
         cold.WaterFactor = race.WaterAvoidance * (cold.Faction == data.PlayerFaction && data.PlayerFaction >= 0 ? 0.5f : 1);
     }

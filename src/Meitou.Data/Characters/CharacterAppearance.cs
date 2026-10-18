@@ -34,6 +34,11 @@ public sealed record CharacterPart
     public GameRecord? Material { get; init; }
     /// <summary>When the part shows: always, or only while the weapon in hand is sheathed or drawn (the first weapon's meshes).</summary>
     public WeaponShown Shown { get; init; }
+    /// <summary>
+    /// Boots over one prosthetic leg (<c>AppearanceBase_SetupItemMaterial</c>, <c>COLLAPSE_SIDE</c>): 1 collapses the mesh's x &gt;= 0 half (the left leg's), 2 its x &lt; 0 half;
+    /// 0 none.
+    /// </summary>
+    public int HideSide { get; init; }
 }
 
 /// <summary>When a <see cref="CharacterPart"/> shows: the first weapon has its sheathed <c>mesh</c> and its drawn <c>bare sword</c> and <c>sheath</c> in one appearance.</summary>
@@ -238,7 +243,16 @@ public sealed class CharacterAppearance
             result.AddWorn(item, female, worn);
         foreach (var item in items.Where(i => i.Type == FcsRecordType.LIMB_REPLACEMENT))
             result.AddLimb(item, female);
-        if (loadout is not null) result.AddLimbs(db, race, female, loadout.Limbs);
+        if (loadout is not null)
+        {
+            result.AddLimbs(db, race, female, loadout.Limbs);
+            // Boots (not `is locked`) over exactly one prosthetic leg lose that leg's half.
+            bool left = loadout.Limbs[2]?.State == 2, right = loadout.Limbs[3]?.State == 2;
+            if (left != right)
+                for (int i = 0; i < result.Parts.Count; i++)
+                    if (result.Parts[i] is { Slot: AttachSlot.Boots } boots && boots.Record.Type == FcsRecordType.ARMOUR && !boots.Record.GetBool("is locked"))
+                        result.Parts[i] = boots with { HideSide = left ? 1 : 2 };
+        }
 
         // Weapons: the loadout's, else the likeliest: the first entry with quantity > 0 of the hip pool (val1 = 0) and of
         // the back pool (val1 ≠ 0), whose absolute chances make the first one win (docs/characters.md). Then --equip weapons.

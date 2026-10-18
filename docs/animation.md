@@ -61,9 +61,10 @@ Sh=Shoulders*broad, F=Feet*h. Table retains every bone/positional vector and rem
 Neutral vectors1 except thighY0.95 (CharacterShapeTests).
 
 Limb factor0 only for a stump (limb state1; a prosthetic keeps1), else1; indices0 left-arm,1 right,2 left-leg,3 right-leg. Upper-arm
-stump remains unless hide-stump bits1/2 remove it. Thigh n0.8 for per-leg state1 (meaning unknown).
-Calf k uses signed equipment length ratio(boot/robotic-offset plus unknown constant): positive
-left, negative right,0 leaves both1. Movement translation scaleH unless two unidentified states.
+stump remains unless hide-stump bits1/2 remove it. Thigh n0.8 when that leg is a stump (limb state 1; **Observed**).
+Calf k uses the signed leg ratio (`@ read_boot_height_n7`, **Observed**): b = worn boots' `boot height`, L/R = the `offset` of a fitted
+left/right leg LIMB_REPLACEMENT (slot 52/53). Left only: (b+4)/(L+4); right only: x=R, y=b; both: x=R, y=L, then x<y gives
+(x+4)/(y+4), else -(y+4)/(x+4), equal 0. Positive scales the left calf, negative the right, 0 neither (`CharacterShape.LegRatioOf`). Movement translation scaleH unless two unidentified states.
 Muscle normal blends, head poses and skinning follow their own data/shader rules, not bone scale.
 
 **Engine choice** GroundOffset compensates lowest foot/toe bind-pose height change per appearance;
@@ -140,7 +141,7 @@ The renderer samples at `clip length × slider / 100`; generated NPC posture fol
   movement blend, was not traced), how the idle timer's units work, the arm check `@ 14051d240` in detail,
   the get-up clip's playback rate, how fast the movement direction turns, and which of `foetal` /
   `sitting dazed` / `knockout training` play when. Our engine's rules are in [simulation.md](simulation.md#animation).
-- Body shape: the nutrition value behind starvation (+0x4b8), the thigh-narrowing leg state, the two
+- Body shape: the nutrition value behind starvation (+0x4b8), the two
   movement-scale exceptions, the stats field x in the muscle definition, what reads (`Height` − 80) × 0.025,
   and what the game does when a body file lacks a slider (the viewer uses 100).
 

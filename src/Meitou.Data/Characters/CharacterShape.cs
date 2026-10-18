@@ -234,13 +234,44 @@ public static class CharacterShape
             muscle = MuscleFromStats(stats.GetFloat("strength"), stats.GetFloat("weapon smith"), stats.GetFloat("armour smith"));
         // hide stump: Kenshi reads it from the item worn under the name "armour"; the viewer takes the body-slot ARMOUR.
         var bodyArmour = c.Parts.FirstOrDefault(p => p.Record.Type == FcsRecordType.ARMOUR && p.Slot == AttachSlot.Body)?.Record;
+        int State(int k) => c.Loadout?.Limbs[k]?.State ?? 0;
         return new CharacterShapeInput
         {
             Sliders = sliders, Female = c.Female, Muscle = muscle,
             // Limb factor 0 only for a stump (state 1, uses_hide_stump); a prosthetic keeps the bone sizes so it skins to them.
-            Missing = c.Loadout is { } l ? l.Limbs.Select((x, k) => (x, k)).Where(p => p.x?.State == 1).Select(p => (Limb)p.k).ToHashSet() : new HashSet<Limb>(),
+            Missing = Enumerable.Range(0, 4).Where(k => State(k) == 1).Select(k => (Limb)k).ToHashSet(),
             HideStump = (HideStump)((bodyArmour?.GetInt("hide stump") ?? 0) & 3),
+            LegRatio = LegRatioOf(c.Parts),
+            // The thigh narrows to 0.8 when its leg is a stump (uses_hide_stump: the leg part's limb slot, FUN_140643ba0, in state 1).
+            NarrowLeftThigh = State(2) == 1, NarrowRightThigh = State(3) == 1,
         };
+    }
+
+    /// <summary>
+    /// The calf length ratio (<c>read_boot_height_n7</c>, docs/animation.md): b the worn boots' <c>boot height</c>, L / R the <c>offset</c> of the LIMB_REPLACEMENT worn in
+    /// slot 52 / 53 (a stump's mesh counts, offset 0). Left only: (b + 4) / (L + 4); right only: x = R against y = b; both: x = R, y = L. Then x &lt; y gives (x + 4) / (y + 4)
+    /// (the left calf), y &lt; x gives -(y + 4) / (x + 4) (the right calf), equal nothing. Without a leg item it is not set (0).
+    /// </summary>
+    public static float LegRatioOf(IEnumerable<CharacterPart> parts)
+    {
+        float boot = 0, left = 0, right = 0;
+        int flags = 0;
+        foreach (var p in parts)
+        {
+            if (p.Record.Type == FcsRecordType.ARMOUR && p.Slot == AttachSlot.Boots) boot = p.Record.GetFloat("boot height");
+            else if (p.Record.Type == FcsRecordType.LIMB_REPLACEMENT)
+                switch (p.Record.GetInt("slot"))
+                {
+                    case 52: flags |= 1; left = p.Record.GetFloat("offset"); break;
+                    case 53: flags |= 2; right = p.Record.GetFloat("offset"); break;
+                }
+        }
+        if (flags == 0) return 0;
+        if (flags == 1) return (boot + 4) / (left + 4);
+        float x = right, y = flags == 2 ? boot : left;
+        if (x < y) return (x + 4) / (y + 4);
+        if (y < x || flags == 2) return -((y + 4) / (x + 4));
+        return 0;
     }
 
     /// <summary>

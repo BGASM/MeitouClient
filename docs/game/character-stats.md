@@ -256,6 +256,9 @@ replaced, 3 crushed) and the fitted item (holder `FUN_1400cd3f0`; **Verified** b
 | Slot | Fields | Stat numbers |
 | --- | --- | --- |
 | all | `swimming mult`, `HP` (/`HP 1`), `unarmed damage bonus` (/`... 1`), `overall mult` | 23, part HP |
+- Meitou in play: fitted items sit in the inventory's `*_replace` sections (the limbs window), weigh nothing, are not traded and
+  are saved only through MEDICAL_STATE `limbs`. Dropping a LIMB_REPLACEMENT whose `slot` is 50 + k on slot k fits it when limb k is a
+  stump; dragging it out removes it. Whether the original also fits over a crushed limb is **Unknown** (Meitou refuses).
 | arms | `strength mult`, `dexterity mult`, `thievery mult` (applied to both 10 and 37), `ranged mult` | 1, 18, 10 and 37, 35 |
 | legs | `athletics mult`, `stealth mult` | 17, 16 |
 

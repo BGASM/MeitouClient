@@ -20,6 +20,10 @@ public sealed class SaveItem
     public int ItemFunction { get; init; }
     public float Quality { get; init; }
     public float Charges { get; init; } = 1;
+    /// <summary>A removed prosthetic's condition, the <c>dam</c>, <c>wear</c> and <c>stun</c> floats (docs/game/character-stats.md "Limb replacements and robots"); 0 for other items.</summary>
+    public float Damage { get; init; }
+    public float Wear { get; init; }
+    public float Stun { get; init; }
     /// <summary>A container's contents (the INVENTORY_STATE its one instance names); null for other items.</summary>
     public List<SaveItem>? Contents { get; init; }
     public FcsRecord? Source { get; init; }
@@ -68,6 +72,9 @@ public static class SaveInventory
         ItemFunction = r.Ints.GetValueOrDefault("item function"),
         Quality = r.Floats.GetValueOrDefault("quality"),
         Charges = r.Floats.GetValueOrDefault("charges", 1),
+        Damage = r.Floats.GetValueOrDefault("dam"),
+        Wear = r.Floats.GetValueOrDefault("wear"),
+        Stun = r.Floats.GetValueOrDefault("stun"),
         Contents = contents,
         Source = r,
     };
@@ -121,6 +128,9 @@ public static class SaveInventory
         r.Ints["quantity"] = item.Quantity;
         r.Floats["charges"] = item.Charges;
         r.Floats["quality"] = item.Quality;
+        // A prosthetic's condition: written where the record had it or it is not zero.
+        foreach (var (k, v) in new[] { ("dam", item.Damage), ("wear", item.Wear), ("stun", item.Stun) })
+            if (v != 0 || r.Floats.ContainsKey(k)) r.Floats[k] = v;
         r.Bools["in inventory"] = true;
         return r;
     }

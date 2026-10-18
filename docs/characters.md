@@ -90,6 +90,8 @@ arm, 8.6 for a leg. Bones map to limbs through the race's `combat anatomy` LOCAT
 for every limb not in state 0 (`FUN_1400cd470`); `character.hlsl` clips where the interpolated flag is above 0. Meitou: the limb bits
 ride in the body vertices' colour Y, the mask in the instance flags (`CharacterContent.MarkLimbs`, `CharacterAppearance.HiddenLimbs`);
 an unnamed root-chain bone (pelvis) is no limb (the original's fallback part index 1 is **Unknown** in effect). Part-map bits are not built.
+Boots (slot 9, not `is locked`) on a character with exactly one fitted leg prosthetic lose that leg's half (`AppearanceBase_SetupItemMaterial`,
+**Observed**): left leg replaced collapses the x >= 0 half, right the x < 0 half. Meitou: `CharacterPart.HideSide`, instance flag bits 16-17.
 
 ### LOD of character meshes
 

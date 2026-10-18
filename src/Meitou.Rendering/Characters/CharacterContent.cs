@@ -38,6 +38,8 @@ internal sealed class AssetPart
     public bool Morphed;
     /// <summary>The body mesh, whose limb vertices the appearance's hidden limbs hide (<see cref="CharacterAppearance.HiddenLimbs"/>).</summary>
     public bool IsBody;
+    /// <summary>Boots' collapsed half (<see cref="CharacterPart.HideSide"/>).</summary>
+    public int HideSide;
     /// <summary>The mesh's shadow-only levels (null: the shadow passes pick among the picture's levels): their distances, level 0 first (the original), and the mesh level the first of them is.</summary>
     public float[]? ShadowDistances;
     public int ShadowFirst;
@@ -452,7 +454,7 @@ internal sealed class CharacterContent : IDisposable
             var ap = new AssetPart
             {
                 Label = $"{part.Record.Type} '{part.Record.Name}' .{part.Field}", Mesh = loaded.Gpu, Shared = shared, Material = ItemMaterial(c, part, path, loaded),
-                BoundsCentre = loaded.Centre, BoundsRadius = loaded.Radius, Shown = part.Shown, PickBoxes = loaded.PickBoxes ?? [],
+                BoundsCentre = loaded.Centre, BoundsRadius = loaded.Radius, Shown = part.Shown, HideSide = part.HideSide, PickBoxes = loaded.PickBoxes ?? [],
             };
             if (!shared)
             {
