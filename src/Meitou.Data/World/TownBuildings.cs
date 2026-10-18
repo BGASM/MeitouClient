@@ -27,6 +27,12 @@ public readonly record struct HomeSpot(HomeSpotKind Kind, Vector3 Position, floa
 }
 
 /// <summary>
+/// A turret building (<c>BUILDING_FUNCTIONALITY</c> function BF_TURRET): where its mount stands and faces (0 along +Z, turning towards +X), how near its gunner must be,
+/// the GUN_DATA it fires, and the instance of the building it is mounted on (<c>mounted</c> handle; null when it names none known).
+/// </summary>
+public readonly record struct TurretPost(Vector3 Position, float Yaw, float UseRange, string GunId, string? MountedOn);
+
+/// <summary>
 /// A placed building of a town that squads can live in, with the beds and nodes of its interior layout (docs/formats/zones.md "Building layouts") and the shop and
 /// bar flags of its exterior layout. Position is the building's origin (absolute Y).
 /// </summary>
@@ -49,6 +55,8 @@ public sealed record TownBuilding(string InstanceId, string BuildingId, string N
     public bool IsGate { get; init; }
     /// <summary>The level data's <c>residents template</c> of its state (a SQUAD_TEMPLATE id; empty when none).</summary>
     public string ResidentsTemplate { get; init; } = "";
+    /// <summary>Its turret, when its record has a <c>BUILDING_FUNCTIONALITY</c> function BF_TURRET (a mounted harpoon turret or crossbow); null otherwise.</summary>
+    public TurretPost? Turret { get; init; }
     /// <summary>The state's <c>interior layout name</c> (the one its <see cref="Spots"/> come from); empty when none.</summary>
     public string InteriorLayout { get; init; } = "";
     /// <summary>The names of the interior and exterior layouts its record can take (its own and those of <c>shares interiors with</c>), case ignored.</summary>
@@ -74,7 +82,7 @@ public sealed record TownFixture(string Id, string RecordId, bool IsCage, Vector
 /// The buildings of each placed town, for the AI's homes, beds and nodes (docs/simulation.md "AI", Homes). A placed building belongs to the town its state's
 /// <c>town</c> handle names (at any distance: Squin's reach 4.5 x its radius), else the nearest one (<see cref="BuildingTowns"/>) when it stands within 1.5 x that
 /// town's radius (<b>engine choice</b>: the nearest-town fallback would otherwise hand every lone building in the world to some town). Buildings the level data marks destroyed are kept (the game rebuilds a non-player building on import: <c>FUN_140552b70</c> keeps <c>destroyed</c> only for the player's; the Hub's ruins house its squatters); node markers and resource buildings
-/// (<c>is foliage</c>) are left out. Beds are interior-layout objects with a BED or SKELETON_BED functionality (docs/game/buildings-production.md, BuildingFunction 6
+/// (<c>is foliage</c>) are left out. Turrets stay, with their gun and the building they are mounted on (<see cref="TownBuilding.Turret"/>), the AI's turret posts. Beds are interior-layout objects with a BED or SKELETON_BED functionality (docs/game/buildings-production.md, BuildingFunction 6
 /// and 25, found by the type of the referenced records rather than a field name); nodes are its <c>is node</c> objects, their <c>node type</c> kept and their kind read
 /// from it (0 shopkeeper, 2 guard post), else from the record name (<see cref="NodeKind(string)"/>).
 /// </summary>
@@ -94,6 +102,11 @@ public static class TownBuildings
                 radius[t.InstanceId] = MathF.Max(town.SizeRadius * town.TownRadiusMult, 1);
         var beds = new Dictionary<string, bool>(StringComparer.Ordinal);
         var functions = new Dictionary<string, GameRecord?>(StringComparer.Ordinal);
+        // The instance of each building state's own handle, so a turret's mounted handle names the building it stands on.
+        var instances = new Dictionary<(int C, int I), string>();
+        foreach (var b in levels.Buildings())
+            if (b.StateId is not null && levels.Zones.TryGetValue(b.Zone, out var zone) && zone.Find(b.StateId) is { } state && state.GetInt("handleTYPE") == (int)FcsRecordType.BUILDING && state.Ints.ContainsKey("handleI"))
+                instances[(state.GetInt("handleC"), state.GetInt("handleI"))] = b.InstanceId;
         var names = new Dictionary<(string, bool), IReadOnlySet<string>>();
         List<TownFixture>? fixtures = null;
         var result = new Dictionary<string, List<TownBuilding>>(StringComparer.Ordinal);
@@ -106,6 +119,11 @@ public static class TownBuildings
             var linked = towns.TownByHandle(state);
             if ((linked ?? towns.NearestTown(resolved.Position)) is not { } town || !radius.TryGetValue(town.InstanceId, out float r)) continue;
             if (linked is null && Vector2.Distance(new Vector2(town.Position.X, town.Position.Z), new Vector2(resolved.Position.X, resolved.Position.Z)) > r * 1.5f) continue;
+            var functionality = FunctionOf(db, record, functions);
+            TurretPost? turret = functionality is { } fn && fn.GetInt("function") == ObjectRanges.TurretFunction
+                ? new TurretPost(resolved.Position, YawOf(b.Rotation), fn.GetFloat("use range", 10),
+                    record.GetReferences("gun turret").Select(r => r.TargetStringId).FirstOrDefault() ?? "", MountedOn(instances, state))
+                : null;
             var spots = new List<HomeSpot>();
             bool shop = false, bar = false;
             if (layouts is not null && state is not null)
@@ -138,6 +156,7 @@ public static class TownBuildings
                 OwnerFactionId = owner, Fixtures = fixtures ?? [], Zone = b.Zone,
                 CanHouse = record.GetBool("is wall gate") || record.GetReferences("interior").Count > 0 && !record.GetBool("links together"),
                 IsGate = record.GetBool("is wall gate"),
+                Turret = turret,
                 ResidentsTemplate = state?.GetString("residents template") ?? "",
                 InteriorLayout = state?.GetString("interior layout name") ?? "",
                 InteriorLayouts = LayoutNames(layouts, record, exterior: false, names),
@@ -149,6 +168,11 @@ public static class TownBuildings
         }
         return result;
     }
+
+    /// <summary>The instance of the building a state's <c>mounted</c> handle names; null when the handle is null, not a building, or unknown.</summary>
+    static string? MountedOn(Dictionary<(int C, int I), string> instances, GameRecord? state) =>
+        state is not null && state.GetInt("mountedTYPE") == (int)FcsRecordType.BUILDING && state.Ints.ContainsKey("mountedI") &&
+        instances.TryGetValue((state.GetInt("mountedC"), state.GetInt("mountedI")), out string? instance) ? instance : null;
 
     /// <summary>The kind of a node: by its <c>node type</c> (0 shopkeeper, 2 guard post), else by its record's name.</summary>
     public static HomeSpotKind NodeKind(GameRecord node) => node.GetInt("node type") switch

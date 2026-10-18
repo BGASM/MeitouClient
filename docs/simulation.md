@@ -704,9 +704,30 @@ to the next tick. A hostile target is attacked instead.
 
 `AiSystem`, blackboards/minds, package/task data: slot/class/time/weight selection, homes/beds/nodes,
 patrol/bar/shop/sleep/retreat/contracts, combat stances and off-screen roaming jobs. Data and
-TaskData semantics: [ai.md](game/ai.md), [ai-tasks.md](game/ai-tasks.md). Desire scoring is an
-engine approximation where original functions are undecoded; full planner, wars, prisoners and
-resident town simulation off screen are incomplete. Hash blackboards/minds/jobs when present.
+TaskData semantics: [ai.md](game/ai.md), [ai-tasks.md](game/ai-tasks.md). Full planner, wars,
+prisoners and resident town simulation off screen are incomplete. Hash blackboards/minds/jobs when present.
+
+Scoring follows the original (`TaskProfiles`: desire, commitment, crowding per goal type); a desire
+the original computes in a function of its own counts as 1. Town goals ([ai-tasks.md](game/ai-tasks.md#town-goals)):
+wandering and patrolling in town walk to a general node of a town building, shopping to a node of a
+shop, relaxing under a bar package sits at a bar seat (bar nodes, then general nodes) claimed per
+member on the package cadence, and the wanderer walks to the nearest town. A town's bars and shops are
+the buildings whose residents (the squads living there, else the level data's `residents template`)
+have designation BAR or a shop (`AiSystem.RefreshPlaces`). Walks to nodes, beds and seats pass the
+spot's height and count as arrived only on that floor. Engine choices: patrolling town acts as
+wandering (its task class is undecoded); a committed goal chosen again after its commitment ran out
+starts over with a new target; seats are nodes, not furniture; shops stand customers at a general
+node, else a guard post, else any node; the first bar of a town is the package's; a home or seat given up
+after three failed walks is tried again when a new goal is taken up, and a member that gave its seat up
+leaves it to the next (no game data names a bar node, so seats are general nodes).
+
+Turret goals (149, 222, 234, 146) man a turret of the squad's town: a placed BUILDING with a
+`BUILDING_FUNCTIONALITY` function 12 (`TownBuilding.Turret`: its `use range` and `gun turret`
+GUN_DATA). In member order each slot claims the nearest free turret and walks to a spot behind its
+gun, facing its way; the home-building goal (222) takes only a turret mounted on its home (the
+state's `mounted` handle). Claim order and gunner spot are engine choices (the game's turret state
+is undecoded); turrets do not fire yet (no power, aiming or damage model,
+[combat.md](game/combat.md) "Ranged and turrets").
 
 ## Saves
 

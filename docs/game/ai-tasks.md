@@ -570,6 +570,60 @@ Rules: [economy 11.5, 11.7](economy.md#115-bail-and-sentence). **Observed** (eva
 | goal 276 Liberating prisoners | finder `FUN_1408cf140` (`BuildingFinder_CagesToLiberate`): a cage of a faction that fails the relation test `FUN_1406b2630` (read as allied) holding an occupant that is not an enemy |
 | 133 / 207, 256 `Task_GetOutOfCage` | constructor flag "escape" 0 for 133, 1 for 207 and 256 ([locks](locks.md#cages-and-beds)) |
 
+## Desire and commitment
+
+**Observed** (TaskData constructor `FUN_14061d350`, registrations in `FUN_140319a60` parsed for all 253 rows, scorer `FUN_14050df10`, `AITaskSytem`
+vfunc 5 `FUN_14050caf0`). TaskData fields: +0x108 desire (a member function, nearly always a virtual of the `AI` object: `mov rax,[rcx]; jmp [rax+slot*8]`);
++0x160 target finder (returns a factor, 0 when it found nothing; the desire is multiplied by it when the row has an effect, `FUN_14060fd80`);
++0x18 / +0x1c commitment minimum / random range in game hours; +0x20 commits; +0x34 crowd factor (default 1); +0x3c is read by the senses
+(`FUN_1408529c0`, meaning **Unknown**).
+
+- Score = desire x goal weight x crowd^n (n squad mates on the same type and target); x1.25 for the current task. For a committing current task the
+  score is at least 0.4 until the commitment ends and at most 0.05 after it, so the character moves on.
+- Commitment: when a committing task becomes current, end = now + min + rand x range. A candidate that is not the current task has its target cleared
+  before it is chosen, so a newly chosen goal gets a fresh target from its finder.
+- Desires (`AI` vtable slots): 19 = 1, 39 = 0.1 (Idleness), 40 = 0.25 (Patrolling, Patrolling town), 41 = 0.5 (Stand at node, Shopkeeper, Static guard,
+  general node), 48 = 0.01 + 0.4 x rand (Wandering town, Staying home, Sitting around, Static town guard, Shopping 119). 125 rows desire 1; 102 call a
+  function of their own (sleeping, following, retreating, turrets, Shopping 118: 1 until the shopping list is done).
+
+| Type | Commitment (h) | Crowd |
+|---|---|---|
+| 37 Wandering town, 118 Shopping | 0.25 + r x 1.5 | 1 |
+| 43 Staying home, 255 Reigning, 275 Sitting around | 0.2 + r x 0.8 | 1 |
+| 38, 268 Static guard | 0.1 + r x 0.5 | 1 |
+| 157 Static town guard | 0.1 + r x 1 | 1 |
+| 47 general node | 0.03 + r x 0.1 | 1 |
+| 153, 239 Going to bed | 2 + r x 8 | 1 |
+| 190 Worker, 221 Operating machine | 0.5 + r x 2 | 1 |
+| 240 Capture Target | 0.05 + r x 0.5 | 1 |
+| 248 Attacking Squad | 0.3 + r x 2 | 1 |
+| 45 Bodyguard | - | 0.9 |
+| 57, 58, 125, 237, 250 | - | 0.8 |
+
+## Town goals
+
+**Observed** (target finders named; TaskData effects lead the planner to the task that acts them out):
+
+- **37 Wandering town** (`FUN_140999a60`): keeps a target that is still a general node; else a random building of the character's town in its zone
+  (`FUN_1409fc6c0` over `FUN_1409fbb00`, a building filter **Unknown**), then a random node of type 1 (NODE_GENERAL) in it whose owner is unset or the
+  character's faction (`FUN_14038c2f0`); none: 0. Effect `atNode`, acted out by 51 Stand at node.
+- **47 general node / 20 Shopkeeper** (`FUN_14099f280` / `FUN_14099e920`): a node of that type in the home building (owner unset or own faction),
+  reserved; guard posts fall back to general nodes.
+- **118 Shopping** (`FUN_1409997f0`): a shop of the town selling an item on the character's shopping list (`FUN_1409fc070`), else a random shop
+  (`FUN_1409fc1b0`); factor 1 for a BF_SHOP building, 0.4 otherwise. Then 119 (`Task_Shopping`) at it.
+- **214 Relaxing** (`FUN_140998d10`): the current package's own target (package vfunc 1); none: 0. Effect `IS_WORKING`, acted out by 87 Operating
+  machine, i.e. using furniture there; with no free one the plan fails and another goal wins.
+- **Hang-around-bar package** (`Package_HangAroundBar`, start vfunc 6): its town is the squad's home town, else the nearest friendly one
+  (`FUN_1402916b0`); its bar a random one of the town's buildings of designation 3 (BD_BAR, the residents' template's `building designation`), with a
+  free spot reserved there; with none it settles for something else (`FUN_140292de0`, **Unknown**).
+- Building layouts' `is bar` / `is shop` are 0 on every exterior layout of the base game and mods checked (2 interior layouts set `is bar`, 9 `is shop`),
+  so they do not mark bars and shops (**Verified** over the merged `interiors.level`).
+- **43 Staying home** (`FUN_1408cbc00`): furniture in the home whose BuildingFunction is in mask 0x2049a (bits MINE, RESEARCH, REFINERY, TRAINING,
+  CRAFTING, CHAIR; reading the mask as bits is **Observed**); **275 Sitting around** (`FUN_1408caf00`): only in the home town, furniture of mask
+  0x1020080 (TRAINING, CHAIR, THRONE) not claimed by others. Both lead to 221 (pretend operating).
+- **24 Wandering** (`FUN_140998040`): the nearest town; list A holds `atATown`, so it is dropped while in a town.
+- **36 Patrolling town**: `Task_PatrolTown`, behaviour **Unknown**.
+
 ## Unknowns
 
 - Why `taskType` 289 and 290 exist without an enum name (they build `Task_Follow` and `Task_BashDoor`; row 290 of the TaskData table repeats the data of `BASH_GATE`).

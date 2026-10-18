@@ -222,7 +222,8 @@ no path re-running the initial resident placement was found (**Unknown** whether
   (`FUN_140583a10`): a GENERAL node, else SHOPKEEPER, at node + (0, 10, 0), else the platoon point. The squad's home is the building.
 - **Bar squads** (`FUN_1409fcd20`): n = v0 > 2 ? (int)(v1 x 0.005 x v0) : 0, then +1 per Rand(0, 100) <= v1, stopping
   at the first failure, at most v0. Each at a random node of the town's node map (`FUN_14038b000`), else the town
-  position; no home. Which nodes that map holds is **Unknown** (Meitou: GENERAL nodes of its bars).
+  position; no home. That map (NodeList +0x50) is filled by `FUN_14038b650` with nodes the game creates itself next to objects
+  (record `1186-gamedata.base`, "Node Guardpost", node type 2); which objects is **Unknown** (Meitou: GENERAL nodes of its bars).
 - **New game vs level data**: level-data building states carry `residents template` / `squad template`; save 2 against
   them has the same multiset per town but shuffled across buildings (223 same, 125 moved), so a new game rerolls homes
   (**Observed**). Destroyed buildings stay candidates (the Hub's ruins house squatters).

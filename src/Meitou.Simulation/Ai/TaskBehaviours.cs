@@ -4,7 +4,7 @@ namespace Meitou.Simulation.Ai;
 
 /// <summary>
 /// How the engine acts out a goal it chose (docs/simulation.md "AI"). The original runs a <c>Task_*</c> class and its GOAP plan per goal
-/// (docs/game/ai-tasks.md); towns here have no buildings, beds, doors or nodes yet, so a goal maps onto the movement tasks that exist.
+/// (docs/game/ai-tasks.md); here a goal maps onto the movement tasks that exist, at the town's buildings, nodes and beds.
 /// A goal whose type has no behaviour is never chosen.
 /// </summary>
 public enum AiBehaviour : byte
@@ -13,8 +13,6 @@ public enum AiBehaviour : byte
     None = 0,
     /// <summary>Stands about near its post, stepping a few metres now and then (<see cref="CharacterTask.Wander"/> in <see cref="AiSettings.MillRadius"/>).</summary>
     Mill = 1,
-    /// <summary>Walks to random places in the squad's home (the town) and waits between them (<see cref="CharacterTask.Wander"/>).</summary>
-    Roam = 2,
     /// <summary>Walks to its node in the home building (shopkeeper, guard, throne or general, by goal), else to its post, and stands there.</summary>
     Post = 3,
     /// <summary>Keeps its place beside the squad leader (<see cref="CharacterTask.Follow"/>); the leader itself cannot.</summary>
@@ -23,10 +21,20 @@ public enum AiBehaviour : byte
     Sleep = 5,
     /// <summary>Sits down (<see cref="CharacterTask.Rest"/>): at a bar or general node of its home, else inside it; without a home where it is.</summary>
     Sit = 6,
-    /// <summary>While a patrol package runs, the leader walks the patrol's route and the others follow it; otherwise as <see cref="Roam"/>.</summary>
+    /// <summary>While a patrol package runs, the leader walks the patrol's route and the others follow it; otherwise wanders about the town (<see cref="CharacterTask.Wander"/>).</summary>
     Patrol = 7,
     /// <summary>Goes back to its home town (its home building, else the town's centre); wanted at 0.5 while away from it and not at all at home (docs/game/perception.md 7.2, Observed).</summary>
     GoHome = 8,
+    /// <summary>Walks to the turret of its town it claimed and stands at its gun (docs/simulation.md "AI"; turret firing is not modelled yet).</summary>
+    Turret = 9,
+    /// <summary>Walks to a general node of a random building of its town and stands there (WANDER_TOWN, docs/game/ai-tasks.md "Town goals", Observed); PATROL_TOWN too (its <c>Task_PatrolTown</c> is not decoded: engine choice).</summary>
+    TownNode = 10,
+    /// <summary>Walks into a shop of its town and stands at a node in it (SHOPPING; buying is not modelled).</summary>
+    Shop = 11,
+    /// <summary>Sits at the seat of the package's bar it claimed (RELAX_IN_TOWN_PACKAGE under a bar package); wanted only while it has one.</summary>
+    Relax = 12,
+    /// <summary>Walks to the nearest town; not wanted while in one (WANDERER, docs/game/ai-tasks.md "Town goals", Observed).</summary>
+    ToTown = 13,
 }
 
 /// <summary>The engine's table from <see cref="TaskType"/> to <see cref="AiBehaviour"/>, and the TaskData display text (docs/game/ai-tasks.md "TaskData registry", Verified) of the types it acts out.</summary>
@@ -35,11 +43,12 @@ public static class TaskBehaviours
     static readonly Dictionary<TaskType, (AiBehaviour Behaviour, string Text)> Table = new()
     {
         [TaskType.IDLE] = (AiBehaviour.Mill, "Idleness"),
-        [TaskType.WANDERER] = (AiBehaviour.Roam, "Wandering"),
-        [TaskType.PATROL_TOWN] = (AiBehaviour.Roam, "Patrolling town"),
+        [TaskType.WANDERER] = (AiBehaviour.ToTown, "Wandering"),
+        [TaskType.WANDER_TOWN] = (AiBehaviour.TownNode, "Wandering town"),
+        [TaskType.PATROL_TOWN] = (AiBehaviour.TownNode, "Patrolling town"),
         [TaskType.PATROL] = (AiBehaviour.Patrol, "Patrolling"),
-        [TaskType.RELAX_IN_TOWN_PACKAGE] = (AiBehaviour.Roam, "Relaxing"),
-        [TaskType.SHOPPING] = (AiBehaviour.Roam, "Shopping"),
+        [TaskType.RELAX_IN_TOWN_PACKAGE] = (AiBehaviour.Relax, "Relaxing"),
+        [TaskType.SHOPPING] = (AiBehaviour.Shop, "Shopping"),
         [TaskType.STAND_AT_SHOPKEEPER_NODE] = (AiBehaviour.Post, "Shopkeeper"),
         [TaskType.STAND_AT_GUARD_NODE_HOMEBUILDING] = (AiBehaviour.Post, "Static guard"),
         [TaskType.STAND_AT_GUARD_NODE_HOMEBUILDING_INDOORS_ONLY] = (AiBehaviour.Post, "Static guard indoors"),
@@ -48,6 +57,10 @@ public static class TaskBehaviours
         [TaskType.HOLD_POSITION] = (AiBehaviour.Post, "Holding position"),
         [TaskType.STAY_IN_HOME] = (AiBehaviour.Post, "Staying home"),
         [TaskType.MAN_THE_GATE] = (AiBehaviour.Post, "Gate guard"),
+        [TaskType.MAN_A_TURRET] = (AiBehaviour.Turret, "Turret guard"),
+        [TaskType.MAN_A_TURRET_ON_BUILDING] = (AiBehaviour.Turret, "Turret home guard"),
+        [TaskType.MAN_A_TURRET_PLAYER_JOB] = (AiBehaviour.Turret, "Turret guard"),
+        [TaskType.USE_TURRET] = (AiBehaviour.Turret, "Turret gunner"),
         [TaskType.SIT_ON_THRONE] = (AiBehaviour.Post, "Reigning"),
         [TaskType.FOLLOW_SQUADLEADER] = (AiBehaviour.Follow, "Following leader"),
         [TaskType.FOLLOW_SLAVEMASTER] = (AiBehaviour.Follow, "Following master"),
@@ -78,7 +91,7 @@ public static class TaskBehaviours
     };
 
     // Flat tables by type number for the think's hot loop (a dictionary lookup per goal was a third of the think).
-    const int TypeCount = 291;
+    internal const int TypeCount = 291;
     static readonly AiBehaviour[] Behaviours = BuildBehaviours();
     static readonly sbyte[] StanceTable = BuildStances();
 

@@ -98,6 +98,22 @@ public sealed class PopulationData
     public BodyOptions BodyOptions { get; init; } = BodyOptions.Default;
     Dictionary<string, int>? factionIndex;
 
+    readonly Dictionary<int, IReadOnlyList<TownBuilding>> turrets = [];
+    /// <summary>
+    /// The turret buildings of the site (<see cref="TownBuilding.Turret"/>), in placement order; empty for no site, no building data or none. Cached: the AI asks the
+    /// package cadence of every town squad.
+    /// </summary>
+    public IReadOnlyList<TownBuilding> Turrets(int site)
+    {
+        lock (turrets)
+        {
+            if (turrets.TryGetValue(site, out var known)) return known;
+            IReadOnlyList<TownBuilding> list = site >= 0 && site < Sites.Count ? [.. Sites[site].Buildings.Where(b => b.Turret is not null)] : [];
+            turrets[site] = list;
+            return list;
+        }
+    }
+
     /// <summary>The position of a faction id in <see cref="Factions"/> (the first when an id repeats), or -1. The index is built once.</summary>
     public int FactionIndex(string id)
     {

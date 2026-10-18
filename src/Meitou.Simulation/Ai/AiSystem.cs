@@ -16,8 +16,6 @@ public sealed class AiSettings
     public float PostSlack { get; init; } = 12;
     /// <summary>The radius a character mills about its post in (<see cref="AiBehaviour.Mill"/>).</summary>
     public float MillRadius { get; init; } = 25;
-    /// <summary>The crowding factor: the score is multiplied by it once per squad mate acting out the same goal type. The original's is per TaskData (<b>Unknown</b>); 1 turns crowding off.</summary>
-    public float CrowdFactor { get; init; } = 1;
     /// <summary>The score of the goal being acted out is multiplied by this (<b>Observed</b>, docs/game/ai.md "Scoring"), so a near tie does not flip.</summary>
     public float Continuity { get; init; } = 1.25f;
     /// <summary>A patrol package may start this many game hours after the last one started (uniform), and the first one within <see cref="FirstPatrolHours"/> of the squad appearing.</summary>
@@ -60,6 +58,9 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
     /// <summary>Walks to a spot in a row that may end elsewhere before it gives the spot up.</summary>
     public const int MaxFailedWalks = 3;
 
+    /// <summary>How near a turret's gunner spot counts as arrived (units): well inside the turret's <c>use range</c>, which is 10 for the base game's turrets.</summary>
+    public const float TurretSlack = 3;
+
     static readonly TaskPriority[] Tiers = [TaskPriority.Urgent, TaskPriority.NonUrgent, TaskPriority.Fluff];
 
     public AiSettings Settings { get; } = settings ?? new AiSettings();
@@ -68,6 +69,10 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
     readonly Dictionary<string, (IReadOnlyList<SlottedPackage> Packages, SquadTemplate? Template)> templates = [];
     // Squads already looked at (ids are never reused); derived from the squads, so not part of the hash.
     readonly HashSet<int> looked = [];
+    // The turret indices of each town claimed in the current cadence pass (derived, not hashed).
+    readonly Dictionary<int, HashSet<int>> turretTaken = [];
+    // The seats of each bar claimed in the current cadence pass, by building (derived, not hashed).
+    readonly Dictionary<TownBuilding, HashSet<int>> seatTaken = new(ReferenceEqualityComparer.Instance);
     readonly Rules rules = new();
 
     // ------------------------------------------------------------------ think (parallel)
@@ -106,8 +111,9 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
         {
             CharacterTask.Idle or CharacterTask.Wander or CharacterTask.Follow => true,
             // The walks to its spots, and lying or sitting there, are the AI's own.
-            CharacterTask.GoTo => mind.Behaviour is AiBehaviour.Post or AiBehaviour.Sleep or AiBehaviour.Sit or AiBehaviour.GoHome or AiBehaviour.Patrol,
-            CharacterTask.Rest => mind.Behaviour is AiBehaviour.Sleep or AiBehaviour.Sit,
+            CharacterTask.GoTo => mind.Behaviour is AiBehaviour.Post or AiBehaviour.Sleep or AiBehaviour.Sit or AiBehaviour.GoHome or AiBehaviour.Patrol or AiBehaviour.Turret
+                or AiBehaviour.TownNode or AiBehaviour.Shop or AiBehaviour.Relax or AiBehaviour.ToTown,
+            CharacterTask.Rest => mind.Behaviour is AiBehaviour.Sleep or AiBehaviour.Sit or AiBehaviour.Relax,
             _ => false,
         };
     }
@@ -149,11 +155,17 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
             void Consider(AiGoal g)
             {
                 if (g.Task.Priority != tier || !g.InWindow(hour)) return;
-                float desire = Desire(world, TaskBehaviours.Of(g.Task.Type), squad, board, id);
+                var profile = TaskProfiles.Of(g.Task.Type);
+                float desire = Desire(world, TaskBehaviours.Of(g.Task.Type), g.Task.Type, profile, squad, board, mind, id);
                 if (desire <= 0) return;
                 int crowd = board.Crowd.GetValueOrDefault(g.Task.Type) - (mind.Goal?.Task.Type == g.Task.Type ? 1 : 0);
-                float score = desire * g.Weight * (crowd > 0 ? MathF.Pow(Settings.CrowdFactor, crowd) : 1);
-                if (mind.Goal is { } current && current.Task.Type == g.Task.Type && current.Task.Target == g.Task.Target) score *= Settings.Continuity;
+                float score = desire * g.Weight * (crowd > 0 ? MathF.Pow(profile.Crowd, crowd) : 1);
+                if (mind.Goal is { } current && current.Task.Type == g.Task.Type && current.Task.Target == g.Task.Target)
+                {
+                    score *= Settings.Continuity;
+                    // A goal it committed to holds at least 0.4 until the commitment runs out, then at most 0.05 (docs/game/ai.md "Packages and goals", Observed).
+                    if (profile.Commits) score = world.GameHours < mind.CommitUntil ? MathF.Max(score, 0.4f) : MathF.Min(score, 0.05f);
+                }
                 if (score > bestScore) (best, bestScore) = (g, score);
             }
             // Index loops: a foreach over the interface would box an enumerator per list and pass.
@@ -166,16 +178,140 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
     }
 
     /// <summary>
-    /// How much the character wants a goal (the TaskData desire functions are not decoded): 1 for a goal it can act out, 0 for the rest; going home 0.5 while
-    /// away from the home town and 0 in it (docs/game/perception.md 7.2, Observed).
+    /// How much the character wants a goal: its type's desire (<see cref="TaskProfiles"/>; a type with a desire function of its own, 1), times what the goal's target
+    /// finder found (docs/game/ai-tasks.md "Town goals", Observed: 0 when it found nothing). Going home is 0.5 while away from the home town and 0 in it
+    /// (docs/game/perception.md 7.2, Observed); a goal the engine cannot act out is 0.
     /// </summary>
-    float Desire(World world, AiBehaviour behaviour, Squad squad, Blackboard board, CharacterId self) => behaviour switch
+    float Desire(World world, AiBehaviour behaviour, TaskType type, TaskProfile profile, Squad squad, Blackboard board, AiMind mind, CharacterId self)
     {
-        AiBehaviour.None => 0,
-        AiBehaviour.Follow => squad.Leader.IsNone || squad.Leader == self || !world.Characters.IsAlive(squad.Leader) ? 0 : 1,
-        AiBehaviour.GoHome => AtHomeTown(world, squad, board, self) ? 0 : 0.5f,
-        _ => 1,
-    };
+        if (behaviour == AiBehaviour.None) return 0;
+        float desire = profile.Desire switch
+        {
+            TaskProfiles.Random => 0.01f + 0.4f * Rng.Float(Rng.Hash(world.Seed, Rng.Key(self), RngPurpose.Think, SeedSalts.AiDesire ^ (ulong)world.Tick << 9 ^ (ulong)type)),
+            TaskProfiles.Special => 1,
+            var d => d,
+        };
+        return desire * behaviour switch
+        {
+            AiBehaviour.Follow => squad.Leader.IsNone || squad.Leader == self || !world.Characters.IsAlive(squad.Leader) ? 0 : 1,
+            AiBehaviour.GoHome => AtHomeTown(world, squad, board, self) ? 0 : 0.5f,
+            // A turret is only wanted by a member its squad gave one (the nearest free one in <see cref="ClaimTurrets"/>).
+            AiBehaviour.Turret => board.TurretClaims.ContainsKey(self.Slot) ? 1 : 0,
+            AiBehaviour.TownNode => Places(board.Town).WithNodes.Count > 0 ? 1 : 0,
+            AiBehaviour.Shop => Places(board.Town).Shops.Count > 0 ? 1 : 0,
+            // Relaxing needs a free seat of the package's bar (claimed in <see cref="ClaimSeats"/>).
+            AiBehaviour.Relax => board.SeatClaims.ContainsKey(self.Slot) && !mind.SeatUnreachable ? 1 : 0,
+            AiBehaviour.ToTown => TownAt(world.Characters.Previous[self.Slot].Position) >= 0 ? 0 : 1,
+            _ => 1,
+        };
+    }
+
+    /// <summary>The town a point is in (within its <c>town radius</c>), -1 when none.</summary>
+    int TownAt(Vector3 p)
+    {
+        var at = Flat(p);
+        for (int s = 0; s < data.Sites.Count; s++)
+        {
+            var site = data.Sites[s];
+            float r = site.Town.SizeRadius * site.Town.TownRadiusMult;
+            if (Vector2.DistanceSquared(at, Flat(site.Position)) <= r * r) return s;
+        }
+        return -1;
+    }
+
+    /// <summary>A town's buildings with a general node, its shops and its bars, as <see cref="RefreshPlaces"/> last found them.</summary>
+    sealed record TownPlaces(IReadOnlyList<TownBuilding> WithNodes, IReadOnlyList<TownBuilding> Shops, IReadOnlyList<TownBuilding> Bars);
+
+    static readonly TownPlaces NoPlaces = new([], [], []);
+    // Rebuilt in the serial step, read by the think on every worker (derived, not hashed).
+    readonly Dictionary<int, TownPlaces> places = [];
+
+    TownPlaces Places(int site) => site >= 0 && places.TryGetValue(site, out var p) ? p : NoPlaces;
+
+    /// <summary>
+    /// The towns' places for the AI's squads (serial, on the package cadence). A bar is a building whose residents' template has <c>building designation</c> BAR
+    /// (the original's hang-around-bar package picks one of those in the home town, docs/game/ai-tasks.md "Town goals", Observed); a shop one whose residents
+    /// trade (<see cref="SquadTemplate.HasShop"/>; the original's shopping looks for BF_SHOP furniture inside, which Meitou does not read: engine choice).
+    /// Residents are the squads living there, else the level data's <c>residents template</c>; the layout flags <c>is bar</c> / <c>is shop</c> count too.
+    /// </summary>
+    void RefreshPlaces(World world)
+    {
+        places.Clear();
+        var shops = new HashSet<TownBuilding>(ReferenceEqualityComparer.Instance);
+        var bars = new HashSet<TownBuilding>(ReferenceEqualityComparer.Instance);
+        void Note(TownBuilding b, SquadTemplate? t)
+        {
+            if (t is null) return;
+            if (t.HasShop) shops.Add(b);
+            if (t.BuildingDesignation == DesignationBar) bars.Add(b);
+        }
+        foreach (var squad in world.Squads.All)
+            if ((squad.Ai?.OwnHome ?? squad.HomeBuilding) is { } home) Note(home, TemplateOf(squad.TemplateId).Template);
+        foreach (var squad in world.Squads.All)
+        {
+            int site = squad.Ai?.Town ?? -1;
+            if (site < 0 || places.ContainsKey(site)) continue;
+            var buildings = data.Sites[site].Buildings;
+            foreach (var b in buildings)
+                if (b.ResidentsTemplate.Length > 0) Note(b, TemplateOf(b.ResidentsTemplate).Template);
+            places[site] = new([.. buildings.Where(b => b.Spots.Any(IsGeneralNode))], [.. buildings.Where(b => b.IsShop || shops.Contains(b))],
+                [.. buildings.Where(b => b.IsBar || bars.Contains(b))]);
+        }
+    }
+
+    /// <summary>BuildingDesignation BD_BAR.</summary>
+    const int DesignationBar = 3;
+
+    static bool IsGeneralNode(HomeSpot s) => s.NodeType == NodeGeneral;
+
+    /// <summary>BUILDING <c>node type</c> NODE_GENERAL.</summary>
+    const int NodeGeneral = 1;
+
+    /// <summary>
+    /// Where a town goal goes (docs/game/ai-tasks.md "Town goals"): wandering in town, a random general node of a random building of the town (Observed; the
+    /// original draws from all its buildings and finds nothing in one without such a node, Meitou draws from those with one); shopping, a random shop of the town,
+    /// at a general node in it, else at it (the original first looks for a shop selling what the character wants to buy: shopping lists are not modelled); the
+    /// wanderer, the nearest town. Null when there is none.
+    /// </summary>
+    Vector3? TargetFor(World world, CharacterId self, AiBehaviour behaviour, int town)
+    {
+        ulong roll = Rng.Hash(world.Seed, Rng.Key(self), RngPurpose.Think, SeedSalts.AiTarget ^ (ulong)world.Tick << 8 ^ (ulong)behaviour);
+        var places = Places(town);
+        switch (behaviour)
+        {
+            case AiBehaviour.TownNode:
+            case AiBehaviour.Shop:
+            {
+                var from = behaviour == AiBehaviour.TownNode ? places.WithNodes : places.Shops;
+                if (from.Count == 0) return null;
+                var b = from[Rng.Int(roll, from.Count)];
+                // A general node; in a shop without one a guard post, else any other node (engine choice: where the original's Task_Shopping stands is not decoded).
+                foreach (var accept in (ReadOnlySpan<Func<HomeSpot, bool>>)[IsGeneralNode, s => s.Kind == HomeSpotKind.Guard, s => s.Kind != HomeSpotKind.Bed])
+                {
+                    int nodes = 0;
+                    foreach (var s in b.Spots) if (accept(s)) nodes++;
+                    if (nodes == 0) continue;
+                    int pick = Rng.Int(Rng.Mix(roll), nodes);
+                    foreach (var s in b.Spots)
+                        if (accept(s) && pick-- == 0) return s.Position;
+                }
+                return b.Position;
+            }
+            case AiBehaviour.ToTown:
+            {
+                var at = Flat(world.Characters.Previous[self.Slot].Position);
+                int best = -1;
+                float bestD = float.MaxValue;
+                for (int s = 0; s < data.Sites.Count; s++)
+                {
+                    float d = Vector2.DistanceSquared(at, Flat(data.Sites[s].Position));
+                    if (d < bestD) (best, bestD) = (s, d);
+                }
+                return best < 0 ? null : data.Sites[best].Position;
+            }
+        }
+        return null;
+    }
 
     bool AtHomeTown(World world, Squad squad, Blackboard board, CharacterId self)
     {
@@ -192,7 +328,25 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
         var table = world.Characters;
         var type = goal.Task.Type;
         var behaviour = TaskBehaviours.Of(type);
-        if (mind.Goal is { } before && before.Task.Type != type) { mind.Walking = false; mind.FailedWalks = 0; }
+        var profile = TaskProfiles.Of(type);
+        // A goal taken up anew starts over: a fresh target and, for a goal it commits to, a fresh commitment. So does a committed goal chosen again after its
+        // commitment ran out (engine reading: the original's target finders roll a new target then, so the goal counts as new).
+        bool fresh = mind.Goal is not { } before || before.Task.Type != type || before.Task.Target != goal.Task.Target
+            || profile.Commits && world.GameHours >= mind.CommitUntil;
+        if (fresh)
+        {
+            mind.Walking = false;
+            mind.FailedWalks = 0;
+            mind.Target = null;
+            // A spot given up is tried again from wherever the character is now (engine choice: the walk may have failed from the old place only).
+            mind.HomeUnreachable = false;
+            if (type != TaskType.RELAX_IN_TOWN_PACKAGE) mind.SeatUnreachable = false;
+            if (profile.Commits)
+            {
+                ulong roll = Rng.Hash(world.Seed, Rng.Key(table.IdOf(slot)), RngPurpose.Think, SeedSalts.AiCommit ^ (ulong)world.Tick << 9 ^ (ulong)type);
+                mind.CommitUntil = world.GameHours + profile.CommitMin + Rng.Float(roll) * profile.CommitRange;
+            }
+        }
         mind.Goal = goal;
         mind.Behaviour = behaviour;
         mind.Version = board.Version;
@@ -205,9 +359,6 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
                 // Round its post; at a borrowed home (the bar of a bar package) round that.
                 mind.WanderCentre = board.Home is { } borrowed && borrowed != board.OwnHome ? Flat(borrowed.Position) : mind.Post;
                 mind.WanderRadius = Settings.MillRadius;
-                Become(table, slot, CharacterTask.Wander);
-                break;
-            case AiBehaviour.Roam:
                 Become(table, slot, CharacterTask.Wander);
                 break;
             case AiBehaviour.Follow:
@@ -224,17 +375,41 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
             case AiBehaviour.Post:
             case AiBehaviour.Sleep:
             case AiBehaviour.GoHome:
-                var (target, home) = SpotFor(mind, board, behaviour, type);
-                if (GoToSpot(table, slot, mind, target, home, type == TaskType.RUN_AWAY_HOMETOWN ? SpeedMode.Run : SpeedMode.Walk))
+                var (target, home, floor) = SpotFor(mind, board, behaviour, type);
+                if (GoToSpot(table, slot, mind, target, home ? GiveUp.Home : GiveUp.Post, type == TaskType.RUN_AWAY_HOMETOWN ? SpeedMode.Run : SpeedMode.Walk, height: floor))
                     Become(table, slot, behaviour == AiBehaviour.Sleep ? CharacterTask.Rest : CharacterTask.Idle);
+                break;
+            case AiBehaviour.TownNode:
+            case AiBehaviour.Shop:
+            case AiBehaviour.ToTown:
+                mind.Target ??= TargetFor(world, table.IdOf(slot), behaviour, board.Town);
+                if (mind.Target is not { } goTo) Become(table, slot, CharacterTask.Idle);
+                else if (GoToSpot(table, slot, mind, Flat(goTo), GiveUp.Target, SpeedMode.Walk, height: behaviour == AiBehaviour.ToTown ? null : goTo.Y))
+                    Become(table, slot, CharacterTask.Idle);
+                break;
+            case AiBehaviour.Relax:
+                if (board.SeatClaims.TryGetValue(slot, out var claimed) && GoToSpot(table, slot, mind, Flat(claimed.Position), GiveUp.Seat, SpeedMode.Walk, height: claimed.Position.Y))
+                    Become(table, slot, CharacterTask.Rest);
+                break;
+            case AiBehaviour.Turret:
+                if (board.TurretClaims.TryGetValue(slot, out int t) && (uint)t < (uint)board.Turrets.Count && board.Turrets[t].Turret is { } turret)
+                {
+                    var spot = TurretSpot(world, turret);
+                    if (GoToSpot(table, slot, mind, Flat(spot), GiveUp.Post, SpeedMode.Walk, TurretSlack, spot.Y))
+                    {
+                        table.Next[slot].Yaw = turret.Yaw;   // at the gun, facing its way
+                        Become(table, slot, CharacterTask.Idle);
+                    }
+                }
+                else Become(table, slot, CharacterTask.Idle);
                 break;
             case AiBehaviour.Sit:
                 // With a home, a seat in it (a bar or general node, else inside); without, where it stands.
                 if (board.Home is null || mind.HomeUnreachable) Become(table, slot, CharacterTask.Rest);
                 else
                 {
-                    var (seat, inHome) = SpotFor(mind, board, behaviour, type);
-                    if (GoToSpot(table, slot, mind, seat, inHome, SpeedMode.Walk)) Become(table, slot, CharacterTask.Rest);
+                    var (place, inHome, level) = SpotFor(mind, board, behaviour, type);
+                    if (GoToSpot(table, slot, mind, place, inHome ? GiveUp.Home : GiveUp.Post, SpeedMode.Walk, height: level)) Become(table, slot, CharacterTask.Rest);
                 }
                 break;
         }
@@ -243,21 +418,21 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
     /// <summary>
     /// Where a goal is acted out: a node of the home building by goal (shopkeeper, guard, throne, general; any node when the home has none of that kind), a bed for
     /// sleep (the home itself when it has no bed), the home or the town for going home; else (no home, or its spots kept failing) the character's post. True in
-    /// <c>Home</c> when the spot is the home's.
+    /// <c>Home</c> when the spot is the home's; <c>Floor</c> is the height of a node or bed (so the walk ends on the floor it is on, not on the ground below).
     /// </summary>
-    (Vector2 Target, bool Home) SpotFor(AiMind mind, Blackboard board, AiBehaviour behaviour, TaskType type)
+    (Vector2 Target, bool Home, float? Floor) SpotFor(AiMind mind, Blackboard board, AiBehaviour behaviour, TaskType type)
     {
         if (behaviour == AiBehaviour.GoHome)
         {
-            if (board.Home is { } h && !mind.HomeUnreachable) return (Flat(h.Position), true);
-            if (board.Town >= 0) return (Flat(data.Sites[board.Town].Position), true);
-            return (mind.Squad.HomeCentre, true);
+            if (board.Home is { } h && !mind.HomeUnreachable) return (Flat(h.Position), true, null);
+            if (board.Town >= 0) return (Flat(data.Sites[board.Town].Position), true, null);
+            return (mind.Squad.HomeCentre, true, null);
         }
-        if (board.Home is not { } home || mind.HomeUnreachable || type is TaskType.HOLD_POSITION or TaskType.MAN_THE_GATE) return (mind.Post, false);
+        if (board.Home is not { } home || mind.HomeUnreachable || type is TaskType.HOLD_POSITION or TaskType.MAN_THE_GATE) return (mind.Post, false, null);
         if (behaviour == AiBehaviour.Sit)
         {
-            if ((Pick(home, HomeSpotKind.Bar, mind.MemberIndex) ?? Pick(home, HomeSpotKind.General, mind.MemberIndex)) is { } seat) return (Flat(seat.Position), true);
-            return (Flat(home.Position), true);
+            if ((Pick(home, HomeSpotKind.Bar, mind.MemberIndex) ?? Pick(home, HomeSpotKind.General, mind.MemberIndex)) is { } seat) return (Flat(seat.Position), true, seat.Position.Y);
+            return (Flat(home.Position), true, null);
         }
         HomeSpotKind kind = behaviour == AiBehaviour.Sleep ? HomeSpotKind.Bed : type switch
         {
@@ -266,11 +441,11 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
             TaskType.SIT_ON_THRONE => HomeSpotKind.Throne,
             _ => HomeSpotKind.General,
         };
-        if (Pick(home, kind, mind.MemberIndex) is { } spot) return (Flat(spot.Position), true);
-        if (kind != HomeSpotKind.Bed && Pick(home, null, mind.MemberIndex) is { } any) return (Flat(any.Position), true);
+        if (Pick(home, kind, mind.MemberIndex) is { } spot) return (Flat(spot.Position), true, spot.Position.Y);
+        if (kind != HomeSpotKind.Bed && Pick(home, null, mind.MemberIndex) is { } any) return (Flat(any.Position), true, any.Position.Y);
         // No bed: it sleeps in the house; a node goal without nodes stays at its own post, except staying home.
-        if (kind == HomeSpotKind.Bed || type == TaskType.STAY_IN_HOME) return (Flat(home.Position), true);
-        return (mind.Post, false);
+        if (kind == HomeSpotKind.Bed || type == TaskType.STAY_IN_HOME) return (Flat(home.Position), true, null);
+        return (mind.Post, false, null);
     }
 
     /// <summary>The <paramref name="index"/>-th spot of a kind (null: any node) of a building, round robin; null when it has none.</summary>
@@ -288,14 +463,39 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
     static Vector2 Flat(Vector3 p) => new(p.X, p.Z);
 
     /// <summary>
-    /// Walks the character to a spot; true when it is there (and not walking). A walk that ends away from the spot counts as failed; after
-    /// <see cref="MaxFailedWalks"/> in a row it gives the home's spots up (<see cref="AiMind.HomeUnreachable"/>), or makes the spot it stands on its post.
+    /// Where a turret is manned: behind its gun (the gunner stands between the gun and the walkway behind it), inside the turret's <c>use range</c>: the first of a
+    /// few distances behind it whose ground is walkable at the turret's height, else beside or before it, else the turret's own place. The Y is the walkable surface
+    /// there, so the path goes up to the tower's floor rather than to the ground below it. Engine choice: the game's gunner spot is not in the data.
     /// </summary>
-    bool GoToSpot(CharacterTable table, int slot, AiMind mind, Vector2 target, bool home, byte mode)
+    static Vector3 TurretSpot(World world, in TurretPost turret)
+    {
+        var at = Flat(turret.Position);
+        var forward = new Vector2(MathF.Sin(turret.Yaw), MathF.Cos(turret.Yaw));
+        var side = new Vector2(forward.Y, -forward.X);
+        float nearY = turret.Position.Y;
+        bool Walkable(Vector2 p) => world.Walkability.IsWalkable(p.X, p.Y, nearY);
+        Vector3 On(Vector2 p) => new(p.X, world.Walkability.GroundHeight(p.X, p.Y, nearY), p.Y);
+        float reach = MathF.Max(MathF.Min(turret.UseRange, 10), 2);
+        for (float d = reach * 0.6f; d >= 2; d -= 2)
+            if (Walkable(at - forward * d)) return On(at - forward * d);
+        for (int k = 0; k < 2; k++)
+            if (Walkable(at + side * (k == 0 ? 4 : -4))) return On(at + side * (k == 0 ? 4 : -4));
+        return Walkable(at + forward * 4) ? On(at + forward * 4) : On(at);
+    }
+
+    /// <summary>
+    /// Walks the character to a spot; true when it is there (and not walking). A walk that ends away from the spot counts as failed; after
+    /// <see cref="MaxFailedWalks"/> in a row it gives the spot up as <paramref name="giveUp"/> says. <paramref name="slack"/> overrides
+    /// <see cref="AiSettings.PostSlack"/> where the spot must be exact (a turret's gun); <paramref name="height"/> is the floor the spot is on, so the path reaches a
+    /// floor or walkway above the ground.
+    /// </summary>
+    bool GoToSpot(CharacterTable table, int slot, AiMind mind, Vector2 target, GiveUp giveUp, byte mode, float slack = 0, float? height = null)
     {
         ref var n = ref table.Next[slot];
         var here = new Vector2(n.Position.X, n.Position.Z);
-        bool away = Vector2.DistanceSquared(here, target) > Settings.PostSlack * Settings.PostSlack;
+        float within = slack > 0 ? slack : Settings.PostSlack;
+        // A spot on a floor counts as reached on that floor only, not on the ground below it.
+        bool away = Vector2.DistanceSquared(here, target) > within * within || height is { } y && MathF.Abs(n.Position.Y - y) > FloorSlack;
         if (mind.Walking && n.Task != (byte)CharacterTask.GoTo)
         {
             // The walk is over: arrived, or it ended elsewhere (no way there, or a fight took it).
@@ -304,19 +504,35 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
             if (mind.FailedWalks >= MaxFailedWalks)
             {
                 mind.FailedWalks = 0;
-                if (home) mind.HomeUnreachable = true;
-                else mind.Post = here;
+                switch (giveUp)
+                {
+                    case GiveUp.Home: mind.HomeUnreachable = true; break;
+                    case GiveUp.Post: mind.Post = here; break;
+                    case GiveUp.Target: mind.Target = null; break;
+                    case GiveUp.Seat: mind.SeatUnreachable = true; break;
+                }
                 return false;   // the next think picks the new spot
             }
         }
         if (away)
         {
             WalkTo(table, slot, target, mode);
+            if (height is { } floor && n.Task == (byte)CharacterTask.GoTo)
+            {
+                var cold = table.Cold(slot)!;
+                (cold.GoalHeight, cold.GoalHeightAt) = (floor, target);
+            }
             mind.Walking = true;
             return false;
         }
         return n.Task != (byte)CharacterTask.GoTo;   // arriving: the movement system ends the walk
     }
+
+    /// <summary>What a character gives up when its walks to a spot keep failing: its home's spots (it uses its post), its post (where it stands becomes it), the target, or relaxing at its bar seat.</summary>
+    enum GiveUp : byte { Home, Post, Target, Seat }
+
+    /// <summary>How far above or below a spot's floor a character may stand and still be at it (units).</summary>
+    const float FloorSlack = 6;
 
     /// <summary>Switches to a standing task (wander, follow, idle, rest), dropping a walk in progress; nothing when it is doing it already.</summary>
     static void Become(CharacterTable table, int slot, CharacterTask task)
@@ -357,12 +573,15 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
     {
         var table = world.Characters;
         bool cadence = world.Tick % Math.Max(1, Settings.PackageEveryTicks) == 0;
+        // Each town's turrets are claimed once per cadence, by the squads in squad order (derived, not hashed).
+        if (cadence) { turretTaken.Clear(); seatTaken.Clear(); RefreshPlaces(world); }
         foreach (var squad in world.Squads.All)
         {
             if (squad.Ai is null)
             {
                 if (!looked.Add(squad.Id) || !Runs(world, squad)) continue;
                 Attach(world, squad);
+                if (squad.Ai!.Town >= 0 && !places.ContainsKey(squad.Ai.Town)) RefreshPlaces(world);
             }
             else if (!cadence) continue;   // the rest is looked at on the package cadence only (and when the squad appears)
             var board = squad.Ai!;
@@ -382,7 +601,94 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
                 }
                 if (cold.Ai.Goal is { } g) board.Crowd[g.Task.Type] = board.Crowd.GetValueOrDefault(g.Task.Type) + 1;
             }
+            ClaimTurrets(world, board, squad);
+            ClaimSeats(world, board, squad);
         }
+    }
+
+    /// <summary>
+    /// Gives the members' slots the town's turrets to man (docs/simulation.md "AI", turrets): in member order each takes the nearest turret no earlier member claimed,
+    /// by the distance to its post; a member whose goal is the home building's turrets first takes one mounted on its home. Rebuilt on the package cadence; a town
+    /// without turrets gives none.
+    /// </summary>
+    void ClaimTurrets(World world, Blackboard board, Squad squad)
+    {
+        board.Turrets = data.Turrets(board.Town);
+        board.TurretClaims.Clear();
+        if (board.Turrets.Count == 0) return;
+        if (!turretTaken.TryGetValue(board.Town, out var taken)) turretTaken[board.Town] = taken = [];
+        int hour = world.Hour, claimed = 0;
+        for (int pass = 0; pass < 2 && claimed < board.Turrets.Count; pass++)
+            for (int k = 0; k < squad.Members.Count && claimed < board.Turrets.Count; k++)
+            {
+                var id = squad.Members[k];
+                if (!world.Characters.TryResolveNext(id, out int s) || world.Characters.Cold(s) is not { } cold || cold.Ai is not { } mind) continue;
+                if (board.TurretClaims.ContainsKey(s) || !TurretGoal(board, squad, id, cold, hour, out bool homeOnly)) continue;
+                if (pass == 0 ? !homeOnly : homeOnly) continue;
+                int best = -1;
+                float bestD = float.MaxValue;
+                for (int t = 0; t < board.Turrets.Count; t++)
+                {
+                    if (taken.Contains(t) || board.Turrets[t].Turret is not { } turret) continue;
+                    if (homeOnly && turret.MountedOn != board.Home?.InstanceId) continue;
+                    float d = Vector2.DistanceSquared(mind.Post, Flat(turret.Position));
+                    if (d < bestD) (best, bestD) = (t, d);
+                }
+                if (best >= 0) { taken.Add(best); board.TurretClaims[s] = best; claimed++; }
+            }
+    }
+
+    /// <summary>
+    /// Gives the members whose role list has relaxing open at this hour a seat of the package's bar (<see cref="Blackboard.Home"/> under a bar package): in member
+    /// order each takes the first seat (a bar node, then a general node) no one in that bar claimed in this cadence pass; members left without one do not relax
+    /// (docs/game/ai-tasks.md "Town goals": the original relaxes on furniture of the bar it can use, Observed; Meitou's seats are the bar's nodes, engine choice).
+    /// </summary>
+    void ClaimSeats(World world, Blackboard board, Squad squad)
+    {
+        board.SeatClaims.Clear();
+        if (board.CurrentClass != PackageClass.Bar || board.Home is not { } bar) return;
+        if (!seatTaken.TryGetValue(bar, out var taken)) seatTaken[bar] = taken = [];
+        int hour = world.Hour;
+        for (int k = 0; k < squad.Members.Count; k++)
+        {
+            var id = squad.Members[k];
+            if (!world.Characters.TryResolveNext(id, out int s) || world.Characters.Cold(s) is not { } cold || cold.Ai is null) continue;
+            var roles = board.Roles[(int)RoleOf(squad, id, cold)];
+            bool relaxes = false;
+            for (int g = 0; g < roles.Count && !relaxes; g++) relaxes = roles[g].Task.Type == TaskType.RELAX_IN_TOWN_PACKAGE && roles[g].InWindow(hour);
+            if (!relaxes || cold.Ai.SeatUnreachable) continue;   // one that gave its seat up leaves it to the next member
+            int seat = FreeSeat(bar, taken, HomeSpotKind.Bar);
+            if (seat < 0) seat = FreeSeat(bar, taken, HomeSpotKind.General);
+            if (seat < 0) return;
+            taken.Add(seat);
+            board.SeatClaims[s] = bar.Spots[seat];
+        }
+    }
+
+    static int FreeSeat(TownBuilding bar, HashSet<int> taken, HomeSpotKind kind)
+    {
+        for (int i = 0; i < bar.Spots.Count; i++)
+            if (bar.Spots[i].Kind == kind && !taken.Contains(i)) return i;
+        return -1;
+    }
+
+    /// <summary>
+    /// Whether the member's role list has a turret goal open at <paramref name="hour"/>, and whether it is only the home building's (222): that one may only man a
+    /// turret mounted on its home. Its role list only (not its race's goals): a race goal without the town's turret data names no turret.
+    /// </summary>
+    static bool TurretGoal(Blackboard board, Squad squad, CharacterId id, CharacterCold cold, int hour, out bool homeOnly)
+    {
+        var roles = board.Roles[(int)RoleOf(squad, id, cold)];
+        bool home = false, town = false;
+        for (int k = 0; k < roles.Count; k++)
+        {
+            if (!roles[k].InWindow(hour)) continue;
+            var type = roles[k].Task.Type;
+            if (type == TaskType.MAN_A_TURRET_ON_BUILDING) home = true;
+            else if (type is TaskType.MAN_A_TURRET or TaskType.MAN_A_TURRET_PLAYER_JOB or TaskType.USE_TURRET) town = true;
+        }
+        homeOnly = home && !town;
+        return home || town;
     }
 
     void Attach(World world, Squad squad)
@@ -522,11 +828,8 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
         }
     }
 
-    TownBuilding? TownBar(int site)
-    {
-        foreach (var b in data.Sites[site].Buildings) if (b.IsBar) return b;
-        return null;
-    }
+    /// <summary>The town's bar (<see cref="RefreshPlaces"/>; the first when it has several, the original picks one at random); null when it has none.</summary>
+    TownBuilding? TownBar(int site) => Places(site).Bars is { Count: > 0 } bars ? bars[0] : null;
 
     /// <summary>
     /// A patrol's route (<b>engine choice</b>: the original's <c>GoOutOnPatrol</c> is not decoded): <see cref="AiSettings.PatrolPoints"/> points round the home town at

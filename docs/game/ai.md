@@ -17,8 +17,8 @@ dialogue event and already-satisfied A. score=desire*weight*crowdFactor^n*m, n s
 mates, m1.25 for current type/target/second hand. Effect-state evaluation can scale positive
 desire. Sticky current task floors0.4 before commitment expiry, caps0.05 after; another owner
 condition can add1.25 when score<1 (unknown). Drop nonpositive candidates; B-satisfied/no-effect
-branch also drops. Resolve key ties by0.0001 increments. Exact desire and A/B meanings remain
-unresolved, not equivalent to our simple utility approximation.
+branch also drops. Resolve key ties by0.0001 increments. Desire, commitment and crowd factor per
+type: [ai-tasks](ai-tasks.md#desire-and-commitment); exact A/B meanings remain unresolved.
 
 GOAP requests unmet B states, finds tasks/effects and evaluates completion/cost through TaskData.
 Squad toggles inject sleep/ditch/sit goals; slave obedience uses role4. Player commands and job

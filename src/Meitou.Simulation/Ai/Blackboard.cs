@@ -94,6 +94,11 @@ public sealed class Blackboard
 
     /// <summary>The town the squad belongs to (a site index, -1: none) and the building it lives in (null: none known); <see cref="OwnHome"/> is the one it was given, <see cref="Home"/> the one in use (a bar package moves it to the bar).</summary>
     public int Town { get; init; } = -1;
+    /// <summary>The town's turrets (<see cref="PopulationData.Turrets"/>) and the turret index each member's slot claimed to man, as the last serial step found them (derived, not hashed).</summary>
+    public IReadOnlyList<TownBuilding> Turrets { get; set; } = [];
+    public Dictionary<int, int> TurretClaims { get; } = [];
+    /// <summary>The seat of the bar (<see cref="Home"/> under a bar package) each relaxing member's slot claimed, as the last serial step found it (derived, not hashed).</summary>
+    public Dictionary<int, HomeSpot> SeatClaims { get; } = [];
     public TownBuilding? OwnHome { get; set; }
     public TownBuilding? Home { get; set; }
     /// <summary>The members it was made with: the squad size of the intact rule.</summary>
@@ -253,6 +258,10 @@ public sealed class AiMind
     public int Version { get; set; } = -1;
     /// <summary>Its own spot: where it stood when the AI took it over (the stand-in where the home has no node or bed for it).</summary>
     public Vector2 Post { get; set; }
+    /// <summary>The game hours (<see cref="World.GameHours"/>) until which it is committed to its goal (docs/game/ai.md "Packages and goals").</summary>
+    public double CommitUntil { get; set; }
+    /// <summary>Where its town goal goes (a node, a shop, a town; null: not picked yet, picked when the goal is acted out).</summary>
+    public Vector3? Target { get; set; }
     /// <summary>The centre and radius <see cref="MovementSystem"/>'s wander uses instead of the squad's home (radius 0: the squad's).</summary>
     public Vector2 WanderCentre { get; set; }
     public float WanderRadius { get; set; }
@@ -264,6 +273,8 @@ public sealed class AiMind
     public int FailedWalks { get; set; }
     /// <summary>The home's spots kept failing: it uses <see cref="Post"/> instead until its home changes.</summary>
     public bool HomeUnreachable { get; set; }
+    /// <summary>Walks to its bar seat kept failing: it does not relax there any more.</summary>
+    public bool SeatUnreachable { get; set; }
     /// <summary>Whether its lists hold any combat goal at all (else the stance stays the old default).</summary>
     public bool HasCombatGoals { get; set; }
     /// <summary>The role list and hour <see cref="Stance"/> was worked out for (a cache; the stance itself is hashed).</summary>
@@ -282,5 +293,8 @@ public sealed class AiMind
         hasher.Add(Walking);
         hasher.Add(FailedWalks);
         hasher.Add(HomeUnreachable);
+        hasher.Add(SeatUnreachable);
+        hasher.Add(CommitUntil);
+        hasher.Add(Target ?? new Vector3(float.NaN));
     }
 }
