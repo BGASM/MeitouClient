@@ -106,24 +106,24 @@ internal sealed partial class ZoneGeometryGatherer
         var boxMin = new Vector2(crossHighX && !crossLowX ? hi.X - side : lo.X, crossHighZ && !crossLowZ ? hi.Y - side : lo.Y);
         var g = new ZoneGeometry
         {
-            Zone = site.Zone, ZoneMin = boxMin, ZoneMax = boxMin + new Vector2(side), Margin = 8, InteriorHull = hull, InteriorOf = site.Placement.InstanceId,
+            Zone = site.Zone, ZoneMin = boxMin, ZoneMax = boxMin + new Vector2(side), Margin = 8, InteriorHull = hull, InteriorOf = site.Placement.Key,
             ClippedAtBorder = crossLowX || crossLowZ || crossHighX || crossHighZ,
         };
 
         uint mask = site.Destroyed ? DestroyedInteriorGroupMask : InteriorGroupMask;
-        AddBuilding(g, site.Record, site.Placement.InstanceId, site.Position, site.Placement.Rotation, site.Destroyed, new InteriorContext(site.Placement.InstanceId, site.Destroyed, mask, Own: true));
+        AddBuilding(g, site.Record, site.Placement.Key, site.Position, site.Placement.Rotation, site.Destroyed, new InteriorContext(site.Placement.Key, site.Destroyed, mask, Own: true));
         // Its layouts' furniture: walkable pieces give floor, the rest cut.
         foreach (var (item, at, rotation) in LayoutObjects(site.Placement, site.Record, site.Position, site.Destroyed))
-            AddBuilding(g, item.Building, $"{site.Placement.InstanceId}/{item.InstanceId}", at, rotation, destroyed: false, new InteriorContext(site.Placement.InstanceId, false, mask, Own: false), item.Floor);
+            AddBuilding(g, item.Building, $"{site.Placement.Key}/{item.InstanceId}", at, rotation, destroyed: false, new InteriorContext(site.Placement.Key, false, mask, Own: false), item.Floor);
 
         // Other buildings standing inside the hull (furniture placed in the zone file): walkable ones give floor, the rest cut.
         var (ox, oz) = WorldLayout.ZoneOrigin(site.Placement.Zone);
         var zmin = new Vector2((float)ox, (float)oz);
         foreach (var (b, record, position, destroyed) in NearBuildings(site.Placement.Zone, zmin, zmin + new Vector2(WorldLayout.ZoneSize), 0))
         {
-            if (b.InstanceId == site.Placement.InstanceId || position.Y < yMin - 30 || position.Y > yMax + 30) continue;
+            if (b.Key == site.Placement.Key || position.Y < yMin - 30 || position.Y > yMax + 30) continue;
             if (!NavGeometry.InsideConvex(hull.Polygon, new Vector2(position.X, position.Z), 5)) continue;
-            AddBuilding(g, record, b.InstanceId, position, b.Rotation, destroyed, new InteriorContext(site.Placement.InstanceId, destroyed, mask, Own: false));
+            AddBuilding(g, record, b.Key, position, b.Rotation, destroyed, new InteriorContext(site.Placement.Key, destroyed, mask, Own: false));
         }
 
         // A destroyed building's "destroyed boundary" cuts its interior (fcs.def: navmesh cutter for a destroyed interior).

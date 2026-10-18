@@ -78,7 +78,7 @@ public sealed class FixtureRegistry
 
     void RegisterBuilding(World world, PopulationData data, int site, TownBuilding b, int townFaction)
     {
-        if (byBuilding.ContainsKey(b.InstanceId)) return;
+        if (byBuilding.ContainsKey(b.Key)) return;
         var db = data.Db;
         int owner = b.OwnerFactionId is { } o && data.FactionIndex(o) is var fi and >= 0 ? fi : townFaction;
         var faction = owner >= 0 && owner < data.Factions.Count ? data.Factions[owner] : null;
@@ -86,29 +86,29 @@ public sealed class FixtureRegistry
         var record = db.Find(b.BuildingId);
         if (record is not null)
         {
-            AddDoors(world, db, record, b.InstanceId, site, owner, faction, b.Position, b.Yaw, list);
-            if (Lockable(db, record) is { } own) list.Add(Make(world, db, own, b.InstanceId, b.InstanceId, record, site, owner, faction, b.Position, b.Yaw));
+            AddDoors(world, db, record, b.Key, site, owner, faction, b.Position, b.Yaw, list);
+            if (Lockable(db, record) is { } own) list.Add(Make(world, db, own, b.Key, b.Key, record, site, owner, faction, b.Position, b.Yaw));
         }
         foreach (var f in b.Fixtures)
             if (db.Find(f.RecordId) is { } item && Lockable(db, item) is { } kind)
-                list.Add(Make(world, db, kind, f.Id, b.InstanceId, item, site, owner, faction, f.Position, f.Yaw));
+                list.Add(Make(world, db, kind, f.Id, b.Key, item, site, owner, faction, f.Position, f.Yaw));
         int bed = 0;
         foreach (var spot in b.Spots)
         {
             if (spot.Kind != HomeSpotKind.Bed) continue;
             list.Add(new Fixture
             {
-                Id = $"{b.InstanceId}@bed{bed.ToString(CultureInfo.InvariantCulture)}", Building = b.InstanceId, Kind = FixtureKind.Bed, Site = site, Owner = owner,
+                Id = $"{b.Key}@bed{bed.ToString(CultureInfo.InvariantCulture)}", Building = b.Key, Kind = FixtureKind.Bed, Site = site, Owner = owner,
                 Position = spot.Position, Yaw = spot.Yaw, UseRange = 15,
             });
             bed++;
         }
         if (list.Count == 0) return;
-        byBuilding[b.InstanceId] = list;
-        buildings.Add(b.InstanceId);
+        byBuilding[b.Key] = list;
+        buildings.Add(b.Key);
         foreach (var f in list) { all.Add(f); byId[f.Id] = f; }
-        if (Saved?.GetValueOrDefault(b.InstanceId) is { } state) Restore(state, b.InstanceId, list);
-        SyncDoors(b.InstanceId);
+        if (Saved?.GetValueOrDefault(b.Key) is { } state) Restore(state, b.Key, list);
+        SyncDoors(b.Key);
     }
 
     /// <summary>One door fixture per entry of the building's <c>doors</c> list: the door's own <c>lock level bonus</c> and motion, the parent's <c>hardness</c>.</summary>

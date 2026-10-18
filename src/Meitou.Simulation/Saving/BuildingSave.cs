@@ -3,6 +3,7 @@ using Meitou.Data;
 using Meitou.Data.Fcs;
 using Meitou.Data.Gameplay.Construction;
 using Meitou.Data.Save;
+using Meitou.Data.World;
 using Meitou.Simulation.Construction;
 
 namespace Meitou.Simulation.Saving;
@@ -40,8 +41,12 @@ public static class BuildingSave
             if (zone.BuildingList is { } list)
                 foreach (var i in list.Instances) reg.Reserve(i.Id);
         var states = HeldSave.BuildingStates(save);
+        // A parent named by handle comes back as its zone-file id (player buildings' ids are unique: every id in the save is reserved above).
         var idOf = new Dictionary<FcsRecord, string>(ReferenceEqualityComparer.Instance);
-        foreach (var (id, record) in states) idOf[record] = id;
+        foreach (var zone in save.Zones.Values)
+            if (zone.BuildingList is { } ids)
+                foreach (var i in ids.Instances)
+                    if (states.TryGetValue(BuildingKey.Of(zone.Coordinate, i.Id), out var record)) idOf[record] = i.Id;
         var handles = save.BuildHandles();
         var townOf = ReadTowns(save, world, playerFactionId, playerIndex);
         int made = 0;
@@ -50,7 +55,7 @@ public static class BuildingSave
             if (zone.BuildingList is not { } list) continue;
             foreach (var instance in list.Instances)
             {
-                if (instance.IsRemoved || !states.TryGetValue(instance.Id, out var state) || !IsPlayerBuilt(instance.Id, state, playerFactionId)) continue;
+                if (instance.IsRemoved || !states.TryGetValue(BuildingKey.Of(zone.Coordinate, instance.Id), out var state) || !IsPlayerBuilt(instance.Id, state, playerFactionId)) continue;
                 if (db.Find(instance.Target) is not { Type: FcsRecordType.BUILDING } record) continue;
                 var data = BuildingBuildData.From(record);
                 var materials = new MaterialSlot[data.Materials.Count];
@@ -153,12 +158,12 @@ public static class BuildingSave
         var states = HeldSave.BuildingStates(game);
         foreach (var site in reg.All)
         {
-            if (!states.TryGetValue(site.Id, out var state)) continue;
+            if (!states.TryGetValue(BuildingKey.Of(site.Zone, site.Id), out var state)) continue;
             if (site.Parent is { } parent)
             {
                 state.Strings[MeitouParent] = parent;
                 state.Bools["is inside building"] = true;
-                (states.TryGetValue(parent, out var p) && Hand.IsComplete(p, "handle") ? Hand.Read(p, "handle") : Hand.Null).Write(state, "isInsideBuilding");
+                (states.TryGetValue(BuildingKey.Of(site.Zone, parent), out var p) && Hand.IsComplete(p, "handle") ? Hand.Read(p, "handle") : Hand.Null).Write(state, "isInsideBuilding");
             }
             else
             {

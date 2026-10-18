@@ -14,7 +14,7 @@ public static class HeldSave
 {
     public const string MeitouState = "meitou in something", MeitouWhat = "meitou in what";
 
-    /// <summary>The zones' building state records by building instance id (the building lists' instances and their GAMESTATE_BUILDING state).</summary>
+    /// <summary>The zones' building state records by <see cref="Meitou.Data.World.BuildingKey"/> (the building lists' instances and their GAMESTATE_BUILDING state).</summary>
     public static Dictionary<string, FcsRecord> BuildingStates(SaveGame save)
     {
         var map = new Dictionary<string, FcsRecord>(StringComparer.Ordinal);
@@ -25,12 +25,12 @@ public static class HeldSave
             foreach (var r in zone.BuildingStates) states[r.StringId] = r;
             foreach (var i in list.Instances)
                 foreach (var id in i.States)   // the building state; an inventory state can come first (docs/formats/save.md "Zone files")
-                    if (states.TryGetValue(id, out var state)) { map[i.Id] = state; break; }
+                    if (states.TryGetValue(id, out var state)) { map[Meitou.Data.World.BuildingKey.Of(zone.Coordinate, i.Id)] = state; break; }
         }
         return map;
     }
 
-    /// <summary>Reads a character's held state and sentence (the Meitou keys first; else <c>in what</c> resolved through <paramref name="handles"/> to a building instance id).</summary>
+    /// <summary>Reads a character's held state and sentence (the Meitou keys first; else <c>in what</c> resolved through <paramref name="handles"/> to a building key).</summary>
     public static void Read(FcsRecord? state, CharacterCold cold, SaveHandles handles, IReadOnlyDictionary<FcsRecord, string> instanceOf)
     {
         if (state is null) return;

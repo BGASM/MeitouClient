@@ -144,7 +144,7 @@ public sealed class BuildingFootprints
                 foreach (var b in list)
                 {
                     if (b.Position == Vector3.Zero || Vector2.DistanceSquared(new Vector2(b.Position.X, b.Position.Z), centre) > (radius + Reach) * (radius + Reach)) continue;
-                    if (Of(b.BuildingId) is { } footprint) yield return new PlacedFootprint(b.InstanceId, footprint.Place(b.Position, b.Rotation));
+                    if (Of(b.BuildingId) is { } footprint) yield return new PlacedFootprint(b.Key, footprint.Place(b.Position, b.Rotation));
                 }
             }
     }

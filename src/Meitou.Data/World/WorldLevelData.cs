@@ -174,12 +174,18 @@ public sealed class WorldLevelLayer(string name, string directory)
     public override string ToString() => Name.Length == 0 ? "(base)" : Name;
 }
 
+/// <param name="InstanceId">The id in its zone file's building list; ids repeat between zones (Observed: 8,754 of 11,714 base placements share one), so at run time a
+/// building is named by <see cref="Key"/>.</param>
 /// <param name="Position">X and Z are world coordinates; Y is the height above the terrain (Observed).</param>
 /// <param name="BuildingId">String id of the placed <see cref="FcsRecordType.BUILDING"/> record.</param>
 /// <param name="StateId">String id of its <see cref="FcsRecordType.GAMESTATE_BUILDING"/> record in the same zone file.</param>
 /// <param name="WorldY">The state's <c>world Y pos</c>: absolute height (terrain height + <c>Position.Y</c> for most).</param>
 public sealed record BuildingPlacement(ZoneCoordinate Zone, string InstanceId, string BuildingId, Vector3 Position, Quaternion Rotation, string? StateId, float? WorldY)
 {
+    readonly string? key;
+
+    /// <summary>The run-time name of the building (<see cref="BuildingKey.Of"/>); a player-placed building, whose id is unique already, is given its own.</summary>
+    public string Key { get => key ?? BuildingKey.Of(Zone, InstanceId); init => key = value; }
     /// <summary>True when <see cref="BuildingId"/> names a record of the zone file itself rather than a building.</summary>
     public bool TargetsZoneRecord { get; init; }
 }

@@ -90,7 +90,10 @@ Building state writer/reader (**Verified** by code, no player-built building in 
 | `usagenode_<i>` | | usage node state |
 
 New instance ids are `<n>-<container name>-INGAME`, n from the container's id counter (**Verified**, `FUN_140386770`;
-e.g. `19765-zone39.16-INGAME`). Their instance Y equals the state's `world Y pos` (**Observed**: 11405 of 11405 in the sample saves). On import, non-player buildings are rebuilt complete
+e.g. `19765-zone39.16-INGAME`). Instance ids are unique only within one zone file: **Observed** (base load order, scratch probe over
+`WorldLevelData.Buildings()`) 8,754 of 11,714 placements share their id with one in another zone, 580 ids within two zones of each other
+(`2-Newwworld-INGAME` is a Y-House in 19.29 and another house in 19.28). Meitou names a building at run time by `BuildingKey`
+`"<zone x>.<zone z>:<id>"` (doors, fixtures, renderer placements, saved-state lookup); the raw id stays in files and in the material seed. Their instance Y equals the state's `world Y pos` (**Observed**: 11405 of 11405 in the sample saves). On import, non-player buildings are rebuilt complete
 ([construction](../game/buildings-production.md#construction-tick)). A `creates player town` building makes a TOWN
 "Your Outpost" ([placement](../game/buildings-production.md#placement)), saved in `quick.save`'s town list, not in a
 zone file ([player outposts](save.md#player-outposts)); the buildings' `town` handle names it.

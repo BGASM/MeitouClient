@@ -58,9 +58,9 @@ internal sealed partial class ZoneGeometryGatherer
         foreach (var (b, record, position, destroyed) in NearBuildings(g.Zone, g.ZoneMin, g.ZoneMax, g.Margin))
         {
             g.Stats.Buildings++;
-            AddBuilding(g, record, b.InstanceId, position, b.Rotation, destroyed);
+            AddBuilding(g, record, b.Key, position, b.Rotation, destroyed);
             foreach (var (item, at, rotation) in LayoutObjects(b, record, position, destroyed))
-                AddBuilding(g, item.Building, $"{b.InstanceId}/{item.InstanceId}", at, rotation, destroyed: false, floor: item.Floor);
+                AddBuilding(g, item.Building, $"{b.Key}/{item.InstanceId}", at, rotation, destroyed: false, floor: item.Floor);
         }
         g.BuildingLastTriangle = g.TriangleCount;
         g.BuildingHash = knownHash ?? BuildingHash(g.Zone, g.Margin);
@@ -243,9 +243,9 @@ internal sealed partial class ZoneGeometryGatherer
         foreach (var (b, record, position, destroyed) in NearBuildings(zone, min, min + new Vector2(WorldLayout.ZoneSize), 0))
         {
             if (b.Zone != zone) continue;
-            AddRagdollBuilding(record, b.InstanceId, position, b.Rotation, destroyed, output);
+            AddRagdollBuilding(record, b.Key, position, b.Rotation, destroyed, output);
             foreach (var (item, at, rotation) in LayoutObjects(b, record, position, destroyed))
-                AddRagdollBuilding(item.Building, $"{b.InstanceId}/{item.InstanceId}", at, rotation, false, output);
+                AddRagdollBuilding(item.Building, $"{b.Key}/{item.InstanceId}", at, rotation, false, output);
         }
     }
 

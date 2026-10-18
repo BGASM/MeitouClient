@@ -21,7 +21,7 @@ public static class NavArea
 /// <summary>A convex prism: a convex polygon on the XZ plane between two heights. Used for carvers (removes the mesh) and door painters.</summary>
 internal sealed class NavVolume(Vector2[] polygon, float yMin, float yMax)
 {
-    /// <summary>For a door painter: the instance id of the building whose door it is (<see cref="NavDoors"/>).</summary>
+    /// <summary>For a door painter: the <see cref="Meitou.Data.World.BuildingKey"/> of the building whose door it is (<see cref="NavDoors"/>).</summary>
     public string? Owner { get; set; }
     /// <summary>Convex polygon on (X, Z), counter-clockwise seen from above (+Y).</summary>
     public Vector2[] Polygon { get; } = polygon;
@@ -67,7 +67,7 @@ internal sealed class ZoneGeometry
 
     /// <summary>For an interior mesh: the convex hull of the building interior mask; the mesh is clipped to it.</summary>
     public NavVolume? InteriorHull { get; init; }
-    /// <summary>For an interior mesh: the building instance it belongs to.</summary>
+    /// <summary>For an interior mesh: the <see cref="Meitou.Data.World.BuildingKey"/> of the building it belongs to.</summary>
     public string? InteriorOf { get; init; }
     /// <summary>
     /// For an interior clipped at a zone border: no seed keeps nothing (instead of the largest region); the part is kept from the neighbour's border

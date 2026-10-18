@@ -65,8 +65,8 @@ public class JailTests
             World.Fixtures.RegisterSite(World, data, 0);
             playerSquad = new Squad { Id = 1000, TemplateId = "p", Faction = relations.PlayerFaction };
             World.Squads.Add(playerSquad);
-            CageA = World.Fixtures.Find("cageA")!;
-            CageB = World.Fixtures.Find("cageB")!;
+            CageA = World.Fixtures.Find("0.0:cageA")!;
+            CageB = World.Fixtures.Find("0.0:cageB")!;
         }
 
         public void Dispose() => World.Dispose();

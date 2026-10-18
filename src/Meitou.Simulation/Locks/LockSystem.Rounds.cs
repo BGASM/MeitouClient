@@ -231,8 +231,8 @@ public sealed partial class LockSystem : IStateHashed
                 if (HasGoal(world, s, c, TaskType.LOCK_ALL_THE_CAGES, hour)) { cages = true; if (free && warden < 0) warden = s; }
             }
             if (cages && warden >= 0 && board.Town >= 0) LockCages(world, squad, board, warden, ref started);
-            if (board.OwnHome is not { } home || world.Fixtures.DoorOwner(home.InstanceId) < 0 || Targeted(home.InstanceId)) continue;
-            string building = home.InstanceId;
+            if (board.OwnHome is not { } home || world.Fixtures.DoorOwner(home.Key) < 0 || Targeted(home.Key)) continue;
+            string building = home.Key;
             if (inside155 || from197)
             {
                 if (world.Fixtures.AllDoorsLocked(building)) continue;
@@ -290,10 +290,10 @@ public sealed partial class LockSystem : IStateHashed
     /// <summary>How far from a building's origin its inside reaches (engine: its farthest node or bed + 10, at least 30).</summary>
     float Extent(TownBuilding b)
     {
-        if (extents.TryGetValue(b.InstanceId, out float e)) return e;
+        if (extents.TryGetValue(b.Key, out float e)) return e;
         float r = 0;
         foreach (var s in b.Spots) r = MathF.Max(r, Vector2.Distance(new Vector2(s.Position.X, s.Position.Z), new Vector2(b.Position.X, b.Position.Z)));
-        return extents[b.InstanceId] = MathF.Max(30, r + 10);
+        return extents[b.Key] = MathF.Max(30, r + 10);
     }
 
     static bool Within(in CharacterHot n, TownBuilding b, float extent) =>
@@ -336,7 +336,7 @@ public sealed partial class LockSystem : IStateHashed
 
     /// <summary>The target's building is shut by doors the worker may open: its faction's, or its squad's home.</summary>
     static bool NeedsKeys(World world, Round round, CharacterCold c, Fixture f) =>
-        world.Fixtures.IsShut(f.Building) && (world.Fixtures.DoorOwner(f.Building) == round.Faction || c.Ai?.Squad.Ai?.OwnHome?.InstanceId == f.Building);
+        world.Fixtures.IsShut(f.Building) && (world.Fixtures.DoorOwner(f.Building) == round.Faction || c.Ai?.Squad.Ai?.OwnHome?.Key == f.Building);
 
     static void Walk(World world, int worker, Round round, Fixture f)
     {

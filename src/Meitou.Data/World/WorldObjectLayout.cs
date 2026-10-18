@@ -54,6 +54,8 @@ public sealed record BuildingState(bool Destroyed = false, GameRecord? TownMater
 {
     /// <summary>Also lay out the building's <c>interior</c> list (flagged <see cref="PlacedMesh.Interior"/>), for a renderer that shows the interior view.</summary>
     public bool WithInterior { get; init; }
+    /// <summary>The <see cref="PlacedMesh.PlacementId"/> and <see cref="PlacedLight.PlacementId"/> to give the output (a <see cref="BuildingKey"/>); null: the placement id, which also seeds the material choice either way.</summary>
+    public string? Identity { get; init; }
 }
 
 /// <summary>
@@ -124,6 +126,8 @@ public static class WorldObjectLayout
         public readonly GameDatabase Db = db;
         public readonly GameRecord Building = building;
         public readonly string PlacementId = placementId;
+        /// <summary>What the output is named by (<see cref="BuildingState.Identity"/>).</summary>
+        public readonly string Identity = state.Identity ?? placementId;
         public readonly BuildingState State = state;
         public readonly List<PlacedMesh> Result = result;
         public readonly List<PlacedLight>? Lights = lights;
@@ -219,7 +223,7 @@ public static class WorldObjectLayout
         local *= Matrix4x4.CreateTranslation(offset);
         var node = local * parentNode;
         if (!entity) return null;
-        a.Result.Add(new PlacedMesh(mesh, node, part, a.Building, a.PlacementId, PlacedKind.BuildingPart) { Material = PartMaterial(a, part), Floor = Math.Clamp(part.GetInt("building floor"), 0, 3), Interior = a.Interior, DoorIndex = a.DoorIndex });
+        a.Result.Add(new PlacedMesh(mesh, node, part, a.Building, a.Identity, PlacedKind.BuildingPart) { Material = PartMaterial(a, part), Floor = Math.Clamp(part.GetInt("building floor"), 0, 3), Interior = a.Interior, DoorIndex = a.DoorIndex });
         return node;
     }
 
@@ -257,7 +261,7 @@ public static class WorldObjectLayout
         var local = Vector3.Transform(-Vector3.UnitY, Normalized(instance.Rotation));
         var direction = Vector3.TransformNormal(local, holderNode);
         direction = direction.LengthSquared() > 1e-12f ? Vector3.Normalize(direction) : -Vector3.UnitY;
-        return new PlacedLight(light, holder, a.Building, a.PlacementId, instance.Id, position, direction, power);
+        return new PlacedLight(light, holder, a.Building, a.Identity, instance.Id, position, direction, power);
     }
 
     /// <summary>A part's material (game: Building's part material lookup): its first <c>material</c>, else the building's base, else <see cref="FallbackPartMaterial"/>.</summary>

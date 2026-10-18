@@ -422,7 +422,7 @@ public sealed partial class ArrestSystem(CrimeSystem crimes, GameConstants const
     {
         var table = world.Characters;
         var gc = table.Cold(g)!;
-        string? home = gc.Ai?.Squad.Ai?.Home?.InstanceId;
+        string? home = gc.Ai?.Squad.Ai?.Home?.Key;
         var cage = world.Fixtures.FindCage(world, table.Next[g].Position, gc.Faction, home, f => Reserved(f, a));
         if (cage is null) return Drop(world, a, g);
         a.Cage = cage.Id;

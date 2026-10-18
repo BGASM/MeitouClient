@@ -114,9 +114,9 @@ public class HubNavmeshTests
             Assert.True(crossedDoor, "the way does not cross the door");
         }
         // With that door closed the room is shut (its walls are solid).
-        doors.Close("4933-Newwworld-INGAME");
+        doors.Close("20.32:4933-Newwworld-INGAME");
         Assert.False(query.FindPath(street, floor).Found);
-        doors.Open("4933-Newwworld-INGAME");
+        doors.Open("20.32:4933-Newwworld-INGAME");
         Assert.True(query.FindPath(street, floor).Found);
     }
 }

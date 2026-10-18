@@ -56,7 +56,7 @@ sealed partial class PlayerInterface
                 if (RayPrism(ray.Origin, ray.Direction, hull, y + candidate.Footprint.YMin, y + candidate.Footprint.YMax) is not { } t || t >= bestT) continue;
                 bestT = t;
                 var info = host.WorldInfo(b);
-                best = new(UiMode == Meitou.Data.Ui.UiMode.Meitou && info.Sells is { } sells ? sells : info.Name, info.Type, info.Owner, info.Town, null, b.InstanceId, new Vector3(b.Position.X, y, b.Position.Z), hull, info.PublicDay, info.PublicNight);
+                best = new(UiMode == Meitou.Data.Ui.UiMode.Meitou && info.Sells is { } sells ? sells : info.Name, info.Type, info.Owner, info.Town, null, b.Key, new Vector3(b.Position.X, y, b.Position.Z), hull, info.PublicDay, info.PublicNight);
             }
         return best;
     }

@@ -10,7 +10,7 @@ namespace Meitou.Data.World;
 /// The indoor volume of a placed building (docs/formats/zones.md, "Interior view"): the collision of its <c>interior mask</c> parts placed with the building's
 /// node (position, rotation, <c>scale</c>), kept as the convex footprint of the hull on the ground plane and its height range. A point inside is indoors.
 /// </summary>
-/// <param name="PlacementId">The building's instance id (what <see cref="PlacedMesh.PlacementId"/> carries for its parts).</param>
+/// <param name="PlacementId">The building's <see cref="BuildingKey"/> (what <see cref="PlacedMesh.PlacementId"/> carries for its parts).</param>
 /// <param name="Footprint">Convex polygon of the hull in world X/Z, counter-clockwise.</param>
 public sealed record InteriorVolume(string PlacementId, Vector2[] Footprint, float YMin, float YMax)
 {

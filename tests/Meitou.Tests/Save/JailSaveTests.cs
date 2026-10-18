@@ -20,6 +20,9 @@ public class JailSaveTests
 {
     const StandardParts Parts = StandardParts.Population | StandardParts.Player | StandardParts.Movement | StandardParts.Body | StandardParts.Crime;
     static readonly Vector3 HouseAt = SyntheticTown.Centre + new Vector3(0, 0, 100);
+    // The house stands in its own zone and is known at run time by its key there (BuildingKey).
+    static readonly ZoneCoordinate HouseZone = WorldLayout.ZoneOf(HouseAt.X, HouseAt.Z);
+    static readonly string HouseKey = BuildingKey.Of(HouseZone, "house");
     static readonly string[] CharacterKeys = [CrimeSave.EscapedKey, CrimeSave.RecentlyWantedKey, CrimeSave.RecognitionKey, HeldSave.MeitouState, HeldSave.MeitouWhat];
     static readonly SaveCaptureOptions Options = new() { Placements = [new TownPlacement("inst", "30-t", SyntheticTown.Centre, null)] };
 
@@ -37,7 +40,7 @@ public class JailSaveTests
         var cage = Rec("54-t", FcsRecordType.BUILDING, "Prisoner Cage");
         cage.References["functionality"] = [SyntheticTown.Ref("53-t")];
         var db = SyntheticTown.Database(anatomy: true, extra: [door, house, function, cage]);
-        var home = new TownBuilding("house", "52-t", "house", HouseAt, 0, false, false, []) { Fixtures = [new TownFixture("house/0", "54-t", true, HouseAt + new Vector3(10, 0, 0), 0)] };
+        var home = new TownBuilding("house", "52-t", "house", HouseAt, 0, false, false, []) { Zone = HouseZone, Fixtures = [new TownFixture($"{HouseKey}/0", "54-t", true, HouseAt + new Vector3(10, 0, 0), 0)] };
         return PopulationData.Create(db, [new TownPlacement("inst", "30-t", SyntheticTown.Centre, null)], buildings: new Dictionary<string, List<TownBuilding>> { ["inst"] = [home] });
     }
 
@@ -101,11 +104,11 @@ public class JailSaveTests
         var squadA = population.StartPlayer(a.World, NewGameStart.From(data.Db.Find("40-t")!));
         // The home is locked up (the lock round's flag read from a loaded state, as the round's own is private), its door locked, one member caged in the interior cage with a bounty,
         // another free and escaped.
-        a.World.Fixtures.Saved = new Dictionary<string, FcsRecord> { ["house"] = HouseState((LockSystem.HouseLockedKey, true)) };
+        a.World.Fixtures.Saved = new Dictionary<string, FcsRecord> { [HouseKey] = HouseState((LockSystem.HouseLockedKey, true)) };
         a.World.Fixtures.RegisterSite(a.World, data, 0);
-        a.World.Fixtures.SetDoorsLocked("house", true);
+        a.World.Fixtures.SetDoorsLocked(HouseKey, true);
         a.World.RunTicks(2);
-        var cage = a.World.Fixtures.Find("house/0")!;
+        var cage = a.World.Fixtures.Find($"{HouseKey}/0")!;
         cage.Lock!.Level = 40;
         var caged = squadA.Members[0];
         var cagedCold = a.World.Characters.Cold(caged.Slot)!;
@@ -115,7 +118,7 @@ public class JailSaveTests
         var runaway = a.World.Characters.Cold(squadA.Members[1].Slot)!;
         (runaway.Escaped, runaway.RecentlyWanted, runaway.Recognition) = (true, 100, 0.25f);
         var locksA = a.World.Systems.OfType<LockSystem>().Single();
-        Assert.True(locksA.IsHouseLocked(a.World, "house"));
+        Assert.True(locksA.IsHouseLocked(a.World, HouseKey));
 
         var first = Capture(a.World, data);
         string folder = Path.Combine(Temp("jail"), QuickSave.Name);
@@ -126,11 +129,11 @@ public class JailSaveTests
             // The save holds them (a world without the state, below, holds none).
             var states = save.Platoons.Single(p => p.FactionId == save.PlayerFaction!.Id).Characters.Select(c => c.GameState!).ToList();
             Assert.Equal(2, states[0].Ints[HeldSave.MeitouState]);
-            Assert.Equal("house/0", states[0].Strings[HeldSave.MeitouWhat]);
+            Assert.Equal($"{HouseKey}/0", states[0].Strings[HeldSave.MeitouWhat]);
             Assert.True(states[1].Bools[CrimeSave.EscapedKey]);
             Assert.Equal(100, states[1].Floats[CrimeSave.RecentlyWantedKey]);
             Assert.Equal(0.25f, states[1].Floats[CrimeSave.RecognitionKey]);
-            var house = HeldSave.BuildingStates(save)["house"];
+            var house = HeldSave.BuildingStates(save)[HouseKey];
             Assert.True(house.Bools[LockSystem.HouseLockedKey]);
             Assert.True(house.Bools["locked0"]);
             Assert.Equal(40 << 2 | 1, house.Ints["meitou lock 0"]);
@@ -140,9 +143,9 @@ public class JailSaveTests
             b.World.Fixtures.RegisterSite(b.World, data, 0);
             var squadB = b.World.Squads.Find(b.World.Player.Squad)!;
             var cagedB = b.World.Characters.Cold(squadB.Members[0].Slot)!;
-            var cageB = b.World.Fixtures.Find("house/0")!;
+            var cageB = b.World.Fixtures.Find($"{HouseKey}/0")!;
             Assert.True(cagedB.IsImprisoned);
-            Assert.Equal("house/0", cagedB.InWhat);
+            Assert.Equal($"{HouseKey}/0", cagedB.InWhat);
             Assert.Equal(squadB.Members[0], cageB.Occupant);
             Assert.True(cageB.Lock!.EffectivelyLocked);
             Assert.Equal(40, cageB.Lock.Level);
@@ -150,8 +153,8 @@ public class JailSaveTests
             Assert.Equal((Math.Truncate(cagedCold.SentenceStart), cagedCold.SentenceLength), (cagedB.SentenceStart, cagedB.SentenceLength));
             var runawayB = b.World.Characters.Cold(squadB.Members[1].Slot)!;
             Assert.Equal((true, 100f, 0.25f), (runawayB.Escaped, runawayB.RecentlyWanted, runawayB.Recognition));
-            Assert.True(b.World.Fixtures.AllDoorsLocked("house"));
-            Assert.True(b.World.Systems.OfType<LockSystem>().Single().IsHouseLocked(b.World, "house"));
+            Assert.True(b.World.Fixtures.AllDoorsLocked(HouseKey));
+            Assert.True(b.World.Systems.OfType<LockSystem>().Single().IsHouseLocked(b.World, HouseKey));
 
             // Captured again from the loaded world: the same keys, character by character and for the house.
             var second = SaveCapture.Capture(b.World, data, loaded.Clock, loaded, Options);
@@ -159,7 +162,7 @@ public class JailSaveTests
             for (int k = 0; k < 2; k++)
                 Assert.Equal(Keys(states[k]).Where(e => e.Key.StartsWith("meitou ") || e.Key is "sentence" or "psts" or "bountyfac0" or "amount0"),
                     Keys(again[k]).Where(e => e.Key.StartsWith("meitou ") || e.Key is "sentence" or "psts" or "bountyfac0" or "amount0"));
-            Assert.Equal(Keys(house), Keys(HeldSave.BuildingStates(second)["house"]));
+            Assert.Equal(Keys(house), Keys(HeldSave.BuildingStates(second)[HouseKey]));
         }
         finally { Directory.Delete(Path.GetDirectoryName(folder)!, recursive: true); }
 
@@ -173,7 +176,7 @@ public class JailSaveTests
         Assert.Equal(squadP.Members.Count, plainPlatoon.Characters.Count);
         foreach (var c in plainPlatoon.Characters)
             Assert.DoesNotContain(Keys(c.GameState!), e => CharacterKeys.Contains(e.Key));
-        var plainHouse = HeldSave.BuildingStates(empty)["house"];
+        var plainHouse = HeldSave.BuildingStates(empty)[HouseKey];
         Assert.False(plainHouse.Bools["locked0"]);
         Assert.DoesNotContain(Keys(plainHouse), e => e.Key is "meitou lock 0" or LockSystem.HouseLockedKey);
     }

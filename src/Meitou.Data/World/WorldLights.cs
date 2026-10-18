@@ -44,7 +44,7 @@ public enum WorldLightRule
 /// <param name="Floor">The holder part's <c>building floor</c> (the game hands it to the light pass with the light; use Unknown).</param>
 /// <param name="LightId">The LIGHT record's string id.</param>
 /// <param name="BuildingId">The BUILDING record that owns the light.</param>
-/// <param name="PlacementId">The placement (zone instance id, plus "/layout item id" for layout objects).</param>
+/// <param name="PlacementId">The placement (its <see cref="BuildingKey"/>, plus "/layout item id" for layout objects).</param>
 /// <param name="PowerOn">The placed building's GAMESTATE_BUILDING <c>power on</c> when its state has one (null for layout objects and states without it); what it does to the lights is Unknown.</param>
 public sealed record WorldLight(
     Vector3 Position,
@@ -104,7 +104,7 @@ public static class WorldLights
         var state = b.StateId is not null && levels.Zones.TryGetValue(b.Zone, out var zoneDb) ? zoneDb.Find(b.StateId) : null;
         bool? powerOn = state is not null && state.Bools.TryGetValue("power on", out var on) ? on : null;
         var placed = new List<PlacedLight>();
-        WorldObjectLayout.Building(db, building.Record, b.InstanceId, building.Position, b.Rotation, new BuildingState(), placed);
+        WorldObjectLayout.Building(db, building.Record, b.InstanceId, building.Position, b.Rotation, new BuildingState { Identity = b.Key }, placed);
         foreach (var p in placed) result.Add(FromPlaced(p, interior: false, powerOn));
         if (layouts is null || state is null) return result;
         AddLayout(db, layouts, building, state.GetString("exterior layout name"), exterior: true, result);
@@ -119,7 +119,8 @@ public static class WorldLights
         {
             var (at, rotation) = BuildingLayouts.Place(building.Position, building.Placement.Rotation, item);
             var placed = new List<PlacedLight>();
-            WorldObjectLayout.Building(db, item.Building, $"{building.Placement.InstanceId}/{item.InstanceId}", at, rotation, new BuildingState(), placed);
+            WorldObjectLayout.Building(db, item.Building, $"{building.Placement.InstanceId}/{item.InstanceId}", at, rotation,
+                new BuildingState { Identity = $"{building.Placement.Key}/{item.InstanceId}" }, placed);
             foreach (var p in placed) result.Add(FromPlaced(p, interior: !exterior, powerOn: null));
         }
     }

@@ -34,7 +34,7 @@ public readonly record struct HomeSpot(HomeSpotKind Kind, Vector3 Position, floa
 
 /// <summary>
 /// A turret building (<c>BUILDING_FUNCTIONALITY</c> function BF_TURRET): where its mount stands and faces (0 along +Z, turning towards +X), how near its gunner must be,
-/// the GUN_DATA it fires, and the instance of the building it is mounted on (<c>mounted</c> handle; null when it names none known).
+/// the GUN_DATA it fires, and the <see cref="BuildingKey"/> of the building it is mounted on (<c>mounted</c> handle; null when it names none known).
 /// </summary>
 public readonly record struct TurretPost(Vector3 Position, float Yaw, float UseRange, string GunId, string? MountedOn);
 
@@ -52,6 +52,8 @@ public sealed record TownBuilding(string InstanceId, string BuildingId, string N
     public IReadOnlyList<TownFixture> Fixtures { get; init; } = [];
     /// <summary>The zone whose building list places it (instance ids repeat between zones).</summary>
     public ZoneCoordinate Zone { get; init; }
+    /// <summary>Its run-time name (<see cref="BuildingKey"/>): what fixtures, doors and the renderer's placements know it by.</summary>
+    public string Key => BuildingKey.Of(Zone, InstanceId);
     /// <summary>
     /// Whether residents can be housed in it (docs/game/factions-squads-towns.md "Town residents"): a BUILDING with <c>interior</c> parts that does not
     /// <c>links together</c> (a wall), or an <c>is wall gate</c> gate.
@@ -80,7 +82,7 @@ public sealed record TownBuilding(string InstanceId, string BuildingId, string N
 
 /// <summary>
 /// A lockable object of a building's interior layout: a cage or pole (BUILDING_FUNCTIONALITY <c>function</c> 8) or a BUILDING with <c>has lock</c>. <paramref name="Id"/> is
-/// the parent's instance id, "/", and the item's index in the layout (an <b>engine</b> name: the save's ids of generated interiors are not mapped).
+/// the parent's <see cref="BuildingKey"/>, "/", and the item's index in the layout (an <b>engine</b> name: the save's ids of generated interiors are not mapped).
 /// </summary>
 public sealed record TownFixture(string Id, string RecordId, bool IsCage, Vector3 Position, float Yaw);
 
@@ -114,7 +116,7 @@ public static class TownBuildings
         var instances = new Dictionary<(int C, int I), string>();
         foreach (var b in levels.Buildings())
             if (b.StateId is not null && levels.Zones.TryGetValue(b.Zone, out var zone) && zone.Find(b.StateId) is { } state && state.GetInt("handleTYPE") == (int)FcsRecordType.BUILDING && state.Ints.ContainsKey("handleI"))
-                instances[(state.GetInt("handleC"), state.GetInt("handleI"))] = b.InstanceId;
+                instances[(state.GetInt("handleC"), state.GetInt("handleI"))] = b.Key;
         var names = new Dictionary<(string, bool), IReadOnlySet<string>>();
         List<TownFixture>? fixtures = null;
         var result = new Dictionary<string, List<TownBuilding>>(StringComparer.Ordinal);
@@ -157,7 +159,7 @@ public static class TownBuildings
                                 SitClip = function.GetReferences("animation").Select(r => db.Find(r.TargetStringId)?.Name).FirstOrDefault(n => n is not null),
                             });
                         else if (FunctionOf(db, item.Building, functions)?.GetInt("function") == CageFunction || item.Building.GetBool("has lock"))
-                            (fixtures ??= []).Add(new TownFixture($"{b.InstanceId}/{index}", item.Building.StringId,
+                            (fixtures ??= []).Add(new TownFixture($"{b.Key}/{index}", item.Building.StringId,
                                 FunctionOf(db, item.Building, functions)?.GetInt("function") == CageFunction, at, YawOf(rotation)));
                         index++;
                     }
@@ -183,7 +185,7 @@ public static class TownBuildings
         return result;
     }
 
-    /// <summary>The instance of the building a state's <c>mounted</c> handle names; null when the handle is null, not a building, or unknown.</summary>
+    /// <summary>The key of the building a state's <c>mounted</c> handle names; null when the handle is null, not a building, or unknown.</summary>
     static string? MountedOn(Dictionary<(int C, int I), string> instances, GameRecord? state) =>
         state is not null && state.GetInt("mountedTYPE") == (int)FcsRecordType.BUILDING && state.Ints.ContainsKey("mountedI") &&
         instances.TryGetValue((state.GetInt("mountedC"), state.GetInt("mountedI")), out string? instance) ? instance : null;

@@ -44,7 +44,7 @@ public class DoorTests
         world.Fixtures.RegisterSite(world, ArrestTests.Town(), 0);
         world.Fixtures.Doors = new Gate();
 
-        var door = world.Fixtures.Find("house#0")!;
+        var door = world.Fixtures.Find("0.0:house#0")!;
         door.Motion = DoorMotion.Open;
         door.OpenAmount = 1;
         door.WantsLock = true;

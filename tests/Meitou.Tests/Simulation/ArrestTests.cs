@@ -117,7 +117,7 @@ public class ArrestTests
         world.Characters.Cold(hero.Slot)!.RecentlyWanted = CrimeSystem.RecentlyWantedSeconds;
         var picker = Hero(new Vector2(-200, 0), "picker", 2500, new Combatant());
         world.Characters.Cold(picker.Slot)!.Stats![StatsEnumerated.Lockpicking] = 60;
-        var cageB = world.Fixtures.Find("cageB")!;
+        var cageB = world.Fixtures.Find("0.0:cageB")!;
         Assert.True(world.Fixtures.Imprison(world, picker, cageB));
 
         var hashes = new List<ulong>();
@@ -134,7 +134,7 @@ public class ArrestTests
             hashes.Add(world.StateHash());
         }
         var heroCold = world.Characters.Cold(hero.Slot)!;
-        seen = (heroCold.IsImprisoned && heroCold.InWhat == "cageA" && arrest.Log.Any(e => e.Kind == ArrestEventKind.Jailed && e.Target == hero),
+        seen = (heroCold.IsImprisoned && heroCold.InWhat == "0.0:cageA" && arrest.Log.Any(e => e.Kind == ArrestEventKind.Jailed && e.Target == hero),
             picked, world.Characters.Cold(picker.Slot)!.Escaped || arrest.Log.Any(e => e.Target == picker));
         return hashes;
     }

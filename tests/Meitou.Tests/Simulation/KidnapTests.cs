@@ -80,7 +80,7 @@ public class KidnapTests
             hashes.Add(world.StateHash());
         }
         var cold = world.Characters.Cold(victim.Slot)!;
-        seen = (cold.IsImprisoned && cold.InWhat is "cageA" or "cageB", cold.Kidnapped,
+        seen = (cold.IsImprisoned && cold.InWhat is "0.0:cageA" or "0.0:cageB", cold.Kidnapped,
             kidnap.Log.Any(e => e.Kind == KidnapEventKind.Lifted && e.Victim == victim) && kidnap.Log.Any(e => e.Kind == KidnapEventKind.Caged && e.Victim == victim));
         return hashes;
     }
@@ -125,7 +125,7 @@ public class KidnapTests
         var own = Down(city);
         var animal = Down(player, c => c.Fighter = new Fighter(null) { IsAnimal = true });
         var caged = Down(player);
-        Assert.True(world.Fixtures.Imprison(world, caged, world.Fixtures.Find("cageA")!));
+        Assert.True(world.Fixtures.Imprison(world, caged, world.Fixtures.Find("0.0:cageA")!));
         Assert.True(kidnap.IsVictim(world, stranger.Slot, city));
         Assert.False(kidnap.IsVictim(world, own.Slot, city));
         Assert.False(kidnap.IsVictim(world, animal.Slot, city));
@@ -137,7 +137,7 @@ public class KidnapTests
 
         // A kidnapped prisoner: its sentence is never served, no bail is offered, getting out is no escape. The same prisoner with an unserved sentence does escape.
         var cold = world.Characters.Cold(caged.Slot)!;
-        var cage = world.Fixtures.Find("cageA")!;
+        var cage = world.Fixtures.Find("0.0:cageA")!;
         cold.SentenceStart = world.GameHours;
         cold.SentenceLength = 0;
         Assert.True(FixtureRegistry.SentenceServed(cold, world.GameHours));

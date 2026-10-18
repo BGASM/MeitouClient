@@ -638,7 +638,7 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
                 for (int t = 0; t < board.Turrets.Count; t++)
                 {
                     if (taken.Contains(t) || board.Turrets[t].Turret is not { } turret) continue;
-                    if (homeOnly && turret.MountedOn != board.Home?.InstanceId) continue;
+                    if (homeOnly && turret.MountedOn != board.Home?.Key) continue;
                     float d = Vector2.DistanceSquared(mind.Post, Flat(turret.Position));
                     if (d < bestD) (best, bestD) = (t, d);
                 }
@@ -714,7 +714,7 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
         var (packages, template) = TemplateOf(squad.TemplateId);
         var home = AssignHome(world, squad, template);
         // The template's initial door state applies to the home it is given (docs/game/locks.md "Doors"); the first squad's wins, a saved building keeps its own.
-        if (home is not null) world.Fixtures.ApplyInitialDoorState(home.InstanceId, template?.InitialDoorState ?? 0);
+        if (home is not null) world.Fixtures.ApplyInitialDoorState(home.Key, template?.InitialDoorState ?? 0);
         ulong roll = Rng.Hash(world.Seed, (ulong)squad.Id, RngPurpose.Think, SeedSalts.AiPatrol);
         squad.Ai = new Blackboard(packages)
         {
