@@ -103,19 +103,29 @@ sealed partial class PlayerInterface
     }
 
     /// <summary>Adds a text panel's lines over the arranged widget <paramref name="panel"/>: one row per line, the label from 3 % of the width, the value right-aligned to 96 %.</summary>
-    static void AddLines(List<UiControl> controls, string panel, IReadOnlyList<HudLine> lines, float rowHeight, float? fontPixels = null, string font = "Kenshi_StandardFont_Medium")
+    /// <summary>One row per line, the label left and the value right; the value takes <paramref name="valueFont"/> at <paramref name="valuePixels"/> when given.</summary>
+    static void AddLines(List<UiControl> controls, string panel, IReadOnlyList<HudLine> lines, float rowHeight, float? fontPixels = null, string font = "Kenshi_StandardFont_Medium",
+        string? valueFont = null, float? valuePixels = null)
     {
         if (controls.FirstOrDefault(c => c.Name == panel) is not { } host) return;
         var area = host.Bounds;
-        var properties = new Dictionary<string, string> { ["FontName"] = font };
-        if (fontPixels is { } pixels) properties["FontPixels"] = Math.Max(8, (int)MathF.Round(pixels)).ToString(CultureInfo.InvariantCulture);
+        var labelProperties = Face(font, fontPixels);
+        var valueProperties = valueFont is null ? labelProperties : Face(valueFont, valuePixels);
         for (int i = 0; i < lines.Count; i++)
         {
             var row = new UiRect(area.X + area.Width * 0.03f, area.Y + i * rowHeight, area.Width * 0.93f, rowHeight);
-            foreach (var (part, text, colour, align) in new[] { ("label", lines[i].Label, lines[i].LabelColour, "Left Top"), ("value", lines[i].Value, lines[i].ValueColour, "Right Top") })
+            foreach (var (part, text, colour, align, properties) in new[] { ("label", lines[i].Label, lines[i].LabelColour, "Left Top", labelProperties),
+                ("value", lines[i].Value, lines[i].ValueColour, "Right Top", valueProperties) })
                 if (text.Length > 0)
                     controls.Add(new($"{panel}-{part}-{i}", "TextBox", row, text, "", "Kenshi_TextboxStandardText", true,
                         new Dictionary<string, string>(properties) { ["TextAlign"] = align, ["TextColour"] = colour ?? MyGuiColours.InkText }, Vector4.Zero, Pickable: false, Clip: host.Clip));
+        }
+
+        static Dictionary<string, string> Face(string name, float? pixels)
+        {
+            var properties = new Dictionary<string, string> { ["FontName"] = name };
+            if (pixels is { } p) properties["FontPixels"] = Math.Max(8, (int)MathF.Round(p)).ToString(CultureInfo.InvariantCulture);
+            return properties;
         }
     }
 
@@ -138,8 +148,9 @@ sealed partial class PlayerInterface
         string faction = FactionName?.Invoke(lead.Faction) ?? "";
         AddLines(controls, "NameText", [new(lead.Name, faction, TitleColour, TitleColour)], row, sidePixels);
         AddLines(controls, "StateText", StateLines(lead), row, sidePixels);
-        // The base game draws the stats rows in the painted face (Observed: glyph shapes and widths match Sentencia at its resized 22 pt).
-        AddLines(controls, "StatsText", StatsLines(lead), row, font: "Kenshi_PaintedTextFont_Medium");
+        // The base game draws the stats labels in the painted face (Observed: glyph shapes and widths match Sentencia at its resized 22 pt); the values
+        // take the standard face, like the medical column's numbers.
+        AddLines(controls, "StatsText", StatsLines(lead), row, font: "Kenshi_PaintedTextFont_Medium", valueFont: "Kenshi_StandardFont_Medium", valuePixels: sidePixels);
         if (infoExpanded) AddLines(controls, "ExtendedStatsText", ExtendedLines(lead, SpeedUnit).Select(line => line with
             { Label = line.Label.ToUpperInvariant(), LabelColour = MainColour }).ToArray(), row, sidePixels);
         foreach (var (bar, name, arrows) in medicalRows)

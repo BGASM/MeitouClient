@@ -130,9 +130,9 @@ Meitou (`PlayerInterface.PortraitStates.cs`):
 - The serial is `CharacterCold.PortraitSerial`. It is read and written as `portrait_serial` (or taken from the handle's serial), and rolled at spawn otherwise.
 - "In danger" is taken to mean "in a fight". The `Eaten` flag is never set.
 - Shackles are worn ARMOUR with `is locked`, which the original makes a `LockedArmour`.
-The HUD stats rows (`StatsText`: MARTIAL ARTS ...) are drawn in the painted face, Sentencia at its resized 22 pt, 15.3 px at 1080 p
+The HUD stats labels (`StatsText`: MARTIAL ARTS ...) are drawn in the painted face, Sentencia at its resized 22 pt, 15.3 px at 1080 p
 (**Observed**: glyph shapes and widths in a base-game screenshot; [mygui.md](../formats/mygui.md) for the resize); Meitou uses
-`Kenshi_PaintedTextFont_Medium` there.
+`Kenshi_PaintedTextFont_Medium` there. The values' face in the original is **Unknown**; Meitou draws them in the standard face at the HUD size.
 JOBS and RANGED start enabled (user-reported original defaults).
 HUD text size: `Kenshi_StandardFont_Medium` (the MyGUI default font, `core_settings.xml`) is Exo2 SemiBold 20 pt at 50 dpi, a 13.9 px
 em (**Verified**, `kenshi_fonts.xml`). The base game draws HUD text at that size at 1080 p (**Observed**: user screenshots; Meitou's
