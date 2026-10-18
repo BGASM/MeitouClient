@@ -72,6 +72,16 @@ public sealed partial class LockSystem
         }
     }
 
+    /// <summary>The door lock hardness one point of <see cref="BlowDamage"/> takes off.</summary>
+    public const float HardnessPerDamage = 0.015f;
+
+    /// <summary>A blow's damage to a door (<c>FUN_14029d690</c>): clamp(2 x blunt + 0.5 x cut, 20, 60), an animal's packet at a quarter first (<c>FUN_140348c10</c>).</summary>
+    public static float BlowDamage(float cut, float blunt, bool animal)
+    {
+        float scale = animal ? 0.25f : 1;
+        return Math.Clamp(2 * blunt * scale + 0.5f * cut * scale, 20, 60);
+    }
+
     /// <summary>One swing at a door (<c>FUN_14029d690</c>): true when it broke the door.</summary>
     bool Hit(Fixture door, CharacterCold c)
     {
@@ -83,11 +93,10 @@ public sealed partial class LockSystem
             var packet = f.Unarmed
                 ? DamageFormulas.UnarmedPacket(Eff(f.WeaponSkill), Eff(StatsEnumerated.Toughness), str, f.Weapon, TargetKind.Human, null, f.DamageOutput, k)
                 : DamageFormulas.Packet(Eff(f.WeaponSkill), Eff(StatsEnumerated.Dexterity) * f.DexterityMult, str, f.Weapon!, TargetKind.Human, null, f.DamageOutput, k);
-            float scale = f.IsAnimal ? 0.25f : 1;
-            damage = Math.Clamp(2 * packet.Blunt * scale + 0.5f * packet.Cut * scale, 20, 60);
+            damage = BlowDamage(packet.Cut, packet.Blunt, f.IsAnimal);
         }
         var l = door.Lock!;
-        l.Hardness -= damage * 0.015f;
+        l.Hardness -= damage * HardnessPerDamage;
         if (l.Hardness > 0) return false;
         l.Hardness = 0;
         l.Locked = false;

@@ -4,14 +4,15 @@ using Meitou.Data.World;
 using Meitou.Navigation;
 using Meitou.Simulation;
 using Meitou.Simulation.Bodies;
+using Meitou.Simulation.Combat;
 using Meitou.Simulation.Locks;
 using static Meitou.Tests.Bodies.BodyFixtures;
 using SimWorld = Meitou.Simulation.World;
 
 namespace Meitou.Tests.Simulation;
 
-/// <summary>Doors: leaf motion, closing to the lock, Meitou's close-behind and where the doors are (docs/game/locks.md "Doors", "Door motion"; docs/simulation.md "Doors").</summary>
-public class DoorTests
+/// <summary>Doors: leaf motion, closing to the lock, Meitou's close-behind, bashing and where the doors are (docs/game/locks.md "Doors", "Door motion"; docs/simulation.md "Doors").</summary>
+public class DoorTests(ITestOutputHelper output)
 {
     [Fact]
     public void The_leaf_slides_and_steps_out_by_the_original_formula()
@@ -67,6 +68,84 @@ public class DoorTests
         world.RunTicks(10 + LockSystem.WalkerEveryTicks);
         Assert.Equal(DoorMotion.Closing, door.Motion);
         Assert.False(door.Lock!.Locked);
+    }
+
+    [Fact]
+    public void A_bash_blow_does_clamp_2_blunt_plus_half_cut_20_to_60_an_animal_at_a_quarter_first()
+    {
+        Assert.Equal(20, LockSystem.BlowDamage(10, 2, animal: false));     // 9 -> 20
+        Assert.Equal(35, LockSystem.BlowDamage(30, 10, animal: false));
+        Assert.Equal(60, LockSystem.BlowDamage(100, 40, animal: false));   // 130 -> 60
+        Assert.Equal(25, LockSystem.BlowDamage(0, 50, animal: true));      // 100 x 0.25, then the clamp
+        Assert.Equal(20, LockSystem.BlowDamage(30, 10, animal: true));
+        Assert.Equal(0.015f, LockSystem.HardnessPerDamage);
+    }
+
+    sealed class SpotGate : IDoorGate
+    {
+        public void SetDoorsBlocked(string buildingInstance, bool blocked) { }
+        public void ResetDoors() { }
+        public DoorSpot? DoorSpotOf(string buildingRecordId, int doorIndex) => new(new Vector3(0, 0, 60), Vector3.UnitZ, 15);
+    }
+
+    [Fact, Slow]
+    public void A_bonedog_whose_target_hides_in_a_locked_hub_house_walks_to_its_door_bashes_it_open_and_goes_in()
+    {
+        Assert.SkipWhen(InstallData.Install is null, "Kenshi install not found");
+        var db = InstallData.BaseGame!;
+        var levels = InstallData.Levels!;
+        var data = PopulationData.Create(db, levels.Towns(), buildings: TownBuildings.Build(db, levels, null, (_, _) => 0));
+        int site = data.Sites.ToList().FindIndex(s => s.Town.Name == "The Hub");
+        var walk = new OpenGroundWalkability((_, _) => 150);
+        var systems = StandardSystems.Build(data, walk, new StandardSystemOptions
+        {
+            Parts = StandardParts.Movement | StandardParts.Pursuit | StandardParts.Body | StandardParts.Combat | StandardParts.Crime, SynchronousPaths = true,
+            Combat = new Meitou.Simulation.Combat.CombatOptions { SelfApproach = false, TickMedical = false },
+        });
+        using var world = new SimWorld(new WorldSettings { Seed = 3, MinPartitionSize = 1, PublishSnapshots = false }, walk, systems.Systems);
+        world.Fixtures.RegisterSite(world, data, site);
+        world.Fixtures.Doors = new SpotGate();   // headless: a stand-in for navigation's door spots
+        var b = data.Sites[site].Buildings.First(x => world.Fixtures.OfBuilding(x.Key).Any(f => f.Kind == FixtureKind.Door));
+        var doors = world.Fixtures.OfBuilding(b.Key).Where(f => f.Kind == FixtureKind.Door).ToList();
+        foreach (var d in doors) { d.Lock!.Level = Math.Max(1, d.Lock.Level); world.Fixtures.SetLocked(d, true); }
+        Assert.True(world.Fixtures.IsShut(b.Key));
+        var door = doors[0];
+        float hardness = door.Lock!.Hardness;
+        Assert.True(hardness > 0);
+
+        var population = new PopulationSystem(data, new PopulationSettings());
+        string human = db.OfType(Meitou.Data.Fcs.FcsRecordType.CHARACTER)
+            .First(r => r.GetReferences("race").Any(x => x.Values.Value0 > 0 && db.Find(x.TargetStringId)?.Name == "Greenlander") && r.GetReferences("stats").Count > 0).StringId;
+        var me = population.SpawnSandbox(world, human, new Vector2(b.Position.X, b.Position.Z), player: true, faction: data.PlayerFaction);
+        var spot = world.Fixtures.DoorSpotOf(door)!.Value;
+        var outward = Vector2.Normalize(new Vector2(spot.Centre.X - b.Position.X, spot.Centre.Z - b.Position.Z));
+        var dog = population.SpawnSandbox(world, "3979-gamedata.base", new Vector2(spot.Centre.X, spot.Centre.Z) + outward * 200, player: false);
+        world.RunTicks(2);
+        world.Defer(new AttackOrder([dog], me) { Tick = world.Tick + 1 });
+        var table = world.Characters;
+
+        // A bonedog's blows do the minimum (a quarter of its packet is under 20): 0.3 hardness each, one every 1.5 s.
+        bool bashed = false;
+        Vector3 at = default;
+        int ticks = (int)((MathF.Ceiling(hardness / (20 * LockSystem.HardnessPerDamage)) + 4) * LockSystem.BashSwingSeconds / world.TickSeconds) + 900;
+        for (int t = 0; t < ticks && !door.DoorBroken; t++)
+        {
+            world.RunTick();
+            bashed |= table.Cold(dog.Slot)!.Bashing == door.Id;
+            at = table.Next[dog.Slot].Position;
+        }
+        output.WriteLine($"{b.Name}: hardness {hardness}, broken at tick {world.Tick}");
+        Assert.True(bashed);
+        Assert.True(door.DoorBroken);
+        Assert.False(door.Lock.Locked);
+        Assert.Equal(DoorMotion.Opening, door.Motion);
+        Assert.False(world.Fixtures.IsShut(b.Key));
+        Assert.True(Vector2.Distance(new Vector2(at.X, at.Z), new Vector2(spot.Centre.X, spot.Centre.Z)) <= LockSystem.BashStandOff + LockSystem.BashReach);
+        // The pursuit carries on into the house.
+        world.RunTicks(150);
+        Assert.Null(table.Cold(dog.Slot)!.Bashing);
+        var now = table.Next[dog.Slot].Position;
+        Assert.True(Vector2.Distance(new Vector2(now.X, now.Z), new Vector2(b.Position.X, b.Position.Z)) < Vector2.Distance(new Vector2(at.X, at.Z), new Vector2(b.Position.X, b.Position.Z)));
     }
 
     [Fact, Slow]

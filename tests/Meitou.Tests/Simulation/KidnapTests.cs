@@ -159,6 +159,47 @@ public class KidnapTests
         Assert.True(world.Fixtures.GetOut(world, other, crime));
         Assert.True(oc.Escaped);
     }
+
+    [Fact]
+    public void A_slave_serves_no_sentence_escapes_as_an_escaped_slave_is_reenslaved_by_its_owners_cage_and_freed_by_a_release_and_the_save_keeps_it()
+    {
+        var data = ArrestTests.Town();
+        using var world = new SimWorld(new WorldSettings { PublishSnapshots = false }, new OpenGroundWalkability((_, _) => 150));
+        world.Fixtures.RegisterSite(world, data, 0);
+        int city = data.FactionIndex("50-a");
+        var squad = new Squad { Id = 1, TemplateId = "t", Faction = data.Relations.PlayerFaction };
+        world.Squads.Add(squad);
+        var cold = new Combatant().MakeCold();
+        cold.Faction = data.Relations.PlayerFaction;
+        var slave = Add(world, cold, Vector2.Zero, squad);
+        var cage = world.Fixtures.Find("0.0:cageA")!;
+
+        FixtureRegistry.Enslave(world, cold, city);
+        Assert.Equal((1, city), (cold.SlaveState, cold.SlaveOwner));
+        Assert.True(world.Fixtures.Imprison(world, slave, cage));
+        Assert.False(FixtureRegistry.SentenceServed(cold, world.GameHours + 1e6));
+
+        // Getting out: an escaped slave (state 2), recognised at once.
+        cage.Lock!.Locked = false;
+        Assert.True(world.Fixtures.GetOut(world, slave));
+        Assert.Equal((2, city), (cold.SlaveState, cold.SlaveOwner));
+        Assert.Equal(CrimeSystem.RecentlyWantedSeconds, cold.RecentlyWanted);
+
+        // The save keeps state and owner.
+        var record = SyntheticTown.Rec("1-s", FcsRecordType.CHARACTER, "state");
+        SlaveSave.Write(record, cold, data);
+        var loaded = new Combatant().MakeCold();
+        SlaveSave.Read(record, loaded, data);
+        Assert.Equal((2, city), (loaded.SlaveState, loaded.SlaveOwner));
+
+        // Caged again by an owner: a slave again; a release frees it.
+        Assert.True(world.Fixtures.Imprison(world, slave, cage));
+        Assert.Equal((1, city), (cold.SlaveState, cold.SlaveOwner));
+        Assert.True(world.Fixtures.Release(world, slave));
+        Assert.Equal((0, -1), (cold.SlaveState, cold.SlaveOwner));
+        SlaveSave.Write(record, cold, data);
+        Assert.False(record.Strings.ContainsKey(SlaveSave.OwnerKey));
+    }
 }
 
 /// <summary>The Skin Bandits' small raid against an outpost of the installed game's data. Skipped without the game.</summary>
@@ -233,5 +274,48 @@ public class KidnapInstallTests(ITestOutputHelper output)
         int Flags(SaveGame g) => g.Platoons.SelectMany(p => p.Characters).Count(c => c.GameState?.Bools.ContainsKey(CrimeSave.KidnappedKey) == true);
         Assert.Equal(Flags(game), Flags(again));
         Assert.Equal(loaded.Count, Flags(game));
+    }
+
+    [Fact]
+    public void A_player_character_puts_the_games_shackles_on_a_downed_character_locked_and_its_worn_item_in_that_slot_goes_to_its_inventory()
+    {
+        Assert.SkipWhen(InstallData.Install is null, "Kenshi install not found");
+        var db = InstallData.BaseGame!;
+        var data = PopulationData.Create(db, []);
+        var walk = new OpenGroundWalkability((_, _) => 300);
+        var set = StandardSystems.Build(data, walk, new StandardSystemOptions
+        {
+            Parts = StandardParts.Player | StandardParts.Movement | StandardParts.Body | StandardParts.Carry | StandardParts.Crime, SynchronousPaths = true,
+        });
+        using var world = new SimWorld(new WorldSettings { Seed = 5, PublishSnapshots = false }, walk, set.Systems);
+        var population = new PopulationSystem(data, new PopulationSettings());
+        string human = db.OfType(FcsRecordType.CHARACTER).First(r => r.GetReferences("race").Any(x => x.Values.Value0 > 0 && db.Find(x.TargetStringId)?.Name == "Greenlander") && r.GetReferences("stats").Count > 0).StringId;
+        var worker = population.SpawnSandbox(world, human, new Vector2(5000, 5000), player: true);
+        var wearer = population.SpawnSandbox(world, human, new Vector2(5100, 5000), player: false, variant: 1);
+        var table = world.Characters;
+        var wc = table.Cold(wearer.Slot)!;
+        wc.Medical!.KnockOut(100000);
+
+        var record = db.OfType(FcsRecordType.ARMOUR).First(r => r.GetBool("is locked"));
+        var shackles = data.Items.Create(record.StringId)!;
+        shackles.Section = "main";
+        Assert.True(table.Cold(worker.Slot)!.Inventory!.Add(shackles));
+        // Something already worn in that slot.
+        var other = db.OfType(FcsRecordType.ARMOUR).Select(r => data.Items.Create(r.StringId)!).First(i => !i.IsLocked && i.EquipmentSection == shackles.EquipmentSection);
+        wc.Inventory!.Items.RemoveAll(i => i.Section == shackles.EquipmentSection);
+        Assert.True(Meitou.Simulation.Items.InventoryCommands.TryEquip(wc.Inventory, other));
+        Assert.True(LockSystem.CanBeShackled(wc, true));
+
+        world.Commands.Enqueue(new PutShacklesOrder([worker], wearer) { Tick = world.Tick });
+        for (int i = 0; i < 60 && LockSystem.WornShackles(wc) is null; i++) world.RunTicks(30);
+        output.WriteLine($"{record.Name} ({shackles.EquipmentSection}) on {wc.Name} at tick {world.Tick}; {other.Name} now in {other.Section}");
+        var worn = LockSystem.WornShackles(wc);
+        Assert.NotNull(worn);
+        Assert.Equal(record.StringId, worn.Record);
+        Assert.True(worn.Lock!.EffectivelyLocked);
+        Assert.Equal("main", other.Section);
+        Assert.Contains(other, wc.Inventory.Items);
+        Assert.Null(LockSystem.CarriedShackles(table.Cold(worker.Slot)));
+        Assert.False(LockSystem.CanBeShackled(wc, true));   // one pair at a time
     }
 }

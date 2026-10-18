@@ -46,6 +46,45 @@ public class PopulationTests
     }
 
     [Fact]
+    public void A_housed_squads_prisoners_are_made_caged_in_its_home_held_without_a_sentence_and_trimmed_to_its_free_cages()
+    {
+        var function = SyntheticTown.Rec("53-t", Meitou.Data.Fcs.FcsRecordType.BUILDING_FUNCTIONALITY, "Cage");
+        function.Ints["function"] = TownBuildings.CageFunction;
+        var cage = SyntheticTown.Rec("54-t", Meitou.Data.Fcs.FcsRecordType.BUILDING, "Prisoner Cage");
+        cage.References["functionality"] = [SyntheticTown.Ref("53-t")];
+        var house = SyntheticTown.Rec("52-t", Meitou.Data.Fcs.FcsRecordType.BUILDING, "House");
+        var captives = SyntheticTown.Rec("14-t", Meitou.Data.Fcs.FcsRecordType.SQUAD_TEMPLATE, "Captives");
+        captives.References["squad"] = [SyntheticTown.Ref("2-t", 3)];
+        // One patrol, housed by its level-data template in a house with two cages; its template makes a captive squad of three.
+        var db = SyntheticTown.Database(residentSquads: 1, extra: [function, cage, house, captives], changePatrol: p => p.References["prisoners"] = [SyntheticTown.Ref("14-t")]);
+        var at = SyntheticTown.Centre + new Vector3(0, 0, 100);
+        var zone = WorldLayout.ZoneOf(at.X, at.Z);
+        string key = BuildingKey.Of(zone, "house");
+        var home = new TownBuilding("house", "52-t", "house", at, 0, false, false, [])
+        {
+            Zone = zone, CanHouse = true, ResidentsTemplate = "10-t",
+            Fixtures = [new TownFixture($"{key}/0", "54-t", true, at + new Vector3(10, 0, 0), 0), new TownFixture($"{key}/1", "54-t", true, at + new Vector3(-10, 0, 0), 0)],
+        };
+        var data = PopulationData.Create(db, [new TownPlacement("inst", "30-t", SyntheticTown.Centre, null)], buildings: new Dictionary<string, List<TownBuilding>> { ["inst"] = [home] });
+        var walk = new OpenGroundWalkability(SyntheticTown.Ground);
+        using var world = new Meitou.Simulation.World(new WorldSettings { Seed = 7, PublishSnapshots = false }, walk,
+            SyntheticTown.Standard(data, walk, StandardParts.Population | StandardParts.Movement, new PopulationSettings { CheckEveryTicks = 1 }).Systems);
+        world.Commands.Enqueue(new FocusCommand(SyntheticTown.Centre) { Tick = 0 });
+        world.RunTicks(2);
+
+        var patrol = world.Squads.All.Single(s => s.TemplateId == "10-t");
+        Assert.Same(home, patrol.HomeBuilding);
+        var held = world.Squads.All.Single(s => s.TemplateId == "14-t");
+        Assert.Equal(2, held.Members.Count);   // three made, two free cages
+        Assert.Equal(patrol.Faction, held.Faction);
+        var table = world.Characters;
+        var cages = held.Members.Select(m => table.Cold(m.Slot)!).Select(c => (c.IsImprisoned, c.Kidnapped, c.SentenceLength, c.InWhat)).ToList();
+        Assert.All(cages, c => Assert.Equal((true, true, 0f), (c.IsImprisoned, c.Kidnapped, c.SentenceLength)));
+        Assert.Equal([$"{key}/0", $"{key}/1"], cages.Select(c => c.InWhat).Order());
+        Assert.All(cages, c => Assert.True(world.Fixtures.Find(c.InWhat!)!.Lock!.Locked));
+    }
+
+    [Fact]
     public void Background_building_gives_the_same_town_as_building_in_the_tick()
     {
         using var sync = SyntheticTown.World(11, 1, 3);

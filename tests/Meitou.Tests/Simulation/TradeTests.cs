@@ -67,7 +67,39 @@ public class TradeTests
             r.Bools["buys stolen"] = true;
             r.References["vendors"] = [Ref("vl-t", 100)];
         }),
+        Rec("bshop-t", FcsRecordType.SQUAD_TEMPLATE, r =>
+        {
+            r.Bools["is trader"] = true;
+            r.References["vendors"] = [Ref("vl-t", 100)];
+            r.Ints["vendors fill total amount"] = 10;
+            r.Ints["vendor money"] = 5000;
+        }),
     ];
+
+    [Fact]
+    public void A_housed_trader_sells_from_its_homes_merged_stock_containers_with_its_vendor_money_purse()
+    {
+        using var b = new Bazaar();
+        var shopkeeper = b.Spawn("shopkeeper", new Vector2(10, 0), b.Data.FactionIndex("f-t"), false, "bshop-t");
+        TownFixture Box(string id, int function, int w, int h) => new(id, "box", false, Vector3.Zero, 0) { Function = function, StorageWidth = w, StorageHeight = h };
+        // Two stock containers (20 x 10 and 10 x 10); a cage and a chest of another function do not count.
+        var home = new TownBuilding("shop", "shop", "Shop", Vector3.Zero, 0, true, false, [])
+        {
+            Fixtures = [Box("a", TownBuildings.ShopFunction, 20, 10), Box("b", TownBuildings.GeneralStorageFunction, 10, 10), Box("c", TownBuildings.CageFunction, 0, 0), Box("d", TownBuildings.RefineryFunction, 30, 30)],
+        };
+        b.SquadOf(shopkeeper).HomeBuilding = home;
+        b.World.RunTicks(1);
+        var shop = b.SquadOf(shopkeeper).Shop!;
+        Assert.Equal(home.Key, shop.Building);
+        Assert.Equal((20, 15), (shop.Stock.Width, shop.Stock.Height));   // the widest, and 300 cells at that width
+        Assert.InRange(b.SquadOf(shopkeeper).Money, 5000 - 2000 + 500, 5000 + 2000 + 500);   // vendor money +/- 0.4 x it, plus the money roll
+        Assert.InRange(shop.Stock.All().Sum(i => i.Quantity), 8, 12);
+
+        // No stock container: a squad shop of 18 x 18.
+        var bare = new TownBuilding("bare", "bare", "Bare", Vector3.Zero, 0, false, false, []) { Fixtures = [Box("c", TownBuildings.CageFunction, 0, 0)] };
+        Assert.Null(Shop.ForBuilding(bare, shop.Terms));
+        Assert.Equal((Shop.Width, Shop.Height), (new Shop { Terms = shop.Terms }.Stock.Width, new Shop { Terms = shop.Terms }.Stock.Height));
+    }
 
     sealed class Bazaar : IDisposable
     {
