@@ -34,6 +34,28 @@ public interface IWalkability
     bool IsWalkable(float x, float z, float nearY) => IsWalkable(x, z);
     /// <summary>The terrain's own height at world X/Z, also under the water (where <see cref="GroundHeight(float, float)"/> is the flat water surface): the depth of the water is the water level minus this.</summary>
     float TerrainHeight(float x, float z) => GroundHeight(x, z);
+
+    /// <summary>
+    /// The floor point at or next to a spot on a floor at height <paramref name="y"/>: the spot itself where the floor under it is within <paramref name="slack"/>, else
+    /// the first such point on rings of 2..<see cref="FloorSearch"/> units round it (8 directions each); null when there is none. Furniture cuts holes in a building's
+    /// floor mesh and the ground below shows through them (Observed: the Hub's Storm House, its counter, tables and stools), so a node or chair there would otherwise
+    /// be stood on the ground under the floor.
+    /// </summary>
+    Vector3? FloorNear(float x, float z, float y, float slack)
+    {
+        for (float r = 0; r <= FloorSearch; r += 2)
+            for (int k = 0; k < (r == 0 ? 1 : 8); k++)
+            {
+                float px = x + r * MathF.Cos(k * MathF.PI / 4), pz = z + r * MathF.Sin(k * MathF.PI / 4);
+                if (!IsWalkable(px, pz, y)) continue;
+                float g = GroundHeight(px, pz, y);
+                if (MathF.Abs(g - y) <= slack) return new Vector3(px, g, pz);
+            }
+        return null;
+    }
+
+    /// <summary>How far (units) <see cref="FloorNear"/> looks round a spot (engine choice: more than a table's half width).</summary>
+    const float FloorSearch = 12;
 }
 
 /// <summary>

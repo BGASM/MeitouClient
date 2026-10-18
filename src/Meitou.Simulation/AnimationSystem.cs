@@ -125,6 +125,9 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     /// <summary>The whole-body clips held while a character bandages a patient (<c>medic</c>) or rests (<c>sitting idle</c>); -1 when the data has none. A held clip like the lying one (engine choice).</summary>
     int TreatingClip { get; } = library.IndexOf("medic");
     int RestingClip { get; } = library.IndexOf("sitting idle");
+    // The chairs' sitting clips by record name (looked up on every worker).
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> sitClips = new(StringComparer.Ordinal);
+    int SitClipOf(string name) => sitClips.GetOrAdd(name, Library.IndexOf);
     /// <summary>The whole-body clip held while a character takes a building apart (<c>stonemine</c>, <b>Verified</b>: <c>Task_Dismantle</c>); -1 when the data has none.</summary>
     int DismantlingClip { get; } = library.IndexOf("stonemine");
     /// <summary>The carrier's lift clip (<c>shoulder lift left</c>, played backwards to put down) and a carried body's held pose (<c>carry me</c>, a category 3 record the library appends); -1 when the data has none.</summary>
@@ -133,10 +136,11 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
     int CarriedClip { get; } = library.IndexOf(Carrying.CarrySystem.CarriedClip);
 
     // Building and delivering materials play the medic clip (Verified, Task_Build and Task_AddMaterialsToBuilding).
-    int HeldClip(CharacterTask task) => task switch
+    // Resting on a chair plays the clip its functionality names ("sitting chair"), else sitting on the floor.
+    int HeldClip(CharacterTask task, CharacterCold cold) => task switch
     {
         CharacterTask.Treat or CharacterTask.Build or CharacterTask.DeliverMaterials => TreatingClip,
-        CharacterTask.Rest => RestingClip,
+        CharacterTask.Rest => cold.Ai?.SitClip is { } sit && SitClipOf(sit) is >= 0 and var chair ? chair : RestingClip,
         CharacterTask.Dismantle => DismantlingClip,
         _ => -1,
     };
@@ -350,7 +354,7 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
                 // original's upper pick while moving in combat was not traced, docs/animation.md), not the bare shuffle with the blade between the legs.
                 if (upper.Count == 0 && stance.Combat && technique < 0) StandingIdle(a, stance, true, dt, seed, key, tick, wanted);
             }
-            else if (technique < 0 && HeldClip(task) is >= 0 and var held) { wanted.Add((held, 1)); a.Idle = -1; }
+            else if (technique < 0 && HeldClip(task, cold) is >= 0 and var held) { wanted.Add((held, 1)); a.Idle = -1; }
             else if (technique < 0)
             {
                 // A carrier standing: a whole-body idle as if it carried nothing, with the carrying arm pose (stand carrying left) over it (engine choice: the data has no whole-body carrying idle).

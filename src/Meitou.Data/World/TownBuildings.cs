@@ -17,6 +17,8 @@ public enum HomeSpotKind : byte
     Throne = 4,
     /// <summary>Any other node.</summary>
     General = 5,
+    /// <summary>A seat: interior furniture with a BF_CHAIR functionality (stools, benches, sitting pillows); <see cref="HomeSpot.SitClip"/> is how it is sat on.</summary>
+    Chair = 6,
 }
 
 /// <summary>A spot inside a building in world space; <paramref name="Yaw"/> as the simulation measures it (0 along +Z, turning towards +X).</summary>
@@ -24,6 +26,10 @@ public readonly record struct HomeSpot(HomeSpotKind Kind, Vector3 Position, floa
 {
     /// <summary>A node's BUILDING <c>node type</c> (NodeType: 0 NODE_SHOPKEEPER, 1 NODE_GENERAL, 2 NODE_GUARD_POST, 3 NODE_TURRET, 4 NODE_USE, 5 NODE_LIGHT); -1 for a bed.</summary>
     public int NodeType { get; init; } = -1;
+    /// <summary>A chair's sitting clip: the ANIMATION record its functionality's <c>animation</c> names ("sitting chair", "sitting idle" for floor seats); null otherwise.</summary>
+    public string? SitClip { get; init; }
+    /// <summary>A node a goal may stand at: neither a bed nor a seat.</summary>
+    public bool IsNode => Kind is not (HomeSpotKind.Bed or HomeSpotKind.Chair);
 }
 
 /// <summary>
@@ -83,14 +89,16 @@ public sealed record TownFixture(string Id, string RecordId, bool IsCage, Vector
 /// <c>town</c> handle names (at any distance: Squin's reach 4.5 x its radius), else the nearest one (<see cref="BuildingTowns"/>) when it stands within 1.5 x that
 /// town's radius (<b>engine choice</b>: the nearest-town fallback would otherwise hand every lone building in the world to some town). Buildings the level data marks destroyed are kept (the game rebuilds a non-player building on import: <c>FUN_140552b70</c> keeps <c>destroyed</c> only for the player's; the Hub's ruins house its squatters); node markers and resource buildings
 /// (<c>is foliage</c>) are left out. Turrets stay, with their gun and the building they are mounted on (<see cref="TownBuilding.Turret"/>), the AI's turret posts. Beds are interior-layout objects with a BED or SKELETON_BED functionality (docs/game/buildings-production.md, BuildingFunction 6
-/// and 25, found by the type of the referenced records rather than a field name); nodes are its <c>is node</c> objects, their <c>node type</c> kept and their kind read
-/// from it (0 shopkeeper, 2 guard post), else from the record name (<see cref="NodeKind(string)"/>).
+/// and 25, found by the type of the referenced records rather than a field name); seats are those with a CHAIR functionality (17); nodes are its <c>is node</c> objects,
+/// their <c>node type</c> kept and their kind read from it (0 shopkeeper, 2 guard post), else from the record name (<see cref="NodeKind(string)"/>).
 /// </summary>
 public static class TownBuildings
 {
     public const int BedFunction = 6, SkeletonBedFunction = 25;
     /// <summary>BUILDING_FUNCTIONALITY <c>function</c> 8, BF_CAGE: cages, the prisoner pole, the peeler (docs/game/locks.md "Data").</summary>
     public const int CageFunction = 8;
+    /// <summary>BUILDING_FUNCTIONALITY <c>function</c> 17, BF_CHAIR: stools, benches, sitting pillows and spots (docs/game/ai-tasks.md "Town goals").</summary>
+    public const int ChairFunction = 17;
 
     /// <summary>The buildings by town placement id (<see cref="TownPlacement.InstanceId"/>), each list in placement order.</summary>
     public static Dictionary<string, List<TownBuilding>> Build(GameDatabase db, WorldLevelData levels, BuildingLayouts? layouts, Func<double, double, float> terrainHeight)
@@ -141,7 +149,13 @@ public static class TownBuildings
                         var (at, rotation) = BuildingLayouts.Place(resolved.Position, b.Rotation, item);
                         bool node = item.Building.GetBool("is node");
                         HomeSpotKind? kind = node ? NodeKind(item.Building) : IsBed(db, item.Building, beds) ? HomeSpotKind.Bed : null;
+                        var function = kind is null ? FunctionOf(db, item.Building, functions) : null;
                         if (kind is { } k) spots.Add(new HomeSpot(k, at, YawOf(rotation)) { NodeType = node ? item.Building.GetInt("node type") : -1 });
+                        else if (function?.GetInt("function") == ChairFunction)
+                            spots.Add(new HomeSpot(HomeSpotKind.Chair, at, YawOf(rotation))
+                            {
+                                SitClip = function.GetReferences("animation").Select(r => db.Find(r.TargetStringId)?.Name).FirstOrDefault(n => n is not null),
+                            });
                         else if (FunctionOf(db, item.Building, functions)?.GetInt("function") == CageFunction || item.Building.GetBool("has lock"))
                             (fixtures ??= []).Add(new TownFixture($"{b.InstanceId}/{index}", item.Building.StringId,
                                 FunctionOf(db, item.Building, functions)?.GetInt("function") == CageFunction, at, YawOf(rotation)));

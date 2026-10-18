@@ -742,16 +742,26 @@ prisoners and resident town simulation off screen are incomplete. Hash blackboar
 Scoring follows the original (`TaskProfiles`: desire, commitment, crowding per goal type); a desire
 the original computes in a function of its own counts as 1. Town goals ([ai-tasks.md](game/ai-tasks.md#town-goals)):
 wandering and patrolling in town walk to a general node of a town building, shopping to a node of a
-shop, relaxing under a bar package sits at a bar seat (bar nodes, then general nodes) claimed per
-member on the package cadence, and the wanderer walks to the nearest town. A town's bars and shops are
+shop, relaxing under a bar package and sitting around (275, in the home) sit on a seat claimed per
+member on the package cadence, and the wanderer walks to the nearest town. Seats are the home's
+interior furniture with a CHAIR functionality (`HomeSpotKind.Chair`; never a standing node), free
+in that building this pass; relaxing falls back to a bar node, then a general node, sitting around
+has none and is not wanted without a chair (without a home it sits where it is). A seated character
+is moved onto the chair, faces its yaw and plays the functionality's clip ("sitting chair", pillows
+"sitting idle"). A town's bars and shops are
 the buildings whose residents (the squads living there, else the level data's `residents template`)
 have designation BAR or a shop (`AiSystem.RefreshPlaces`). Walks to nodes, beds and seats pass the
-spot's height and count as arrived only on that floor. Engine choices: patrolling town acts as
+spot's height and count as arrived only on that floor. Furniture cuts holes in a floor's navmesh and
+the ground below shows through them (Observed: the Storm House at the Hub, counter, tables, stools, ~28
+below), so a spot whose floor is not under it is walked to (and residents spawned) at the nearest floor
+point within 12 (`IWalkability.FloorNear`). The Storm House's upper storey (+70: beds, guard posts) has no
+floor on the navmesh, so those spots stand on the floor below (Observed). Engine choices: patrolling town acts as
 wandering (its task class is undecoded); a committed goal chosen again after its commitment ran out
-starts over with a new target; seats are nodes, not furniture; shops stand customers at a general
+starts over with a new target; the sitting offset and facing on a chair are undecoded (its origin and
+yaw); training and throne furniture of 275's mask are not used; shops stand customers at a general
 node, else a guard post, else any node; the first bar of a town is the package's; a home or seat given up
 after three failed walks is tried again when a new goal is taken up, and a member that gave its seat up
-leaves it to the next (no game data names a bar node, so seats are general nodes).
+leaves it to the next.
 
 Turret goals (149, 222, 234, 146) man a turret of the squad's town: a placed BUILDING with a
 `BUILDING_FUNCTIONALITY` function 12 (`TownBuilding.Turret`: its `use range` and `gun turret`

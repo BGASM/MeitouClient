@@ -199,8 +199,9 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
             AiBehaviour.Turret => board.TurretClaims.ContainsKey(self.Slot) ? 1 : 0,
             AiBehaviour.TownNode => Places(board.Town).WithNodes.Count > 0 ? 1 : 0,
             AiBehaviour.Shop => Places(board.Town).Shops.Count > 0 ? 1 : 0,
-            // Relaxing needs a free seat of the package's bar (claimed in <see cref="ClaimSeats"/>).
-            AiBehaviour.Relax => board.SeatClaims.ContainsKey(self.Slot) && !mind.SeatUnreachable ? 1 : 0,
+            // Relaxing needs a free seat of the package's bar, sitting around a free chair of the home (claimed in <see cref="ClaimSeats"/>); without a home it sits where it is.
+            AiBehaviour.Relax => board.CurrentClass == PackageClass.Bar && board.SeatClaims.ContainsKey(self.Slot) && !mind.SeatUnreachable ? 1 : 0,
+            AiBehaviour.Sit => board.Home is null || board.SeatClaims.ContainsKey(self.Slot) && !mind.SeatUnreachable ? 1 : 0,
             AiBehaviour.ToTown => TownAt(world.Characters.Previous[self.Slot].Position) >= 0 ? 0 : 1,
             _ => 1,
         };
@@ -286,7 +287,7 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
                 if (from.Count == 0) return null;
                 var b = from[Rng.Int(roll, from.Count)];
                 // A general node; in a shop without one a guard post, else any other node (engine choice: where the original's Task_Shopping stands is not decoded).
-                foreach (var accept in (ReadOnlySpan<Func<HomeSpot, bool>>)[IsGeneralNode, s => s.Kind == HomeSpotKind.Guard, s => s.Kind != HomeSpotKind.Bed])
+                foreach (var accept in (ReadOnlySpan<Func<HomeSpot, bool>>)[IsGeneralNode, s => s.Kind == HomeSpotKind.Guard, s => s.IsNode])
                 {
                     int nodes = 0;
                     foreach (var s in b.Spots) if (accept(s)) nodes++;
@@ -340,7 +341,7 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
             mind.Target = null;
             // A spot given up is tried again from wherever the character is now (engine choice: the walk may have failed from the old place only).
             mind.HomeUnreachable = false;
-            if (type != TaskType.RELAX_IN_TOWN_PACKAGE) mind.SeatUnreachable = false;
+            if (type is not (TaskType.RELAX_IN_TOWN_PACKAGE or TaskType.SIT_AROUND)) mind.SeatUnreachable = false;
             if (profile.Commits)
             {
                 ulong roll = Rng.Hash(world.Seed, Rng.Key(table.IdOf(slot)), RngPurpose.Think, SeedSalts.AiCommit ^ (ulong)world.Tick << 9 ^ (ulong)type);
@@ -351,6 +352,7 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
         mind.Behaviour = behaviour;
         mind.Version = board.Version;
         mind.WanderRadius = 0;
+        mind.SitClip = null;   // set again below while it stays on its chair
         ref var n = ref table.Next[slot];
         bool leader = mind.Squad.Leader == table.IdOf(slot);
         switch (behaviour)
@@ -376,7 +378,7 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
             case AiBehaviour.Sleep:
             case AiBehaviour.GoHome:
                 var (target, home, floor) = SpotFor(mind, board, behaviour, type);
-                if (GoToSpot(table, slot, mind, target, home ? GiveUp.Home : GiveUp.Post, type == TaskType.RUN_AWAY_HOMETOWN ? SpeedMode.Run : SpeedMode.Walk, height: floor))
+                if (GoToSpot(world.Walkability, table, slot, mind, target, home ? GiveUp.Home : GiveUp.Post, type == TaskType.RUN_AWAY_HOMETOWN ? SpeedMode.Run : SpeedMode.Walk, height: floor))
                     Become(table, slot, behaviour == AiBehaviour.Sleep ? CharacterTask.Rest : CharacterTask.Idle);
                 break;
             case AiBehaviour.TownNode:
@@ -384,33 +386,43 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
             case AiBehaviour.ToTown:
                 mind.Target ??= TargetFor(world, table.IdOf(slot), behaviour, board.Town);
                 if (mind.Target is not { } goTo) Become(table, slot, CharacterTask.Idle);
-                else if (GoToSpot(table, slot, mind, Flat(goTo), GiveUp.Target, SpeedMode.Walk, height: behaviour == AiBehaviour.ToTown ? null : goTo.Y))
+                else if (GoToSpot(world.Walkability, table, slot, mind, Flat(goTo), GiveUp.Target, SpeedMode.Walk, height: behaviour == AiBehaviour.ToTown ? null : goTo.Y))
                     Become(table, slot, CharacterTask.Idle);
                 break;
             case AiBehaviour.Relax:
-                if (board.SeatClaims.TryGetValue(slot, out var claimed) && GoToSpot(table, slot, mind, Flat(claimed.Position), GiveUp.Seat, SpeedMode.Walk, height: claimed.Position.Y))
-                    Become(table, slot, CharacterTask.Rest);
+            case AiBehaviour.Sit:
+                // At its claimed seat (a chair, else a node); sitting around without a home, where it stands.
+                if (behaviour == AiBehaviour.Sit && board.Home is null) Become(table, slot, CharacterTask.Rest);
+                else if (board.SeatClaims.TryGetValue(slot, out var claimed))
+                {
+                    bool chair = claimed.Kind == HomeSpotKind.Chair;
+                    // Already on its chair (moved onto it below, off the floor point the walk ended at).
+                    bool seated = chair && n.Task == (byte)CharacterTask.Rest && !mind.Walking
+                        && Vector2.DistanceSquared(Flat(n.Position), Flat(claimed.Position)) < 1 && MathF.Abs(n.Position.Y - claimed.Position.Y) <= FloorSlack;
+                    if (seated || GoToSpot(world.Walkability, table, slot, mind, Flat(claimed.Position), GiveUp.Seat, SpeedMode.Walk, height: claimed.Position.Y))
+                    {
+                        if (chair)
+                        {
+                            // On the chair itself at the floor's height, facing its way (engine choice: the original's sitting offset is not decoded).
+                            n.Position = new Vector3(claimed.Position.X, n.Position.Y, claimed.Position.Z);
+                            n.Yaw = claimed.Yaw;
+                            mind.SitClip = claimed.SitClip;
+                        }
+                        Become(table, slot, CharacterTask.Rest);
+                    }
+                }
                 break;
             case AiBehaviour.Turret:
                 if (board.TurretClaims.TryGetValue(slot, out int t) && (uint)t < (uint)board.Turrets.Count && board.Turrets[t].Turret is { } turret)
                 {
                     var spot = TurretSpot(world, turret);
-                    if (GoToSpot(table, slot, mind, Flat(spot), GiveUp.Post, SpeedMode.Walk, TurretSlack, spot.Y))
+                    if (GoToSpot(world.Walkability, table, slot, mind, Flat(spot), GiveUp.Post, SpeedMode.Walk, TurretSlack, spot.Y))
                     {
                         table.Next[slot].Yaw = turret.Yaw;   // at the gun, facing its way
                         Become(table, slot, CharacterTask.Idle);
                     }
                 }
                 else Become(table, slot, CharacterTask.Idle);
-                break;
-            case AiBehaviour.Sit:
-                // With a home, a seat in it (a bar or general node, else inside); without, where it stands.
-                if (board.Home is null || mind.HomeUnreachable) Become(table, slot, CharacterTask.Rest);
-                else
-                {
-                    var (place, inHome, level) = SpotFor(mind, board, behaviour, type);
-                    if (GoToSpot(table, slot, mind, place, inHome ? GiveUp.Home : GiveUp.Post, SpeedMode.Walk, height: level)) Become(table, slot, CharacterTask.Rest);
-                }
                 break;
         }
     }
@@ -429,11 +441,6 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
             return (mind.Squad.HomeCentre, true, null);
         }
         if (board.Home is not { } home || mind.HomeUnreachable || type is TaskType.HOLD_POSITION or TaskType.MAN_THE_GATE) return (mind.Post, false, null);
-        if (behaviour == AiBehaviour.Sit)
-        {
-            if ((Pick(home, HomeSpotKind.Bar, mind.MemberIndex) ?? Pick(home, HomeSpotKind.General, mind.MemberIndex)) is { } seat) return (Flat(seat.Position), true, seat.Position.Y);
-            return (Flat(home.Position), true, null);
-        }
         HomeSpotKind kind = behaviour == AiBehaviour.Sleep ? HomeSpotKind.Bed : type switch
         {
             TaskType.STAND_AT_SHOPKEEPER_NODE => HomeSpotKind.Shopkeeper,
@@ -448,15 +455,15 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
         return (mind.Post, false, null);
     }
 
-    /// <summary>The <paramref name="index"/>-th spot of a kind (null: any node) of a building, round robin; null when it has none.</summary>
+    /// <summary>The <paramref name="index"/>-th spot of a kind (null: any node, <see cref="HomeSpot.IsNode"/>) of a building, round robin; null when it has none.</summary>
     static HomeSpot? Pick(TownBuilding home, HomeSpotKind? kind, int index)
     {
         int count = 0;
-        foreach (var s in home.Spots) if (kind is { } k ? s.Kind == k : s.Kind != HomeSpotKind.Bed) count++;
+        foreach (var s in home.Spots) if (kind is { } k ? s.Kind == k : s.IsNode) count++;
         if (count == 0) return null;
         int want = index % count;
         foreach (var s in home.Spots)
-            if ((kind is { } k ? s.Kind == k : s.Kind != HomeSpotKind.Bed) && want-- == 0) return s;
+            if ((kind is { } k ? s.Kind == k : s.IsNode) && want-- == 0) return s;
         return null;
     }
 
@@ -487,10 +494,11 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
     /// Walks the character to a spot; true when it is there (and not walking). A walk that ends away from the spot counts as failed; after
     /// <see cref="MaxFailedWalks"/> in a row it gives the spot up as <paramref name="giveUp"/> says. <paramref name="slack"/> overrides
     /// <see cref="AiSettings.PostSlack"/> where the spot must be exact (a turret's gun); <paramref name="height"/> is the floor the spot is on, so the path reaches a
-    /// floor or walkway above the ground.
+    /// floor or walkway above the ground; a spot over a hole furniture cuts in that floor is walked to beside it, on the floor (<see cref="IWalkability.FloorNear"/>).
     /// </summary>
-    bool GoToSpot(CharacterTable table, int slot, AiMind mind, Vector2 target, GiveUp giveUp, byte mode, float slack = 0, float? height = null)
+    bool GoToSpot(IWalkability walk, CharacterTable table, int slot, AiMind mind, Vector2 target, GiveUp giveUp, byte mode, float slack = 0, float? height = null)
     {
+        if (height is { } spotY && walk.FloorNear(target.X, target.Y, spotY, FloorSlack) is { } onFloor) (target, height) = (Flat(onFloor), onFloor.Y);
         ref var n = ref table.Next[slot];
         var here = new Vector2(n.Position.X, n.Position.Z);
         float within = slack > 0 ? slack : Settings.PostSlack;
@@ -639,29 +647,39 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
     }
 
     /// <summary>
-    /// Gives the members whose role list has relaxing open at this hour a seat of the package's bar (<see cref="Blackboard.Home"/> under a bar package): in member
-    /// order each takes the first seat (a bar node, then a general node) no one in that bar claimed in this cadence pass; members left without one do not relax
-    /// (docs/game/ai-tasks.md "Town goals": the original relaxes on furniture of the bar it can use, Observed; Meitou's seats are the bar's nodes, engine choice).
+    /// Gives the members whose role list has relaxing (under a bar package) or sitting around open at this hour a seat of their <see cref="Blackboard.Home"/> (the
+    /// package's bar under a bar package): in member order each takes the first seat no one in that building claimed in this cadence pass; members left without one
+    /// do not relax or sit. Relaxing takes a chair, else a bar node, else a general node (the original operates furniture of the bar, docs/game/ai-tasks.md "Town
+    /// goals", Observed; the node fallbacks are an engine choice); sitting around a chair only (the original's furniture not claimed by others, Observed; its
+    /// training and throne furniture are left out).
     /// </summary>
     void ClaimSeats(World world, Blackboard board, Squad squad)
     {
         board.SeatClaims.Clear();
-        if (board.CurrentClass != PackageClass.Bar || board.Home is not { } bar) return;
-        if (!seatTaken.TryGetValue(bar, out var taken)) seatTaken[bar] = taken = [];
+        if (board.Home is not { } home) return;
+        bool bar = board.CurrentClass == PackageClass.Bar;
+        HashSet<int>? taken = null;
         int hour = world.Hour;
         for (int k = 0; k < squad.Members.Count; k++)
         {
             var id = squad.Members[k];
             if (!world.Characters.TryResolveNext(id, out int s) || world.Characters.Cold(s) is not { } cold || cold.Ai is null) continue;
             var roles = board.Roles[(int)RoleOf(squad, id, cold)];
-            bool relaxes = false;
-            for (int g = 0; g < roles.Count && !relaxes; g++) relaxes = roles[g].Task.Type == TaskType.RELAX_IN_TOWN_PACKAGE && roles[g].InWindow(hour);
-            if (!relaxes || cold.Ai.SeatUnreachable) continue;   // one that gave its seat up leaves it to the next member
-            int seat = FreeSeat(bar, taken, HomeSpotKind.Bar);
-            if (seat < 0) seat = FreeSeat(bar, taken, HomeSpotKind.General);
-            if (seat < 0) return;
+            bool relaxes = false, sits = false;
+            for (int g = 0; g < roles.Count; g++)
+            {
+                if (!roles[g].InWindow(hour)) continue;
+                relaxes |= bar && roles[g].Task.Type == TaskType.RELAX_IN_TOWN_PACKAGE;
+                sits |= roles[g].Task.Type == TaskType.SIT_AROUND;
+            }
+            if (!relaxes && !sits || cold.Ai.SeatUnreachable) continue;   // one that gave its seat up leaves it to the next member
+            if (taken is null && !seatTaken.TryGetValue(home, out taken)) seatTaken[home] = taken = [];
+            int seat = FreeSeat(home, taken, HomeSpotKind.Chair);
+            if (seat < 0 && relaxes) seat = FreeSeat(home, taken, HomeSpotKind.Bar);
+            if (seat < 0 && relaxes) seat = FreeSeat(home, taken, HomeSpotKind.General);
+            if (seat < 0) continue;
             taken.Add(seat);
-            board.SeatClaims[s] = bar.Spots[seat];
+            board.SeatClaims[s] = home.Spots[seat];
         }
     }
 

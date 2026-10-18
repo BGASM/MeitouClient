@@ -273,8 +273,10 @@ public sealed class AiMind
     public int FailedWalks { get; set; }
     /// <summary>The home's spots kept failing: it uses <see cref="Post"/> instead until its home changes.</summary>
     public bool HomeUnreachable { get; set; }
-    /// <summary>Walks to its bar seat kept failing: it does not relax there any more.</summary>
+    /// <summary>Walks to its seat kept failing: it does not relax or sit there any more.</summary>
     public bool SeatUnreachable { get; set; }
+    /// <summary>The sitting clip of the chair it sits on (<see cref="HomeSpot.SitClip"/>), for <see cref="AnimationSystem"/>; null when not seated. Follows from the goal and seat, so not hashed.</summary>
+    public string? SitClip { get; set; }
     /// <summary>Whether its lists hold any combat goal at all (else the stance stays the old default).</summary>
     public bool HasCombatGoals { get; set; }
     /// <summary>The role list and hour <see cref="Stance"/> was worked out for (a cache; the stance itself is hashed).</summary>

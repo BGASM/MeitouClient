@@ -375,6 +375,8 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
             var plan = member.Plan;
             float x = built.Position.X + plan.Offset.X, z = built.Position.Y + plan.Offset.Y;
             if (!(built.NearY is { } nearY ? walk.IsWalkable(x, z, nearY) : walk.IsWalkable(x, z))) (x, z) = (built.Position.X, built.Position.Y);
+            // Inside, on the floor and not on the ground showing through a hole furniture cuts in it (the spot's height is its own plus SpotLift).
+            if (built.NearY is { } floorY && walk.FloorNear(x, z, floorY - SpotLift, SpotLift) is { } onFloor) (x, z) = (onFloor.X, onFloor.Z);
             var race = assembly.RaceOf(plan.RecordId, member.Appearance);
             var record = data.Db.Find(plan.RecordId);
             var hot = new CharacterHot

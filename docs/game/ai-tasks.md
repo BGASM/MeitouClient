@@ -621,6 +621,10 @@ vfunc 5 `FUN_14050caf0`). TaskData fields: +0x108 desire (a member function, nea
 - **43 Staying home** (`FUN_1408cbc00`): furniture in the home whose BuildingFunction is in mask 0x2049a (bits MINE, RESEARCH, REFINERY, TRAINING,
   CRAFTING, CHAIR; reading the mask as bits is **Observed**); **275 Sitting around** (`FUN_1408caf00`): only in the home town, furniture of mask
   0x1020080 (TRAINING, CHAIR, THRONE) not claimed by others. Both lead to 221 (pretend operating).
+- Chairs (**Verified**, BUILDING_FUNCTIONALITY records of gamedata.base / rebirth.mod / the install's mods, dumped): BuildingFunction 17 BF_CHAIR
+  `chair`, `chair-fixed`, `chair-fixed 180` (animation "sitting chair"; Stool, Old Stool, Bench, Sitting Box) and `sit on floor (no chair)`
+  ("sitting idle"; Sitting Pillow, Sitting spot (invisible)); 24 BF_THRONE `throne chair` ("sitting chair"); all `max operators` 1. `flags`
+  (0/1/2) differs between them: **Unknown** (perhaps the facing).
 - **24 Wandering** (`FUN_140998040`): the nearest town; list A holds `atATown`, so it is dropped while in a town.
 - **36 Patrolling town**: `Task_PatrolTown`, behaviour **Unknown**.
 
