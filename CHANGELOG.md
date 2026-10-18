@@ -3,6 +3,21 @@
 What changed in each release, newest first. The release workflow copies the section of the version it builds into the GitHub release
 notes and refuses to release a version without one: add a `## vX.Y.Z` section with one `- ` line per change before running it.
 
+## v0.14.0
+
+- NPCs whose target hides behind another faction's locked doors bash the door in
+- Slavery: put shackles on downed or caged characters; slavers enslave a carried captive; slaves can escape, be recaptured or freed, and their state is saved
+- Town shops sell from the storage containers in their building, stocked and paid like the original
+- Squads that keep prisoners start with them locked in their home's cages
+- Town AI sits on chairs, stools and benches, facing the way the original does
+- F10 debug menu: teleport, spawn NPCs, give items and money, heal, damage, max out skills
+- Name tags over your characters as in vanilla: game font, stealth icon, brackets when selected
+- Terrain, grass and rocks are cut away inside buildings you look into
+- Pick up items from the ground with right click; ground items are saved
+- Navmesh: Storm House and watchtower upper floors, the Longhouse ramp and the L-House and Y-House doors are walkable; walkers no longer drop through floor holes
+- Clicks land on wall tops and ramps; characters inside closed buildings no longer catch the pointer
+- Shift+F11 shows the navmesh debug view
+
 ## v0.13.0
 
 - Recruiting: NPCs who offer to join (hires, freed prisoners, escaped slaves, unique recruits) join your active squad, a new squad when it is full, up to 30 characters
