@@ -90,13 +90,13 @@ static class NavmeshTool
         var built = new List<(ZoneGeometry? Geometry, ZoneNavMesh Mesh)>();
         var interiorMeshes = new List<ZoneNavMesh>();
         NavWorld world = NavWorld.Empty;
+        var full = new Dictionary<ZoneCoordinate, ZoneNavMesh>();
         for (int dz = -around; dz <= around; dz++)
             for (int dx = -around; dx <= around; dx++)
             {
                 var c = new ZoneCoordinate(zone.Value.X + dx, zone.Value.Y + dz);
                 if (!c.IsInsideGrid) continue;
                 var geometry = dx == 0 && dz == 0 ? g : gatherer.Gather(c);
-                geometry.Seeds.AddRange(NeighbourSeeds.Collect(world, c, geometry));
                 ZoneNavMesh? mesh = null;
                 for (int i = 0; i < (dx == 0 && dz == 0 ? repeat : 1); i++)
                 {
@@ -107,6 +107,9 @@ static class NavmeshTool
                 }
                 built.Add((geometry, mesh!));
                 if (dx == 0 && dz == 0 && verbose) foreach (var p in g.Painters) { int n = 0; for (int q = 0; q < mesh!.PolygonCount; q++) { if (mesh.Areas[q] != NavArea.Door) continue; var vv = mesh.Vertices[mesh.Polygons[q][0]]; if (vv.X >= p.Polygon.Min(a => a.X) - 4 && vv.X <= p.Polygon.Max(a => a.X) + 4 && vv.Z >= p.Polygon.Min(a => a.Y) - 4 && vv.Z <= p.Polygon.Max(a => a.Y) + 4) n++; } Console.WriteLine($"  door polygons near painter {p.Polygon.Min(a => a.X):0},{p.Polygon.Min(a => a.Y):0}: {n}"); }
+                // Kept regions are joined across zone borders as the game does (NavMeshService), whatever the order.
+                full[c] = mesh!;
+                foreach (var other in ZoneKeptClosure.Spread(full, c, settings)) if (other != c && world.Find(other) is not null) world = world.With(full[other].WithoutPruned());
                 world = world.With(mesh!.WithoutPruned());
             }
 

@@ -84,6 +84,11 @@ joins open edges of one tile that coincide reversed and are within the climb at 
 Swamp House `48-Newwworld-INGAME`'s stair foot met the ground at Y124 vs 127 and kept only a 4-unit tile-border link, so radius-4
 agents had no way up; with the seam, ground (-47000,125,48100) reaches the room (-47229,178,47969) (the dome `805-rebirth-INGAME`,
 `6-` and `4-` were already reachable). Its deck (Y~178) was never pruned: the red there in `--png` is roofs, beams under the deck and interior fragments.
+**Zone borders** (engine choice): each zone is pruned by its own seeds only and cached that way; when a zone loads, points on the
+kept edges of each shared border seed the neighbour's full mesh (and back) until nothing grows, so the kept set does not depend on load
+order. The original seeds a new zone from already built neighbours' border midpoints (order dependent) but ships prebuilt tiles, so
+players never see the order. **Observed** (World's End, zones 25..27 × 12..14, `meitou-tools navmesh --around 1`): with neighbour seeds
+zone 26.14 kept 7,943 polygons in raster order and 3,790 in reverse; with the closure every order gives the same kept sets and paths.
 **Heights**: **Observed** polygons are up to ~15 off over stairs/ramps (Hub gate), so standing
 heights snap to walkable collision (`NavSurfaces`, also its edge within `EdgeReach`: the mesh overhangs raised floors, e.g. the Hub bar landing) or zone terrain (water-surface polygons keep their height); the layer is picked by mesh or real height within
 `StandRise` of the character wins.

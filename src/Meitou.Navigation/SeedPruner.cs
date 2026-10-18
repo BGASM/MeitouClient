@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Meitou.Navigation;
 
 /// <summary>
@@ -12,13 +14,45 @@ internal static class SeedPruner
     {
         int n = mesh.PolygonCount;
         if (n == 0) return 0;
-        // The mesh's own point index (every polygon is still kept here, and the index does not depend on that anyway).
-        var ix = mesh.Index;
-
         var keep = new bool[n];
         var queue = new Queue<int>();
+        int matched = Match(mesh, g.Seeds, s, keep, queue);
+
+        if (matched == 0)
+        {
+            // "All regions are below the area threshold and too far from a seed point. Keeping the largest region."
+            var component = Components(mesh);
+            int best = component.GroupBy(c => c).OrderByDescending(c => c.Count()).First().Key;
+            for (int p = 0; p < n; p++) if (component[p] == best) { keep[p] = true; }
+            for (int p = 0; p < n; p++) mesh.Kept[p] = keep[p];
+            return 0;
+        }
+
+        Spread(mesh, keep, queue);
+        for (int p = 0; p < n; p++) mesh.Kept[p] = keep[p];
+        return matched;
+    }
+
+    /// <summary>Also keeps the regions of <paramref name="mesh"/> that <paramref name="seeds"/> reach (no fallback); true when a polygon was added.</summary>
+    public static bool Extend(ZoneNavMesh mesh, IReadOnlyList<Vector3> seeds, NavBuildSettings s)
+    {
+        if (mesh.PolygonCount == 0 || seeds.Count == 0) return false;
+        var keep = (bool[])mesh.Kept.Clone();
+        var queue = new Queue<int>();
+        Match(mesh, seeds, s, keep, queue);
+        if (queue.Count == 0) return false;
+        Spread(mesh, keep, queue);
+        for (int p = 0; p < keep.Length; p++) mesh.Kept[p] = keep[p];
+        return true;
+    }
+
+    /// <summary>Marks the polygons each seed claims (queued when newly kept). Returns how many seeds found a polygon, kept already or not.</summary>
+    static int Match(ZoneNavMesh mesh, IReadOnlyList<Vector3> seeds, NavBuildSettings s, bool[] keep, Queue<int> queue)
+    {
+        // The mesh's own point index (independent of which polygons are kept).
+        var ix = mesh.Index;
         int matched = 0;
-        foreach (var seed in g.Seeds)
+        foreach (var seed in seeds)
         {
             bool found = false;
             // Engine choice: a seed that finds nothing within the slack is retried with three times the slack (a seed's Y is where it was authored).
@@ -44,25 +78,17 @@ internal static class SeedPruner
             }
             if (found) matched++;
         }
+        return matched;
+    }
 
-        if (matched == 0)
-        {
-            // "All regions are below the area threshold and too far from a seed point. Keeping the largest region."
-            var component = Components(mesh);
-            int best = component.GroupBy(c => c).OrderByDescending(c => c.Count()).First().Key;
-            for (int p = 0; p < n; p++) if (component[p] == best) { keep[p] = true; }
-            for (int p = 0; p < n; p++) mesh.Kept[p] = keep[p];
-            return 0;
-        }
-
+    static void Spread(ZoneNavMesh mesh, bool[] keep, Queue<int> queue)
+    {
         while (queue.Count > 0)
         {
             int p = queue.Dequeue();
             foreach (int q in mesh.NeighboursOf(p))
                 if (!keep[q]) { keep[q] = true; queue.Enqueue(q); }
         }
-        for (int p = 0; p < n; p++) mesh.Kept[p] = keep[p];
-        return matched;
     }
 
     static int[] Components(ZoneNavMesh mesh)

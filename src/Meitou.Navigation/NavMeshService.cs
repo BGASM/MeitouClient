@@ -32,6 +32,8 @@ internal sealed class NavMeshService : IDisposable
     readonly ConcurrentDictionary<ZoneCoordinate, TaskCompletionSource<NavZoneReady>> pending = new();
     readonly Thread worker;
     readonly object publishLock = new();
+    // The loaded zones' meshes with their pruned polygons, for joining kept regions across borders (worker thread and Unload, under publishLock).
+    readonly Dictionary<ZoneCoordinate, ZoneNavMesh> full = [];
     volatile bool disposed;
 
     public NavMeshService(GameInstall install, GameDatabase db, WorldLevelData levels, NavmeshWalkability walkability, NavBuildSettings? settings = null, NavMeshCache? cache = null,
@@ -82,7 +84,11 @@ internal sealed class NavMeshService : IDisposable
     /// <summary>Drops a zone's mesh from the loaded world (the cache file stays).</summary>
     public void Unload(ZoneCoordinate zone)
     {
-        lock (publishLock) Walkability.SetWorld(Walkability.World.Without(zone));
+        lock (publishLock)
+        {
+            Walkability.SetWorld(Walkability.World.Without(zone));
+            full.Remove(zone);
+        }
     }
 
     void Work()
@@ -102,15 +108,26 @@ internal sealed class NavMeshService : IDisposable
                 if (mesh is null)
                 {
                     var geometry = gatherer.Gather(zone, buildingHash: hash);
-                    geometry.Seeds.AddRange(NeighbourSeeds.Collect(Walkability.World, zone, geometry));
-                    mesh = NavMeshPipeline.BuildZone(gatherer, geometry, Settings, out _).WithoutPruned();
+                    // Pruned by the zone's own seeds only, so the cached mesh does not depend on which neighbours were loaded (ZoneKeptClosure joins them).
+                    mesh = NavMeshPipeline.BuildZone(gatherer, geometry, Settings, out _);
                     origin = NavMeshOrigin.Built;
                     try { Cache.Save(mesh, hash, settingsHash); }
                     catch (IOException) { /* a read-only or full disk only costs the next build */ }
                 }
                 mesh.Terrain = gatherer.ZoneHeights(zone);
-                lock (publishLock) Walkability.SetWorld(Walkability.World.With(mesh));
-                var ready = new NavZoneReady(zone, origin, watch.Elapsed.TotalMilliseconds, mesh.PolygonCount);
+                int polygons;
+                lock (publishLock)
+                {
+                    full[zone] = mesh;
+                    var world = Walkability.World;
+                    // Neighbours whose kept regions grew from this zone's border are published again (With replaces them and relinks their borders).
+                    foreach (var other in ZoneKeptClosure.Spread(full, zone, Settings))
+                        if (other != zone && world.Find(other) is not null) world = world.With(full[other].WithoutPruned());
+                    var own = mesh.WithoutPruned();
+                    polygons = own.PolygonCount;
+                    Walkability.SetWorld(world.With(own));
+                }
+                var ready = new NavZoneReady(zone, origin, watch.Elapsed.TotalMilliseconds, polygons);
                 if (pending.TryRemove(zone, out var tcs)) tcs.TrySetResult(ready);
                 ZoneReady?.Invoke(ready);
                 // The buildings changed while this one was built: it may have missed it.
