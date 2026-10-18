@@ -96,7 +96,7 @@ public sealed class PlayerState
 }
 
 /// <summary>Applies the player's selection and stop commands (step 1 of the tick). Move orders are the movement system's.</summary>
-public sealed class PlayerSystem(PopulationData? data = null) : ITickSystem
+public sealed partial class PlayerSystem(PopulationData? data = null) : ITickSystem
 {
     readonly CharacterAssembly? assembly = data is null ? null : new(data);
     internal PopulationData? Data => data;
@@ -159,6 +159,9 @@ public sealed class PlayerSystem(PopulationData? data = null) : ITickSystem
                 case Editing.FinishCreation:
                     player.InCreation = false;
                     break;
+                case Items.PickUpItemOrder pick:
+                    PickUpInput(world, pick);
+                    break;
                 case Items.ArrangeInventory arrange:
                     if (table.TryResolveNext(arrange.Character, out int character) && table.Cold(character) is { IsPlayer: true, Inventory: { } carried } &&
                         !Items.InventoryCommands.Arrange(carried)) world.Post("Cannot arrange inventory: the items do not fit.");
@@ -167,7 +170,11 @@ public sealed class PlayerSystem(PopulationData? data = null) : ITickSystem
         }
     }
 
-    public void SlowWorld(World world) => world.Player.Prune(world.Characters);
+    public void SlowWorld(World world)
+    {
+        world.Player.Prune(world.Characters);
+        PickUpWorkers(world);
+    }
 
     /// <summary>
     /// A prosthetic dragged into or out of the limbs window (docs/game/character-stats.md "Limb replacements and robots"): into a slot it is fitted when that limb is a stump and the

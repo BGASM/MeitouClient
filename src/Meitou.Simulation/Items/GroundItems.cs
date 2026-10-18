@@ -3,35 +3,71 @@ using System.Numerics;
 namespace Meitou.Simulation.Items;
 
 /// <summary>An item lying in the world, as the host draws it: <see cref="Yaw"/> about Y, the mesh laid flat (docs/simulation.md "Ground items").</summary>
-public readonly record struct GroundItemSnapshot(int Id, string Record, Vector3 Position, float Yaw);
+public readonly record struct GroundItemSnapshot(int Id, string Record, string Name, Vector3 Position, float Yaw);
+
+/// <summary>One loose item: where it lies and how it is turned (a saved item's whole rotation, written back as read; a dropped one turned about Y).</summary>
+public sealed record GroundItem(int Id, ItemInstance Item, Vector3 Position, Quaternion Rotation)
+{
+    /// <summary>The turn about Y the host draws it with.</summary>
+    public float Yaw
+    {
+        get
+        {
+            var ahead = Vector3.Transform(Vector3.UnitZ, Rotation);
+            return ahead.X * ahead.X + ahead.Z * ahead.Z < 1e-6f ? 0 : MathF.Atan2(ahead.X, ahead.Z);
+        }
+    }
+}
 
 /// <summary>
-/// Loose items lying in the world (docs/simulation.md "Ground items"): so far only the severed limbs combat drops. Oldest first; beyond <see cref="Limit"/> the oldest go.
-/// Not saved yet (the zones' <c>1-itemlist</c>, docs/formats/save.md), and nothing picks them up. Hashed by <see cref="World.StateHash"/> only while it holds one.
+/// Loose items lying in the world (docs/simulation.md "Ground items"): the save's (its zones' <c>1-itemlist</c>, docs/formats/save.md "Zone files") and the severed limbs combat drops.
+/// Oldest first; beyond <see cref="Limit"/> items dropped in play the oldest of those goes. Hashed by <see cref="World.StateHash"/> only while it holds one.
 /// </summary>
 public sealed class GroundItems
 {
-    /// <summary>How many lie in the world at most (an engine choice; how long the original keeps them is <b>Unknown</b>).</summary>
+    /// <summary>How many items dropped in play (not read from the save) lie in the world at most (an engine choice; the original's limbs carry a <c>timeout</c>, meaning <b>Unknown</b>).</summary>
     public const int Limit = 64;
 
-    readonly List<(int Id, ItemInstance Item, Vector3 Position, float Yaw)> items = [];
+    readonly List<GroundItem> items = [];
     int nextId = 1;
 
     public int Count => items.Count;
-    /// <summary>Bumped when an item is dropped or goes: the host diffs <see cref="Published"/> by id when it changes.</summary>
+    public IReadOnlyList<GroundItem> All => items;
+    /// <summary>Bumped when an item is dropped, loaded or goes: the host diffs <see cref="Published"/> by id when it changes.</summary>
     public long Revision { get; private set; }
 
+    /// <summary>Drops an item made in play, turned <paramref name="yaw"/> about Y.</summary>
     public void Drop(ItemInstance item, Vector3 position, float yaw)
     {
-        items.Add((nextId++, item, position, yaw));
-        if (items.Count > Limit) items.RemoveAt(0);
+        items.Add(new GroundItem(nextId++, item, position, Quaternion.CreateFromAxisAngle(Vector3.UnitY, yaw)));
+        if (items.Count(i => i.Item.Saved is null) > Limit) items.RemoveAt(items.FindIndex(i => i.Item.Saved is null));
         Revision++;
+    }
+
+    /// <summary>Puts a saved item back where the save had it (no limit).</summary>
+    public void Load(ItemInstance item, Vector3 position, Quaternion rotation)
+    {
+        items.Add(new GroundItem(nextId++, item, position, rotation));
+        Revision++;
+    }
+
+    public GroundItem? Find(int id) => items.Find(i => i.Id == id);
+
+    /// <summary>Takes an item off the ground (null when it is gone).</summary>
+    public GroundItem? Take(int id)
+    {
+        int k = items.FindIndex(i => i.Id == id);
+        if (k < 0) return null;
+        var taken = items[k];
+        items.RemoveAt(k);
+        Revision++;
+        return taken;
     }
 
     /// <summary>The items as published, made again only when <see cref="Revision"/> changed.</summary>
     internal IReadOnlyList<GroundItemSnapshot> Published()
     {
-        if (publishedAt != Revision) (published, publishedAt) = ([.. items.Select(i => new GroundItemSnapshot(i.Id, i.Item.Record, i.Position, i.Yaw))], Revision);
+        if (publishedAt != Revision) (published, publishedAt) = ([.. items.Select(i => new GroundItemSnapshot(i.Id, i.Item.Record, i.Item.Name, i.Position, i.Yaw))], Revision);
         return published;
     }
     IReadOnlyList<GroundItemSnapshot> published = [];
@@ -40,12 +76,16 @@ public sealed class GroundItems
     public void Hash(ref StateHasher h)
     {
         h.Add(items.Count);
-        foreach (var (id, item, position, yaw) in items)
+        foreach (var i in items)
         {
-            h.Add(id);
-            h.Add(Rng.StableHash(item.Record));
-            h.Add(position);
-            h.Add(yaw);
+            h.Add(i.Id);
+            h.Add(Rng.StableHash(i.Item.Record));
+            h.Add(i.Item.Quantity);
+            h.Add(i.Position);
+            h.Add(i.Rotation.X);
+            h.Add(i.Rotation.Y);
+            h.Add(i.Rotation.Z);
+            h.Add(i.Rotation.W);
         }
     }
 }

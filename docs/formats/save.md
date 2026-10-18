@@ -300,15 +300,27 @@ has an override world state (its lists are then replaced) or `0-buildinglist` ho
 - Slot list: the last level layer's list (a layer without one empties it), plus slots allocated in play (the lists Meitou makes this way are within the saved ones in 181 of 183 files, the other two lack
   one slot each). `nextId` can be above the highest record id.
 - Nest buildings are not saved (no type-85 `town` handle in save 2's 133 files); nest debris are `1-itemlist` ITEMs whose `persist` handle is the nest (222 in save 2).
+- `1-itemlist` (**Observed**, METARU: 285 items in its zone files): INSTANCE_COLLECTION, name "0", flags 0; entries numbered "1", "2", ... with no states, the item's position and a
+  full (physics-settled) quaternion, target an ITEM record (type 4, name "0", flags 0) of the same file, id `<n>-zone<X>.<Y>-INGAME` of the zone it was made in (an item
+  moved to another zone keeps it). Its keys are INVENTORY_ITEM_STATE's with `in inventory` false and `section` "": `base data sid`, `material sid`, `company sid`,
+  `color sid`, `item function`, `level`, `quantity`, `charges`, `quality`, `inventory x/y` 0, `death`, null-able `ownedby` and `insideBuilding` handles; `uniform` on 49, a
+  `persist` handle (type 85, a town container) on 284 (the nest debris). The one severed limb (`limbs.mod`, `item function` 17) has no `persist` and adds `skin` and `blood`
+  ints, a `scale` vector and a `timeout` float (131.7; meaning, units and whether it removes the item **Unknown**).
 
 **Meitou** (`Saving/ZoneSave`, `Data/Save/SaveZoneBuilder`): every zone the population had active, and every zone of a town it made but another town's centre zone (engine choice:
 a town is made and saved whole; three such zones, e.g. Black Desert City's buildings in Scraphouse's 34.28), is visited (`World.VisitedZones`, not hashed). A save keeps the loaded save's zone files (locks, doors and player buildings are written into them) and makes
 the missing ones from the level data as above, with `town` set to the save's town state `hand` and a new save's town states taking their level `hand`; it writes no
-`serialised interior`, no furniture, inventories or loose items (not modelled), so the original makes each interior as for a fresh zone (only the residents differ: the
+`serialised interior`, no furniture or inventories (not modelled), so the original makes each interior as for a fresh zone (only the residents differ: the
 saved platoons). **Observed** (headless new game, the player moved to Squin and Stack): 8 visited zones, 8 files, every handle in its slot list, 300 of 300 `town` handles
 name a town state; key set = the real saves' minus the runtime-only keys (`serialised interior`, `internalbuildings`, farm, craft and lock keys of buildings that have none
 here) plus `meitou lock <i>`; doors and an interior chest locked before the save are locked after reload, and a second save writes the same zone files. Base saves 1, 3,
 wade and 2 (moved to Admag) keep every zone file byte for byte except door keys added to buildings whose saved state has none (3 files in save 2, 1 in save 1).
+Loose items (`Saving/GroundItemSave`, `Data/Save/SaveGroundItems`): a load puts every `1-itemlist` item the data can make on the ground at its saved position and rotation;
+a save writes each zone's list from the items lying in it, a read item with its own record (unmodelled keys kept), a new one with the key set above minus `uniform`,
+`persist` and the limb keys, id `<n>-zone<X>.<Y>-INGAME` above every such number of the file; entries whose item the data lacks are written back as read; a zone whose
+list is unchanged is left as it is, an empty list is not written, a file left empty goes. **Observed** (headless, METARU with the install's load order): 285 of 285 items
+loaded; a capture with nothing changed keeps all 123 zone files byte for byte; an item dropped, saved and reloaded lies where it was, and a second save writes the
+same 124 files.
 
 ### Locks, cages and sentences
 

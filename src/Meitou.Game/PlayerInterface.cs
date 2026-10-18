@@ -95,6 +95,7 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
             // before the context menu's hold time; held longer, the menu opens instead (PlayerInterface.ContextMenu.cs).
             else if (QuickOrder(p)?.Do is var quick && ContextPress(p, quick)) { }
             else if (quick is not null) quick();
+            else if (GroundItemClick(p)) { }
             else if (Ray(p) is { } ray && GroundHit(ray.Origin, ray.Direction) is { } hit)
             {
                 Move(hit, shift);
