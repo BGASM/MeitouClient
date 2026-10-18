@@ -95,8 +95,11 @@ public readonly record struct FoliageCullResult(Buffer Rows, ulong RowsOffset, u
 public sealed unsafe class FoliageGpuCull : IDisposable
 {
     const ulong Align = 256;
-    /// <summary>The kernels' View buffer (<c>ViewData</c>): 8 planes, their normals' lengths, the resident biome bits, the mode, the fog cull (<see cref="FogVolumes.CullVectors"/> vec4s), the occlusion cull (<see cref="HizPyramid.ViewVectors"/> vec4s).</summary>
-    const ulong ViewBytes = 208 + FogVolumes.CullVectors * 16 + HizPyramid.ViewVectors * 16 + 16;
+    /// <summary>The kernels' View buffer (<c>ViewData</c>): 8 planes, their normals' lengths, the resident biome bits, the mode, the fog cull (<see cref="FogVolumes.CullVectors"/> vec4s), the occlusion cull (<see cref="HizPyramid.ViewVectors"/> vec4s), the LOD view, the interior masks' boxes.</summary>
+    const ulong ViewBytes = InteriorOffset + MaxInteriorBoxes * 16;
+    const ulong InteriorOffset = 208 + FogVolumes.CullVectors * 16 + HizPyramid.ViewVectors * 16 + 16;
+    /// <summary>The interior masks' boxes the cull takes (<c>ViewData.interior</c>); more are merged into the last.</summary>
+    public const int MaxInteriorBoxes = 32;
     readonly GpuContext ctx;
     readonly ShaderProgram cull, scan, compact;
     readonly ComputePipeline cullPipe, scanPipe, compactPipe;
@@ -366,7 +369,8 @@ public sealed unsafe class FoliageGpuCull : IDisposable
         Dispatch(work, view, eye, default, fullThreshold);
 
     /// <summary><see cref="Dispatch(in FoliageCullWork, FoliageCullView, Vector2, float)"/> with what the view's rock chunks write (<see cref="FoliageRockView"/>).</summary>
-    public FoliageCullResult Dispatch(in FoliageCullWork work, FoliageCullView view, Vector2 eye, in FoliageRockView rock, float fullThreshold = 0.999f, ReadOnlySpan<Vector4> fogCull = default, in OcclusionView occlusion = default, FoliageLodView lod = default, bool split = false)
+    public FoliageCullResult Dispatch(in FoliageCullWork work, FoliageCullView view, Vector2 eye, in FoliageRockView rock, float fullThreshold = 0.999f, ReadOnlySpan<Vector4> fogCull = default, in OcclusionView occlusion = default, FoliageLodView lod = default, bool split = false,
+        IReadOnlyList<(Vector2 Min, Vector2 Max)>? interior = null)
     {
         if (work.ChunkCount == 0) return default;
         if (view.Planes.Length > 8) throw new ArgumentException("at most 8 planes", nameof(view));
@@ -394,12 +398,21 @@ public sealed unsafe class FoliageGpuCull : IDisposable
         var resident = (uint*)(viewData.Pointer + 160);
         for (int i = 0; i < 8; i++) resident[i] = rock.Resident[i];
         var mode = (uint*)(viewData.Pointer + 192);
-        (mode[0], mode[1], mode[2], mode[3]) = (rock.BiomeRows ? 1u : 0u, fogCull.Length == FogVolumes.CullVectors ? 1u : 0u, occlusion.IsEmpty ? 0u : 1u, 0u);
+        (mode[0], mode[1], mode[2], mode[3]) = (rock.BiomeRows ? 1u : 0u, fogCull.Length == FogVolumes.CullVectors ? 1u : 0u, occlusion.IsEmpty ? 0u : 1u, (uint)Math.Min(interior?.Count ?? 0, MaxInteriorBoxes));
         var fogData = (Vector4*)(viewData.Pointer + 208);
         for (int i = 0; i < FogVolumes.CullVectors; i++) fogData[i] = fogCull.Length == FogVolumes.CullVectors ? fogCull[i] : default;
         var hzData = fogData + FogVolumes.CullVectors;
         for (int i = 0; i < HizPyramid.ViewVectors; i++) hzData[i] = occlusion.IsEmpty ? default : occlusion.Vectors[i];
         hzData[HizPyramid.ViewVectors] = new Vector4(lod.EyeY, lod.Scale, lod.Tolerance, lod.Ortho ? 1 : -lod.FarDistance);
+        // The interior masks (a mesh instance over one is drawn with the cut: docs/render-interior-cut.md); past the last slot each box widens the last.
+        var boxes = (Vector4*)(viewData.Pointer + InteriorOffset);
+        for (int i = 0; i < (interior?.Count ?? 0); i++)
+        {
+            var (min, max) = interior![i];
+            int at = Math.Min(i, MaxInteriorBoxes - 1);
+            boxes[at] = i < MaxInteriorBoxes ? new Vector4(min.X, min.Y, max.X, max.Y)
+                : new Vector4(MathF.Min(boxes[at].X, min.X), MathF.Min(boxes[at].Y, min.Y), MathF.Max(boxes[at].Z, max.X), MathF.Max(boxes[at].W, max.Y));
+        }
 
         Span<BufferBinding> b = stackalloc BufferBinding[10];
         b[0] = new BufferBinding(viewData.Handle, viewData.Offset, ViewBytes);

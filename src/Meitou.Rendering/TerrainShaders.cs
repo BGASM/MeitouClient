@@ -529,6 +529,7 @@ static partial class TerrainShaders
         ["uOverlay"] = "textures2D[terrain.overlay]", ["uColour"] = "textures2D[terrain.colour]", ["uGround"] = "textures2D[terrain.ground]",
         ["uWorldColour"] = "textures2D[terrain.worldColour]", ["uRegion"] = "terrain.region", ["uCellGrid"] = "terrain.cellGrid",
         ["uHalfWorld"] = "terrain.halfWorld", ["uInteriorMask"] = "textures2D[terrain.interiorMask]",
+        ["uInteriorCut"] = "true",   // only the cut variants declare it: the patches that overlap a mask
     };
 
     const string DerivativeControl = "#extension GL_ARB_derivative_control : require\n";
@@ -596,35 +597,13 @@ static partial class TerrainShaders
     /// <summary>The vertex stage of the rock bake: <see cref="MeshVertex"/> with the bake's push block (both stages declare the same members).</summary>
     public static string RockBakeVertexNative() => Native(MeshVertex, RockBakePushMembers);
 
-    /// <summary>
-    /// The interior cut (docs/render-terrain.md "Interior cut"): a fragment whose view depth lies between the nearest and the farthest interior-mask face
-    /// at its pixel (<see cref="InteriorMaskRenderer"/>, depth + 1) is left out, as the game's <c>terrainfp4.hlsl</c> clips against <c>rt_interiormask</c>.
-    /// </summary>
-    const string InteriorCut = """
-        {
-                vec4 interiorRange = texelFetch(uInteriorMask, ivec2(gl_FragCoord.xy), 0);
-                float interiorDepth = 1.0 / gl_FragCoord.w;
-                if (interiorDepth < interiorRange.a && interiorDepth > interiorRange.r) discard;
-            }
-        """;
-
-    /// <summary>A terrain fragment text with <see cref="InteriorCut"/> at the top of <c>main</c> (and its texture declared).</summary>
-    static string WithInteriorCut(string fragment)
-    {
-        const string main = "void main()\n";
-        int at = fragment.LastIndexOf(main, StringComparison.Ordinal);
-        int brace = at < 0 ? -1 : fragment.IndexOf('{', at);
-        if (brace < 0) throw new InvalidOperationException("TerrainShaders.WithInteriorCut: no main() in the fragment text.");
-        return fragment.Insert(brace + 1, "\n            " + InteriorCut).Insert(at, "uniform sampler2D uInteriorMask;\n");
-    }
-
     public static string PatchVertexNative() => Native(PatchVertex);
-    public static string FragmentNative(bool interiorCut = false) => Gi.GiResolveShaders.WithAlbedo(Native(interiorCut ? WithInteriorCut(Fragment) : Fragment));
+    public static string FragmentNative(bool interiorCut = false) => Gi.GiResolveShaders.WithAlbedo(Native(interiorCut ? InteriorMaskRenderer.WithCut(Fragment) : Fragment));
     /// <summary>The terrain colour pass's depth-only twin: the same vertex stage (so the depths are the same), a fragment stage that writes nothing (<see cref="TerrainLateColour"/>).</summary>
     public static string PrepassFragmentNative(bool interiorCut = false)
     {
         const string empty = "#version 330 core\nvoid main()\n{\n}\n";
-        return Native(interiorCut ? WithInteriorCut(empty) : empty);
+        return Native(interiorCut ? InteriorMaskRenderer.WithCut(empty) : empty);
     }
     public static string MeshVertexNative() => Native(MeshVertex);
     public static string MeshFragmentNative() => Gi.GiResolveShaders.WithAlbedo(Native(MeshFragment));

@@ -102,6 +102,8 @@ static partial class NativeShaders
             float fogDistance;
             vec2 nearPlanes;
             vec2 jitterNdc;
+            uint interiorMask;
+            uint interiorCut;
         } view;
 
         """;
@@ -187,6 +189,8 @@ static partial class NativeShaders
         ["uViewProjection"] = "view.viewProjection", ["uPreviousViewProjection"] = "view.previousViewProjection", ["uEye"] = "view.eye",
         ["uTime"] = "view.time", ["uLightDir"] = "view.lightDir", ["uPreviousTime"] = "view.previousTime", ["uFogColour"] = "view.fogColour",
         ["uFogDistance"] = "view.fogDistance", ["uNearPlanes"] = "view.nearPlanes", ["uJitterNdc"] = "view.jitterNdc",
+        // The interior cut (InteriorMaskRenderer.WithCut; set by InteriorMaskRenderer.Apply for the main view's near slice only).
+        ["uInteriorMask"] = "textures2D[view.interiorMask]", ["uInteriorCut"] = "(view.interiorCut != 0u)",
     };
 
     /// <summary>The shared mesh shaders' own uniforms (<see cref="Shaders.MeshVertex"/>, <see cref="Shaders.MeshFragment"/>,
@@ -361,7 +365,7 @@ unsafe struct FrameConstants
 }
 
 /// <summary>The C# side of <see cref="NativeShaders.ViewBlock"/> (std140). Matrices as <c>WorldGl.Matrix</c> passes them (System.Numerics memory).</summary>
-[StructLayout(LayoutKind.Explicit, Size = 192)]
+[StructLayout(LayoutKind.Explicit, Size = 208)]
 struct ViewConstants
 {
     [FieldOffset(0)] public Matrix4x4 ViewProjection;
@@ -374,6 +378,8 @@ struct ViewConstants
     [FieldOffset(172)] public float FogDistance;
     [FieldOffset(176)] public Vector2 NearPlanes;
     [FieldOffset(184)] public Vector2 JitterNdc;
+    [FieldOffset(192)] public uint InteriorMask;
+    [FieldOffset(196)] public uint InteriorCut;
 }
 
 /// <summary>The C# side of <see cref="NativeShaders.MeshPushMembers"/> (std430 push constants, 128 bytes). GLSL bools are 32-bit (0 / 1).</summary>

@@ -305,11 +305,13 @@ static class FoliageShaders
 
     /// <summary><see cref="MeshVertex"/> in the native model (the shared mesh uniforms on <see cref="MeshPush"/> and <see cref="ViewConstants"/>).</summary>
     public static string MeshVertexNative() => NativeShaders.Port(MeshVertex());
-    public static string MeshFragmentNative(bool solid = false) => Gi.GiResolveShaders.WithAlbedo(NativeShaders.Port(MeshFragment(solid)), inShader: true);
+    /// <summary><see cref="MeshFragment"/> in the native model; the full one (not <paramref name="solid"/>) also has the interior cut (<see cref="InteriorMaskRenderer.WithCut"/>, on while the view has it).</summary>
+    public static string MeshFragmentNative(bool solid = false) =>
+        Gi.GiResolveShaders.WithAlbedo(NativeShaders.Port(solid ? MeshFragment(true) : InteriorMaskRenderer.WithCut(MeshFragment())), inShader: true);
     /// <summary><see cref="ShadowShaders.MeshDepthFragment"/> in the native model, for <see cref="MeshVertexNative"/>.</summary>
     public static string MeshDepthNative() => NativeShaders.MeshDepthFragment();
-    /// <summary><see cref="MeshPrepassFragment"/> in the native model, for <see cref="MeshVertexNative"/>.</summary>
-    public static string MeshPrepassNative(bool solid = false) => NativeShaders.Port(MeshPrepassFragment(solid));
+    /// <summary><see cref="MeshPrepassFragment"/> in the native model, for <see cref="MeshVertexNative"/>; the full one also has the interior cut.</summary>
+    public static string MeshPrepassNative(bool solid = false) => NativeShaders.Port(solid ? MeshPrepassFragment(true) : InteriorMaskRenderer.WithCut(MeshPrepassFragment()));
 
     /// <summary>The blade programs' push constants (<see cref="GrassPush"/> is the C# side; std430).</summary>
     public const string GrassPushMembers = """
@@ -336,7 +338,8 @@ static class FoliageShaders
     };
 
     public static string GrassVertexNative() => NativeShaders.Port(GrassVertex, NativeShaders.Map(GrassMap), GrassPushMembers);
-    public static string GrassFragmentNative() => Gi.GiResolveShaders.WithAlbedo(NativeShaders.Port(GrassFragment, NativeShaders.Map(GrassMap), GrassPushMembers), inShader: true);
+    /// <summary>The blades' colour program, with the interior cut (<see cref="InteriorMaskRenderer.WithCut"/>; the cut-out already has a <c>discard</c>).</summary>
+    public static string GrassFragmentNative() => Gi.GiResolveShaders.WithAlbedo(NativeShaders.Port(InteriorMaskRenderer.WithCut(GrassFragment), NativeShaders.Map(GrassMap), GrassPushMembers), inShader: true);
     public static string GrassMotionVertexNative() => NativeShaders.Port(GrassMotionVertex, NativeShaders.Map(GrassMap), GrassPushMembers);
     public static string GrassMotionFragmentNative() => NativeShaders.Port(GrassMotionFragment, NativeShaders.Map(GrassMap), GrassPushMembers);
 
@@ -399,13 +402,15 @@ static class FoliageShaders
         // mode.y: the fog cull is on (main colour pass; FogVolumes.WriteCull): fog[0] box min and in w the weather fog's distance squared (0: none), fog[1] box max and in w 1 when the eye's block
         // is there, fog[2] eye + hide distance squared, fog[3..9] the block's planes.
         // mode.z: the occlusion cull is on (main colour pass; HizPyramid.ViewFor): hz and hzOff as OcclusionView.Vectors says.
-        struct ViewData { vec4 planes[8]; vec4 lengths[2]; uvec4 resident[2]; uvec4 mode; vec4 fog[10]; vec4 hz[6]; uvec4 hzOff[3]; vec4 lod; };
+        // mode.w: the interior masks' X/Z boxes in interior (min x, min z, max x, max z; the main colour pass with the split, docs/render-interior-cut.md): a fully visible mesh
+        // instance over one gets the fade 1.5 (drawn whole, as 2) and is laid out with the fading ones, so it is drawn with the program that has the cut.
+        struct ViewData { vec4 planes[8]; vec4 lengths[2]; uvec4 resident[2]; uvec4 mode; vec4 fog[10]; vec4 hz[6]; uvec4 hzOff[3]; vec4 lod; vec4 interior[32]; };
         layout(push_constant) uniform Push { vec2 eye; uint planeCount; uint chunkCount; uint drawCount; float fullThreshold; uint split; } pc;
         // The split (pc.split, the colour views with EarlyDepth): an instance whose mesh shader dithers it (a fade below 1; not an impostor, and a rock only with its impostor transition,
         // the only one whose fade reaches the shader) is laid out after the batch's others, so the others can be drawn with the program that has no discard.
         bool IsFading(uint flags, float packed)
         {
-            return pc.split != 0u && packed > -1.5 && packed < 1.0 && (flags & 8u) == 0u && ((flags & 1u) == 0u || (flags & 4u) != 0u);
+            return pc.split != 0u && packed > -1.5 && (packed < 1.0 || packed == 1.5) && (flags & 8u) == 0u && ((flags & 1u) == 0u || (flags & 4u) != 0u);
         }
         uint ChunkIndex() { return gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x; }
         // FogVolumes.Covers: the box wholly inside the eye's fog block (its box and seven planes) and its nearest point at least the hide distance away.
@@ -437,6 +442,16 @@ static class FoliageShaders
         layout(std430, set = 0, binding = 3) writeonly buffer Fades { float fades[]; };
         layout(std430, set = 0, binding = 4) writeonly buffer Counts { uint counts[]; };
         layout(std430, set = 0, binding = 9) readonly buffer Hiz { vec2 hiz[]; };
+        // Whether the sphere's X/Z square overlaps one of the interior masks' boxes (mode.w of them).
+        bool InInterior(vec4 sphere)
+        {
+            for (uint b = 0u; b < view.mode.w; b++)
+            {
+                vec4 box = view.interior[b];
+                if (sphere.x + sphere.w >= box.x && sphere.x - sphere.w <= box.z && sphere.z + sphere.w >= box.y && sphere.z - sphere.w <= box.w) return true;
+            }
+            return false;
+        }
         // The occlusion cull (HizPyramid, docs/formats/foliage.md "Occlusion culling"): the sphere seen from the previous frame's eye, against that frame's nearest and
         // farthest view distance per block of pixels. view.hz[0] the previous eye and the eye's step, [1..3] its right, up and back axes, [4] tan x, tan y, width, height,
         // [5] pixels per unit of tangent, level count, level 0's width and height; view.hzOff the levels' offsets.
@@ -549,6 +564,7 @@ static class FoliageShaders
                     // The fog cull last, so it counts only what would have been drawn: the sphere's box (FoliageCull.CullGroup).
                     if (packed > -1.5 && view.mode.y != 0u && FogHidden(view, sphere.xyz - vec3(sphere.w), sphere.xyz + vec3(sphere.w))) { packed = -2.0; fogged = 1u; }
                     if (packed > -1.5 && view.mode.z != 0u && HizOccluded(sphere)) { packed = -2.0; occluded = 1u; }
+                    if (packed >= 1.0 && view.mode.w != 0u && (k.flags & 9u) == 0u && InInterior(sphere)) packed = 1.5;
                 }
             }
             fades[c * 256u + i] = packed;

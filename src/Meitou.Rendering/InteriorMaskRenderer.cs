@@ -7,9 +7,10 @@ using Meitou.Rendering.Gpu;
 namespace Meitou.Rendering;
 
 /// <summary>
-/// The interior cut (docs/render-terrain.md "Interior cut"): the <c>interior mask</c> meshes of the buildings near the eye drawn into a depth range of the
-/// main view, nearest front face (R) and farthest back face (A) as view depth + 1, which the terrain reads to leave out its fragments inside a building
-/// (the game's <c>InteriorMask</c> compositor node and <c>rt_interiormask</c>). Drawn before the scene, at the scene's size, with its camera.
+/// The interior cut (docs/render-interior-cut.md): the <c>interior mask</c> meshes of the buildings near the eye drawn into a depth range of the
+/// main view, nearest front face (R) and farthest back face (A) as view depth + 1, which the terrain, the foliage and the map features read to leave out
+/// their fragments inside a building (the game's <c>InteriorMask</c> compositor node and <c>rt_interiormask</c>). Drawn before the scene, at the scene's
+/// size, with its camera.
 /// </summary>
 public sealed unsafe class InteriorMaskRenderer : IDisposable
 {
@@ -82,6 +83,49 @@ public sealed unsafe class InteriorMaskRenderer : IDisposable
 
     /// <summary>The meshes drawn by the last <see cref="Record"/>.</summary>
     public int Drawn { get; private set; }
+
+    /// <summary>Whether the X/Z rectangle [<paramref name="min"/>, <paramref name="max"/>] overlaps a drawn mask's box (false while not <see cref="Active"/>).</summary>
+    public bool Overlaps(Vector2 min, Vector2 max)
+    {
+        if (!Active) return false;
+        foreach (var (lo, hi) in boxes)
+            if (min.X <= hi.X && max.X >= lo.X && min.Y <= hi.Y && max.Y >= lo.Y) return true;
+        return false;
+    }
+
+    /// <summary>Whether a sphere's X/Z square overlaps a drawn mask's box.</summary>
+    public bool Overlaps(Vector3 centre, float radius) =>
+        Overlaps(new Vector2(centre.X - radius, centre.Z - radius), new Vector2(centre.X + radius, centre.Z + radius));
+
+    /// <summary>Turns the cut on in <paramref name="view"/> (programs made with <see cref="WithCut"/> on <see cref="ViewConstants"/>) when <paramref name="cut"/> drew a mask.</summary>
+    internal static void Apply(ref ViewConstants view, InteriorMaskRenderer? cut)
+    {
+        if (cut is not { Active: true }) return;
+        view.InteriorMask = cut.Index;
+        view.InteriorCut = 1;
+    }
+
+    /// <summary>
+    /// The cut a fragment program runs first (docs/render-interior-cut.md): while <c>uInteriorCut</c>, a fragment whose view depth lies between the nearest and
+    /// the farthest interior-mask face at its pixel (depth + 1) is left out, as the game's shaders <c>clip</c> against <c>rt_interiormask</c>.
+    /// </summary>
+    const string Cut = """
+            if (uInteriorCut)
+            {
+                vec4 interiorRange = texelFetch(uInteriorMask, ivec2(gl_FragCoord.xy), 0);
+                float interiorDepth = 1.0 / gl_FragCoord.w;
+                if (interiorDepth < interiorRange.a && interiorDepth > interiorRange.r) discard;
+            }
+        """;
+
+    /// <summary><paramref name="fragment"/> (a legacy GLSL text) with <see cref="Cut"/> at the top of its <c>main</c> and its two uniforms declared, for
+    /// <see cref="NativeShaders.Port"/> to map (<c>uInteriorMask</c> a 2D texture, <c>uInteriorCut</c> a bool expression).</summary>
+    internal static string WithCut(string fragment)
+    {
+        var main = System.Text.RegularExpressions.Regex.Match(fragment, @"void\s+main\s*\(\s*\)\s*\{", System.Text.RegularExpressions.RegexOptions.RightToLeft);
+        if (!main.Success) throw new InvalidOperationException("InteriorMaskRenderer.WithCut: no main() in the fragment text.");
+        return fragment.Insert(main.Index + main.Length, "\n" + Cut).Insert(main.Index, "uniform sampler2D uInteriorMask;\nuniform bool uInteriorCut;\n");
+    }
 
     /// <summary>Draws the masks of the buildings near <paramref name="eye"/> with the main view's <paramref name="viewProjection"/> into a target of the scene's size.</summary>
     public void Record(Matrix4x4 viewProjection, Vector3 eye, int width, int height)

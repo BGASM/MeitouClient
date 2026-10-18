@@ -20,6 +20,7 @@ diaries, asset dumps or decompiled output. Current choices: [DECISIONS](../DECIS
 - [render-distance-benchmark](render-distance-benchmark.md)
 - [render-foliage](render-foliage.md)
 - [render-gi](render-gi.md)
+- [render-interior-cut](render-interior-cut.md): terrain, foliage and map features cut inside buildings
 - [render-lights](render-lights.md)
 - [render-objects](render-objects.md)
 - [render-post](render-post.md)

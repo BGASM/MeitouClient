@@ -167,7 +167,7 @@ public static partial class FoliageGrassShaders
     }
 
     public static string GrassVertexGpu() => Vertex(FoliageShaders.GrassVertex);
-    public static string GrassFragmentGpu() => Fragment(FoliageShaders.GrassFragment);
+    public static string GrassFragmentGpu() => Fragment(InteriorMaskRenderer.WithCut(FoliageShaders.GrassFragment));
     public static string GrassMotionVertexGpu() => Vertex(FoliageShaders.GrassMotionVertex);
     public static string GrassMotionFragmentGpu() => Fragment(FoliageShaders.GrassMotionFragment);
 

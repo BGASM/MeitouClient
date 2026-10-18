@@ -1123,6 +1123,8 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     }
     /// <summary>The fog cull (set by the world frame around the main camera's draw only): zones wholly hidden by the fog the eye is in are skipped (meshes and impostors; the grass is range-limited well inside the hide distance).</summary>
     internal FogVolumes? FogCull { get; set; }
+    /// <summary>The interior cut (docs/render-interior-cut.md; set by the world frame around its near slice's colour draw, null otherwise): the meshes and grass over a mask take it.</summary>
+    internal InteriorMaskRenderer? InteriorCut { get; set; }
     /// <summary>The last frame's depth pyramid for the occlusion cull (empty: none; set by the world frame around the main camera's draw only, like <see cref="FogCull"/>).</summary>
     internal OcclusionView Occlusion { get; set; }
     /// <summary>Foliage instances the occlusion cull left out of the main colour views (a frame ring late, summed over the frame's views).</summary>
@@ -1787,7 +1789,9 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         cull.TimingClass = depthPass || Gpu.CurrentTargets().Formats.Samples > 1 ? 0 : occlusionOn ? 2 : 1;
         // The split (EarlyDepth): in the colour views each batch's dithered instances come after its fully visible ones, drawn with the other program.
         bool split = !depthPass && EarlyDepth.Enabled;
-        var result = cull.Dispatch(new FoliageCullWork(gpuChunkData, gpuChunkCount, draws, count) { Instances = gpuInstances }, cullView, eye, in rock, 0.999f, fogOn ? fog : default, occlusionOn ? Occlusion : default, lodView, split);
+        // The interior cut (main colour view): with the split, the fully visible instances over a mask go with the fading ones, to the program with the cut.
+        var interior = split && InteriorCut is { Active: true } mask ? mask.Boxes : null;
+        var result = cull.Dispatch(new FoliageCullWork(gpuChunkData, gpuChunkCount, draws, count) { Instances = gpuInstances }, cullView, eye, in rock, 0.999f, fogOn ? fog : default, occlusionOn ? Occlusion : default, lodView, split, interior);
         if (occlusionOn && cull.OccludedIsFresh) OccludedInstances = cull.LateOccluded;
         DrawnInstances += cull.LateVisible;
         if (fogOn && cull.LateFogCulled > 0) FogCull!.AddCulled(FogVolumes.CullKind.FoliageInstances, cull.LateFogCulled);
@@ -2034,6 +2038,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         var job = meshJobs.Rent();
         (job.Owner, job.Targets, job.State, job.Layout, job.Count) = (this, targets, state, p.Layout, 0);
         var view = new ViewConstants { ViewProjection = viewProjection, Eye = eye, LightDir = light, FogColour = fogColour, FogDistance = fogDistance };
+        if (!depth) InteriorMaskRenderer.Apply(ref view, InteriorCut);
         job.Frame = nativeFrame.Prepare(in view);
         // The GPU cull's compacted rows and one indirect draw per mesh draw (its batch's count and first instance), else this call's constants.
         bool indirect = !gpuResult.IsEmpty;
@@ -2296,6 +2301,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         var state = GrassState(Gpu, coverage);
         int segment = SegmentId(GrassKind, p, targets, state);
         var view = new ViewConstants { ViewProjection = viewProjection, Eye = eye, LightDir = light, FogColour = fogColour, FogDistance = fogDistance, Time = SwayPhase() };
+        if (!depthPass) InteriorMaskRenderer.Apply(ref view, InteriorCut);
         var job = grassJobs.Rent();
         (job.Owner, job.Targets, job.State, job.Layout, job.Count) = (this, targets, state, p.Layout, 0);
         job.Frame = nativeFrame.Prepare(in view);

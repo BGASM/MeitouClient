@@ -314,7 +314,7 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     }
 
     /// <summary>
-    /// The interior cut of the main view (docs/render-terrain.md "Interior cut"; set by the world frame around its near slice's terrain draws, null otherwise): the
+    /// The interior cut of the main view (docs/render-interior-cut.md; set by the world frame around its near slice's terrain draws, null otherwise): the
     /// mask's depth range, read by the cut programs, which only the patches overlapping a drawn building take (a <c>discard</c> costs the early depth test).
     /// </summary>
     internal InteriorMaskRenderer? InteriorCut { get; set; }

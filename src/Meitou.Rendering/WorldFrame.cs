@@ -596,7 +596,7 @@ static class WorldFrame
         public ParticleRenderer? Particles;
         /// <summary>The movement marker the game interface shows after a ground move order (null in the viewer, or without <c>position.mesh</c>).</summary>
         public MoveMarkerRenderer? MoveMarker;
-        /// <summary>The buildings' interior masks the terrain is cut by (made with the first frame that has objects; docs/render-terrain.md "Interior cut").</summary>
+        /// <summary>The buildings' interior masks the terrain, foliage and map features are cut by (made with the first frame that has objects; docs/render-interior-cut.md).</summary>
         public InteriorMaskRenderer? InteriorMask;
         /// <summary>The navmesh debug view (null in the viewer; drawn while visible).</summary>
         public NavmeshOverlayRenderer? NavmeshOverlay;
@@ -1343,17 +1343,17 @@ static class WorldFrame
             gpu.Terrain.FogCull = null;
             StageClock.Lap(6);
             host.Stage(7);
-            if (gpu.Objects is { } fogObjects) fogObjects.FogCull = fogCull;
+            if (gpu.Objects is { } fogObjects) { fogObjects.FogCull = fogCull; fogObjects.InteriorCut = nearSlice ? gpu.InteriorMask : null; }
             if (render.Objects) gpu.Objects?.Draw(viewProjection, eye, frustum, render, light.SunDirection, light.FogColour, light.FogDistance, gpu.Terrain);
-            if (gpu.Objects is { } fogObjectsDone) fogObjectsDone.FogCull = null;
+            if (gpu.Objects is { } fogObjectsDone) { fogObjectsDone.FogCull = null; fogObjectsDone.InteriorCut = null; }
             StageClock.Lap(7);
             // Foliage in every depth slice (it reaches 32000+ units at the default x4), counted as one draw.
             host.Stage(8);
-            if (gpu.Foliage is { } fogFoliage) { fogFoliage.FogCull = fogCull; fogFoliage.Occlusion = post.OcclusionFor(eye); }
+            if (gpu.Foliage is { } fogFoliage) { fogFoliage.FogCull = fogCull; fogFoliage.Occlusion = post.OcclusionFor(eye); fogFoliage.InteriorCut = nearSlice ? gpu.InteriorMask : null; }
             if (gpu.Foliage is { } prepassFoliage) prepassFoliage.PrepassView = true;
             if (nearSlice || FoliageFarSlice.Enabled) gpu.Foliage?.Draw(viewProjection, eye, frustum, render, light.SunDirection, light.FogColour, light.FogDistance, gpu.Terrain, continuation: foliageDrawn);
             if (gpu.Foliage is { } prepassDone) prepassDone.PrepassView = false;
-            if (gpu.Foliage is { } fogFoliageDone) { fogFoliageDone.FogCull = null; fogFoliageDone.Occlusion = default; }
+            if (gpu.Foliage is { } fogFoliageDone) { fogFoliageDone.FogCull = null; fogFoliageDone.Occlusion = default; fogFoliageDone.InteriorCut = null; }
             foliageDrawn = true;
             StageClock.Lap(8);
             host.Stage(6);

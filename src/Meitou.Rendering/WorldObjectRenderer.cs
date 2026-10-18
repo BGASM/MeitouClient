@@ -57,6 +57,8 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         public bool Manual;
         /// <summary>Some instance is mid cross-fade (or a town's per-vertex fade): its draws need the program with the dither <c>discard</c>.</summary>
         public bool Fading;
+        /// <summary>Map features overlapping an interior mask (<see cref="InteriorCut"/>): drawn with the cut (the full program, push <c>fadeMode</c> bit 2), never solid.</summary>
+        public bool Cut;
         public Matrix4x4[] Data = new Matrix4x4[16];
         public int Count, Offset;
         /// <summary>The nearest instance's distance (to its bounds' edge) this frame: batches are drawn nearest first.</summary>
@@ -642,6 +644,8 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
 
     /// <summary>The fog cull (set by the world frame around the main camera's draw only): instances wholly hidden by the fog the eye is in are skipped.</summary>
     internal FogVolumes? FogCull { get; set; }
+    /// <summary>The interior cut (docs/render-interior-cut.md; set by the world frame around its near slice's colour draw, null otherwise): map features over a mask take it.</summary>
+    internal InteriorMaskRenderer? InteriorCut { get; set; }
 
     /// <summary>The water reflection's cull (set around the reflection pass's own draw): an instance (bounding sphere centre and radius) it answers false for is skipped.</summary>
     internal Func<Vector3, float, bool>? MirrorCull { get; set; }
@@ -836,6 +840,7 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         if (active.Count > 0)
         {
             var view = new ViewConstants { ViewProjection = viewProjection, Eye = eye, LightDir = light, FogColour = fogColour, FogDistance = fogDistance };
+            if (!depthPass) InteriorMaskRenderer.Apply(ref view, InteriorCut);
             var fadeRange = new Vector4(real - realBand, real, DistantReach - distantBand, DistantReach);
             if (wireMode != 2)
             {
@@ -917,22 +922,24 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
             m.M44 = BuildingLodShaders.ScaffoldBase + m.M42 + 1.2f * Math.Clamp(built, 0f, 1f) * gpu.Top * scaleY;
             site = true;
         }
+        // A map feature (CLIP_INTERIOR, docs/render-interior-cut.md) over a building's interior mask takes the cut; the rest keep the programs without it.
+        bool cut = !depthPass && inst.Placed.Kind == PlacedKind.MapFeature && InteriorCut is { Active: true } mask && mask.Overlaps(inst.Centre, inst.Radius);
         if (!blend.IsBlending)
         {
-            Add(gpu, inst.Materials!, blend.Lower, m, 0, weight >= 0.999f ? 2 : weight, value, inst.Placed.Interior, site, highlight: highlight);
+            Add(gpu, inst.Materials!, blend.Lower, m, 0, weight >= 0.999f ? 2 : weight, value, inst.Placed.Interior, site, highlight: highlight, cut: cut);
             return;
         }
-        Add(gpu, inst.Materials!, blend.Upper, m, 0, blend.T * weight, value, inst.Placed.Interior, site, highlight: highlight);
-        Add(gpu, inst.Materials!, blend.Lower, m, blend.T * weight, weight, value, inst.Placed.Interior, site, highlight: highlight);
+        Add(gpu, inst.Materials!, blend.Upper, m, 0, blend.T * weight, value, inst.Placed.Interior, site, highlight: highlight, cut: cut);
+        Add(gpu, inst.Materials!, blend.Lower, m, blend.T * weight, weight, value, inst.Placed.Interior, site, highlight: highlight, cut: cut);
     }
 
-    void Add(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, Matrix4x4 m, float lo, float hi, float near, bool backCull = false, bool site = false, int ghost = 0, bool highlight = false)
+    void Add(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, Matrix4x4 m, float lo, float hi, float near, bool backCull = false, bool site = false, int ghost = 0, bool highlight = false, bool cut = false)
     {
         var manual = gpu.Manual[level];
         // Fully visible: lo 0 and hi 2 (the shader keeps everything when hi >= 1 and lo is 0). With the early depth test off every batch is "fading": the old merging.
         // A construction site discards the fragments above its clip plane, so it needs the program with a discard as well.
         bool fading = !EarlyDepth.Enabled || lo > 0 || hi < 1 || site;
-        var batch = BatchFor(manual ?? gpu, materials, manual is null ? level : 0, (fading ? BatchKind.Fading : BatchKind.Solid) | (backCull ? BatchKind.BackCull : 0) | ghost | (highlight ? BatchKind.Highlight : 0));
+        var batch = BatchFor(manual ?? gpu, materials, manual is null ? level : 0, (fading ? BatchKind.Fading : BatchKind.Solid) | (backCull ? BatchKind.BackCull : 0) | ghost | (highlight ? BatchKind.Highlight : 0) | (cut ? BatchKind.Cut : 0));
         batch.Manual = manual is not null;
         if (batch.Count == 0) { active.Add(batch); batch.Near = near; } else if (near < batch.Near) batch.Near = near;
         m.M14 = lo;
@@ -950,6 +957,8 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         /// <summary>Flags: the placement ghost, valid or invalid (<see cref="Batch.Ghost"/>).</summary>
         public const int Ghost = 8, GhostBad = 16, GhostQueued = 32;
         public const int Highlight = 64;
+        /// <summary>A flag: <see cref="Batch.Cut"/>.</summary>
+        public const int Cut = 128;
     }
 
     Batch BatchFor(GpuObjectMesh gpu, ObjectMaterialSet materials, int level, int kind)
@@ -957,8 +966,8 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         var key = (gpu, materials, level, kind);
         if (!batchMap.TryGetValue(key, out var batch))
             batchMap[key] = batch = new Batch { Mesh = gpu, Materials = materials, Level = level, Town = kind == BatchKind.Town,
-                Fading = (kind & ~(BatchKind.BackCull | BatchKind.Ghost | BatchKind.GhostBad | BatchKind.GhostQueued | BatchKind.Highlight)) != BatchKind.Solid, BackCull = (kind & BatchKind.BackCull) != 0,
-                Highlight = (kind & BatchKind.Highlight) != 0,
+                Fading = (kind & ~(BatchKind.BackCull | BatchKind.Ghost | BatchKind.GhostBad | BatchKind.GhostQueued | BatchKind.Highlight | BatchKind.Cut)) != BatchKind.Solid, BackCull = (kind & BatchKind.BackCull) != 0,
+                Highlight = (kind & BatchKind.Highlight) != 0, Cut = (kind & BatchKind.Cut) != 0,
                 Ghost = (kind & BatchKind.GhostQueued) != 0 ? 3 : (kind & BatchKind.GhostBad) != 0 ? 2 : (kind & BatchKind.Ghost) != 0 ? 1 : 0 };
         return batch;
     }
@@ -1135,7 +1144,7 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
                 d = default;
                 d.Part = gp; d.Level = b.Level; d.FirstInstance = (uint)b.Offset; d.Instances = (uint)b.Count;
                 d.Push.TriplanarScale = 1f / 5000;
-                d.Push.FadeMode = fade;
+                d.Push.FadeMode = fade | (b.Cut ? 2 : 0);
                 if (wire || debugLevels == 1)
                 {
                     d.Push.Wireframe = 1;
@@ -1150,7 +1159,7 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
                     if (b.Highlight) d.Push.FlatColour = new Vector3(1f, 1f, 0f);
                     // A part whose diffuse map is not resident yet is drawn plain grey (pop-in the benchmark counts).
                     if (!depthPass && options.Textures && d.Diffuse == 0 && pm.WantsDiffuse) untexturedDraws++;
-                    d.Solid = !depthPass && !b.Fading && d.Push.AlphaThreshold == 0f;
+                    d.Solid = !depthPass && !b.Fading && !b.Cut && d.Push.AlphaThreshold == 0f;
                     d.BackCull = b.BackCull && pm.Material is not { DoubleSided: true };
                 }
                 DrawCalls++;

@@ -12,7 +12,7 @@ namespace Meitou.Rendering;
 /// whole), whose last column is constant, so row 0's w and row 1's w carry <c>lo</c> and <c>hi</c>: a fragment is kept when
 /// its dither value <c>d</c> in [0, 1) satisfies <c>lo &lt;= d &lt; hi</c>. A fully visible instance has lo 0 and hi 2.
 /// Two draws of the two LOD levels of one instance split [0, 1) between them, so they never both cover a pixel.
-/// With <c>uFadeMode</c> 1 (distant towns) hi comes per vertex from the distance to <c>uFadeEye</c> instead.
+/// With <c>uFadeMode</c> bit 1 (distant towns) hi comes per vertex from the distance to <c>uFadeEye</c> instead.
 /// </remarks>
 static class BuildingLodShaders
 {
@@ -40,7 +40,7 @@ static class BuildingLodShaders
                 vRange = vec2(aInstance0.w, aInstance1.w);
                 vInterior = aInstance2.w;
                 vScaffold = aInstance3.w;
-                if (uFadeMode == 1)
+                if ((uFadeMode & 1) == 1)
                 {
                     float fd = length((uModel * vec4(aPosition, 1.0)).xyz - uFadeEye);
                     vRange = vec2(0.0, smoothstep(uFadeRange.x, uFadeRange.y, fd) * (1.0 - smoothstep(uFadeRange.z, uFadeRange.w, fd)));
@@ -174,13 +174,17 @@ static class BuildingLodShaders
     static readonly Dictionary<string, string> Own = new()
     {
         ["uFadeMode"] = "pc.fadeMode", ["uFadeEye"] = "view.eye", ["uFadeRange"] = "pc.fadeRange",
+        // The interior cut: the view's mask, for the draws of map features over it (fadeMode bit 2, WorldObjectRenderer.Batch.Cut).
+        ["uInteriorCut"] = "(view.interiorCut != 0u && (pc.fadeMode & 2) != 0)",
         ["uSkinned"] = "false", ["uHasHead"] = "false",
         // Read only under uHasHead (never): any valid bindless entry.
         ["uHeadDiffuse"] = "textures2D[pc.diffuse]", ["uHeadNormal"] = "textures2D[pc.normal]",
     };
 
     public static string VertexNative() => NativeShaders.Port(Vertex(), NativeShaders.Map(Own), PushMembers);
-    public static string FragmentNative(bool solid = false) => Gi.GiResolveShaders.WithAlbedo(NativeShaders.Port(Fragment(solid), NativeShaders.Map(Own), PushMembers));
+    /// <summary>The colour program; the full one (not <paramref name="solid"/>) also has the interior cut (<see cref="InteriorMaskRenderer.WithCut"/>).</summary>
+    public static string FragmentNative(bool solid = false) =>
+        Gi.GiResolveShaders.WithAlbedo(NativeShaders.Port(solid ? Fragment(true) : InteriorMaskRenderer.WithCut(Fragment()), NativeShaders.Map(Own), PushMembers));
     /// <summary><see cref="ShadowShaders.MeshDepthFragment"/> for <see cref="VertexNative"/>.</summary>
     public static string DepthNative() => NativeShaders.Port(Depth(), NativeShaders.Map(Own), PushMembers);
 

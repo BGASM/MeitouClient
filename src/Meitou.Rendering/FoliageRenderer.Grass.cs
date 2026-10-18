@@ -224,6 +224,7 @@ public sealed unsafe partial class FoliageRenderer
         var (prefixIndex, fraction) = FoliageGrassGpu.DensityStep(Math.Min(GrassDensitySetting, MaxGrassDensity) / MaxGrassDensity);
         var result = grassStore.Dispatch(frustum, new Vector2(eye.X, eye.Z), PageSize, prefixIndex, fraction, in tables);
         var view = new ViewConstants { ViewProjection = viewProjection, Eye = eye, LightDir = light, FogColour = fogColour, FogDistance = fogDistance, Time = SwayPhase() };
+        if (!depthPass) InteriorMaskRenderer.Apply(ref view, InteriorCut);
         var job = grassGpuJobs.Rent();
         (job.Owner, job.Targets, job.State, job.Layout) = (this, targets, state, p.Layout);
         job.Frame = grassFrame!.Prepare(in view, [tables.Patches.Binding]);
