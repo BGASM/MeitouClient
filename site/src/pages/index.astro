@@ -6,7 +6,7 @@ import GithubIcon from '../components/GithubIcon.astro';
 // The performance video: 30 fps WebM, no audio.
 const performanceVideo = '/fast-loading.webm';
 
-// Roadmap to 1.0.0 (feature parity with the base game), from ROADMAP.md, docs/simulation.md and CHANGELOG.md.
+// Roadmap to 1.0.0 (feature parity with the base game), from ROADMAP.md, docs/simulation.md and CHANGELOG.md (to v0.14.0).
 // done: works in the game today. Partly finished areas are split into a done row and a missing row.
 const roadmap = [
   { area: 'Data and mods', items: [
@@ -19,34 +19,43 @@ const roadmap = [
     { name: 'Streamed terrain, objects and foliage', done: true },
     { name: 'Water, sky, weather and clouds', done: true },
     { name: 'Lights and shadows', done: true },
+    { name: 'Building interiors: terrain, grass and rocks cut away inside', done: true },
     { name: 'Characters and animals: meshes, animation, drawn weapons', done: true },
     { name: 'Remaining body, attachment and material parity', done: false },
   ] },
   { area: 'Characters and combat', items: [
     { name: 'Movement and pathfinding on a navmesh', done: true },
+    { name: 'Doors that open, close and lock', done: true },
     { name: 'Melee and ranged combat, body parts, medical state', done: true },
     { name: 'First aid, resting, carrying, rescue and looting', done: true },
-    { name: 'Crimes, bounties, arrests, cages and locks', done: true },
+    { name: 'Crimes, bounties, arrests, cages, locks and shackles', done: true },
     { name: 'Ragdolls', done: true },
-    { name: 'Global pathing and dynamic doors', done: false },
+    { name: 'Swimming, severed limbs and prosthetics', done: true },
+    { name: 'Global pathing', done: false },
     { name: 'Thrown bodies, physics props and character collision', done: false },
   ] },
   { area: 'World simulation', items: [
     { name: 'NPC population, AI tasks, senses and fleeing, wild animals', done: true },
-    { name: 'Wars, prisoners and slavers, full AI planner', done: false },
+    { name: 'Town and nest populations, off-screen roaming squads and roads', done: true },
+    { name: 'Wars and campaigns, kidnapping, prisoners and slavery', done: true },
+    { name: 'Dialogue, recruiting and speech bubbles', done: true },
+    { name: 'Saves restore NPC squads, towns, nests and weather', done: true },
+    { name: 'Full AI planner', done: false },
     { name: 'Full off-screen town simulation', done: false },
-    { name: 'Dialogue, recruiting and events', done: false },
-    { name: 'Restore towns, NPC squads and world state from saves', done: false },
+    { name: 'Remaining dialogue events, AI talk and contracts', done: false },
+    { name: 'Full world-state restore from saves', done: false },
   ] },
   { area: 'Economy and bases', items: [
-    { name: 'Inventories, trade and shops', done: true },
+    { name: 'Inventories, trade and town shops stocked from building storage', done: true },
     { name: 'Building placement and construction', done: true },
-    { name: 'Building shops, production, farming and research', done: false },
+    { name: 'Production, farming and research', done: false },
   ] },
   { area: 'Interface and audio', items: [
     { name: 'Menus, HUD, inventory and map panels', done: true },
+    { name: 'Trader window, character editor, portraits and name tags as in vanilla', done: true },
+    { name: 'Audio: ambience, music, voices, combat and interface sounds', done: true },
+    { name: 'Remaining sound triggers: doors, machines and effects', done: false },
     { name: 'Full control, font and mod UI fidelity', done: false },
-    { name: 'Audio: ambient, music, speech and events', done: false },
   ] },
 ];
 const roadmapItems = roadmap.flatMap((g) => g.items);
