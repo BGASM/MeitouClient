@@ -39,6 +39,7 @@ sealed partial class GameHost
             DiffBuildings(snapshot);
             buildingsRevision = snapshot.BuildingsRevision;
         }
+        UpdateGroundItems(snapshot);
         UpdateDoors();
         if (gpu.Objects is not { } objects) return;
         constructionLook.Clear();
@@ -100,6 +101,7 @@ sealed partial class GameHost
     void ForgetBuildings()
     {
         gpu?.Objects?.ClearRuntime();
+        ForgetGroundItems();
         foreach (string id in navBuildings) nav?.RemoveRuntimeBuilding(id);
         navBuildings.Clear();
         shownBuildings.Clear();

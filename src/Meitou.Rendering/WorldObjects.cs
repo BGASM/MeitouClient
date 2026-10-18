@@ -200,6 +200,13 @@ sealed class WorldObjects : IDisposable
             {
                 if (b.Position == Vector3.Zero) continue;
                 if (db.Find(b.BuildingId) is not { } record) { Interlocked.Increment(ref missing); continue; }
+                if (record.Type != Meitou.Data.Fcs.FcsRecordType.BUILDING)
+                {
+                    // A loose item (GameHost.GroundItems): its one mesh, at its absolute height.
+                    if (WorldObjectLayout.Item(record, b.InstanceId, new Vector3(b.Position.X, b.WorldY ?? map.HeightAt(b.Position.X, b.Position.Z) + b.Position.Y, b.Position.Z), b.Rotation) is { } item)
+                        result.Items.Add(item);
+                    continue;
+                }
                 // Y: the state's absolute "world Y pos" when there is one, else terrain height + the instance's Y (zones.md).
                 float y = b.WorldY ?? map.HeightAt(b.Position.X, b.Position.Z) + b.Position.Y;
                 if (b.WorldY is not null) Interlocked.Increment(ref fromState);

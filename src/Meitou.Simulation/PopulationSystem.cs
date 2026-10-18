@@ -113,8 +113,27 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         }
         DrainRoamers(world);
         DrainWild(world);
-        while (world.Characters.LimbsChanged.TryDequeue(out int slot))
-            if (world.Characters.Cold(slot) is { } cold) assembly.RefreshEquipment(cold);
+        while (world.Characters.LimbsChanged.TryDequeue(out var cut))
+        {
+            if (world.Characters.Cold(cut.Character) is not { } cold) continue;
+            assembly.RefreshEquipment(cold);
+            DropSeveredLimb(world, cut.Character, cold, cut.Limb);
+        }
+    }
+
+    /// <summary>
+    /// The RACE <c>severed limbs</c> item of <paramref name="limb"/> on the ground (docs/game/character-stats.md "Limb replacements and robots"). The original drops it at the
+    /// limb's <c>bone name 2</c> and lets physics take it; here it lies flat beside the character on that side (an engine choice), turned by a roll of the tick.
+    /// </summary>
+    void DropSeveredLimb(World world, int slot, CharacterCold cold, int limb)
+    {
+        if (cold.Race?.SeveredLimbs.FirstOrDefault(s => s.Slot == limb) is not { } severed || data.Items.Create(severed.TargetStringId) is not { } item) return;
+        ref readonly var hot = ref world.Characters.Next[slot];
+        float side = limb is 0 or 2 ? -1 : 1, forward = limb < 2 ? 0.5f : -1.5f;
+        var right = new Vector3(MathF.Cos(hot.Yaw), 0, -MathF.Sin(hot.Yaw));
+        var ahead = new Vector3(MathF.Sin(hot.Yaw), 0, MathF.Cos(hot.Yaw));
+        float yaw = Rng.Float(Rng.Hash(world.Seed, (ulong)slot, RngPurpose.Loot, (ulong)world.Tick)) * MathF.Tau;
+        world.GroundItems.Drop(item, hot.Position + right * (5 * side) + ahead * forward, yaw);
     }
 
     public void SlowWorld(World world)

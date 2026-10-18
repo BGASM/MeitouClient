@@ -220,8 +220,8 @@ public sealed class CharacterTable
     bool inTick;
     TablePhase phase = TablePhase.Outside;
 
-    /// <summary>Slots whose limbs changed in the tick (a limb cut off): the population system rebuilds their look between ticks.</summary>
-    public System.Collections.Concurrent.ConcurrentQueue<int> LimbsChanged { get; } = new();
+    /// <summary>Limbs cut off in the tick (the character's slot, the limb slot 0 to 3): the population system rebuilds the look and drops the severed limb between ticks.</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<(int Character, int Limb)> LimbsChanged { get; } = new();
 
     public CharacterTable(int capacity = 256)
     {

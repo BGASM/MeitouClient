@@ -10,6 +10,8 @@ public enum PlacedKind
     MapFeature,
     /// <summary>A building's <c>distant mesh</c> (see <see cref="WorldObjectLayout.DistantMesh"/>): the low-poly stand-in for a whole building, not a part.</summary>
     BuildingDistant,
+    /// <summary>A loose item lying in the world (<see cref="WorldObjectLayout.Item"/>): its record's mesh, one piece.</summary>
+    Item,
 }
 
 /// <param name="MeshPath">The mesh file as stored in the record (an install-relative <c>.\data\...</c> path).</param>
@@ -76,6 +78,17 @@ public static class WorldObjectLayout
         Matrix4x4.CreateScale(scale) * Matrix4x4.CreateFromQuaternion(Normalized(rotation)) * Matrix4x4.CreateTranslation(position);
 
     static Quaternion Normalized(Quaternion q) => q.LengthSquared() < 1e-12f ? Quaternion.Identity : Quaternion.Normalize(q);
+
+    /// <summary>
+    /// A loose item on the ground (docs/simulation.md "Ground items"): the record's <c>ground mesh</c>, else its <c>mesh</c>, at <paramref name="worldPosition"/> turned by
+    /// <paramref name="rotation"/>; its look is the material resolver's pick for the record (its <c>material</c> list). Null when the record names no mesh.
+    /// </summary>
+    public static PlacedMesh? Item(GameRecord item, string placementId, Vector3 worldPosition, Quaternion rotation)
+    {
+        string mesh = item.GetPath("ground mesh") is { Length: > 0 } ground ? ground : item.GetPath("mesh");
+        if (mesh.Length == 0) return null;
+        return new PlacedMesh(mesh, InstanceTransform(worldPosition, rotation, Vector3.One), item, item, placementId, PlacedKind.Item);
+    }
 
     /// <summary>
     /// Meshes of a placed building and of the doors it lists. <paramref name="worldPosition"/> is the absolute position

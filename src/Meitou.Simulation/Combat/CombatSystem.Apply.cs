@@ -97,7 +97,7 @@ public sealed partial class CombatSystem
             {
                 case MedicalEventKind.KnockedOut: knockout = true; break;
                 case MedicalEventKind.Died: death = true; break;
-                case MedicalEventKind.PartSevered: xp.ToughnessFromLimbLoss(dc.Stats, dc.Race); table.LimbsChanged.Enqueue(d); break;
+                case MedicalEventKind.PartSevered: xp.ToughnessFromLimbLoss(dc.Stats, dc.Race); table.LimbsChanged.Enqueue((d, dc.Medical.Parts[ev.Part].Template.LimbSlot)); break;
             }
         }
         if (dc.Medical.Incapacitated)

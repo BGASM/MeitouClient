@@ -288,9 +288,15 @@ orders find eligible still patients, walk to reach and apply aid serially. Medic
 is explicit and uncertain; [character-stats.md](game/character-stats.md) owns original rules.
 
 Limbs: `HealthPart.Limb` / `Replacement` / `ReplacementItem` per slot; saves round-trip them ([save.md](formats/save.md#limbs-medical_state-limbs)).
-A severed limb queues the character on `CharacterTable.LimbsChanged`; the population system rebuilds its look between ticks
-(`Loadout.Limbs`: stump or prosthetic mesh, natural limb hidden). Absent: the dropped severed-limb item (no ground items) and fitting
-or removing prosthetics in play (`MedicalState.FitReplacement` exists, no command or UI uses it).
+A severed limb queues (character, limb) on `CharacterTable.LimbsChanged`; between ticks the population system rebuilds the look
+(`Loadout.Limbs`: stump or prosthetic mesh, natural limb hidden) and drops the race's severed-limb item (Ground items). Prosthetics are
+fitted and removed by dragging them onto or off the limbs window's slots (`MoveInventoryItem` into or out of a `*_replace` section,
+`PlayerSystem.MoveLimb`, rules in [character-stats.md](game/character-stats.md)).
+
+Ground items: `World.GroundItems`, loose items (so far only severed limbs), at most 64, oldest dropped first; published with a revision.
+A dropped limb lies flat 5 units to its side of the character, random yaw (the original drops it at the bone and lets physics settle it).
+The host adds each as a runtime world-object placement of its record's `ground mesh` / `mesh` (`GameHost.GroundItems`,
+`WorldObjectLayout.Item`). Absent: picking them up, saving them (zone `1-itemlist`), and the save's own loose items.
 
 ## Items and eating
 

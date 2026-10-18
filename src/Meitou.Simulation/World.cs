@@ -128,6 +128,8 @@ public sealed partial class World : IDisposable
     public UniqueCharacters Uniques { get; } = new();
     /// <summary>The player-built buildings and construction sites, in creation order (docs/simulation.md "Buildings").</summary>
     public Construction.BuildingRegistry Buildings { get; } = new();
+    /// <summary>Loose items lying in the world, so far the severed limbs combat drops (docs/simulation.md "Ground items").</summary>
+    public Items.GroundItems GroundItems { get; } = new();
     /// <summary>
     /// Every zone the population has had active in this world (docs/formats/save.md "Zone files": the original writes a file for each zone it loaded): a save writes a zone file for
     /// each that its loaded save has none of. Only read by saves, so not hashed.
@@ -304,6 +306,7 @@ public sealed partial class World : IDisposable
         if (Uniques.Count > 0) Uniques.Hash(ref h);   // only once a unique is tracked, so worlds without one hash as before
         if (Fixtures.Count > 0) Fixtures.Hash(ref h);   // only once a town with buildings registered, so worlds without them hash as before
         if (Buildings.Count > 0 || Buildings.Towns.Count > 0) Buildings.Hash(ref h);   // only once the player has a site, so worlds without one hash as before
+        if (GroundItems.Count > 0) GroundItems.Hash(ref h);   // only once something lies on the ground, so worlds without hash as before
         foreach (var s in systems) if (s is IStateHashed hashed) hashed.Hash(ref h);
         return h.Value;
     }

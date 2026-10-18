@@ -157,6 +157,10 @@ public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> C
     public IReadOnlyList<Construction.BuildingSnapshot> Buildings { get; init; } = [];
     /// <summary>Bumped when a building is added, completed, destroyed or removed (not on progress): the host diffs <see cref="Buildings"/> by id when it changes.</summary>
     public long BuildingsRevision { get; init; }
+    /// <summary>Loose items lying in the world (<see cref="Items.GroundItems"/>), oldest first.</summary>
+    public IReadOnlyList<Items.GroundItemSnapshot> GroundItems { get; init; } = [];
+    /// <summary>Bumped when an item is dropped or goes: the host diffs <see cref="GroundItems"/> by id when it changes.</summary>
+    public long GroundItemsRevision { get; init; }
     /// <summary>BUILDING ids the player's research has unlocked (the build menu's list).</summary>
     public IReadOnlySet<string> UnlockedBuildings { get; init; } = EmptySet;
     /// <summary>The doors of the player's buildings and the others that are open, moving, locked or set to lock, by (building instance, index in its <c>doors</c> list); any other door is closed and unlocked (docs/simulation.md "Cages, beds and locks").</summary>
