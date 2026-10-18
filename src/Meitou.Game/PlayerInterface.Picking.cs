@@ -11,12 +11,17 @@ sealed partial class PlayerInterface
     /// <summary>The host's building-floor pick, limited to the terrain hit's distance.</summary>
     public Func<Vector3, Vector3, float, Vector3?>? BuildingMoveHit { get; set; }
 
-    /// <summary>The movement destination on a building floor, or the terrain when no building is in front of it.</summary>
+    /// <summary>The host's pick of a raised walkable surface outside the rooms (a wall top, a ramp, a deck), limited to a distance.</summary>
+    public Func<Vector3, Vector3, float, Vector3?>? SurfaceMoveHit { get; set; }
+
+    /// <summary>The movement destination on a raised walkable surface or a building floor, or the terrain when neither is in front of it.</summary>
     public Vector3? MoveHit(Vector3 origin, Vector3 direction)
     {
         var terrain = GroundHit(origin, direction);
         float distance = terrain is { } hit ? Vector3.Distance(origin, hit) : 40000;
-        return BuildingMoveHit?.Invoke(origin, direction, distance) ?? terrain;
+        var room = BuildingMoveHit?.Invoke(origin, direction, distance);
+        if (room is { } floor) distance = Vector3.Distance(origin, floor);
+        return SurfaceMoveHit?.Invoke(origin, direction, distance) ?? room ?? terrain;
     }
 
     /// <summary>The picking ray through a pixel: the near-plane point and the unit direction.</summary>
