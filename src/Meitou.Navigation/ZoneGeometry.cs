@@ -69,6 +69,11 @@ internal sealed class ZoneGeometry
     public NavVolume? InteriorHull { get; init; }
     /// <summary>For an interior mesh: the building instance it belongs to.</summary>
     public string? InteriorOf { get; init; }
+    /// <summary>
+    /// For an interior clipped at a zone border: no seed keeps nothing (instead of the largest region); the part is kept from the neighbour's border
+    /// (<see cref="ZoneKeptClosure"/>).
+    /// </summary>
+    public bool ClippedAtBorder { get; init; }
 
     /// <summary>The range of triangles (in triangle numbers) that came from buildings; for the seed rays.</summary>
     public int BuildingFirstTriangle, BuildingLastTriangle;

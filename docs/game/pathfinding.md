@@ -105,6 +105,12 @@ kept edges of each shared border seed the neighbour's full mesh (and back) until
 order. The original seeds a new zone from already built neighbours' border midpoints (order dependent) but ships prebuilt tiles, so
 players never see the order. **Observed** (World's End, zones 25..27 × 12..14, `meitou-tools navmesh --around 1`): with neighbour seeds
 zone 26.14 kept 7,943 polygons in raster order and 3,790 in reverse; with the closure every order gives the same kept sets and paths.
+An interior whose mask crosses a zone border is built in each zone it reaches, its box ending on the border line; a part without a
+seed keeps nothing (no largest-region fallback) and is kept through the closure from the part with the door. **Observed** (zones
+19.29/20.29, scratch NavSystem probe): the Y-House `2-Newwworld-INGAME` (x−55338, border x−55296) and Old Storm House `14-` have their
+doors in 20.29; built only in 19.29 they had no door join and their 20.29 half was invisible to point queries. Now a path from the
+street reaches the door and the far end of the Y-House. Doorless interiors on a border (20.32/21.32 `20-`, `26-Newwworld`) lose their
+fallback island.
 **Heights**: **Observed** polygons are up to ~15 off over stairs/ramps (Hub gate), so standing
 heights snap to walkable collision (`NavSurfaces`, also its edge within `EdgeReach`: the mesh overhangs raised floors, e.g. the Hub bar landing) or zone terrain (water-surface polygons keep their height); the layer is picked by mesh or real height within
 `StandRise` of the character wins.

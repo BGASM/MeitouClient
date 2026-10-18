@@ -5,8 +5,8 @@ using Meitou.Data.World;
 
 namespace Meitou.Navigation;
 
-/// <summary>A building of a zone with an interior to build: its placement and record.</summary>
-internal sealed record InteriorSite(BuildingPlacement Placement, GameRecord Record, Vector3 Position, bool Destroyed);
+/// <summary>A building with an interior to build in <paramref name="Zone"/> (its own zone, or a neighbour its interior reaches over the border): its placement and record.</summary>
+internal sealed record InteriorSite(BuildingPlacement Placement, GameRecord Record, Vector3 Position, bool Destroyed, ZoneCoordinate Zone);
 
 /// <summary>How a building's shapes are taken for its interior mesh (docs/game/pathfinding.md, "Interiors").</summary>
 sealed record InteriorContext(string InstanceId, bool Destroyed, uint Mask, bool Own);
@@ -35,8 +35,9 @@ internal sealed partial class ZoneGeometryGatherer
         destroyed && part.GetPath("destroyed collision") is { Length: > 0 } dc ? dc : part.GetPath("xml collision");
 
     /// <summary>
-    /// The buildings placed in a zone that have an interior to build: an <c>interior mask</c> part with collision, and not a gateway
-    /// (the approximation of SHELL_WITH_INTERIOR used by the exterior carvers too).
+    /// The buildings whose interior reaches into a zone: an <c>interior mask</c> part with collision, and not a gateway (the approximation of
+    /// SHELL_WITH_INTERIOR used by the exterior carvers too), with the mask's box over the zone's. A building over a zone border is built in each zone it
+    /// reaches, clipped at the border (<see cref="GatherInterior"/>).
     /// </summary>
     public IReadOnlyList<InteriorSite> InteriorSites(ZoneCoordinate zone)
     {
@@ -46,12 +47,27 @@ internal sealed partial class ZoneGeometryGatherer
         var list = new List<InteriorSite>();
         foreach (var (b, record, position, destroyed) in NearBuildings(zone, min, max, 0))
         {
-            if (position.X < min.X || position.X >= max.X || position.Z < min.Y || position.Z >= max.Y) continue;
-            if (record.GetBool("is gateway") || b.Zone != zone) continue;
-            if (!MaskParts(record).Any()) continue;
-            list.Add(new InteriorSite(b, record, position, destroyed));
+            if (record.GetBool("is gateway")) continue;
+            var points = MaskPoints(record, position, b.Rotation);
+            if (points.Count < 4) continue;
+            if (points.Max(p => p.X) < min.X || points.Min(p => p.X) >= max.X || points.Max(p => p.Z) < min.Y || points.Min(p => p.Z) >= max.Y) continue;
+            list.Add(new InteriorSite(b, record, position, destroyed, zone));
         }
         return list;
+    }
+
+    /// <summary>The world-space vertices of a building's interior mask shapes.</summary>
+    List<Vector3> MaskPoints(GameRecord building, Vector3 position, Quaternion rotation)
+    {
+        var node = NodeMatrix(building, position, rotation);
+        var points = new List<Vector3>();
+        foreach (var (_, path) in MaskParts(building))
+        {
+            if (collision.Get(path) is not { } prepared) continue;
+            foreach (var shape in prepared.Shapes)
+                foreach (var v in shape.Vertices) points.Add(Vector3.Transform(v, node));
+        }
+        return points;
     }
 
     IEnumerable<(GameRecord Part, string Path)> MaskParts(GameRecord building)
@@ -62,20 +78,15 @@ internal sealed partial class ZoneGeometryGatherer
     }
 
     /// <summary>
-    /// The input of one building's interior mesh: its own shapes and its furniture's, the door painters, the inner door markers as seeds, and the
-    /// complement of the interior hull as carvers (the hull's inverted volume: everything outside it is removed). The box is a square of whole tiles.
-    /// Null when the building has no usable hull.
+    /// The input of one building's interior mesh in <see cref="InteriorSite.Zone"/>: its own shapes and its furniture's, the door painters, the inner door
+    /// markers as seeds, and the complement of the interior hull as carvers (the hull's inverted volume: everything outside it is removed). The box is a
+    /// square of whole tiles; where the hull crosses the zone's border the box ends on the border line, so the part beyond is the neighbour zone's and the
+    /// two meet like the exteriors do (border links, <see cref="ZoneKeptClosure"/>). Null when the building has no usable hull in the zone.
     /// </summary>
     public ZoneGeometry? GatherInterior(InteriorSite site, float tileWorld, float pad = 12, float agentHeight = 18)
     {
         var node = NodeMatrix(site.Record, site.Position, site.Placement.Rotation);
-        var points = new List<Vector3>();
-        foreach (var (_, path) in MaskParts(site.Record))
-        {
-            if (collision.Get(path) is not { } prepared) continue;
-            foreach (var shape in prepared.Shapes)
-                foreach (var v in shape.Vertices) points.Add(Vector3.Transform(v, node));
-        }
+        var points = MaskPoints(site.Record, site.Position, site.Placement.Rotation);
         if (points.Count < 4) return null;
         float yMin = points.Min(p => p.Y), yMax = points.Max(p => p.Y);
         var hull = NavGeometry.Footprint(points, yMin, yMax, 0);
@@ -83,8 +94,21 @@ internal sealed partial class ZoneGeometryGatherer
 
         var lo = new Vector2(hull.Polygon.Min(p => p.X), hull.Polygon.Min(p => p.Y)) - new Vector2(pad);
         var hi = new Vector2(hull.Polygon.Max(p => p.X), hull.Polygon.Max(p => p.Y)) + new Vector2(pad);
+        var (zx, zz) = WorldLayout.ZoneOrigin(site.Zone);
+        var zoneMin = new Vector2((float)zx, (float)zz);
+        var zoneMax = zoneMin + new Vector2(WorldLayout.ZoneSize);
+        bool crossLowX = lo.X < zoneMin.X, crossLowZ = lo.Y < zoneMin.Y, crossHighX = hi.X > zoneMax.X, crossHighZ = hi.Y > zoneMax.Y;
+        lo = Vector2.Max(lo, zoneMin);
+        hi = Vector2.Min(hi, zoneMax);
+        if (hi.X <= lo.X || hi.Y <= lo.Y) return null;
         float side = MathF.Ceiling(MathF.Max(hi.X - lo.X, hi.Y - lo.Y) / tileWorld) * tileWorld;
-        var g = new ZoneGeometry { Zone = site.Placement.Zone, ZoneMin = lo, ZoneMax = lo + new Vector2(side), Margin = 8, InteriorHull = hull, InteriorOf = site.Placement.InstanceId };
+        // Over the high border the box is moved back to end on it (over the low one it starts on it already).
+        var boxMin = new Vector2(crossHighX && !crossLowX ? hi.X - side : lo.X, crossHighZ && !crossLowZ ? hi.Y - side : lo.Y);
+        var g = new ZoneGeometry
+        {
+            Zone = site.Zone, ZoneMin = boxMin, ZoneMax = boxMin + new Vector2(side), Margin = 8, InteriorHull = hull, InteriorOf = site.Placement.InstanceId,
+            ClippedAtBorder = crossLowX || crossLowZ || crossHighX || crossHighZ,
+        };
 
         uint mask = site.Destroyed ? DestroyedInteriorGroupMask : InteriorGroupMask;
         AddBuilding(g, site.Record, site.Placement.InstanceId, site.Position, site.Placement.Rotation, site.Destroyed, new InteriorContext(site.Placement.InstanceId, site.Destroyed, mask, Own: true));

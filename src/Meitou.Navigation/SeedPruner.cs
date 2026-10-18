@@ -18,6 +18,12 @@ internal static class SeedPruner
         var queue = new Queue<int>();
         int matched = Match(mesh, g.Seeds, s, keep, queue);
 
+        if (matched == 0 && g.ClippedAtBorder)
+        {
+            // Part of an interior whose doors are across a zone border: the neighbour's kept border edges reach it (ZoneKeptClosure).
+            for (int p = 0; p < n; p++) mesh.Kept[p] = false;
+            return 0;
+        }
         if (matched == 0)
         {
             // "All regions are below the area threshold and too far from a seed point. Keeping the largest region."
