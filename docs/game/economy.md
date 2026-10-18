@@ -53,6 +53,19 @@ money-item branches are scoped in the expressions/field tables and undecoded que
   The window's grid is 18 x 18 for a squad trader and the building containers' merged size for a building shop (**Observed**, `FUN_140953850`; details in ui-screens).
   Meitou's squad shops hold one 18 x 18 stock (`Shop`). The 2026-10-17 reference screenshot's trader (Ronin Construction Trader) shows about 28 columns.
 
+### Building shops (**Observed**, decompile)
+
+- **Which** (squad factory `FUN_140583a10`): a trader squad (`vendors`) with a home building that made no prisoner or slave squads is filled by `FUN_14095b210` into its home;
+  any other trader by the squad filler `FUN_1404ff5e0`. A faction test (`+0x250 == 0`, meaning **Unknown**) gates both.
+- **Containers** (`FUN_1409562f0`): the home's interior objects whose functionality is 2 BF_RESOURCE_STORAGE, 9 BF_SHOP or 13 BF_GENERAL_STORAGE and that have an inventory.
+  The filler unlocks their locks, sorts them (key **Unknown**), optionally clears them, puts special items first, then the vendor items; what fits nowhere is destroyed.
+- **Count**: n = round(U(0.8, 1.2) x `vendors fill total amount` x wealth), at least 1. Items: the vendor lists share n by weight as for squads (`FUN_140959800`), but every list's
+  money roll (`money item prob` against U(0, 1), then U[`money item min`, `money item max`]) is summed into one stack of the money item first.
+- **Purse** (the platoon's money): `vendor money` < 1: trunc(clamp(0.25 x value of the placed items, 3000, 25000) x wealth); else trunc((`vendor money` + r) x wealth) with r an int from
+  -0.4 x `vendor money` (the upper bound is not shown by the decompile).
+- Meitou (`Shop.ForBuilding`, engine choices): the merged stock is the shop's one inventory (no per-container inventories yet), the money stack goes to the purse, r is symmetric,
+  stock is not saved (as squad shops). Observed with real data: Squin's armour shop (Bughouse) 18 x 287, Stack's bars (Storm House) 18 x 88.
+
 ## Crimes, bounties and prisoners
 
 Ledgers are per wanted faction; crimes pending at deed time and witness booking are distinct.

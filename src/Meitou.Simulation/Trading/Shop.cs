@@ -17,12 +17,31 @@ public sealed class Shop
 {
     public const int Width = 18, Height = 18;
 
-    public Inventory Stock { get; } = new(Width, Height);
+    public Inventory Stock { get; init; } = new(Width, Height);
     public required Trader Terms { get; init; }
+    /// <summary>A building shop's building (<see cref="Meitou.Data.World.TownBuilding.Key"/>): its stock is the merged storage of the building's containers; null for a squad shop.</summary>
+    public string? Building { get; init; }
     /// <summary>The world tick at which the stock is next replaced (<c>Platoon+0x1f8</c>, saved as <c>inventory refresh time</c> in game hours).</summary>
     public long NextRestockTick { get; set; }
     /// <summary>How many times the stock was filled: the key of the next fill's rolls.</summary>
     public int Fills { get; set; }
+
+    /// <summary>
+    /// A building shop of <paramref name="building"/> (the shop wrapper <c>FUN_140953850</c>, <b>Observed</b>): one merged stock as wide as the widest of its stock containers (at least 18) and
+    /// as tall as their cells take at that width; null when the building has no stock container. <b>Engine choice</b>: the merged stock is the shop's own inventory, the containers
+    /// hold nothing of their own (Meitou has no per-container inventories yet).
+    /// </summary>
+    public static Shop? ForBuilding(Meitou.Data.World.TownBuilding building, Trader terms)
+    {
+        int width = Width, cells = 0;
+        foreach (var f in building.Fixtures)
+        {
+            if (!f.HoldsShopStock) continue;
+            width = Math.Max(width, f.StorageWidth);
+            cells += f.StorageWidth * f.StorageHeight;
+        }
+        return cells == 0 ? null : new Shop { Terms = terms, Building = building.Key, Stock = new Inventory(width, (cells + width - 1) / width) };
+    }
 
     internal void Hash(ref StateHasher h)
     {
@@ -43,6 +62,8 @@ public sealed class Shop
 /// <item>The units are merged into stacks up to their stack limit, sorted by unit price (dearest first: the sort key is the price, its direction <b>Unknown</b>) and put into the stock;
 /// what does not fit is destroyed.</item>
 /// <item>The purse is trunc(clamp(0.25 x the stock's value at full price, 3000, 25000) x wealth); the template's <c>vendor money</c> is a building shop's and is not read.</item>
+/// <item>A building shop (<see cref="Shop.Building"/>, the filler <c>FUN_14095b210</c>) makes at least one unit and its purse is <c>vendor money</c> +/- 0.4 x it, or
+/// the rule above when that is 0 (its money rolls are one stack of the money item in the stock in the original; the purse here, as for a squad).</item>
 /// <item>Each list's money roll (<c>money item prob</c> against U(0, 1), so 1 or more always pays) adds U[min, max] cats. The game adds them as a stack of the money item; here they go
 /// straight to the purse (<b>engine choice</b>: a shop selling its own cats would be a no-op trade).</item>
 /// </list>
@@ -59,6 +80,7 @@ public static class ShopFiller
         shop.Fills++;
         shop.Stock.Items.Clear();
         int n = (int)MathF.Round((0.8f + 0.4f * rng.NextFloat()) * template.VendorsFillTotalAmount, MidpointRounding.AwayFromZero);
+        if (shop.Building is not null) n = Math.Max(n, 1);   // the building filler makes at least one
 
         var lists = new List<(VendorList List, int Weight)>();
         foreach (var link in template.Vendors)
@@ -87,7 +109,13 @@ public static class ShopFiller
         foreach (var item in units.OrderByDescending(u => market.UnitPrice(u, false, shop.Terms, shop.Terms.Faction)).ThenBy(u => u.Record, StringComparer.Ordinal))
             shop.Stock.Add(item);
         long value = shop.Stock.All().Sum(i => market.StackPrice(i, false, shop.Terms, shop.Terms.Faction));
-        return (long)Math.Clamp(0.25f * value, 3000, 25000) + cats;
+        if (shop.Building is null) return (long)Math.Clamp(0.25f * value, 3000, 25000) + cats;
+        // A building shop's purse (FUN_14095b210): vendor money with a roll from -0.4 x it (the roll's upper bound is not shown by the decompile; engine: +0.4 x it), else the
+        // squad rule.
+        int vm = template.VendorMoney;
+        if (vm < 1) return (long)Math.Clamp(0.25f * value, 3000, 25000) + cats;
+        int spread = (int)(vm * 0.4);
+        return vm - spread + rng.NextInt(2 * spread + 1) + cats;
     }
 
     static VendorEntry Pick(List<VendorEntry> entries, ref RandomStream rng)

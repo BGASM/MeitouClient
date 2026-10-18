@@ -61,7 +61,7 @@ found the front end, inventory, bag and limb windows sharing one set of bindings
 
 | Backend | State / dependency |
 | --- | --- |
-| Trading and stealing | Shops, prices, buying, selling and fencing exist ([Trade](simulation.md#trade)); stealing from a conscious owner, building shops and smuggling need implementation |
+| Trading and stealing | Shops, prices, buying, selling and fencing exist ([Trade](simulation.md#trade)); building shops exist; stealing from a conscious owner or a shop container and smuggling need implementation |
 | Dialogue | No complete conversation/choice/effect backend |
 | Research and crafting | No complete research queue, benches or production queue backend |
 | Construction/prospecting | No complete placement/construction or prospecting backend |

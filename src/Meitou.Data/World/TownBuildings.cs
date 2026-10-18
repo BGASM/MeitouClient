@@ -48,7 +48,7 @@ public sealed record TownBuilding(string InstanceId, string BuildingId, string N
     public int Beds => Spots.Count(s => s.Kind == HomeSpotKind.Bed);
     /// <summary>The placement state's <c>owner faction ID</c> (a FACTION string id); null when the state names none (the town's faction owns it).</summary>
     public string? OwnerFactionId { get; init; }
-    /// <summary>The cages and lockable containers of its interior layout (docs/game/locks.md "Data"), in layout order.</summary>
+    /// <summary>The cages, lockable containers and containers with an inventory of its interior layout (docs/game/locks.md "Data"), in layout order.</summary>
     public IReadOnlyList<TownFixture> Fixtures { get; init; } = [];
     /// <summary>The zone whose building list places it (instance ids repeat between zones).</summary>
     public ZoneCoordinate Zone { get; init; }
@@ -81,10 +81,19 @@ public sealed record TownBuilding(string InstanceId, string BuildingId, string N
 }
 
 /// <summary>
-/// A lockable object of a building's interior layout: a cage or pole (BUILDING_FUNCTIONALITY <c>function</c> 8) or a BUILDING with <c>has lock</c>. <paramref name="Id"/> is
+/// A lockable object or container of a building's interior layout: a cage or pole (BUILDING_FUNCTIONALITY <c>function</c> 8), a BUILDING with <c>has lock</c> or <c>has inventory</c>. <paramref name="Id"/> is
 /// the parent's <see cref="BuildingKey"/>, "/", and the item's index in the layout (an <b>engine</b> name: the save's ids of generated interiors are not mapped).
 /// </summary>
-public sealed record TownFixture(string Id, string RecordId, bool IsCage, Vector3 Position, float Yaw);
+public sealed record TownFixture(string Id, string RecordId, bool IsCage, Vector3 Position, float Yaw)
+{
+    /// <summary>Its BUILDING_FUNCTIONALITY <c>function</c> (-1: none).</summary>
+    public int Function { get; init; } = -1;
+    /// <summary>A container with its own inventory (<c>has inventory</c>): its <c>storage size width</c> x <c>storage size height</c>; 0 x 0 otherwise.</summary>
+    public int StorageWidth { get; init; }
+    public int StorageHeight { get; init; }
+    /// <summary>Its stock is a building shop's (functions 2 BF_RESOURCE_STORAGE, 9 BF_SHOP, 13 BF_GENERAL_STORAGE with an inventory; <c>FUN_1409562f0</c>, docs/game/economy.md "Building shops").</summary>
+    public bool HoldsShopStock => StorageWidth > 0 && StorageHeight > 0 && Function is TownBuildings.ResourceStorageFunction or TownBuildings.ShopFunction or TownBuildings.GeneralStorageFunction;
+}
 
 /// <summary>
 /// The buildings of each placed town, for the AI's homes, beds and nodes (docs/simulation.md "AI", Homes). A placed building belongs to the town its state's
@@ -103,6 +112,8 @@ public static class TownBuildings
     public const int ChairFunction = 17;
     /// <summary>BF_TABLE, BF_CORPSE_DISPOSAL, BF_REFINERY: what a free seat faces (<see cref="SeatYaw"/>).</summary>
     public const int TableFunction = 16, CorpseDisposalFunction = 11, RefineryFunction = 4;
+    /// <summary>BF_RESOURCE_STORAGE, BF_SHOP, BF_GENERAL_STORAGE: the containers a building shop's stock goes into (<see cref="TownFixture.HoldsShopStock"/>).</summary>
+    public const int ResourceStorageFunction = 2, ShopFunction = 9, GeneralStorageFunction = 13;
 
     /// <summary>The buildings by town placement id (<see cref="TownPlacement.InstanceId"/>), each list in placement order.</summary>
     public static Dictionary<string, List<TownBuilding>> Build(GameDatabase db, WorldLevelData levels, BuildingLayouts? layouts, Func<double, double, float> terrainHeight)
@@ -166,9 +177,16 @@ public static class TownBuildings
                             });
                         }
                         if (function?.GetInt("function") is TableFunction or CorpseDisposalFunction or RefineryFunction) (faced ??= []).Add(at);
-                        else if (FunctionOf(db, item.Building, functions)?.GetInt("function") == CageFunction || item.Building.GetBool("has lock"))
-                            (fixtures ??= []).Add(new TownFixture($"{b.Key}/{index}", item.Building.StringId,
-                                FunctionOf(db, item.Building, functions)?.GetInt("function") == CageFunction, at, YawOf(rotation)));
+                        else if (FunctionOf(db, item.Building, functions)?.GetInt("function") is var itemFn && (itemFn == CageFunction || item.Building.GetBool("has lock") || item.Building.GetBool("has inventory")))
+                        {
+                            bool stores = item.Building.GetBool("has inventory");
+                            (fixtures ??= []).Add(new TownFixture($"{b.Key}/{index}", item.Building.StringId, itemFn == CageFunction, at, YawOf(rotation))
+                            {
+                                Function = itemFn ?? -1,
+                                StorageWidth = stores ? item.Building.GetInt("storage size width", 18) : 0,
+                                StorageHeight = stores ? item.Building.GetInt("storage size height", 18) : 0,
+                            });
+                        }
                         index++;
                     }
                     if (seats is not null && faced is not null)

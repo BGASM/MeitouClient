@@ -704,8 +704,10 @@ ghost, commands), `Building/PlacementCheck.cs`, `Building/BuildMenu.cs` (categor
 
 `TradeSystem`: trader-squad stock/purse/restock, open trade, buying/selling/fencing. Charge,
 quality, culture, market, forbidden/stolen factors follow [economy.md](game/economy.md).
-A squad shop holds one 18 x 18 stock grid (the building storage size and the vanilla trader window width); `ArrangeStock` arranges it. Shop state is hashed; open UI trade is not world state. Building shops/production/research remain
-incomplete. Transfers and money changes must succeed together.
+A squad shop holds one 18 x 18 stock grid (the building storage size and the vanilla trader window width); `ArrangeStock` arranges it. A housed trader whose template makes no
+prisoners or slaves and whose home has stock containers gets a building shop instead ([building shops](game/economy.md#building-shops-observed-decompile)): one merged stock
+(`Shop.ForBuilding`, `Shop.Building`), its own purse rule, the containers' locks opened at each fill. Shop state is hashed; open UI trade is not world state; stock is not saved.
+Production/research remain incomplete. Transfers and money changes must succeed together.
 
 ## Dialogue
 

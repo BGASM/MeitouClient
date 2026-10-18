@@ -77,7 +77,8 @@ public sealed class TradeSettings
 /// The economy in play (docs/simulation.md "Trade", docs/game/economy.md sections 8 and 9):
 /// <list type="bullet">
 /// <item><b>Shops</b>: a squad made from a template with <c>is trader</c> and vendor lists gets a <see cref="Shop"/> when it appears (the game's first fill at squad creation), filled by
-/// <see cref="ShopFiller"/>, with the purse in <see cref="Squad.Money"/>; it restocks every <c>vendors refresh time</c> game hours (9.3). Squads of the player's faction never get one.</item>
+/// <see cref="ShopFiller"/>, with the purse in <see cref="Squad.Money"/>; it restocks every <c>vendors refresh time</c> game hours (9.3). Squads of the player's faction never get one.
+/// A housed one whose template has no <c>prisoners</c> or <c>slaves</c> gets a building shop when its home has stock containers (<see cref="Shop.ForBuilding"/>).</item>
 /// <item><b>Trading</b> (the trade window <c>FUN_140715560</c>, <b>Observed</b>): a purchase is priced by <see cref="Market.StackPrice"/> without the sell flag, a sale with it; when the payer
 /// cannot afford the stack the number of units it can afford moves instead, none: "You can't afford that." (3) or "The shopkeeper can't afford that." (4). What does not fit: "No room for
 /// that item." (2). The cats move between the player's purse and the shop's.</item>
@@ -212,7 +213,10 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
             }
             else if (TemplateOf(squad.TemplateId) is { } template)
             {
-                squad.Shop = new Shop { Terms = new Trader(squad.Town, squad.Faction, template.BuyMult, template.BuysStolen, template.BuysIllegal) };
+                var terms = new Trader(squad.Town, squad.Faction, template.BuyMult, template.BuysStolen, template.BuysIllegal);
+                // A housed trader whose template makes no prisoner or slave squads keeps a building shop when its home has stock containers (the squad factory, Observed).
+                squad.Shop = (squad.HomeBuilding is { } home && template.Prisoners.Count == 0 && template.Slaves.Count == 0 ? Shop.ForBuilding(home, terms) : null)
+                    ?? new Shop { Terms = terms };
                 Refill(world, squad, squad.Shop, template);
             }
         }
@@ -221,6 +225,10 @@ public sealed class TradeSystem : ITickSystem, ITradeSource
     void Refill(World world, Squad squad, Shop shop, SquadTemplate template)
     {
         squad.Money = ShopFiller.Fill(shop, template, Market(world), data, world.Seed, (ulong)squad.Id);
+        // The building filler unlocks the stock containers it fills (FUN_14095b210).
+        if (shop.Building is not null && squad.HomeBuilding is { } home)
+            foreach (var f in home.Fixtures)
+                if (f.HoldsShopStock && world.Fixtures.Find(f.Id)?.Lock is { } l) l.Locked = false;
         shop.NextRestockTick = world.Tick + (long)(template.VendorsRefreshTime / BodySystem.HoursPerTick);
     }
 
