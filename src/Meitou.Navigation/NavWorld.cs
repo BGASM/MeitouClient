@@ -153,7 +153,18 @@ public sealed class NavWorld
         if (!slots.TryGetValue(WorldLayout.ZoneOf(x, z), out int slot)) return;
         var m = meshes[slot];
         m.HeightsAt(x, z, heights);
-        if (heights.Count == 0 && edge > 0 && m.Nearest(x, nearY, z, edge, out _) is var p and >= 0) heights.Add(ClosestPoint(m, p, new Vector3(x, nearY, z)).Y);
+        if (heights.Count == 0 && edge > 0 && TryEdgeHeight(x, z, nearY, edge, out float h)) heights.Add(h);
+    }
+
+    /// <summary>The height, at its nearest point, of the polygon within <paramref name="edge"/> of (x, z) nearest to it (picked by <paramref name="nearY"/>, see <see cref="ZoneNavMesh.Nearest"/>).</summary>
+    public bool TryEdgeHeight(float x, float z, float nearY, float edge, out float height)
+    {
+        height = 0;
+        if (!slots.TryGetValue(WorldLayout.ZoneOf(x, z), out int slot)) return false;
+        var m = meshes[slot];
+        if (m.Nearest(x, nearY, z, edge, out _) is not (var p and >= 0)) return false;
+        height = ClosestPoint(m, p, new Vector3(x, nearY, z)).Y;
+        return true;
     }
 
     /// <summary>The polygon under or nearest to the point (nearest within <paramref name="maxDistance"/> on the XZ plane, height as the tie-break).</summary>

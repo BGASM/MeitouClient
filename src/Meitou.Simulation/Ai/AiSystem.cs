@@ -527,8 +527,9 @@ public sealed class AiSystem(PopulationData data, AiSettings? settings = null) :
             WalkTo(table, slot, target, mode);
             if (height is { } floor && n.Task == (byte)CharacterTask.GoTo)
             {
+                // A spot on a floor (a node, seat or gun) is walked onto, not to a stride off it.
                 var cold = table.Cold(slot)!;
-                (cold.GoalHeight, cold.GoalHeightAt) = (floor, target);
+                (cold.GoalHeight, cold.GoalHeightAt, cold.ArriveWithin) = (floor, target, MovementSystem.SpotArrive);
             }
             mind.Walking = true;
             return false;

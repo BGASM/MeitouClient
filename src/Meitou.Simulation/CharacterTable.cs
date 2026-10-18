@@ -80,6 +80,11 @@ public sealed class CharacterCold
     /// </summary>
     public float GoalHeight { get; set; } = float.NaN;
     public System.Numerics.Vector2 GoalHeightAt { get; set; }
+    /// <summary>
+    /// How near (units) the walk's last waypoint counts as reached; 0: <see cref="MovementSystem.ArriveRadius"/>. The AI sets it for a walk to a node, post, seat
+    /// or gun (<see cref="MovementSystem.SpotArrive"/>), which ends on the spot; <see cref="MovementSystem.GoTo"/> clears it. Derived from the AI and not hashed.
+    /// </summary>
+    public float ArriveWithin { get; set; }
     /// <summary>Animation layers in play (made by <see cref="AnimationSystem"/>; null before the first tick it runs).</summary>
     public CharacterAnimation? Animation { get; set; }
     /// <summary>The kind of weapon drawn in the right hand (None while sheathed): the stance animations are chosen for.</summary>

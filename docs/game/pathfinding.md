@@ -122,7 +122,9 @@ street reaches the door and the far end of the Y-House. Doorless interiors on a 
 fallback island.
 **Heights**: **Observed** polygons are up to ~15 off over stairs/ramps (Hub gate), so standing
 heights snap to walkable collision (`NavSurfaces`, also its edge within `EdgeReach`: the mesh overhangs raised floors, e.g. the Hub bar landing) or zone terrain (water-surface polygons keep their height); the layer is picked by mesh or real height within
-`StandRise` of the character wins.
+`StandRise` of the character wins. A layer more than `StandDrop` (12) below the character is not stepped onto (engine choice: the
+ground 22..28 under the Storm House floor, Observed, showed through furniture holes and walkers fell to it); with no layer in range, a
+polygon within `EdgeTolerance` counts. A character already off every layer near its height still steps down.
 **Long routes** (engine choice): goals in unloaded zones use `CoarseRoute` (terrain grid, slope and
 water costs, no buildings); the navmesh part ends inside loaded zones, the rest is provisional and
 re-asked; its zones within `Lookahead` load early. **Observed**: Hub→(-36000,-6000) and Hub→Squin arrive.

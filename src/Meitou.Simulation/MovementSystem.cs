@@ -34,6 +34,8 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
     public const int MaxSeparationContributions = 26;
     /// <summary>A character within this distance of a waypoint has reached it.</summary>
     public const float ArriveRadius = 10;
+    /// <summary>The <see cref="CharacterCold.ArriveWithin"/> of a walk to a spot (engine choice: a barman stands at his node behind the counter, not a stride off it).</summary>
+    public const float SpotArrive = 2;
     /// <summary>Formation offsets (3 units apart in the factory) are spread by this when followers stand beside the leader (the slot rules are Unknown).</summary>
     public const float FormationScale = 2.5f;
 
@@ -142,6 +144,7 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
         ref var n = ref table.Next[slot];
         var cold = table.Cold(slot)!;
         cold.OrderQueue.Clear();
+        cold.ArriveWithin = 0;
         n.Task = (byte)CharacterTask.GoTo;
         n.Goal = target;
         n.Mode = mode;
@@ -327,7 +330,7 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
             float speed = MathF.Sqrt(p.Velocity.X * p.Velocity.X + p.Velocity.Z * p.Velocity.Z);
             var dir = Vector2.Zero;
             float desired = 0;
-            bool finished = false;
+            bool finished = false, closing = false;
             int water = WaterStateAt(walk, p.Position, cold);
             cold.WaterState = (byte)water;
 
@@ -337,7 +340,8 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                 var to = new Vector2(waypoint.X - p.Position.X, waypoint.Z - p.Position.Z);
                 float dist = to.Length();
                 bool last = n.PathCursor == cold.Path.Length - 1;
-                if (dist <= (last ? ArriveRadius : ArriveRadius * 0.5f))
+                closing = last && cold.ArriveWithin > 0 && dist <= ArriveRadius;
+                if (dist <= (last ? cold.ArriveWithin > 0 ? cold.ArriveWithin : ArriveRadius : ArriveRadius * 0.5f))
                 {
                     n.PathCursor++;
                     if (last) finished = true;
@@ -411,11 +415,20 @@ public sealed class MovementSystem(PathService paths) : ITickSystem, IDisposable
                     s.Sum += (len > 1e-4f ? d / len : (s.Self < other ? Vector2.UnitX : -Vector2.UnitX)) * (100 * (1 - len / SeparationRadius));
                 });
 
+            // Closing on its spot it is not held off by those standing round it (they are pushed aside as it arrives).
+            if (closing) push.Sum = Vector2.Zero;
             var step = (dir * speed + push.Sum * SeparationStrength) * dt;
             float x = p.Position.X + step.X, z = p.Position.Z + step.Y;
+            // Pushed by its neighbours where it cannot stand (over a hole furniture cuts in a floor): its own step alone.
+            if (push.Sum != Vector2.Zero && !walk.IsWalkable(x, z, p.Position.Y))
+            {
+                step = dir * speed * dt;
+                (x, z) = (p.Position.X + step.X, p.Position.Z + step.Y);
+            }
             if (step != Vector2.Zero)
             {
-                if (walk.IsWalkable(x, z, p.Position.Y))
+                // One already off every surface near its height (a stale height) is not held there: it steps down onto what is below.
+                if (walk.IsWalkable(x, z, p.Position.Y) || !walk.IsWalkable(p.Position.X, p.Position.Z, p.Position.Y) && walk.IsWalkable(x, z))
                 {
                     n.Position = new Vector3(x, walk.GroundHeight(x, z, p.Position.Y), z);
                     if (speed > 0.1f) n.Yaw = MathF.Atan2(dir.X, dir.Y);

@@ -51,6 +51,12 @@ public sealed class NavmeshWalkability : IWalkability
     /// </summary>
     public const float StandRise = 12;
 
+    /// <summary>
+    /// How far below a character's height a surface may be and still be stepped onto (engine choice, as <see cref="StandRise"/>): the ground showing through a hole
+    /// furniture cuts in a building's floor mesh is not (Observed: 22..28 under the Hub's Storm House floor, where walkers fell through).
+    /// </summary>
+    public const float StandDrop = 12;
+
     /// <summary>How far (units) off the mesh a walker may stand on the polygon beside it (engine choice: a path hugs corners and edges exactly, and a step can graze past them).</summary>
     public const float EdgeTolerance = 2;
 
@@ -77,7 +83,8 @@ public sealed class NavmeshWalkability : IWalkability
         return w.TryGroundHeight(x, z, out _);
     }
 
-    /// <summary>Whether there is a surface at (x, z) no more than <see cref="StandRise"/> above <paramref name="nearY"/> (a wall top beside the walker is not).</summary>
+    /// <summary>Whether there is a surface at (x, z) no more than <see cref="StandRise"/> above <paramref name="nearY"/> (a wall top beside the walker is not) nor
+    /// <see cref="StandDrop"/> below it (the ground under a floor is not).</summary>
     public bool IsWalkable(float x, float z, float nearY)
     {
         var w = world;
@@ -88,9 +95,10 @@ public sealed class NavmeshWalkability : IWalkability
     bool TryStand(NavWorld w, float x, float z, float nearY, out float y) => TryStand(w, x, z, nearY, out y, out _);
 
     /// <summary>
-    /// The real surface of the highest mesh layer at (x, z) within <see cref="StandRise"/> above <paramref name="nearY"/> (by the mesh's height or the
-    /// real one: on steep stairs the mesh is up to 20 off, and judged by the real height alone the walker's own layer could fall out of reach and drop it
-    /// to a floor far below, Observed at Fallen Tower); else the lowest. <paramref name="reachable"/>: a layer was within reach. False off the mesh.
+    /// The real surface of the highest mesh layer at (x, z) within <see cref="StandRise"/> above <paramref name="nearY"/> and <see cref="StandDrop"/> below it
+    /// (by the mesh's height or the real one: on steep stairs the mesh is up to 20 off, and judged by the real height alone the walker's own layer could fall
+    /// out of reach and drop it to a floor far below, Observed at Fallen Tower); with none there, the one of a polygon within <see cref="EdgeTolerance"/>
+    /// (a walker grazing the edge of a hole in a floor); else the lowest. <paramref name="reachable"/>: a layer was within reach. False off the mesh.
     /// </summary>
     bool TryStand(NavWorld w, float x, float z, float nearY, out float y, out bool reachable)
     {
@@ -100,20 +108,26 @@ public sealed class NavmeshWalkability : IWalkability
         y = float.MinValue;
         reachable = false;
         if (heights.Count == 0) return false;
+        bool near = float.IsFinite(nearY);
         float lowest = float.MaxValue, layer = float.MinValue;
         foreach (float h in heights)
         {
             float s = Snap(w, x, z, h);
             // Where the mesh is too far off for its surface to be found (a ramp the polygon cuts under), the surface at the walker's own height, when that
             // is nearer the mesh than what was found (Observed: the terrain 30 below, inside the ramp, at the Great Fortress).
-            if (float.IsFinite(nearY) && MathF.Abs(s - nearY) > StandRise && w.TrySurfaceNear(x, z, nearY, StandRise, out float own)
+            if (near && MathF.Abs(s - nearY) > StandRise && w.TrySurfaceNear(x, z, nearY, StandRise, out float own)
                 && MathF.Abs(own - h) < MathF.Abs(s - h)) s = own;
             lowest = MathF.Min(lowest, s);
             float reach = MathF.Min(h, s);
-            if (reach > nearY + StandRise || reach <= layer) continue;
+            if (reach > nearY + StandRise || reach <= layer || near && MathF.Max(h, s) < nearY - StandDrop) continue;
             layer = reach;
             y = s;
             reachable = true;
+        }
+        if (!reachable && near && w.TryEdgeHeight(x, z, nearY, EdgeTolerance, out float edge))
+        {
+            float s = Snap(w, x, z, edge);
+            if (MathF.Min(edge, s) <= nearY + StandRise && MathF.Max(edge, s) >= nearY - StandDrop) (y, reachable) = (s, true);
         }
         if (!reachable) y = lowest;
         return true;

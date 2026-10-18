@@ -751,11 +751,13 @@ is moved onto the chair, faces its yaw and plays the functionality's clip ("sitt
 "sitting idle"). A town's bars and shops are
 the buildings whose residents (the squads living there, else the level data's `residents template`)
 have designation BAR or a shop (`AiSystem.RefreshPlaces`). Walks to nodes, beds and seats pass the
-spot's height and count as arrived only on that floor. Furniture cuts holes in a floor's navmesh and
-the ground below shows through them (Observed: the Storm House at the Hub, counter, tables, stools, ~28
+spot's height and count as arrived only on that floor, and end within `MovementSystem.SpotArrive` (2) of
+it, not `ArriveRadius` (10), without separation over the last 10 (engine choice: the barman stands at his node). Furniture cuts holes in a floor's navmesh and
+the ground below shows through them (Observed: the Storm House at the Hub, counter, tables, stools, 22..28
 below), so a spot whose floor is not under it is walked to (and residents spawned) at the nearest floor
-point within 12 (`IWalkability.FloorNear`). The Storm House's upper storey (+70: beds, guard posts) has no
-floor on the navmesh, so those spots stand on the floor below (Observed). Engine choices: patrolling town acts as
+point within 12 (`IWalkability.FloorNear`), and no step goes down into such a hole (`StandDrop`,
+[pathfinding](game/pathfinding.md)). The Storm House's upper storey (+66) is on the navmesh except under its beds, whose
+spots therefore stand on the floor below (Observed, 2026-10-18 probe). Engine choices: patrolling town acts as
 wandering (its task class is undecoded); a committed goal chosen again after its commitment ran out
 starts over with a new target; the sitting offset and facing on a chair are undecoded (its origin and
 yaw); training and throne furniture of 275's mask are not used; shops stand customers at a general
