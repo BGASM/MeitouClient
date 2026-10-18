@@ -43,8 +43,10 @@ and stealth x 5). Each looker keeps a meter per target (`SensoryData::SpottingPe
 
 Meitou: meters only for hostile/police lookers the aggro scan runs, no line-of-sight ray, f = 0.5, dt = the scan interval,
 a meter decays also when the target is out of range (the original's rule there is **Unknown**). A sneaking player
-character gets the pointers (from 0.35 of their length to the tip, with a head) and a diamond over its head in the tag
+character gets the pointers (from 0.35 of their length to the tip, with a head) and a diamond left of its name in the tag
 colours: seen if any watcher detects, almost seen if any notices, else hidden. No light model, so no sun icon.
+Every player character within the 1.2e8 range gets its name over its head (the diamond only while sneaking); NPCs get none
+(**Observed** in the original, not verified against `FUN_1406e8100`).
 
 ## Hearing
 

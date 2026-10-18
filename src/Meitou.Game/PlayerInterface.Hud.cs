@@ -116,6 +116,7 @@ sealed partial class PlayerInterface
         }
 
         DrawStealth(o);
+        DrawNameTags(o);
         DrawFloaters(o);
         FadeMarker();
 
