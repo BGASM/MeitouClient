@@ -131,6 +131,15 @@ sealed partial class GameHost
         // PageUp/PageDown are the game's floor keys and never the cinema's (its lens keys are the viewer's); Home puts the lens back in these cameras.
         cinema.LensKeys = () => session.Camera.IsFree || cinemaHolds;
         cinema.Load();
+        // Numpad / flies the camera across the squad in portrait order (docs/viewer.md "Squad tour"); it holds the camera like the cinema does.
+        var tour = new SquadTour();
+        Vector3? TourPosition(CharacterId id) => session.CurrentSnapshot.Characters.FirstOrDefault(c => c.Id == id) is { } c ? DrawnPosition(c) : null;
+        void EndTour()
+        {
+            tour.Stop();
+            cinemaHolds = false;
+            session.Camera.TakeOver(new CameraState(camera.Eye, camera.Forward, Vector3.UnitY, camera.Target, camera.Yaw, camera.Pitch, camera.Distance, true), strategy: true);
+        }
 
         var silkInput = Silk.NET.Input.InputWindowExtensions.CreateInput(window);
         Vector2? lastMouse = null;
@@ -194,6 +203,18 @@ sealed partial class GameHost
                 { panel.Visible = true; return; }
                 if (KeyMap.Map(k) is { } uiKey && player.UiKey(uiKey, keyboard.IsKeyPressed(SilkKey.ControlLeft) || keyboard.IsKeyPressed(SilkKey.ControlRight), shiftDown)) return;
                 bool ctrl = keyboard.IsKeyPressed(SilkKey.ControlLeft) || keyboard.IsKeyPressed(SilkKey.ControlRight);
+                if (k == SilkKey.KeypadDivide && !IsDuel)
+                {
+                    if (tour.Active) EndTour();
+                    else if (!cinema.Playing && !cinema.Recording)
+                    {
+                        player.Follow = null;
+                        tour.Start(camera, [.. player.SquadBarMembers().Select(c => c.Id)], TourPosition);
+                        if (tour.Active) cinemaHolds = true;
+                        else Console.WriteLine("squad tour: nobody else in the squad to fly to");
+                    }
+                    return;
+                }
                 if (Enum.TryParse(k.ToString(), out CinemaKey cinemaKey) && cinema.OnKey(cinemaKey, ctrl, shiftDown)) return;
                 // F9 is the game's quickload; the fps counter is on Ctrl+F9 (a modifier, so the key never reaches the input bindings).
                 if (k == SilkKey.F9 && ctrl) { fpsVisible = !fpsVisible; return; }
@@ -309,7 +330,8 @@ sealed partial class GameHost
             if (actions.Pressed(InputAction.CycleProfiler) && profiler is not null) profiler.Showing = (FrameProfiler.Mode)(((int)profiler.Showing + 1) % 3);
             // The camera the cinema left (a cut, a scrub, the end of a flight) goes back to the rig at the first camera input: the free camera at
             // that eye (only it can stand anywhere), or with ; the strategy camera where the view meets the ground. A flight in progress keeps it.
-            if (cinemaHolds && !cinema.Playing && CameraInput(actions))
+            if (tour.Active && CameraInput(actions)) EndTour();
+            else if (cinemaHolds && !cinema.Playing && CameraInput(actions))
             {
                 cinemaHolds = false;
                 session.Camera.TakeOver(new CameraState(camera.Eye, camera.Forward, Vector3.UnitY, camera.Target, camera.Yaw, camera.Pitch, camera.Distance, true),
@@ -375,6 +397,7 @@ sealed partial class GameHost
             UpdateBuildings();
             if (!cinemaHolds) ApplyCamera(session.CameraAt());
             cinema.Advance(cinema.FrameTime(dt));   // a flight through the keys moves the camera (and takes it from the rig)
+            if (tour.Active && !tour.Advance(dt, camera, TourPosition)) EndTour();
             string? takeFile = cinema.TakeFrame();
             SendFocus(cinemaHolds ? camera.Target : null);
             if (!cinemaHolds) SandboxFollowCamera();

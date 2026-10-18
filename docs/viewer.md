@@ -49,7 +49,7 @@ headless and settles streaming. User and cinematic bindings are separate.
 ## Cinematic camera
 
 Cinema/CameraPath stores viewer keys in %LOCALAPPDATA%/Meitou/viewer-shots.json; game keys separate.
-Ctrl+numpad1..9 saves; numpad1..9 cuts. Enter play/stop,0 loop,+/- timing*1.25,/ time-follow,
+Ctrl+numpad1..9 saves; numpad1..9 cuts. Enter play/stop,0 loop,+/- timing*1.25,/ time-follow (viewer; game: squad tour),
 . list,Ctrl+. delete (editor Delete-all requires second click3s). PageUp/Down FOV±2.5deg,
 10..100,Home50 (viewer and --duel; elsewhere in the game PageUp/Down are floor_up/down).
 F6 editor supports scrub/retime0.05s/reorder/ease, add/update/delete and recording.
@@ -58,6 +58,13 @@ at easing/open endpoints and joins loops. Unequal timing can overshoot; use easi
 Record-path samples manual flight each second plus endpoints. Numpad* letterbox2.39:1/clean view.
 Shift+Enter records numbered PNGs to C:/Temp/meitou-take-<time>, fixed1/60s camera/world motion;
 render duration does not alter film time. Recording excludes UI/editor and uses an open flight.
+
+## Squad tour
+
+Game only (`SquadTour`, not --duel): numpad / flies the camera over the squad bar members in order, keeping the view's yaw, pitch and
+distance at each; starts at member 1 (flies there first if the view is elsewhere), 1.2 s on each. Hops are arcs (2-6 s, log of distance):
+climb first, pitch steepens up to +0.35 rad, then cross and descend; the target tracks the moving member. Camera input or / again ends it in
+the strategy camera where it is.
 
 ## Diagnostics and references
 
