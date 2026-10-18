@@ -13,9 +13,10 @@ grows through a bar's floorboards. `InteriorMaskRenderer`; consumers: terrain, f
 - **Verified** readers (installed `data/materials`): `terrain.material`/`terrainfp4.hlsl` (patches, always);
   `foliage.material` `Grass` (`grass_fs`, always; the `Foliage` material there is commented out); `objects.hlsl` and
   `triplanar.hlsl` under `CLIP_INTERIOR` (0x200); `mapfeature.material` `Feature_Terrain_DX11` (`interiorClip` unit).
-- **Verified (decompiled)**: map features always get CLIP_INTERIOR ([runtime-materials](formats/runtime-materials.md));
-  foliage meshes and their leaves get their materials from the same builder (FUN_1406d1380, the FOLIAGE_MESH
-  `texture map`/`leaves texture` reader, calls FUN_140843920), so they are cut too. Building parts and items are not.
+- **Verified (decompiled)**: map features always get CLIP_INTERIOR ([runtime-materials](formats/runtime-materials.md)),
+  and so do foliage leaves (FUN_1406d1380 copies the `leaves *` fields and calls FUN_140843920 with mode 4, FOLIAGE).
+  Building parts and items do not. **Observed**: the foliage meshes' own materials also come from FUN_140843920
+  (FUN_1406cf140 / FUN_1406cf640 read `material type` and call it; not traced further), so Meitou cuts them too.
 - **Observed**: the queue-16 geometry is the `interior mask` parts' `phs or mesh` (`Storm_House_01_Interior_MASK.mesh` etc.;
   [settings](formats/settings.md) `skip stencil tricks`), placed with the building node. **Verified** (probe, merged
   records): 31 mask parts have such a mesh (gate triggers have none), none has an offset; the meshes are not the
@@ -38,4 +39,4 @@ grows through a bar's floorboards. `InteriorMaskRenderer`; consumers: terrain, f
   - grass: always cut in the main near view (its cut-out already discards).
 - Only the main view's near slice; not shadows, the water reflection or farther slices.
 - Engine limits: "inside" is decided by the hull, not per ray; TERRAIN-mode features and rocks (terrain mesh path) and
-  foliage impostors are not cut.
+  foliage impostors are not cut; the grass motion pass (TAA velocity) is not cut either.
