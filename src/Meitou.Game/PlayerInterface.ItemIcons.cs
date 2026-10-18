@@ -39,9 +39,11 @@ sealed partial class PlayerInterface
         if (shown) controls.Add(new($"{name}-icon", "ImageBox", area, "", "", "", true, image!, System.Numerics.Vector4.Zero, Pickable: false, Clip: clip));
         if (charge is { } fill)
         {
-            // A thin white line along the cell's bottom edge, as long as what is left (the vanilla trader screenshot shows it under food stacks).
-            float height = Math.Max(2, InventoryScale * 2), inset = 1, width = Math.Max(0, area.Width - 2 * inset);
-            controls.Add(new($"{name}-charge", "Widget", new(area.X + inset, area.Y + area.Height - inset - height, width * Math.Clamp(fill, 0, 1), height), "", "", "", true,
+            // A white line over a black track along the cell's bottom edge, as long as what is left (the vanilla inventory and trader screenshots show it under food stacks).
+            float height = Math.Max(3, InventoryScale * 3), inset = 1, width = Math.Max(0, area.Width - 2 * inset), top = area.Y + area.Height - inset - height;
+            controls.Add(new($"{name}-charge-track", "Widget", new(area.X + inset, top, width, height), "", "", "", true,
+                new Dictionary<string, string>(), new(0, 0, 0, 1), Pickable: false, Clip: clip));
+            controls.Add(new($"{name}-charge", "Widget", new(area.X + inset, top, width * Math.Clamp(fill, 0, 1), height), "", "", "", true,
                 new Dictionary<string, string>(), System.Numerics.Vector4.One, Pickable: false, Clip: clip));
         }
         string caption = shown ? count : itemName + (count.Length > 0 ? " x" + count : "");
