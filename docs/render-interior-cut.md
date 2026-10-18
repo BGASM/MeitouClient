@@ -36,7 +36,10 @@ grows through a bar's floorboards. `InteriorMaskRenderer`; consumers: terrain, f
     with the cut on (`ViewConstants.interiorCut` and push `fadeMode` bit 2), never the solid one;
   - foliage meshes: the full colour and prepass programs (already discarding) cut while the view has it on; the GPU cull
     gives a fully visible instance over a box the fade 1.5 (drawn whole), which lays it out with the dithered ones;
-  - grass: always cut in the main near view (its cut-out already discards).
+  - grass: always cut in the main near view (its cut-out already discards);
+  - TERRAIN-mode features and rocks (the terrain's mesh path): placements over a box are drawn with the meshes' full
+    colour program with `TerrainConstants.interiorCut` on (features and CPU-culled rocks in their own list; GPU-culled
+    rocks get the fade 1.5 too and are drawn by the fading draw).
 - Only the main view's near slice; not shadows, the water reflection or farther slices.
-- Engine limits: "inside" is decided by the hull, not per ray; TERRAIN-mode features and rocks (terrain mesh path) and
-  foliage impostors are not cut; the grass motion pass (TAA velocity) is not cut either.
+- Engine limits: "inside" is decided by the hull, not per ray; foliage impostors and the grass motion pass (TAA velocity)
+  are not cut.

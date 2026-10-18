@@ -519,7 +519,10 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
             c.Debug = options.Debug;
             c.Grid = options.Grid ? 1u : 0u;
             if (patches && TerrainLayerSkip.Enabled) c.CliffEps = TerrainLayerSkip.CliffEps;
-            c.InteriorMask = patches && cutCount > 0 ? cutMask : standIn2D;
+            // The interior cut: the patches' cut variants, or a mesh draw given one (DrawMeshes, DrawMeshesIndirect).
+            bool cut = patches ? cutCount > 0 : meshCut is { Active: true };
+            c.InteriorMask = !cut ? standIn2D : patches ? cutMask : meshCut!.Index;
+            c.InteriorCut = cut ? 1u : 0u;
             c.FarStart = options.MaterialDistance * 0.8f;
             c.FarEnd = options.MaterialDistance;
             var t = textures;
@@ -782,14 +785,25 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     /// the one of <c>biomemap.png</c> at the mesh's origin, back faces culled. Drawn instanced (<see cref="GroupMeshes"/>); returns
     /// the number of draw calls.
     /// </summary>
-    public int DrawMeshes(List<(MeshBindings Mesh, int IndexCount, Matrix4x4 Model)> meshes, bool depth = false)
+    public int DrawMeshes(List<(MeshBindings Mesh, int IndexCount, Matrix4x4 Model)> meshes, bool depth = false, InteriorMaskRenderer? cut = null)
     {
         if (depth) return DrawMeshesDepth(meshes);
         if (!GroupMeshes(meshes, biomes: true)) return 0;
+        if (cut is { Active: true })
+        {
+            // Placements over an interior mask (the caller splits them out): the program with the cut, on for this draw.
+            meshCut = cut;
+            try { PrepareConstants(material: true, patches: false); }
+            finally { meshCut = null; }
+            return DrawGroups(meshColour, Colour, "terrain meshes interior cut");
+        }
         PrepareConstants(material: true, patches: false);
         // No placement of this path fades (row 1's w is 0): the program without the discard, so the depth test runs first (EarlyDepth).
         return EarlyDepth.Enabled ? DrawGroups(meshSolid, Solid, "terrain meshes solid") : DrawGroups(meshColour, Colour, "terrain meshes");
     }
+
+    /// <summary>The interior cut of the mesh draw being prepared (<see cref="DrawMeshes"/>, <see cref="DrawMeshesIndirect"/>; docs/render-interior-cut.md), null otherwise.</summary>
+    InteriorMaskRenderer? meshCut;
 
     /// <summary>This call's placements (each group's contiguous, <see cref="MeshGroup.Offset"/> instances in), in the frame's constants.</summary>
     Transient placements;
@@ -1082,7 +1096,8 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
     /// writes them) from <paramref name="rowsOffset"/>, with the argument's firstInstance. Same programs, state, and GL state left behind as
     /// <see cref="DrawMeshes"/>; the caller orders the meshes. Returns the number of draw calls.
     /// </summary>
-    public int DrawMeshesIndirect(ReadOnlySpan<IndirectMesh> meshes, Silk.NET.Vulkan.Buffer rows, ulong rowsOffset, Silk.NET.Vulkan.Buffer args, ulong argsOffset, bool depth = false, bool solid = false)
+    public int DrawMeshesIndirect(ReadOnlySpan<IndirectMesh> meshes, Silk.NET.Vulkan.Buffer rows, ulong rowsOffset, Silk.NET.Vulkan.Buffer args, ulong argsOffset, bool depth = false, bool solid = false,
+        InteriorMaskRenderer? cut = null)
     {
         if (meshes.Length == 0) return 0;
         if (depth)
@@ -1091,9 +1106,13 @@ public sealed unsafe partial class TerrainRenderer : IDisposable
             PrepareConstants(material: false, patches: false);
             return DrawIndirect(meshes, rows, rowsOffset, args, argsOffset, meshDepth, Depth, "terrain mesh depth");
         }
-        PrepareConstants(material: true, patches: false);
+        bool solidDraw = solid && EarlyDepth.Enabled;
+        // cut: the interior cut on in the program with the discard (the caller's cull lays the placements over a mask out with the fading ones).
+        meshCut = solidDraw ? null : cut;
+        try { PrepareConstants(material: true, patches: false); }
+        finally { meshCut = null; }
         // solid: none of these placements is mid cross-fade (the caller splits them), so the program without the discard draws them (EarlyDepth).
-        return solid && EarlyDepth.Enabled
+        return solidDraw
             ? DrawIndirect(meshes, rows, rowsOffset, args, argsOffset, meshSolid, Solid, "terrain meshes solid")
             : DrawIndirect(meshes, rows, rowsOffset, args, argsOffset, meshColour, Colour, "terrain meshes");
     }

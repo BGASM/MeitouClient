@@ -39,6 +39,7 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
     readonly Dictionary<(GpuObjectMesh, ObjectMaterialSet, int, int), Batch> batchMap = [];
     readonly List<Batch> active = [];
     readonly List<(MeshBindings, int, Matrix4x4)> terrainMeshes = [];   // the TERRAIN-mode instances of a draw (TerrainRenderer.DrawMeshes)
+    readonly List<(MeshBindings, int, Matrix4x4)> terrainMeshesCut = [];   // those over an interior mask (InteriorCut)
     /// <summary>MEITOU_LOD_DEBUG: 1 colours solid surfaces by LOD level, 2 draws wireframe only coloured by level (green 0, yellow 1, orange 2, red 3, magenta manual, blue distant stand-ins).</summary>
     readonly int debugLevels = int.TryParse(Environment.GetEnvironmentVariable("MEITOU_LOD_DEBUG"), out int dl) ? dl : 0;
 
@@ -778,6 +779,7 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         foreach (var b in batchMap.Values) b.Count = 0;
         active.Clear();
         terrainMeshes.Clear();
+        terrainMeshesCut.Clear();
 
         // 1. Cull and choose levels: every instance into the batch of its (mesh, materials, level) with its dither range.
         float realBand = Math.Clamp(real * 0.1f, 50, 1500);
@@ -854,6 +856,7 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
             }
         }
         if (terrainMeshes.Count > 0) DrawCalls += terrain.DrawMeshes(terrainMeshes, depthPass);
+        if (terrainMeshesCut.Count > 0) DrawCalls += terrain.DrawMeshes(terrainMeshesCut, cut: InteriorCut);
         LastDrawCpuMs = cpu.Elapsed.TotalMilliseconds;
         int kind = depthPass ? 1 : 0;
         (Totals[kind, 0], Totals[kind, 1], Totals[kind, 2], Totals[kind, 3], Totals[kind, 4]) =
@@ -889,10 +892,12 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
             int level = gpu.Curve.Select(lodValue * LodBias);
             var g = gpu.Manual[level] ?? gpu;
             int lv = gpu.Manual[level] is null ? level : 0;
+            // A TERRAIN-mode feature over an interior mask: drawn with the cut (Feature_Terrain_DX11 clips against the mask, docs/render-interior-cut.md).
+            var into = !depthPass && inst.Placed.Kind == PlacedKind.MapFeature && InteriorCut is { Active: true } mask && mask.Overlaps(inst.Centre, inst.Radius) ? terrainMeshesCut : terrainMeshes;
             foreach (var gp in g.Parts)
                 if (gp.Count[lv] > 0)
                 {
-                    terrainMeshes.Add((meshes.PlainMesh(gp, lv), gp.Count[lv], inst.Transform));
+                    into.Add((meshes.PlainMesh(gp, lv), gp.Count[lv], inst.Transform));
                     DrawnTriangles += gp.Count[lv] / 3;
                 }
             return;

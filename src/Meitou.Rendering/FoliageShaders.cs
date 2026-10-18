@@ -403,14 +403,14 @@ static class FoliageShaders
         // is there, fog[2] eye + hide distance squared, fog[3..9] the block's planes.
         // mode.z: the occlusion cull is on (main colour pass; HizPyramid.ViewFor): hz and hzOff as OcclusionView.Vectors says.
         // mode.w: the interior masks' X/Z boxes in interior (min x, min z, max x, max z; the main colour pass with the split, docs/render-interior-cut.md): a fully visible mesh
-        // instance over one gets the fade 1.5 (drawn whole, as 2) and is laid out with the fading ones, so it is drawn with the program that has the cut.
+        // or rock instance over one gets the fade 1.5 (drawn whole, as 2) and is laid out with the fading ones, so it is drawn with the program that has the cut.
         struct ViewData { vec4 planes[8]; vec4 lengths[2]; uvec4 resident[2]; uvec4 mode; vec4 fog[10]; vec4 hz[6]; uvec4 hzOff[3]; vec4 lod; vec4 interior[32]; };
         layout(push_constant) uniform Push { vec2 eye; uint planeCount; uint chunkCount; uint drawCount; float fullThreshold; uint split; } pc;
         // The split (pc.split, the colour views with EarlyDepth): an instance whose mesh shader dithers it (a fade below 1; not an impostor, and a rock only with its impostor transition,
         // the only one whose fade reaches the shader) is laid out after the batch's others, so the others can be drawn with the program that has no discard.
         bool IsFading(uint flags, float packed)
         {
-            return pc.split != 0u && packed > -1.5 && (packed < 1.0 || packed == 1.5) && (flags & 8u) == 0u && ((flags & 1u) == 0u || (flags & 4u) != 0u);
+            return pc.split != 0u && packed > -1.5 && (flags & 8u) == 0u && (packed == 1.5 || packed < 1.0 && ((flags & 1u) == 0u || (flags & 4u) != 0u));
         }
         uint ChunkIndex() { return gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x; }
         // FogVolumes.Covers: the box wholly inside the eye's fog block (its box and seven planes) and its nearest point at least the hide distance away.
@@ -564,7 +564,8 @@ static class FoliageShaders
                     // The fog cull last, so it counts only what would have been drawn: the sphere's box (FoliageCull.CullGroup).
                     if (packed > -1.5 && view.mode.y != 0u && FogHidden(view, sphere.xyz - vec3(sphere.w), sphere.xyz + vec3(sphere.w))) { packed = -2.0; fogged = 1u; }
                     if (packed > -1.5 && view.mode.z != 0u && HizOccluded(sphere)) { packed = -2.0; occluded = 1u; }
-                    if (packed >= 1.0 && view.mode.w != 0u && (k.flags & 9u) == 0u && InInterior(sphere)) packed = 1.5;
+                    // A rock without an impostor transition is drawn whole from a fade of 0.5, so it takes the mark from there.
+                    if (view.mode.w != 0u && (k.flags & 8u) == 0u && (packed >= 1.0 || packed > -1.5 && (k.flags & 5u) == 1u) && InInterior(sphere)) packed = 1.5;
                 }
             }
             fades[c * 256u + i] = packed;

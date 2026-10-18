@@ -499,6 +499,7 @@ static partial class TerrainShaders
             bool grid;
             float cliffEps;
             uint interiorMask;
+            bool interiorCut;
         } terrain;
 
         """;
@@ -529,7 +530,7 @@ static partial class TerrainShaders
         ["uOverlay"] = "textures2D[terrain.overlay]", ["uColour"] = "textures2D[terrain.colour]", ["uGround"] = "textures2D[terrain.ground]",
         ["uWorldColour"] = "textures2D[terrain.worldColour]", ["uRegion"] = "terrain.region", ["uCellGrid"] = "terrain.cellGrid",
         ["uHalfWorld"] = "terrain.halfWorld", ["uInteriorMask"] = "textures2D[terrain.interiorMask]",
-        ["uInteriorCut"] = "true",   // only the cut variants declare it: the patches that overlap a mask
+        ["uInteriorCut"] = "terrain.interiorCut",   // declared by the cut patch variants and the meshes' colour program (InteriorMaskRenderer.WithCut)
     };
 
     const string DerivativeControl = "#extension GL_ARB_derivative_control : require\n";
@@ -606,7 +607,8 @@ static partial class TerrainShaders
         return Native(interiorCut ? InteriorMaskRenderer.WithCut(empty) : empty);
     }
     public static string MeshVertexNative() => Native(MeshVertex);
-    public static string MeshFragmentNative() => Gi.GiResolveShaders.WithAlbedo(Native(MeshFragment));
+    /// <summary>The TERRAIN-mode meshes' colour program, with the interior cut (on per draw: <see cref="TerrainConstants.InteriorCut"/>; the cross-fade already discards).</summary>
+    public static string MeshFragmentNative() => Gi.GiResolveShaders.WithAlbedo(Native(InteriorMaskRenderer.WithCut(MeshFragment)));
     public static string MeshFragmentSolidNative() => Gi.GiResolveShaders.WithAlbedo(Native(MeshFragmentSolid));
     public static string MeshInstancedDepthVertexNative() => Native(MeshInstancedDepthVertex);
     /// <summary><see cref="ShadowShaders.DepthFragment"/> (the caster block at set 0, binding 2) with the terrain's push block, so both
@@ -659,6 +661,7 @@ struct TerrainConstants
     [System.Runtime.InteropServices.FieldOffset(220)] public uint Grid;
     [System.Runtime.InteropServices.FieldOffset(224)] public float CliffEps;
     [System.Runtime.InteropServices.FieldOffset(228)] public uint InteriorMask;
+    [System.Runtime.InteropServices.FieldOffset(232)] public uint InteriorCut;
 }
 
 /// <summary>The C# side of <see cref="TerrainShaders.PushMembers"/> (std430 push constants): a patch's <c>uNode</c> and <c>uMorph</c>.</summary>

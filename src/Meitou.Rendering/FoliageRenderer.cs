@@ -55,6 +55,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     readonly Dictionary<MeshAsset, Batch> batches = [];
     readonly List<Batch> active = [];
     readonly List<(MeshBindings, int, Matrix4x4)> terrainDraws = [];
+    readonly List<(MeshBindings, int, Matrix4x4)> terrainDrawsCut = [];   // those over an interior mask (InteriorCut)
     readonly Stopwatch clock = Stopwatch.StartNew();
     /// <summary>Seconds that drive the grass sway; null uses a wall clock started with the renderer. Screenshots fix it (pictures repeat exactly) and the game sets its own clock.</summary>
     public double? SwaySeconds { get; set; }
@@ -1116,7 +1117,14 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         if (a.Terrain && options.Textures)
         {
             if (w < 0.5f) return;   // the terrain shader has no dither: the instance goes at the middle of the fade
-            foreach (var gp in a.Main!.Parts) terrainDraws.Add((PlainMesh(gp), gp.Count, t));
+            // Over an interior mask: drawn with the cut (docs/render-interior-cut.md); the sphere is the mesh's bounds placed.
+            var into = terrainDraws;
+            if (!depthPass && InteriorCut is { Active: true } mask)
+            {
+                float scale = MathF.Sqrt(MathF.Max(new Vector3(t.M11, t.M12, t.M13).LengthSquared(), MathF.Max(new Vector3(t.M21, t.M22, t.M23).LengthSquared(), new Vector3(t.M31, t.M32, t.M33).LengthSquared())));
+                if (mask.Overlaps(Vector3.Transform(a.Centre, t), a.Radius * scale)) into = terrainDrawsCut;
+            }
+            foreach (var gp in a.Main!.Parts) into.Add((PlainMesh(gp), gp.Count, t));
             return;
         }
         BatchOf(a).Add(FoliageCull.Packed(t, w));
@@ -1143,6 +1151,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         active.Clear();
         impostorActive.Clear();
         terrainDraws.Clear();
+        terrainDrawsCut.Clear();
 
         // 1. Cull: each instance by its distance along the ground (the game's pages) and its bounding sphere, the groups (a mesh in a zone)
         // in parallel, each into its own list, merged into the batches in order (the same instance order as one pass would give). The shadow
@@ -1255,20 +1264,22 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
                 var rocksNow = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(rockDraws);
                 DrawCalls += terrain.DrawMeshesIndirect(rocksNow, gpuResult.Rows, gpuResult.RowsOffset, gpuResult.Args,
                     gpuResult.ArgsOffset + (ulong)(gpuResult.DrawCount + meshDraws.Count) * 20, false, solid: true);
-                if (RockImpostorsActive)
+                // The rest: mid-transition rocks and, with an interior mask drawn, those over it (the cull lays them out with the fading ones), with the cut on.
+                if (RockImpostorsActive || InteriorCut is { Active: true })
                     DrawCalls += terrain.DrawMeshesIndirect(rocksNow, gpuResult.Rows, gpuResult.RowsOffset, gpuResult.Args,
-                        gpuResult.ArgsOffset + (ulong)(2 * gpuResult.DrawCount + meshDraws.Count) * 20, false, solid: false);
+                        gpuResult.ArgsOffset + (ulong)(2 * gpuResult.DrawCount + meshDraws.Count) * 20, false, solid: false, cut: InteriorCut);
             }
             else if (rockDraws.Count > 0)
                 DrawCalls += terrain.DrawMeshesIndirect(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(rockDraws), gpuResult.Rows, gpuResult.RowsOffset,
-                    gpuResult.Args, gpuResult.ArgsOffset + (ulong)meshDraws.Count * 20, depthPass);
+                    gpuResult.Args, gpuResult.ArgsOffset + (ulong)meshDraws.Count * 20, depthPass, cut: depthPass ? null : InteriorCut);
         }
         else if (terrainDraws.Count > 0)
         {
             DrawCalls += terrain.DrawMeshes(terrainDraws, depthPass);
         }
+        if (!gpu && terrainDrawsCut.Count > 0) DrawCalls += terrain.DrawMeshes(terrainDrawsCut, cut: InteriorCut);
         StageClock.Sub("fol rocks");
-        int rocks = gpu ? rockDraws.Count : terrainDraws.Count;
+        int rocks = gpu ? rockDraws.Count : terrainDraws.Count + terrainDrawsCut.Count;
         if (WorldFrame.DetailedStats)
         {
             double tEnd = cpu.Elapsed.TotalMilliseconds;
