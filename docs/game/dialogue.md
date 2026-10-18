@@ -321,6 +321,23 @@ nearby player character (and stores it as the target). `B` = value > 0.
 
 A recruit into a full player squad ends the conversation with "It looks like your squad is a little full." and skips the rest.
 
+### Recruiting
+
+DA 3 / 18 with a player-faction target (**Observed**, `FUN_140680560` → `FUN_140692820` → `FUN_1407ff8b0`; a non-player target's
+squad simply takes the speaker in, unless a target flag at +0x1d0 is set):
+- **Cap**: refused (the "little full" line) when the player faction already has CONSTANTS `max faction size` characters (30 in the base
+  data). The three CONSTANTS limits sit side by side: `max squad size` (20), `max squads` (10), `max faction size`; the HUD's
+  "{1,num}/{2,num}" counters show the faction and squad counts against the first and last.
+- When the recruits would push the active squad past `max squad size` while `max squads` squads exist, a faction call runs first
+  (`FUN_1407f4420`; what it does is **Unknown**).
+- **Each recruit**: joins the player faction (character vfunc +0xa0), two fields are set (+0x20 of a member at 200 = 2, +0xdc of one at
+  0x34 = 9; meaning **Unknown**); a character without its own dialogue package gets its record's `dialogue package player` (none: the
+  faction's `dialog default`) as its dialogue; one field of every inventory item is cleared (+0x1e8, **Unknown**, possibly the owner).
+- DA 3 then opens the character editor on the recruits (mode 1, [characters](../characters.md#character-editor)) and selects the first.
+- **Verified** (base data scan, 2026-10-18): 332 DIALOG_ACTION records of DA 3 / 18, used by 250 lines in 125 dialogues (hire offers
+  such as "hire me 2500", freed prisoners and escaped slaves asking to join, unique recruits such as Crumblejon), reached from mercenary
+  and unique CHARACTER records and dialogue packages (drifters, beggars, bandits).
+
 | DA | Effect |
 |---|---|
 | 1 TRADE | ends the conversation, opens trade with the speaker |
@@ -376,5 +393,5 @@ lists, 58's field; the speech timer's unit.
 ## Meitou design
 
 As built: [simulation](../simulation.md#dialogue). Speech bubbles (`DialogueSystem.Ambient`, `PlayerInterface.Speech`): ambient lines are said as bubbles over the speaker's head, the chain of its own lines 2 + 0.12 x length seconds apart; fired by the campaign announcement (event 2) and by a sight stand-in (`DialogueSettings.AmbientEvents`, on in the game): every 30 ticks an awake NPC within 600 units of a player character, not fighting, fleeing or caged, says event 66 (its faction hostile to the player's), 67 (ally) or 3 (else), at most 2 per look and once per squad and character per half game hour (engine choices: the original fires 3, 27, 34, 59, 66 and 67 from its perception code `FUN_140859680` with visibility, relation and distance tests that are only partly read). Still planned: the other events (AI-to-AI talk, 4, 15-26, 41 ...), the AI
-tasks 102/159/161, interjector lines in a bubble chain, crowd triggers, recruiting, AI contracts and `change AI`, items given, the arrest and slavery effects, and
+tasks 102/159/161, interjector lines in a bubble chain, crowd triggers, AI contracts and `change AI`, items given, the arrest and slavery effects, and
 moving the surgeon verb, Pay bail and `ArrestSystem`'s fine/arrest stand-ins onto dialogue.

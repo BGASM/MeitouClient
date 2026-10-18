@@ -10,7 +10,7 @@ public sealed partial class DialogueSystem
     /// <summary>
     /// A line's effects (<c>FUN_140680560</c>, docs/game/dialogue.md "Effects"), run as it is said or clicked, with <paramref name="me"/> the NPC-side speaker and the player character the
     /// target, in the original's order: locks, interrupt, relation changes, then the DA effects in data order. Not built yet: crowd triggers, items given, AI changes and
-    /// contracts, recruiting, arrests and the slavery effects.
+    /// contracts, arrests and the slavery effects.
     /// </summary>
     void RunEffects(World world, Conversation c, DialogueNode line, CharacterId me)
     {
@@ -80,8 +80,8 @@ public sealed partial class DialogueSystem
                 case DialogueActions.AssaultPhase or DialogueActions.RetreatPhase:
                     population?.SetCampaignPhase(world, me, effect.Action == DialogueActions.AssaultPhase);
                     break;
-                case 3 or 18:
-                    world.Post("(Recruiting through dialogue is not in Meitou yet.)");
+                case DialogueActions.JoinSquadWithEdit or DialogueActions.JoinSquadFast:
+                    if (!Recruit(world, c, me, effect.Action == DialogueActions.JoinSquadWithEdit)) return;
                     break;
             }
         }

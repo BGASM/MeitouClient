@@ -5,7 +5,8 @@ using Meitou.Simulation.Saving;
 namespace Meitou.Simulation.Editing;
 
 /// <summary>Why the character editor is open (docs/characters.md "Character editor"): making the start's characters, or a plastic surgeon's work.</summary>
-public enum EditKind : byte { Creation, Surgery }
+/// <summary>The editor's use: the new game's characters, a plastic surgeon, or a recruit (DA_JOIN_SQUAD_WITH_EDIT; free, race and gender kept as at a surgeon).</summary>
+public enum EditKind : byte { Creation, Surgery, Recruit }
 
 /// <summary>
 /// The character editor's result for one character: its new look (a CHARACTER_APPEARANCE, normally a <see cref="CharacterDraft"/> of its current one) and name.
@@ -57,6 +58,11 @@ public static class CharacterEditing
                 world.Post($"{proposedRace.Name} is not a playable race.");
                 return;
             }
+        }
+        else if (edit.Kind == EditKind.Recruit)
+        {
+            bool female = edit.Appearance.Bools.TryGetValue("sex female", out var f) && f;
+            if (proposedRace.StringId != currentRace.StringId || female != look.Female) { world.Post("A recruit's race and gender cannot be changed."); return; }
         }
         else
         {

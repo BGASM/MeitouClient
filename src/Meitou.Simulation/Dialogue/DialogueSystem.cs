@@ -14,8 +14,11 @@ public sealed record EndConversation : SimCommand;
 public sealed record ConversationView(CharacterId Npc, CharacterId Player, CharacterId Speaker, string SpeakerName, string PlayerName, string Text,
     IReadOnlyList<string> Choices, IReadOnlyList<string> Log, long PlayerMoney);
 
-/// <summary>What a conversation asks the host to do once it has ended (DA_CHARACTER_EDITOR: the surgeon's editor on <see cref="Player"/>, already paid).</summary>
-public enum DialogueRequestKind : byte { CharacterEditor }
+/// <summary>
+/// What a conversation asks the host to do once it has ended: DA_CHARACTER_EDITOR, the surgeon's editor on <see cref="DialogueRequest.Player"/>, already paid; DA_JOIN_SQUAD_WITH_EDIT,
+/// the in-play editor on the recruit (<see cref="DialogueRequest.Player"/>).
+/// </summary>
+public enum DialogueRequestKind : byte { CharacterEditor, RecruitEditor }
 public sealed record DialogueRequest(long Id, DialogueRequestKind Kind, CharacterId Player, CharacterId Npc);
 
 /// <summary>A system with a conversation to publish (the dialogue system).</summary>

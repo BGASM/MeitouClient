@@ -701,8 +701,13 @@ to the next tick. A hostile target is attacked instead.
 
 - **Effects built**: locks, interrupts, `change relations`, trade, relations, the three attacks, take and give money, the surgeon's editor
   (paid by the line, `EditCharacter.Paid`), assign and clear bounty, lock this dialogue, DA 37 / 38 (a campaign's phase), `trigger campaign` (`PopulationSystem.TriggerFromDialogue`: the rules in
-  [campaigns](game/factions-squads-towns.md#campaigns); `world state` conditions read the live states). Recruiting posts that it is not built; the rest is
+  [campaigns](game/factions-squads-towns.md#campaigns); `world state` conditions read the live states), recruiting (DA 3 / 18, `DialogueSystem.Recruit`); the rest is
   listed in [dialogue](game/dialogue.md#meitou-design).
+- **Recruiting** ([facts](game/dialogue.md#recruiting)): at the `max faction size` cap the line "It looks like your squad is a little full." is
+  posted and the conversation ends; otherwise the speaker leaves its squad (its leader passes to the first member left) and joins the talking
+  character's squad as a player character: player faction, role Squad1, player default orders, no AI mind, stopped, its save link dropped (a save
+  writes it as a new member of the player's platoon). DA 3 ends the conversation and opens the editor in recruit mode (`EditKind.Recruit`: free,
+  race and gender kept). Engine gaps: the squad-size overflow call, the recruit's dialogue package, the unknown fields and the item field.
 - **Conditions**: most DCs are computed; those needing state Meitou lacks (squad memory flags beyond "met", building locks, slavery, walls,
   missions, the personality functions, tech level, ranks) compute "no". `met` and "last seen" come from finished conversations (per squad). IN_MY_BUILDING uses the squad's home building and the lock rounds' extent.
 - **Speech bubbles**: `WorldSnapshot.Speech` lists the lines on show (`SpeechBubble`: speaker, text, large font); `PlayerInterface.DrawSpeech` draws them over the head. Sources and engine choices: [dialogue](game/dialogue.md#meitou-design).

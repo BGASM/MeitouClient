@@ -25,7 +25,7 @@ Project rules: [AGENTS.md](AGENTS.md). Engine constraints: [DECISIONS.md](DECISI
 | Characters | Remaining body/attachment/material parity and exact original random sequence. [Characters](docs/characters.md), [animation](docs/animation.md), [renderer](docs/character-renderer.md). |
 | Navigation | Global pathing, dynamic doors and navmesh cache/lifetime gaps. [Pathfinding](docs/game/pathfinding.md), [simulation](docs/simulation.md#navmesh). |
 | AI | Wars, prisoners/slavers, planner and full off-screen town simulation. [AI research](docs/game/ai.md), [runtime](docs/simulation.md#ai). |
-| Dialogue | Dialogue runtime, conversation window, speech bubbles, event integration and recruiting. [Dialogue](docs/game/dialogue.md). |
+| Dialogue | Remaining events and AI talk, crowd triggers, items given, AI contracts, arrest and slavery effects. [Dialogue](docs/game/dialogue.md#meitou-design). |
 | Economy | Building shops, production, construction, farming and research. [Economy](docs/game/economy.md), [production](docs/game/buildings-production.md). |
 | Saves | Restore towns, NPC squads and world state beyond the player's squad; preserve original save compatibility. [Save format](docs/formats/save.md), [runtime mapping](docs/simulation.md#saves). |
 | UI | Full control, font, mod and interaction fidelity; runtime code-module loading. [Parity](docs/faithful-ui-parity.md), [native UI](docs/native-ui.md). |

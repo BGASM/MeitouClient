@@ -98,7 +98,7 @@ public sealed class DialogueNode
 /// <summary>The <c>DialogActionEnum</c> numbers the engine runs (docs/game/dialogue.md "Effects").</summary>
 public static class DialogueActions
 {
-    public const int None = 0, Trade = 1, AffectRelations = 4, AttackChaseForever = 6, TakeMoney = 8, GiveMoney = 9, CharacterEditor = 11,
+    public const int None = 0, Trade = 1, JoinSquadWithEdit = 3, JoinSquadFast = 18, AffectRelations = 4, AttackChaseForever = 6, TakeMoney = 8, GiveMoney = 9, CharacterEditor = 11,
         BubbleWait = 12, AssignBounty = 32, LockThisDialog = 36, AssaultPhase = 37, RetreatPhase = 38, ClearBounty = 49, AttackStayNearHome = 55, AttackIfNoCoexist = 57;
 }
 

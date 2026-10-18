@@ -307,11 +307,11 @@ sealed partial class PlayerInterface
         draft.Name = "Edited " + draft.Name;
         ConfirmEditor(asked: true);
     }
-    /// <summary>Esc: a surgeon's editor is left without changes; the new game's has to be confirmed.</summary>
+    /// <summary>Esc: a surgeon's or recruit's editor is left without changes; the new game's has to be confirmed.</summary>
     bool EditorEscape()
     {
         if (!EditorOpen) return false;
-        if (editor!.Kind == EditKind.Surgery) CloseEditor();
+        if (editor!.Kind != EditKind.Creation) CloseEditor();
         return true;
     }
 
