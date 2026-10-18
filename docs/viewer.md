@@ -62,8 +62,9 @@ render duration does not alter film time. Recording excludes UI/editor and uses 
 ## Squad tour
 
 Game only (`SquadTour`, not --duel): numpad / flies the camera over the squad bar members in order, keeping the view's yaw, pitch and
-distance at each; starts at member 1 (flies there first if the view is elsewhere), 1.2 s on each. Hops are arcs (2-6 s, log of distance):
-climb first, pitch steepens up to +0.35 rad, then cross and descend; the target tracks the moving member. Camera input or / again ends it in
+distance at each; starts at member 1 (flies there first if the view is elsewhere), 1.5 s on each. Hops are 3 s inverted brachistochrone
+(cycloid) arches, angle linear in time:
+climb first, pitch steepens up to +0.35 rad, fastest at the top, slow landing; the target tracks the moving member. Camera input or / again ends it in
 the strategy camera where it is.
 
 ## Diagnostics and references

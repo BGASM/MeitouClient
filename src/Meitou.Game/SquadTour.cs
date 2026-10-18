@@ -12,7 +12,9 @@ namespace Meitou.Game;
 sealed class SquadTour
 {
     /// <summary>Seconds the camera stays on each member before the next hop.</summary>
-    const float Hold = 1.2f;
+    const float Hold = 1.5f;
+    /// <summary>Seconds each hop takes, whatever its length.</summary>
+    const float HopSeconds = 3;
     /// <summary>The arc's extra boom at its top, per unit of ground crossed (at least <see cref="MinLift"/> times the view's own distance).</summary>
     const float LiftPerDistance = 0.55f, MinLift = 1.5f;
     /// <summary>How much steeper the camera looks down at the top of an arc (radians), and its limit.</summary>
@@ -20,7 +22,7 @@ sealed class SquadTour
 
     readonly List<CharacterId> stops = [];
     int next;
-    float time, hopSeconds, yaw, pitch, distance;
+    float time, yaw, pitch, distance;
     Vector3 from;
     bool holding;
 
@@ -55,10 +57,12 @@ sealed class SquadTour
         }
         // A member gone mid-hop (dead and removed, left the squad): the hop ends where the camera is.
         var to = position(stops[next]) ?? camera.Target;
-        float s = Math.Clamp(time / hopSeconds, 0, 1);
-        // The ground move waits for the climb to get going and lands before the descent ends; the lift rises fast and flattens at the top.
-        float across = SmootherStep(Math.Clamp((s - 0.12f) / 0.76f, 0, 1));
-        float lift = MathF.Pow(MathF.Sin(MathF.PI * s), 0.6f);
+        float s = Math.Clamp(time / HopSeconds, 0, 1);
+        // A brachistochrone (cycloid) arch, upside down for a climb: its angle runs evenly in time, so the camera rises first (the ground move
+        // starts as the cube of time, the lift as its square), crosses fastest at the top and slows into the descent onto the member.
+        float theta = 2 * MathF.PI * s;
+        float across = (theta - MathF.Sin(theta)) / (2 * MathF.PI);
+        float lift = (1 - MathF.Cos(theta)) / 2;
         float height = MathF.Max(LiftPerDistance * Ground(to - from), MinLift * distance);
         camera.Target = Vector3.Lerp(from, to, across);
         camera.Yaw = yaw;
@@ -73,12 +77,8 @@ sealed class SquadTour
         while (next < stops.Count && position(stops[next]) is null) next++;
         if (next >= stops.Count) { Active = false; return; }
         from = camera.Target;
-        // Longer hops take longer, but not proportionally: 2 s next door, up to 6 s across the map.
-        float d = Ground(position(stops[next])!.Value - from);
-        hopSeconds = Math.Clamp(2 + 1.1f * MathF.Log2(1 + d / MathF.Max(distance, 1)), 2, 6);
         (time, holding) = (0, false);
     }
 
     static float Ground(Vector3 v) => new Vector2(v.X, v.Z).Length();
-    static float SmootherStep(float x) => x * x * x * (x * (6 * x - 15) + 10);
 }
