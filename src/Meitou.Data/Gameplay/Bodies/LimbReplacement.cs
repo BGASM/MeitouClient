@@ -3,8 +3,8 @@ namespace Meitou.Data.Gameplay.Bodies;
 /// <summary>
 /// A LIMB_REPLACEMENT record: a prosthetic limb (docs/game/character-stats.md "Limb replacements and robots", <b>Verified</b>, 28 base records).
 /// Each multiplier is stored twice, <c>X mult</c> at the lowest quality and <c>X mult 1</c> at the highest, and the item's quality grade
-/// interpolates; how an ITEM's <c>quality</c> (1 to 100) maps to the grade is <b>Unknown</b>, so every method takes the interpolation
-/// parameter <c>t</c> in [0, 1] directly.
+/// interpolates by t = the item's <c>level</c> x 0.01 (the Gear quality fraction, not the save's <c>quality</c> float; <b>Observed</b>, docs/game/character-stats.md
+/// "Limb replacements and robots"). Every method takes t directly; <see cref="SlotOf"/> names a slot's section.
 /// </summary>
 public sealed record LimbReplacement
 {
@@ -42,6 +42,15 @@ public sealed record LimbReplacement
     public int LimbSlot => Slot - FirstSlot;
 
     public bool IsLeg => LimbSlot is 2 or 3;
+
+    /// <summary>The inventory section of a fitted prosthetic in limb slot 0 to 3 (the save's <c>section</c>; strings of <c>FUN_1400d04d0</c>).</summary>
+    public static string SlotOf(int limbSlot) => limbSlot switch
+    {
+        0 => "left_arm_replace",
+        1 => "right_arm_replace",
+        2 => "left_leg_replace",
+        _ => "right_leg_replace",
+    };
 
     /// <summary>The part's base HP with this limb fitted at quality <paramref name="t"/> (replaces the race's base HP for that slot).</summary>
     public float Hp(float t) => Lerp(HpLow, HpHigh, t);

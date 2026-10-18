@@ -113,6 +113,8 @@ public sealed partial class PopulationSystem : ITickSystem, IDisposable
         }
         DrainRoamers(world);
         DrainWild(world);
+        while (world.Characters.LimbsChanged.TryDequeue(out int slot))
+            if (world.Characters.Cold(slot) is { } cold) assembly.RefreshEquipment(cold);
     }
 
     public void SlowWorld(World world)

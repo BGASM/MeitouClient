@@ -636,7 +636,7 @@ public sealed partial class CombatSystem : IProjectileSource
             {
                 case MedicalEventKind.KnockedOut: knockout = true; break;
                 case MedicalEventKind.Died: death = true; break;
-                case MedicalEventKind.PartSevered: if (dc.Stats is { } st) xp.ToughnessFromLimbLoss(st, dc.Race); break;
+                case MedicalEventKind.PartSevered: if (dc.Stats is { } st) xp.ToughnessFromLimbLoss(st, dc.Race); table.LimbsChanged.Enqueue(v); break;
             }
         }
         if (dc.Medical.Incapacitated)

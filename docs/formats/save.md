@@ -197,6 +197,15 @@ is the look's appearance, worn items its clothes; a character with no saved item
 with only race and flags (no head, no floats) is not a look and the look is rolled. The record is written back only for a new character (the generated look) or
 one changed in the character editor (its keys replaced by the edited copy's, so the key set and order stay the original's).
 
+### Limbs (MEDICAL_STATE `limbs`)
+
+**Verified** (writer `FUN_1400cfb50`, reader `FUN_1400d0190`; METARU and quicksave: 6 records): int `limbs` = state of limb slot k (0 L arm,
+1 R arm, 2 L leg, 3 R leg) in bits 2k..2k+1, states 0 original, 1 stump, 2 replaced, 3 crushed (`160` both legs replaced, `16` L leg stump,
+`4` R arm stump). Only when some slot is 2, a reference list `limbs`: per replaced slot, value 0 = the slot, target = an INVENTORY_ITEM_STATE in
+the same file (`section` `left_arm_replace` / `right_arm_replace` / `left_leg_replace` / `right_leg_replace`, `base data sid` the
+LIMB_REPLACEMENT, `level`, `quality`, `dam`, `wear`, `stun`). These items are in no INVENTORY_STATE. Reader: state 1, or 2 without a resolvable
+item, becomes a stump; 2 with an item fits it; 3 is kept. Meitou: `SaveLimbs` (data), `Saving/SavedLimbs` (medical state both ways).
+
 ### NPC platoons (Meitou mapping)
 
 Every saved NPC platoon with a `basetown` naming a placed town is restored (a characterless town-bound one is skipped); town-bound ones (template does not travel) are pinned to their town, and a town holding any

@@ -28,6 +28,12 @@ public sealed record LoadoutWeapon(GameRecord Weapon)
 }
 
 /// <summary>
+/// A limb that is not the natural one (docs/game/character-stats.md "Limb replacements and robots"): <see cref="State"/> 1 stump, 2 replaced, 3 crushed (the medical
+/// <c>LimbState</c>), and for a replaced limb its LIMB_REPLACEMENT record.
+/// </summary>
+public sealed record LoadoutLimb(int State, GameRecord? Prosthetic = null);
+
+/// <summary>
 /// What <see cref="CharacterGenerator"/> rolled for one character: race, gender, a body-file-like appearance (head, hair,
 /// colours, sliders, face poses), clothing, backpack and weapons. Feed it to <see cref="CharacterAppearance.Build"/>
 /// through <see cref="CharacterOptions.Loadout"/>.
@@ -50,6 +56,8 @@ public sealed class Loadout
     public LoadoutWeapon? Crossbow { get; set; }
     /// <summary>Weapons in equip order (hip first, then back).</summary>
     public List<LoadoutWeapon> Weapons { get; } = [];
+    /// <summary>The limbs by slot (0 left arm, 1 right arm, 2 left leg, 3 right leg); null for a natural one.</summary>
+    public LoadoutLimb?[] Limbs { get; } = new LoadoutLimb?[4];
     public List<string> Notes { get; } = [];
 
     /// <summary>One line per choice, for logs and the viewer.</summary>
@@ -61,6 +69,8 @@ public sealed class Loadout
         if (Crossbow is { } x) yield return $"  crossbow {x.Weapon.Name} at {x.Point}";
         foreach (var w in Weapons)
             yield return $"  weapon {w.Weapon.Name} at {w.Point}" + (w.Manufacturer is { } mf ? $", {mf.Name}" : "") + (w.Model is { } md ? $" {md.Name}" : "") + $" (level {w.Level})";
+        for (int k = 0; k < Limbs.Length; k++)
+            if (Limbs[k] is { } l) yield return $"  limb {(Limb)k}: " + (l.Prosthetic is { } p ? p.Name : l.State == 1 ? "stump" : $"state {l.State}");
         foreach (var n in Notes) yield return $"  note: {n}";
     }
 }

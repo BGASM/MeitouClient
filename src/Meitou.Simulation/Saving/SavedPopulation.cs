@@ -128,7 +128,10 @@ internal static class SavedCharacters
         CharacterStats? stats = sc.Stats is null ? null : CharacterStats.ReadSave(sc.Stats.Floats);
         MedicalState? medical = null;
         if (race is not null && sc.Medical is not null)
+        {
             medical = MedicalState.ReadSave(race, sc.Medical.Floats, sc.Medical.Bools, sc.Medical.Strings, id => PartOf(id, data.Db, parts));
+            SavedLimbs.Apply(medical, sc.Platoon.File, sc.Medical, data.Items);
+        }
         // The kit: a character whose INVENTORY_STATE holds items gets them, and its look is its saved appearance wearing them. One with none (a Meitou save from before
         // inventories were written) keeps the old rule for its clothes: rolled from the handle's serial, with the inventory a new character of the look would have.
         var savedItems = sc.Inventory is { } invState && sc.Platoon.File is { } platoonFile ? SaveInventory.Read(platoonFile, invState) : [];
@@ -137,11 +140,22 @@ internal static class SavedCharacters
         CharacterAppearance? look = null;
         int serial = handle.S & 0x7FFFFFFF;
         if (savedItems.Count > 0 && appearances is { } source && SavedKit.LoadoutOf(sc.Appearance, savedItems, data.Db, serial) is { } kit)
+        {
+            SavedKit.SetLimbs(kit, medical, data.Db);
             look = source.Create(sc.RecordId, kit);
+        }
         look ??= appearances?.Create(sc.RecordId, ownerId.Length > 0 ? ownerId : null, serial);
         // Without items the clothes are rolled, but the body and face are still the saved ones (the CHARACTER_APPEARANCE holds the whole look).
-        if (savedItems.Count == 0 && appearances is { } again && look?.Loadout is { } rolled && SavedKit.Wear(rolled, sc.Appearance, data.Db) is { } worn)
-            look = again.Create(sc.RecordId, worn) ?? look;
+        if (savedItems.Count == 0 && appearances is { } again && look?.Loadout is { } rolled)
+        {
+            var worn = SavedKit.Wear(rolled, sc.Appearance, data.Db);
+            if (worn is null && medical is { LimbBits: not 0 }) worn = SavedKit.Copy(rolled);
+            if (worn is not null)
+            {
+                SavedKit.SetLimbs(worn, medical, data.Db);
+                look = again.Create(sc.RecordId, worn) ?? look;
+            }
+        }
         return new SavedParts(sc, record, race, stats, medical, savedItems, null, look);
     }
 

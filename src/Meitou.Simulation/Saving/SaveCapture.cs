@@ -350,7 +350,10 @@ public static partial class SaveCapture
         if (medical is null && isNew && RaceOf(recordId, data.Db, races) is { } race)
             medical = MedicalState.Create(race, stats?.Strength ?? 50);
         if (medical is not null && sc.Medical is { } mr)
+        {
             medical.WriteSave(mr.Floats, mr.Bools, mr.Strings);
+            if (sc.Platoon.File is { } file) SavedLimbs.Write(medical, file, mr);
+        }
     }
 
     // ------------------------------------------------------------------ NPC platoons

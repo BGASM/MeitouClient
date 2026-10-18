@@ -33,33 +33,63 @@ public static class SavedKit
     {
         foreach (var s in items)
         {
-            if (factory.Create(s.BaseId, s.Quantity, s.Quality) is not { } item)
+            if (ItemOf(s, factory) is not { } item)
             {
                 notes?.Add($"item {s.BaseId} is not in the game data; left out");
                 continue;
             }
-            item.Section = s.Section;
-            item.X = s.X;
-            item.Y = s.Y;
-            item.Level = s.Level;
-            item.MaterialId = s.MaterialId;
-            item.CompanyId = s.CompanyId;
-            item.Charges = s.Charges;
-            item.Saved = s.Source;
             if (s.Contents is { } contents && item.Contents is { } bag) Fill(bag, contents, factory, notes);
             inventory.Items.Add(item);
         }
     }
 
+    /// <summary>A saved item as an instance (without a container's contents); null when the game data lacks its record.</summary>
+    internal static ItemInstance? ItemOf(SaveItem s, ItemFactory factory)
+    {
+        if (factory.Create(s.BaseId, s.Quantity, s.Quality) is not { } item) return null;
+        item.Section = s.Section;
+        item.X = s.X;
+        item.Y = s.Y;
+        item.Level = s.Level;
+        item.MaterialId = s.MaterialId;
+        item.CompanyId = s.CompanyId;
+        item.Charges = s.Charges;
+        item.Saved = s.Source;
+        return item;
+    }
+
     /// <summary>The inventory as saved items, a container with its contents; each keeps the record it was read from (<see cref="ItemInstance.Saved"/>).</summary>
     public static List<SaveItem> FromInventory(Inventory inventory) => [.. inventory.Items.Select(FromItem)];
 
-    static SaveItem FromItem(ItemInstance i) => new()
+    internal static SaveItem FromItem(ItemInstance i) => new()
     {
         BaseId = i.Record, MaterialId = i.MaterialId, CompanyId = i.CompanyId, Section = i.Section, X = i.X, Y = i.Y, Quantity = i.Quantity, Level = i.Level,
         ItemFunction = i.ItemFunction, Quality = i.Quality, Charges = i.Charges, Source = i.Saved,
         Contents = i.Contents is { } bag ? FromInventory(bag) : null,
     };
+
+    /// <summary>Puts the non-natural limbs of <paramref name="medical"/> (stumps, prosthetics, crushed) into <paramref name="loadout"/>.</summary>
+    public static void SetLimbs(Loadout loadout, Bodies.MedicalState? medical, GameDatabase db)
+    {
+        for (int k = 0; k < loadout.Limbs.Length; k++)
+            loadout.Limbs[k] = medical?.LimbPart(k) is { Limb: not Bodies.LimbState.Original } p
+                ? new LoadoutLimb((int)p.Limb, p.Limb == Bodies.LimbState.Replaced && p.Replacement is { } r ? db.Find(r.StringId) : null)
+                : null;
+    }
+
+    /// <summary>A copy of <paramref name="loadout"/> (to give it limbs without touching a look another character may share).</summary>
+    public static Loadout Copy(Loadout loadout)
+    {
+        var copy = new Loadout
+        {
+            Seed = loadout.Seed, Character = loadout.Character, Race = loadout.Race, Female = loadout.Female, Appearance = loadout.Appearance, Generated = loadout.Generated,
+            MorphIndex = loadout.MorphIndex, Backpack = loadout.Backpack, Crossbow = loadout.Crossbow,
+        };
+        copy.Clothing.AddRange(loadout.Clothing);
+        copy.Weapons.AddRange(loadout.Weapons);
+        loadout.Limbs.CopyTo(copy.Limbs, 0);
+        return copy;
+    }
 
     /// <summary>
     /// Whether a CHARACTER_APPEARANCE holds a look (a head or any slider), not just the race and flags that a character without a rolled look is saved with.
@@ -83,6 +113,7 @@ public static class SavedKit
         };
         loadout.Clothing.AddRange(rolled.Clothing);
         loadout.Weapons.AddRange(rolled.Weapons);
+        rolled.Limbs.CopyTo(loadout.Limbs, 0);
         return loadout;
     }
 

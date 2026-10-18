@@ -60,7 +60,7 @@ C=Chest*broad*thin86, c45=1+0.45*(C-1), c9=1+0.9*(C-1), A=Arm-bulk*thin7*bulk,
 Sh=Shoulders*broad, F=Feet*h. Table retains every bone/positional vector and remaining local symbols.
 Neutral vectors1 except thighY0.95 (CharacterShapeTests).
 
-Limb factor0 missing/1 present; indices0 left-arm,1 right,2 left-leg,3 right-leg. Upper-arm
+Limb factor0 only for a stump (limb state1; a prosthetic keeps1), else1; indices0 left-arm,1 right,2 left-leg,3 right-leg. Upper-arm
 stump remains unless hide-stump bits1/2 remove it. Thigh n0.8 for per-leg state1 (meaning unknown).
 Calf k uses signed equipment length ratio(boot/robotic-offset plus unknown constant): positive
 left, negative right,0 leaves both1. Movement translation scaleH unless two unidentified states.

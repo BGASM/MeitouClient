@@ -36,6 +36,8 @@ internal sealed class AssetPart
     public int MaterialSlot;
     /// <summary>The body mesh, whose vertices take the asset's morph.</summary>
     public bool Morphed;
+    /// <summary>The body mesh, whose limb vertices the appearance's hidden limbs hide (<see cref="CharacterAppearance.HiddenLimbs"/>).</summary>
+    public bool IsBody;
     /// <summary>The mesh's shadow-only levels (null: the shadow passes pick among the picture's levels): their distances, level 0 first (the original), and the mesh level the first of them is.</summary>
     public float[]? ShadowDistances;
     public int ShadowFirst;
@@ -201,12 +203,12 @@ internal sealed class CharacterContent : IDisposable
     readonly ConcurrentDictionary<(string Path, int Bones), Lazy<Prepared>> prepared = new();
 
     /// <summary>The preparation of a mesh, made once (any thread; the first caller's level settings stand).</summary>
-    Lazy<Prepared> Prepare(string path, int? boneCount, float lodScale, bool shadowLevels, float pixelsPerRadian) =>
-        prepared.GetOrAdd((path.ToLowerInvariant(), boneCount ?? -1), _ => new Lazy<Prepared>(() => PrepareMesh(path, boneCount, lodScale, shadowLevels, pixelsPerRadian)));
+    Lazy<Prepared> Prepare(string path, int? boneCount, float lodScale, bool shadowLevels, float pixelsPerRadian, LimbHide? limbs = null) =>
+        prepared.GetOrAdd((path.ToLowerInvariant(), boneCount ?? -1), _ => new Lazy<Prepared>(() => PrepareMesh(path, boneCount, lodScale, shadowLevels, pixelsPerRadian, limbs)));
 
     /// <summary>Reads a mesh file and makes its levels and index buffers (no GPU work, any thread): with its skinning weights for a skeleton of <paramref name="boneCount"/>
     /// bones (null: unskinned); its generated levels start <paramref name="lodScale"/> times farther than the rule gives.</summary>
-    static Prepared PrepareMesh(string path, int? boneCount, float lodScale, bool shadowLevels, float pixelsPerRadian)
+    static Prepared PrepareMesh(string path, int? boneCount, float lodScale, bool shadowLevels, float pixelsPerRadian, LimbHide? limbs)
     {
         var messages = new List<string>();
         try
@@ -214,6 +216,7 @@ internal sealed class CharacterContent : IDisposable
             var mesh = OgreMeshReader.ReadFile(path);
             var model = Model.Build(mesh, boneCount);
             var morphs = MeshMorphs.From(mesh, model, messages, Path.GetFileName(path));
+            if (limbs is not null) MarkLimbs(model, limbs);
             foreach (var w in model.Warnings) messages.Add($"{Path.GetFileName(path)}: {w}");
             var centre = mesh.Bounds is { } b ? (b.Min + b.Max) / 2 : model.Center;
             float radius = mesh.Bounds is { } bb ? bb.Radius : model.Radius;
@@ -243,11 +246,11 @@ internal sealed class CharacterContent : IDisposable
     }
 
     /// <summary>A mesh by file, uploaded the first time: prepared here unless a worker has done it (<see cref="Fetched"/>), or after waiting for the worker preparing it.</summary>
-    LoadedMesh? Mesh(string path, int? boneCount, float lodScale = 1, bool shadowLevels = false)
+    LoadedMesh? Mesh(string path, int? boneCount, float lodScale = 1, bool shadowLevels = false, LimbHide? limbs = null)
     {
         var key = (path.ToLowerInvariant(), boneCount ?? -1);
         if (meshes.TryGetValue(key, out var cached)) return cached;
-        var (ready, messages) = Prepare(path, boneCount, lodScale, shadowLevels, LodPixelsPerRadian).Value;
+        var (ready, messages) = Prepare(path, boneCount, lodScale, shadowLevels, LodPixelsPerRadian, limbs).Value;
         prepared[key] = new Lazy<Prepared>(Uploaded);
         Messages.AddRange(messages);
         return meshes[key] = ready is null ? null : Upload(ready);
@@ -302,7 +305,7 @@ internal sealed class CharacterContent : IDisposable
             try
             {
                 if (BodySkeletonName(bodyPath) is not { } name || Rig(name) is not { } rig) return true;
-                _ = Prepare(bodyPath, rig.BoneCount, 1, true, pixels).Value;
+                _ = Prepare(bodyPath, rig.BoneCount, 1, true, pixels, LimbHideOf(c, rig)).Value;
                 foreach (var (path, shared, scale) in parts) _ = Prepare(path!, shared ? rig.BoneCount : null, scale, false, pixels).Value;
             }
             catch (Exception) { }   // a file that cannot be read: Build meets it again on the render thread and reports it
@@ -311,6 +314,56 @@ internal sealed class CharacterContent : IDisposable
         }
         fetching[c] = urgent ? BackgroundWork.RunUrgent(Fetch) : BackgroundWork.Run(Fetch);
         return false;
+    }
+
+    /// <summary>Which bone handle belongs to which limb slot (-1: none) and the bind-pose heights below which a limb's vertices are its hideable part.</summary>
+    internal sealed record LimbHide(int[] LimbOfBone, float ArmBelow, float LegBelow);
+
+    /// <summary>
+    /// The limb map of a person's body (<c>read_part_map</c> <c>FUN_140075600</c>, docs/characters.md "Hidden body parts"): each LOCATIONAL_DAMAGE of the race's <c>combat anatomy</c>
+    /// claims its <c>bone name</c>, <c>bone name 2</c>, <c>bone name 3</c>; a bone no part names takes its nearest named ancestor's; an arm part is limb 0 or 1 and a leg 2 or 3 by
+    /// whether its <c>collapse part</c> has a bit of 0x12 (the right side). Arms hide below 13.83 (male) or 14.1 (female), legs below 8.6. Null for an animal.
+    /// </summary>
+    LimbHide? LimbHideOf(CharacterAppearance c, SkeletonRig rig)
+    {
+        if (c.Animal is not null) return null;
+        var claimed = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var r in c.Race.GetReferences("combat anatomy"))
+        {
+            if (db.Find(r.TargetStringId) is not { Type: FcsRecordType.LOCATIONAL_DAMAGE } part) continue;
+            bool right = (part.GetInt("collapse part") & 0x12) != 0;
+            int limb = part.GetInt("body part type") switch { 2 => right ? 1 : 0, 1 => right ? 3 : 2, _ => -1 };
+            foreach (var key in new[] { "bone name", "bone name 2", "bone name 3" })
+                if (part.GetString(key) is { Length: > 0 } bone) claimed.TryAdd(bone, limb);
+        }
+        var bones = rig.Skeleton.Bones;
+        var byHandle = bones.ToDictionary(b => (int)b.Handle);
+        var map = new int[bones.Count == 0 ? 0 : bones.Max(b => b.Handle) + 1];
+        Array.Fill(map, -1);
+        foreach (var b in bones)
+            for (var x = b; x is not null; x = x.Parent is { } p && byHandle.TryGetValue(p, out var parent) ? parent : null)
+                if (claimed.TryGetValue(x.Name, out int limb)) { map[b.Handle] = limb; break; }
+        return new LimbHide(map, c.Female ? 14.1f : 13.83f, 8.6f);
+    }
+
+    /// <summary>Writes each vertex's limb bit into its colour's Y (<c>FUN_140071f90</c>): the limb of its heaviest bone, when the vertex lies below that limb's height.</summary>
+    static void MarkLimbs(Model model, LimbHide hide)
+    {
+        foreach (var part in model.Parts)
+            for (int i = 0; i < part.Vertices.Length; i++)
+            {
+                ref var v = ref part.Vertices[i];
+                int bone = -1;
+                float best = 0;
+                for (int k = 0; k < 4; k++)
+                {
+                    float w = v.Weights[k];
+                    if (w > best) { best = w; bone = (int)((v.Bones >> (8 * k)) & 0xFF); }
+                }
+                int limb = (uint)bone < (uint)hide.LimbOfBone.Length ? hide.LimbOfBone[bone] : -1;
+                bool below = limb >= 0 && v.Position.Y < (limb < 2 ? hide.ArmBelow : hide.LegBelow);
+                v.Colour.Y = below ? 1 << limb : 0;
+            }
     }
 
     /// <summary>How much farther a part's generated levels start (<see cref="HairLodScale"/> for a person's hair and beard).</summary>
@@ -359,7 +412,7 @@ internal sealed class CharacterContent : IDisposable
         catch (Exception e) when (e is OgreFormatException or IOException or EndOfStreamException or InvalidDataException) { Messages.Add($"{c.BodyMesh}: {e.Message}"); return null; }
         var rig = skeletonName is null ? null : Rig(skeletonName);
         if (rig is null) { Messages.Add($"{c.BodyMesh} has no skeleton ({skeletonName})"); return null; }
-        var body = Mesh(bodyPath, rig.BoneCount, shadowLevels: true);
+        var body = Mesh(bodyPath, rig.BoneCount, shadowLevels: true, limbs: LimbHideOf(c, rig));
         if (body is null) return null;
 
         var asset = new CharacterAsset { Appearance = c, Rig = rig, Animal = c.Animal is not null };
@@ -386,7 +439,7 @@ internal sealed class CharacterContent : IDisposable
         {
             Label = $"body {Path.GetFileName(bodyPath)}", Mesh = body.Gpu, Shared = true, Material = BodyMaterial(c),
             BoundsCentre = body.Centre, BoundsRadius = body.Radius, PickBoxes = body.PickBoxes ?? [],
-            Morphed = asset.MorphBase != 0, ShadowDistances = body.ShadowDistances, ShadowFirst = body.ShadowFirst,
+            Morphed = asset.MorphBase != 0, ShadowDistances = body.ShadowDistances, ShadowFirst = body.ShadowFirst, IsBody = true,
         });
         foreach (var part in c.Parts)
         {

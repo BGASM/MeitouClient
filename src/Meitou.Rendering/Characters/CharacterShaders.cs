@@ -67,7 +67,7 @@ static class CharacterShaders
         layout(location = 1) in vec3 aNormal;
         layout(location = 2) in vec2 aUv;
         layout(location = 3) in vec4 aTangent;
-        layout(location = 4) in vec4 aColour;           // x: the vertex's morph slot as raw bits (0: none)
+        layout(location = 4) in vec4 aColour;           // x: the vertex's morph slot as raw bits (0: none), y: the body vertex's limb bits (bit k: limb slot k)
         layout(location = 5) in uvec4 aBones;
         layout(location = 6) in vec4 aWeights;
         layout(location = 7) in vec4 aInstance0;
@@ -86,6 +86,7 @@ static class CharacterShaders
         out vec2 vUv;
         flat out uint vMaterial;
         flat out uint vInterior;
+        out float vHidden;
         //MOTION_OUT
 
         void main()
@@ -110,6 +111,8 @@ static class CharacterShaders
             vUv = aUv;
             vMaterial = aInstanceData.y;
             vInterior = aInstanceData.z & 1u;
+            // Hidden limbs (docs/characters.md "Hidden body parts"): the body's vertices of a limb whose bit 12 + k the instance carries; the fragments discard where it is above 0.
+            vHidden = ((uint(aColour.y + 0.5) & (aInstanceData.z >> 12)) & 15u) != 0u ? 1.0 : 0.0;
             gl_Position = view.viewProjection * p;
             //MOTION_BODY
         }
@@ -151,6 +154,7 @@ static class CharacterShaders
         in vec2 vUv;
         flat in uint vMaterial;
         flat in uint vInterior;
+        in float vHidden;
         layout(location = 0) out vec4 fragColour;
 
         bool flag(uint f, uint bit) { return (f & bit) != 0u; }
@@ -168,6 +172,7 @@ static class CharacterShaders
 
         void main()
         {
+            if (vHidden > 0.0) discard;
             if (pc.depthIndex != 0u) { fragColour = vec4(pc.flatColour, 1.0); return; }
             CharMaterial m = materials.items[vMaterial];
             uint f = m.flags;
@@ -294,8 +299,10 @@ static class CharacterShaders
         return stock.Replace(stockMain, "") + Structs + Lookup + """
         in vec2 vUv;
         flat in uint vMaterial;
+        in float vHidden;
         void main()
         {
+            if (vHidden > 0.0) discard;
             CharMaterial m = materials.items[vMaterial];
             uint f = m.flags;
             bool cut = false;
@@ -320,10 +327,12 @@ static class CharacterShaders
         in vec4 vNow;
         in vec4 vPrevious;
         flat in uint vMaterial;
+        in float vHidden;
         layout(location = 0) out vec4 fragColour;
         float viewZ(float d) { float zd = 2.0 * d - 1.0; return view.nearPlanes.x * view.nearPlanes.y / (view.nearPlanes.y - zd * (view.nearPlanes.y - view.nearPlanes.x)); }
         void main()
         {
+            if (vHidden > 0.0) discard;
             CharMaterial m = materials.items[vMaterial];
             uint f = m.flags;
             if (m.shading == 2u && (f & 1u) != 0u) { if (dot(tex(m.tex[0], vUv), m.alphaChannel) < m.alphaThreshold) discard; }

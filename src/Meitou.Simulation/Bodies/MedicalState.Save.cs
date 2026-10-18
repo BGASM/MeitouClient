@@ -7,7 +7,7 @@ public sealed partial class MedicalState
 {
     // ------------------------------------------------------------------ save keys
 
-    /// <summary>Writes the MEDICAL_STATE fields (docs/formats/save.md): the bools <c>coma dead unconcious incapacitated</c>, the floats <c>blood bleeding hung fed KO</c> and per part <c>k</c> <c>flesh hit bandage rig stun wear hitmult</c> and the string <c>sid</c>. Limb states and wounds are not part of these keys.</summary>
+    /// <summary>Writes the MEDICAL_STATE fields (docs/formats/save.md): the bools <c>coma dead unconcious incapacitated</c>, the floats <c>blood bleeding hung fed KO</c> and per part <c>k</c> <c>flesh hit bandage rig stun wear hitmult</c> and the string <c>sid</c>. Wounds are not part of these keys; the limbs (<see cref="LimbBits"/>) are written by the save code with their items.</summary>
     public void WriteSave(IDictionary<string, float> floats, IDictionary<string, bool> bools, IDictionary<string, string> strings)
     {
         bools["coma"] = Coma;
@@ -34,8 +34,58 @@ public sealed partial class MedicalState
     }
 
     /// <summary>
+    /// The int <c>limbs</c> (<c>FUN_1400cfb50</c>, docs/formats/save.md "Limbs"): the <see cref="LimbState"/> of limb slot k in bits 2k..2k+1.
+    /// </summary>
+    public int LimbBits
+    {
+        get
+        {
+            int bits = 0;
+            foreach (var p in Parts)
+                if (p.Template.LimbSlot is >= 0 and < 4 and var k) bits |= ((int)p.Limb & 3) << (2 * k);
+            return bits;
+        }
+    }
+
+    /// <summary>The part of limb slot 0 to 3 (0 left arm, 1 right arm, 2 left leg, 3 right leg); null when the anatomy has none.</summary>
+    public HealthPart? LimbPart(int slot)
+    {
+        foreach (var p in Parts)
+            if (p.Template.LimbSlot == slot) return p;
+        return null;
+    }
+
+    /// <summary>
+    /// Applies a saved <c>limbs</c> value (<c>FUN_1400d0190</c>): a stump stays a stump; a replaced slot gets the prosthetic <paramref name="fitted"/> gives for it, or becomes a
+    /// stump without one; crushed is kept as the state. The parts' saved flesh, wear and stun are not touched (the load fits the item without taking its damage).
+    /// </summary>
+    public void ApplySavedLimbs(int bits, Func<int, (LimbReplacement Limb, Items.ItemInstance? Item)?> fitted)
+    {
+        for (int slot = 0; slot < 4; slot++)
+        {
+            if (LimbPart(slot) is not { } p) continue;
+            switch ((LimbState)((bits >> (2 * slot)) & 3))
+            {
+                case LimbState.Stump: p.Limb = LimbState.Stump; break;
+                case LimbState.Crushed: p.Limb = LimbState.Crushed; break;
+                case LimbState.Replaced:
+                    if (fitted(slot) is { } f)
+                    {
+                        p.Limb = LimbState.Replaced;
+                        p.Replacement = f.Limb;
+                        p.ReplacementItem = f.Item;
+                        p.ReplacementQuality = Math.Clamp((f.Item?.Level ?? 0) * 0.01f, 0, 1);
+                    }
+                    else p.Limb = LimbState.Stump;
+                    break;
+            }
+            p.WasDown = p.IsDown;
+        }
+    }
+
+    /// <summary>
     /// Reads what <see cref="WriteSave"/> wrote. <paramref name="resolve"/> finds a LOCATIONAL_DAMAGE template by string id; the base HP of each part comes from the race's anatomy
-    /// (100 when the race does not list the part). The parts come back in the saved order.
+    /// (100 when the race does not list the part). The parts come back in the saved order. The limbs are applied after (<see cref="ApplySavedLimbs"/>).
     /// </summary>
     public static MedicalState ReadSave(RaceData race, IReadOnlyDictionary<string, float> floats, IReadOnlyDictionary<string, bool> bools,
         IReadOnlyDictionary<string, string> strings, Func<string, BodyPartTemplate?> resolve)

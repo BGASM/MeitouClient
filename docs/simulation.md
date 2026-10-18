@@ -287,6 +287,11 @@ moving XP. Combat hits use the same body state; avoid double medical ticks. Trea
 orders find eligible still patients, walk to reach and apply aid serially. Medical time scale
 is explicit and uncertain; [character-stats.md](game/character-stats.md) owns original rules.
 
+Limbs: `HealthPart.Limb` / `Replacement` / `ReplacementItem` per slot; saves round-trip them ([save.md](formats/save.md#limbs-medical_state-limbs)).
+A severed limb queues the character on `CharacterTable.LimbsChanged`; the population system rebuilds its look between ticks
+(`Loadout.Limbs`: stump or prosthetic mesh, natural limb hidden). Absent: the dropped severed-limb item (no ground items) and fitting
+or removing prosthetics in play (`MedicalState.FitReplacement` exists, no command or UI uses it).
+
 ## Items and eating
 
 `Inventory`, `ItemFactory`, `FeedSystem`: grids, stack limits, backpacks, quantities/charges,

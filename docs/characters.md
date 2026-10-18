@@ -82,6 +82,15 @@ follows this, not traced).
   | Teal | 008080 | 0x200 | (not in the enum) |
   | Black | 000000 | none | |
 
+The body's per-vertex `partData.y` holds the part-map bit and, from `@ 140071f90`, a limb bit 1 << (12 + k) (k: 0 L arm, 1 R arm,
+2 L leg, 3 R leg) when the vertex's heaviest bone belongs to that limb and its bind-pose Y is below 13.83 (male) / 14.1 (female) for an
+arm, 8.6 for a leg. Bones map to limbs through the race's `combat anatomy` LOCATIONAL_DAMAGE `bone name`/`bone name 2`/`bone name 3`
+(an unnamed bone takes its nearest named ancestor's part); an arm (`body part type` 2) or leg (1) is the right one when `collapse part`
+& 0x12. `hiddenMask` (`uses_hide_parts`) = OR of worn items' `hide parts`, 1 << (`slot` - 38) per worn LIMB_REPLACEMENT, and bit 12 + k
+for every limb not in state 0 (`FUN_1400cd470`); `character.hlsl` clips where the interpolated flag is above 0. Meitou: the limb bits
+ride in the body vertices' colour Y, the mask in the instance flags (`CharacterContent.MarkLimbs`, `CharacterAppearance.HiddenLimbs`);
+an unnamed root-chain bone (pelvis) is no limb (the original's fallback part index 1 is **Unknown** in effect). Part-map bits are not built.
+
 ### LOD of character meshes
 
 Bodies, hair and armour use their meshes' own generated LOD levels (no separate LOD meshes); each entity picks

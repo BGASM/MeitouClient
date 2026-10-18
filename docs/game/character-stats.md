@@ -239,7 +239,19 @@ Stomach, two arms, two legs, two forelegs):
 A LIMB_REPLACEMENT record (`slot` 50 left arm, 51 right arm, 52 left leg, 53 right leg; **Verified**) becomes a
 `RobotLimbItem` with a `StatsEnumerated -> float` multiplier map. Each multiplier is stored as two fields, `X mult`
 at the lowest quality and `X mult 1` at the highest, interpolated by the item's quality grade
-(`FUN_1400cd500`).
+(`FUN_1400cd500`). The grade is Gear +0x220 = item `level` x 0.01 (the constructor `read_athletics_mult_1_n17`
+lerps `HP`/`HP 1` into +0x268 by it), not the save's `quality` float. **Observed**: METARU's Scout Legs
+(`level` 0, `quality` 95) give legs of 50 HP, the low end of 50/150.
+
+Per limb slot k (0 L arm, 1 R arm, 2 L leg, 3 R leg) the character holds a state (0 original, 1 stump, 2
+replaced, 3 crushed) and the fitted item (holder `FUN_1400cd3f0`; **Verified** by the save code below).
+- Fit (`FUN_1406445b0`): part base HP = item HP, wear = item `wear`, stun = item `stun`, flesh =
+  min(base - wear - item `dam`, base - wear). Remove: the item takes `dam` = base - wear - flesh, `wear`,
+  `stun`; the part becomes base 5, flesh 5, wear/stun 0. On load the item is fitted keeping the saved part floats.
+- Sever (`FUN_14064edc0`) returns for a replaced slot; from state 0 or 3 it makes a stump, awards toughness,
+  drops the RACE `severed limbs` item of the slot at `bone name 2` and opens a wound.
+- A stump shows the RACE `limb replacement` record whose `slot` is 50 + k (`uses_limb_replacement`); a crushed
+  limb attaches no mesh. Hidden body vertices: [characters.md](../characters.md#hidden-body-parts-verified--140075600--140071f90--140531cc0-hlsl-skinhlsl).
 
 | Slot | Fields | Stat numbers |
 | --- | --- | --- |

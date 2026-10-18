@@ -59,8 +59,11 @@ public sealed class HealthPart(BodyPartTemplate template, int hitWeight, float b
     /// <summary>The fitted prosthetic when <see cref="Limb"/> is <see cref="LimbState.Replaced"/>.</summary>
     public LimbReplacement? Replacement { get; set; }
 
-    /// <summary>The prosthetic's quality interpolation parameter in [0, 1].</summary>
+    /// <summary>The prosthetic's quality interpolation parameter in [0, 1]: the item's level x 0.01.</summary>
     public float ReplacementQuality { get; set; }
+
+    /// <summary>The fitted prosthetic as an item (its level, quality and saved record), when <see cref="Limb"/> is <see cref="LimbState.Replaced"/>; null for one fitted without an item.</summary>
+    public Items.ItemInstance? ReplacementItem { get; set; }
 
     /// <summary>The part's own state flag for edge detection of <see cref="MedicalEventKind.PartDown"/> events.</summary>
     internal bool WasDown { get; set; }

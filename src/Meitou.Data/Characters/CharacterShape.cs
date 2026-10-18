@@ -237,6 +237,8 @@ public static class CharacterShape
         return new CharacterShapeInput
         {
             Sliders = sliders, Female = c.Female, Muscle = muscle,
+            // Limb factor 0 only for a stump (state 1, uses_hide_stump); a prosthetic keeps the bone sizes so it skins to them.
+            Missing = c.Loadout is { } l ? l.Limbs.Select((x, k) => (x, k)).Where(p => p.x?.State == 1).Select(p => (Limb)p.k).ToHashSet() : new HashSet<Limb>(),
             HideStump = (HideStump)((bodyArmour?.GetInt("hide stump") ?? 0) & 3),
         };
     }

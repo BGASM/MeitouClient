@@ -81,7 +81,8 @@ public sealed partial class MedicalState
         if (p.IsVital) { Die(DeathCause.VitalPart, events); return; }
         var setting = ctx.Options.Dismemberment;
         bool allowed = inHitPath ? setting >= Dismemberment.Rare && ctx.HasStats && HasStatsObject : setting >= Dismemberment.Frequent;
-        if (allowed && p.Limb == LimbState.Original && p.Template.Severance) Sever(index, ctx, events);
+        // A prosthetic is never cut off (FUN_14064edc0 returns for a replaced slot); a crushed limb can be.
+        if (allowed && p.Limb is LimbState.Original or LimbState.Crushed && p.Template.Severance) Sever(index, ctx, events);
     }
 
     /// <summary>
@@ -105,24 +106,26 @@ public sealed partial class MedicalState
         }
     }
 
-    /// <summary>Fits a prosthetic on the part of its slot (a stump, usually): the part is healthy again at the new maximum, without stun, bandage or wear.</summary>
-    public bool FitReplacement(LimbReplacement limb, float quality)
+    /// <summary>
+    /// Fits a prosthetic on the part of its slot (<c>FUN_1406445b0</c>): the part's base HP becomes the limb's HP at the item's level, its wear and stun the item's, and its flesh
+    /// the maximum less the item's damage (<paramref name="damage"/>, <paramref name="wear"/>, <paramref name="stun"/>: the INVENTORY_ITEM_STATE <c>dam</c>, <c>wear</c>,
+    /// <c>stun</c> a removed limb carries). Bandage and splint are cleared (an engine choice).
+    /// </summary>
+    public bool FitReplacement(LimbReplacement limb, Items.ItemInstance? item, float damage = 0, float wear = 0, float stun = 0)
     {
-        foreach (var p in Parts)
-            if (p.Template.LimbSlot == limb.LimbSlot)
-            {
-                p.Limb = LimbState.Replaced;
-                p.Replacement = limb;
-                p.ReplacementQuality = Math.Clamp(quality, 0, 1);
-                p.Wear = 0;
-                p.Stun = 0;
-                p.Bandage = 0;
-                p.Rig = 0;
-                p.Flesh = p.MaxHp;
-                p.WasDown = false;
-                return true;
-            }
-        return false;
+        if (LimbPart(limb.LimbSlot) is not { } p) return false;
+        p.Limb = LimbState.Replaced;
+        p.Replacement = limb;
+        p.ReplacementItem = item;
+        p.ReplacementQuality = Math.Clamp((item?.Level ?? 0) * 0.01f, 0, 1);
+        p.Wear = wear;
+        p.Stun = stun;
+        p.Bandage = 0;
+        p.Rig = 0;
+        float top = p.MaxHp;
+        p.Flesh = MathF.Min(top - damage, top);
+        p.WasDown = p.IsDown;
+        return true;
     }
 
     // ------------------------------------------------------------------ KO and death

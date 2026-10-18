@@ -220,6 +220,9 @@ public sealed class CharacterTable
     bool inTick;
     TablePhase phase = TablePhase.Outside;
 
+    /// <summary>Slots whose limbs changed in the tick (a limb cut off): the population system rebuilds their look between ticks.</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<int> LimbsChanged { get; } = new();
+
     public CharacterTable(int capacity = 256)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(capacity, 1);

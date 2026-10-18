@@ -51,7 +51,7 @@ public sealed class SaveBuilder
     // ------------------------------------------------------------------ ids
 
     /// <summary>The next number of a file: one more than the highest numeric id in it.</summary>
-    static int NextNumber(SaveFile file) => file.Records.Count == 0 ? Math.Max(file.Data.NextId, 0) + 1 : Math.Max(file.Data.NextId, file.Records.Max(r => Math.Max(r.Id, SaveGame.NumberOf(r)))) + 1;
+    internal static int NextNumber(SaveFile file) => file.Records.Count == 0 ? Math.Max(file.Data.NextId, 0) + 1 : Math.Max(file.Data.NextId, file.Records.Max(r => Math.Max(r.Id, SaveGame.NumberOf(r)))) + 1;
 
     static string QuickId(int n) => $"{n}-{SaveFolder.QuickSaveName}-INGAME";
 

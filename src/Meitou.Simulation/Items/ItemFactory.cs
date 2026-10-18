@@ -15,6 +15,11 @@ public sealed class ItemFactory(GameDatabase db, GameConstants constants)
 
     public ItemInfo? Info(string recordId) => infos.GetOrAdd(recordId, id => Db.Find(id) is { } r ? ItemInfo.From(r) : null);
 
+    readonly ConcurrentDictionary<string, Meitou.Data.Gameplay.Bodies.LimbReplacement?> limbs = new(StringComparer.Ordinal);
+    /// <summary>The prosthetic data of a LIMB_REPLACEMENT record (null for another record).</summary>
+    public Meitou.Data.Gameplay.Bodies.LimbReplacement? Limb(string recordId) =>
+        limbs.GetOrAdd(recordId, id => Db.Find(id) is { Type: FcsRecordType.LIMB_REPLACEMENT } r ? Meitou.Data.Gameplay.Bodies.LimbReplacement.From(r) : null);
+
     /// <summary>The cheapest food in the data (lowest <c>value</c> per nutrition point, ties by id): the ration an NPC without food is given.</summary>
     public ItemInstance? CheapestFood() => Create(CheapestFoodId() ?? "");
 

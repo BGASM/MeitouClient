@@ -234,8 +234,11 @@ public sealed class CharacterAppearance
         foreach (var attachment in new[] { result.Hair, result.Beard })
             if (attachment is not null) result.AddWorn(attachment, female, worn);
         foreach (var item in worn) result.AddWorn(item, female, worn, materials.GetValueOrDefault(item));
-        foreach (var item in items.Where(i => i.Type is FcsRecordType.ATTACHMENT or FcsRecordType.CONTAINER or FcsRecordType.LIMB_REPLACEMENT))
+        foreach (var item in items.Where(i => i.Type is FcsRecordType.ATTACHMENT or FcsRecordType.CONTAINER))
             result.AddWorn(item, female, worn);
+        foreach (var item in items.Where(i => i.Type == FcsRecordType.LIMB_REPLACEMENT))
+            result.AddLimb(item, female);
+        if (loadout is not null) result.AddLimbs(db, race, female, loadout.Limbs);
 
         // Weapons: the loadout's, else the likeliest: the first entry with quantity > 0 of the hip pool (val1 = 0) and of
         // the back pool (val1 ≠ 0), whose absolute chances make the first one win (docs/characters.md). Then --equip weapons.
@@ -287,6 +290,39 @@ public sealed class CharacterAppearance
         if (result.Hair is not null) result.AddWorn(result.Hair, false, []);
         result.LoadAttachmentPoints(installRoot, race);
         return result;
+    }
+
+    /// <summary>
+    /// The limbs whose natural body vertices are hidden, bit k for limb slot k (docs/characters.md "Hidden body parts": the original's <c>hiddenMask</c> bits 12 to 15, set for
+    /// every limb that is not in its natural state and for every worn LIMB_REPLACEMENT, <c>uses_hide_parts</c>).
+    /// </summary>
+    public int HiddenLimbs { get; private set; }
+
+    /// <summary>
+    /// The non-natural limbs of <paramref name="limbs"/> (<c>FUN_1400d0190</c>, <c>uses_limb_replacement</c>): a stump shows the race's <c>limb replacement</c> entry whose
+    /// <c>slot</c> is 50 + k, a replaced limb its prosthetic (a stump's without one); a crushed limb gets no mesh (the original attaches none for state 3) but stays hidden.
+    /// </summary>
+    void AddLimbs(GameDatabase db, GameRecord race, bool female, IReadOnlyList<LoadoutLimb?> limbs)
+    {
+        for (int k = 0; k < limbs.Count; k++)
+        {
+            if (limbs[k] is not { State: > 0 } limb) continue;
+            HiddenLimbs |= 1 << k;
+            if (limb.State == 3) continue;
+            var record = limb.State == 2 ? limb.Prosthetic : null;
+            record ??= race.GetReferences("limb replacement").Select(r => db.Find(r.TargetStringId))
+                .FirstOrDefault(r => r is { Type: FcsRecordType.LIMB_REPLACEMENT } && r.GetInt("slot") == 50 + k);
+            if (record is not null) AddLimb(record, female);
+        }
+    }
+
+    /// <summary>A LIMB_REPLACEMENT mesh on the body's skeleton (<c>mesh</c> / <c>mesh female</c>); hides its slot's natural limb.</summary>
+    void AddLimb(GameRecord limb, bool female)
+    {
+        if (limb.GetInt("slot") - 50 is >= 0 and < 4 and var k) HiddenLimbs |= 1 << k;
+        string field = female && limb.GetPath("mesh female").Length > 0 ? "mesh female" : "mesh";
+        if (limb.GetPath(field) is { Length: > 0 } mesh)
+            Parts.Add(new CharacterPart { Record = limb, Mesh = mesh, Field = field, Mode = AttachMode.SharedSkeleton });
     }
 
     void AddWorn(GameRecord item, bool female, List<GameRecord> worn, GameRecord? material = null)

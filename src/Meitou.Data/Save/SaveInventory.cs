@@ -49,25 +49,28 @@ public static class SaveInventory
             List<SaveItem>? contents = null;
             if (r.Instances.Count > 0 && byId.TryGetValue(r.Instances[0].Target, out var inner) && inner.RecordType == FcsRecordType.INVENTORY_STATE)
                 contents = Read(byId, inner, depth + 1);
-            items.Add(new SaveItem
-            {
-                BaseId = r.Strings.GetValueOrDefault("base data sid", ""),
-                MaterialId = r.Strings.GetValueOrDefault("material sid", ""),
-                CompanyId = r.Strings.GetValueOrDefault("company sid", ""),
-                Section = r.Strings.GetValueOrDefault("section", "main"),
-                X = r.Ints.GetValueOrDefault("inventory x"),
-                Y = r.Ints.GetValueOrDefault("inventory y"),
-                Quantity = r.Ints.GetValueOrDefault("quantity", 1),
-                Level = r.Ints.GetValueOrDefault("level"),
-                ItemFunction = r.Ints.GetValueOrDefault("item function"),
-                Quality = r.Floats.GetValueOrDefault("quality"),
-                Charges = r.Floats.GetValueOrDefault("charges", 1),
-                Contents = contents,
-                Source = r,
-            });
+            items.Add(ItemOf(r, contents));
         }
         return items;
     }
+
+    /// <summary>The modelled keys of an INVENTORY_ITEM_STATE, with <paramref name="contents"/> for a container.</summary>
+    internal static SaveItem ItemOf(FcsRecord r, List<SaveItem>? contents = null) => new()
+    {
+        BaseId = r.Strings.GetValueOrDefault("base data sid", ""),
+        MaterialId = r.Strings.GetValueOrDefault("material sid", ""),
+        CompanyId = r.Strings.GetValueOrDefault("company sid", ""),
+        Section = r.Strings.GetValueOrDefault("section", "main"),
+        X = r.Ints.GetValueOrDefault("inventory x"),
+        Y = r.Ints.GetValueOrDefault("inventory y"),
+        Quantity = r.Ints.GetValueOrDefault("quantity", 1),
+        Level = r.Ints.GetValueOrDefault("level"),
+        ItemFunction = r.Ints.GetValueOrDefault("item function"),
+        Quality = r.Floats.GetValueOrDefault("quality"),
+        Charges = r.Floats.GetValueOrDefault("charges", 1),
+        Contents = contents,
+        Source = r,
+    };
 
     /// <summary>The records an INVENTORY_STATE reaches: its items and, through containers, their contents' states and items (not the state itself).</summary>
     internal static HashSet<string> Reachable(SaveFile file, FcsRecord inventory)

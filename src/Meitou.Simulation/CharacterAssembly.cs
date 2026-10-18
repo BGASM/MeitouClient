@@ -103,9 +103,11 @@ sealed class CharacterAssembly(PopulationData data)
         cold.Fighter = fighter;
         if (cold.Appearance is not { } look || look.Animal is not null) return;
         var body = look.Loadout?.Appearance.Record ?? look.Body?.Record;
-        if (Saving.SavedKit.LoadoutOf(body, Saving.SavedKit.FromInventory(inventory), data.Db, look.Loadout?.Seed ?? 0) is { } kit &&
-            data.Appearances?.Create(cold.RecordId, kit) is { } updated)
-            cold.Appearance = updated;
+        if (Saving.SavedKit.LoadoutOf(body, Saving.SavedKit.FromInventory(inventory), data.Db, look.Loadout?.Seed ?? 0) is { } kit)
+        {
+            Saving.SavedKit.SetLimbs(kit, cold.Medical, data.Db);
+            if (data.Appearances?.Create(cold.RecordId, kit) is { } updated) cold.Appearance = updated;
+        }
     }
 
     /// <summary>
