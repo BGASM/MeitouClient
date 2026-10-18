@@ -90,6 +90,10 @@ without the list that storey and the Watchtower `2-Newwworld-INGAME` floors +130
 using that width as the crossing direction leaves Shark's Swamp House `321-Newwworld-INGAME` room unseeded.
 Its platform has overlapping upward faces near Y122/133; the lower face lacks headroom. A zone21.42 route from
 (-47010,133,48970) to (-46960,133,49005) crosses its doorway with the corrected markers/floor selection (`meitou-tools navmesh`).
+**Door joins** (engine choice): an interior's door polygons link to the exterior's door polygons of the same door; when none face them,
+to any kept exterior polygon facing their open edges. **Observed** (zone18.35): the L-House `13-rebirth-INGAME` and `15-rebirth-INGAME`
+door leaves sit 5..14 inside the interior hull, so the hull-carved exterior got no door polygons and the rooms were sealed.
+`29-rebirth-INGAME`'s door (Y365..380) has no exterior surface within reach (ground and steps end ~352): still sealed.
 **Inner seams** (engine choice): Recast welds polygon vertices only within 2 height cells, and a step's corner height can come out
 differently on each side, so a stair foot and the ground beside it can share an X/Z edge without being neighbours. The stitcher
 joins open edges of one tile that coincide reversed and are within the climb at both ends. **Observed** (zone 21.42, `meitou-tools navmesh`):

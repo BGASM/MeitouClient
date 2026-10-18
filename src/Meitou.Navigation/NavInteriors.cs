@@ -81,17 +81,34 @@ internal static class NavInteriors
             var outside = Enumerable.Range(0, exteriorCount).Where(p => kept[p] && areas[p] == NavArea.Door && doorOf[p] == door).ToList();
             // An edge that faces several polygons links to all of them, so which edges are open is decided before any link is added.
             var openInside = inside.SelectMany(p => Enumerable.Range(0, polygons[p].Length).Where(e => Free(p, e)).Select(e => (p, e))).ToList();
-            var openOutside = outside.SelectMany(q => Enumerable.Range(0, polygons[q].Length).Where(f => Free(q, f)).Select(f => (q, f))).ToList();
+            if (Link(openInside, OpenEdges(outside), "") > 0) continue;
+            // A door leaf set back inside the interior hull paints nothing outside it (the exterior is carved to the hull): the doorway's interior
+            // polygons meet the exterior's ground along the hull's edge (Observed: the L-House 13-rebirth-INGAME, zone 18.35).
+            var lo = new Vector2(float.MaxValue); var hi = new Vector2(float.MinValue);
+            foreach (int p in inside)
+                foreach (int i in polygons[p]) { lo = Vector2.Min(lo, new(v[i].X, v[i].Z)); hi = Vector2.Max(hi, new(v[i].X, v[i].Z)); }
+            lo -= new Vector2(JoinDistance); hi += new Vector2(JoinDistance);
+            var near = Enumerable.Range(0, exteriorCount).Where(q => kept[q] && areas[q] != NavArea.Null && polygons[q].Any(i => v[i].X >= lo.X && v[i].X <= hi.X && v[i].Z >= lo.Y && v[i].Z <= hi.Y));
+            Link(openInside, OpenEdges(near), " (doorway edge)");
+        }
+
+        List<(int, int)> OpenEdges(IEnumerable<int> outside) => [.. outside.SelectMany(q => Enumerable.Range(0, polygons[q].Length).Where(f => Free(q, f)).Select(f => (q, f)))];
+
+        int Link(List<(int, int)> openInside, List<(int, int)> openOutside, string kind)
+        {
+            int joined = 0;
             foreach (var (p, e) in openInside)
                 foreach (var (q, f) in openOutside)
                 {
                     var a0 = v[polygons[p][e]]; var a1 = v[polygons[p][(e + 1) % polygons[p].Length]];
                     var b0 = v[polygons[q][f]]; var b1 = v[polygons[q][(f + 1) % polygons[q].Length]];
                     if (!Facing(a0, a1, b0, b1)) continue;
-                    log?.Invoke($"    door join {doorIds[door]}: interior polygon {p - first} edge {e} to exterior {q} edge {f}");
+                    log?.Invoke($"    door join {doorIds[doorOf[p]]}{kind}: interior polygon {p - first} edge {e} to exterior {q} edge {f}");
                     (links[p] ??= []).AddRange([e, q]);
                     (links[q] ??= []).AddRange([f, p]);
+                    joined++;
                 }
+            return joined;
         }
     }
 
