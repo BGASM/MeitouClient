@@ -3,7 +3,7 @@
 Original building classes/function IDs, records, construction/producer/power/storage/farm/research
 binary research; field/constants tables and expressions retained. Placement: [zones](../formats/zones.md),
 prices/stock: [economy](economy.md). Meitou construction contract: [simulation](../simulation.md#buildings);
-production/research gameplay is incomplete.
+Meitou production: [simulation](../simulation.md#production).
 
 ## Construction
 
@@ -241,33 +241,47 @@ Stats panel (`FUN_1404df450`): "Materials cost:" (each `construction` item and a
 `power capacity`, Num People (`max operators`), Produces (`produces`, `output rate`), Efficiency, Damage, Training max
 and Turrets bonus (their formulas **Unknown**).
 
+## Classes and functions
+
+The factory `FUN_14057cc70` picks the class from the functionality's `function` (**Observed**): `Building` ->
+`UseableStuff` -> `StorageBuilding` -> `ProductionBuilding` -> `FarmBuilding`, `CraftingBuilding`, `FurnaceBuilding`,
+generators, `RainCollectorBuilding`; `ResearchBuilding` beside them. `BuildingFunction` (**Verified**, editor enum `BF_*`):
+0 ANY, 1 MINE, 2 RESOURCE_STORAGE, 3 RESEARCH, 4 REFINERY, 5 GENERATOR, 6 BED, 7 TRAINING, 8 CAGE, 9 SHOP, 10 CRAFTING,
+11 CORPSE_DISPOSAL, 12 TURRET, 13 GENERAL_STORAGE, 14 ITEM_FURNACE, 15 LIGHT, 16 TABLE, 17 CHAIR, 18 FLUFF,
+19 SHELL_WITH_INTERIOR, 20 WALL, 21 GATE, 22 DOOR, 23 BATTERY, 24 THRONE, 25 SKELETON_BED, 26 RAIN_COLLECTOR,
+27 MINE_NATURAL, 28 STEERING, 29 ENGINE, 30 LIQUID_TANK. `MiningResource` (**Verified**): 0 NONE, 1 IRON, 2 STONE,
+3 COPPER, 4 CARBON, 5 WATER, 6 GROUND. A farm is function 1 with `world resource mining` 6 and a BUILDING `farm data`
+reference (FARM_DATA); a well is function 1 with resource 5 (**Verified**, probe: `farming wheat`, `well`).
+
+**Constants** (**Verified**, CONSTANTS loader `FUN_14086b2b0`): `production speed` P = 2, `research rate` 0.3,
+`research level increase rate` 1.3. G = the day length at speed 1, 2618.18 s (`FUN_14066cd50`, the exe's float); per-day
+data rates are divided by G, per-hour by G/24. dt = the scaled frame time. The option sliders (production `142133590`,
+research `14213358c`) default **Unknown**; 1 below.
+
 ## Production
 
-Producer/crafter consumes input recipe quantities, worker/skill/race/research/environment and
-functionality rate, then creates output with quality/manufacturer rules. Crafting queue,
-storage/output capacity and machine operation are distinct. Keep stateful progress and
-availability tests; do not infer all rates from the displayed output-rate tooltip. Farming
-fertility, water, crop growth, harvest/yield and labour differ from a generic machine.
+**Per operator and frame** (**Observed**, `ProductionBuilding::vfunc_150` `FUN_140298700`, called by
+`Task_OperateMachine` `FUN_14035bc90` with the operator's skill factor s):
+`amount = yield x outputRate x upgrade x dt x P x health x powerSat x s x option`. Several operators add up.
+- s = `lerp(stat/100, 0.5, 1.4)` of the effective stat `stat used` (`FUN_1408852a0`; 1 without an operator; the lerp
+  helper `FUN_140015b63` is `a + (b - a) t`).
+- outputRate = BUILDING `output rate` x functionality `production mult`; with `output per day`, / (2G) (loader
+  `FUN_14029e7b0`). So a building makes `output rate x production mult x P/2 x s` cycles per game day.
+- yield (slot 120 via offset `0x46c`): 1 without `world resource mining`; else the resource at the position
+  ([resources](#resources)), 0 replaced by 0.5 for a non-natural site, at least 0.1 for a natural one.
+- health x powerSat (slot 109): health `min(1, hp/max)`; powerSat the granted share of the demand, 1 with no demand.
+- upgrade = the research `production mult` of the building ([research](#research)), default 1.
 
-## Power, storage and research
-
-**Observed** power-output is data plus additive research increase; capacity is data plus increase,
-then health fraction. Positive generates, negative consumes. Wind/fuel and battery output/capacity
-are separate. Town sums supply/reserve, fairly shares remaining power among consumers and uses
-batteries for deficit/charges from surplus. Minimum powered share and wind/fuel units remain
-unknown. Tested base generator/battery values remain in data/source checks, not universal defaults.
-
-**Verified** inventory-building survey87/603; default inventory18x18, itemtype-limit4. Storage
-filters and stack bonuses apply separately from character backpacks. Research owns tech levels,
-prerequisites, costs/progress, unlock/improvement effects and blueprints; money prices are in
-[economy](economy.md). Additive versus multiplicative improvement semantics must be decoded per
-field. Building operational state, ownership and saved progress: [save](../formats/save.md). Cages, beds,
-doors and lockable containers: [locks](locks.md).
-
-### Production and crafting
-
-Main functionalities in the base game (**Verified**, probe of the functionality table: `production mult` and `output
-per day`; all those listed have `output per day` true except crafting benches, power, battery and the furnace):
+**Recipes** (**Observed**, loader `FUN_14029e7b0`). Each `consumes` entry (item, v0, v1) is an input: section `in<k>`
+of the building's inventory limited to v0, a level float (starts 0) and a rate v1/100. Each cycle the inputs lose
+`amount x rate` from their level, refilled by taking one item of the section (+1 level each, slot 180). The `produces`
+first entry is the output: section `out` of the item's footprint, capacity v0 items, a progress float. `vfunc_185`
+clamps amount to what the inputs hold and to `capacity - held - progress`; nothing left: status 1 (output full) or 0.
+Else status 2, inputs drawn, progress += amount; each time progress >= 0.999 one output item is added and progress is 0
+(`vfunc_184` `FUN_1402984b0`). Example: well (Water 10, production mult 48, `output rate` 0.75) at s 1: 36 water/day,
+holding at most 10. Save (`vfunc_17`/`18` `FUN_1402a1fa0` / `FUN_1402a23a0`, **Observed**): floats `production amount`
+(output progress), `resource mult` (yield), `mining resource level` (natural sites only), `consumption amount-<k>`
+(input levels); the items are in the building's INVENTORY_STATE.
 
 | function | examples (production mult) |
 |---|---|
@@ -280,15 +294,94 @@ per day`; all those listed have `output per day` true except crafting benches, p
 | 23 BATTERY | battery 0.00125 |
 | 26 RAIN_COLLECTOR | 48 |
 
+**Crafting** (**Observed**, `FUN_1402b5a40`): the same factors / the recipe duration (`craft time hrs` / P); quality roll
+`FUN_1402b5900` (**Unknown**).
+
+### Resources
+
+(**Observed**, `FUN_140a13540`, `FUN_140a12ff0`.) The BIOME_GROUP at the position (areas map) names an
+ENVIRONMENT_RESOURCES record (`resources`). WATER and GROUND use the prefix `water` / `farming`: band = 1 between
+`<p> altitude min` and `max` (height y), ramping to 0 over `<p> altitude fade` below the min and above the max, else 0;
+value = band x `<p> mult` + `<p> min`. STONE uses a noise field (`stone noise zoom`, `cutoff`); IRON/COPPER/CARBON need a
+resource node within 1500 (falloff from the node radius, at least 25). The farm efficiency also reads the record's
+`arid`, `green`, `swamp` coverages (crop types 2, 1, 3).
+
+## Farming
+
+`FarmBuilding` (ctor `FUN_1400e8420`, tick `vfunc_28` `FUN_1400e5580`, harvest `vfunc_150` `FUN_1400e59e0`, save
+`vfunc_17`/`18`; all **Observed** by decompile). FARM_DATA fields (**Verified**, probe; Wheat Farm 25): `amount` 25
+plants, `growth time` 22 h, `harvest time` 48 h, `death time` 8 h, `drought death time` 48 h, `drought multiplier` 0,
+`death threshold` 0.4, `consumption rate` 2 /day, `harvest rate` 256 /day, `clear rate` 500 /day, `output per plant` 1,
+`fertility effect` 0.25, `minimum fertility` 0, crop weights `arid` 0.5 `green` 1 `swamp` 0, `inside`; layout `spacing`,
+`jitter`, `aspect`, `layout`, `plants` (part records with v1 a growth percentage).
+- **Setup**: water rate w = `consumption rate`/G x the biome group's `farm water usage` (Desert 8, most 1, Floodlands 0.1);
+  harvest and clear rates / G; harvest time at least 1e-6; indoor = `fertility effect` 0; every input's rate is 1.
+  Fertility factor F = `1 - (1 - f) x fertility effect`, 0 when f <= `minimum fertility`, f the GROUND resource
+  (`FUN_1400e4320`, `vfunc_91`); F is also the yield.
+- **Plants**: each has a growth g. Replant (`FUN_1400e48e0`): every g = -0.2 x U[0,1), `plant start` = their minimum,
+  `plants harvested` 0, death d 0, clear progress 0, harvest progress 0, farm growth = `plant start`.
+- **Tick**, h = dt/(G/24): outdoors, rain fills each input level by `rain x w x dt x 3` (to 1 at most). Water draw
+  (`FUN_1400df4c0`): an input whose level is below `w x dt` takes one item from its section, or fails (level 0); then
+  level -= `w x dt`. Growth step `inc = h x F / growth time`, x `drought multiplier` when the draw failed, x health x
+  powerSat when the building uses power. Farm growth < 1: each plant with -1 <= g < 1 gains inc; farm growth = the
+  lowest such g, capped at 1. 1 <= growth < 2: growth += h / `harvest time` (ripe; at 2 it rots). Growth >= 2:
+  d += h / `death time`. While 0 < growth < 1 and `drought death time` > 0: a failed draw adds h / `drought death time`
+  to d, a good one takes it off while 0 < d < 0.6. d >= 1 or every plant harvested: replant.
+- **Harvest** (an operator, skill factor s): when growth >= 1, d < `death threshold`, not every plant harvested and the
+  output is not full, harvest progress += health x powerSat x P x dt x s x harvest rate. At 1: the output gets, per whole
+  unit of `output per plant`, one item with probability e (the fraction rolled once); the plant's g = -10, `plants
+  harvested` += 1; the work point moves to the next plant. No room: status 1. A crop of zero items floats "Failed".
+  e (`FUN_1400dfe10`) = `clamp01(lerp(farming/100, 0.5, 2))` x C x F, C = sum of the farm's crop weights x the biome
+  coverages (1 indoors), farming the operator's effective stat (**Verified**: the 0.01 at `141682ad8` and the call order).
+- **Clearing**: d >= `death threshold`: clear progress += health x powerSat x P x dt x s x clear rate; at 1 one plant is
+  cleared as if harvested.
+- **Status** (`+0x468`): 3 growing with water, 0 no water, 2 harvestable or dead, 1 output full.
+- **Save** (GAMESTATE_BUILDING, after the [production keys](#production)): floats `plant growth` (farm growth), `plant death` (d),
+  `plant start`, `save time` (game hours); int `plants harvested`. A load with more than an hour since `save time`
+  simulates the gap (`FUN_1400df6e0`); with no farm keys, growth is random (`FUN_1409b1c10`).
+
+## Research
+
+`ResearchBuilding::vfunc_150` (`FUN_14029b8d0`, **Observed**): an operator of a player-owned bench posts event 8 with
+`outputRate x upgrade x health x powerSat x s` (s from `stat used` 4, science); the dispatcher `FUN_1407b65b0` passes it
+to `FUN_140836b70`: contribution k of the frame is x 0.6^k (counter `+0x174`, cleared with the rate readout by
+`FUN_14082e690`), the queue's first item gains contribution x dt seconds and completes past
+`hours x G/24`, hours = `time x 0.3 x 1.3^(level - 1) / option` (`FUN_14082ed10`). Benches: `output rate` 0.85, 0.9,
+0.95, 1.0, 1.05, 1.1 (I to VI); functionality `tech level` 1 to 6; power 0, 0, -10, -15, -25, -30 (**Verified**, probe).
+- **Levels** (**Observed**): the manager's tech level starts 1; each finished `is level upgrade` research of `level` L
+  raises it to L+1 (`FUN_140830880`). A complete player bench raises the bench level to its `tech level`
+  (`FUN_14029be00` -> `FUN_140834390`). Available (`FUN_1408333b0`): not `blueprint only`, not finished or queued,
+  `level` <= tech level, requirements met (a RESEARCH finished, a BUILDING unlocked; `FUN_140830490`, engine reading
+  of a garbled decompile), grouped by `category`.
+- **Queue** (`FUN_1408348a0`): needs `level` <= bench level (`FUN_140830a30` names the missing level) and the cost
+  paid (`FUN_1408343c0`): `cost` items (x `repeat mult` per repeat, `FUN_1408320a0`) summed over the inventories of the
+  player's research benches near the player (`FUN_14082e750`, `FUN_14082e810`), then removed; a paid id is remembered and
+  never charged again. Partial progress is kept when an item leaves the queue.
+- **Complete** (`FUN_140834550`): leaves the queue, joins the finished set, `improve buildings` applied
+  (`FUN_140831a60`: `production mult`, additive `power increase`, `power capacity increase` per listed building), lists
+  rebuilt, message "Research complete: {1}", sound `Thing_Complete`.
+- **Tech levels** (**Verified**, probe): Tech Level 2 time 4 (6 Book, requires Small House), 3 time 10 (10 Book),
+  4 time 16 (4 Ancient Science Book), 5 time 24 (8 Ancient Science Book), 6 time 32 (2 AI Core), each after the previous.
+- **Save** (RESEARCH record, `FUN_1408310b0` / `FUN_1408360f0`): floats `num currents`, `num finished`; strings
+  `current<k>` (queued id), floats `current prog<k>` (seconds), strings `finished<k>`; a third string list (prefix at
+  `14171dd08`, **Unknown**).
+- **UI**: the overview window's ResearchTab (`ResearchTypeList`, `ResearchQueueList`, `ResearchBenchMessage`, description
+  panels); the bench's `Kenshi_InventoryResearchWindow` (`ResearchButton`); HUD `ResearchProgressBar`; header
+  "RESEARCH - LEVEL {1} (CURRENT RATE: {2}x)" (`FUN_140494af0`).
+
+## Power and storage
+
+**Observed**: a building's power is data `power output` plus research `power increase`; capacity data plus increase, x
+health. A town shares generator supply among consumers max-min fairly, batteries cover the shortfall and charge from
+surplus (`Town::vfunc_87` `FUN_14092cd60`). Wind fraction, fuel units and the minimum powered share are **Unknown**.
+Storage (**Verified**, 603 buildings): 87 have `has inventory`; default 18 x 18, `itemtype limit` 4; `stackable bonus
+mult` 1 to 100000; `limit inventory` restricts the items. Locks and containers: [locks](locks.md).
+
 ## Unknowns
 
 - How often Building slot 28 resets the builder counter, the work distance of builders, which storages
   `Task_EmptyMachine_BuildMats` fetches from, and what `FUN_14025c6d0` (holding dismantle work) tests.
 - Event types of the queue at `DAT_1421346d8` other than 8 (research progress) and 11 (build work).
-- The unit and exact use of generator fuel burn (`production mult` 0.00125) and of the wind fraction.
-- The crafting quality curve (`FUN_1402b5900`), the unit conversion between `craft time hrs` and the per-tick
-  crafting amount, and the minimum power share for "powered".
-- Default values of the three option sliders and whether they multiply or divide in every use.
-- Meaning of the percentage and flag of consumes / produces reference triples.
-- Whether the 0.6^k research falloff counter is reset per frame (per call is what the code shows).
-- The argument `p` of the farm efficiency `FUN_1400dfe10`, and the record field that carries `BuildingClassType`.
+- Generator fuel and wind units, the minimum powered share, the crafting quality curve and `craft time hrs` units.
+- Option slider defaults; the third value of reference triples; the record field of `BuildingClassType`.
+- The farm plant layout (`spacing`, `jitter`, `aspect`, `layout`) and the parts' growth thresholds (`FUN_1400e7a70`).
