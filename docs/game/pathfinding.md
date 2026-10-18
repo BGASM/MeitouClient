@@ -93,7 +93,10 @@ Its platform has overlapping upward faces near Y122/133; the lower face lacks he
 **Door joins** (engine choice): an interior's door polygons link to the exterior's door polygons of the same door; when none face them,
 to any kept exterior polygon facing their open edges. **Observed** (zone18.35): the L-House `13-rebirth-INGAME` and `15-rebirth-INGAME`
 door leaves sit 5..14 inside the interior hull, so the hull-carved exterior got no door polygons and the rooms were sealed.
-`29-rebirth-INGAME`'s door (Y365..380) has no exterior surface within reach (ground and steps end ~352): still sealed.
+When neither joins, the interior polygons connected to the door polygons within 32 units of them join the exterior polygons their open
+edges face: a raised sill reached by steps (~47..52°) that cross the hull, whose lower part is the exterior's (cut at the hull: Y351 for
+`29-rebirth-INGAME`, door Y365..380; Y418 for `27-`, door Y430..441) and upper part the interior's, meeting on the hull's edge.
+**Observed** (zone 18.35, scratch probe): both rooms reached from the street; no other door in 18.35, 19.29, 20.29, 20.32, 21.32, 21.42 needs it.
 **Inner seams** (engine choice): Recast welds polygon vertices only within 2 height cells, and a step's corner height can come out
 differently on each side, so a stair foot and the ground beside it can share an X/Z edge without being neighbours. The stitcher
 joins open edges of one tile that coincide reversed and are within the climb at both ends. **Observed** (zone 21.42, `meitou-tools navmesh`):
