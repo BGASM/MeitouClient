@@ -117,7 +117,7 @@ sealed class CharacterAssembly(PopulationData data)
     /// </summary>
     public void AttachSaved(CharacterCold cold, RaceData race, CharacterStats stats, MedicalState medical, GameRecord? record, Inventory? inventory = null)
     {
-        cold.NpcClass = NpcClassOf(record);
+        cold.NpcClass = NpcClassFor(cold, record);
         cold.Race = race;
         cold.Stats = stats;
         cold.Medical = medical;
@@ -137,6 +137,10 @@ sealed class CharacterAssembly(PopulationData data)
     /// CHARACTER <c>NPC class</c> (<b>Verified</b>, carry-loot.md 4.3: read by <c>FUN_14062b210</c>, the editor's CharacterTypeEnum, <c>fcs.def</c> default MILITARY); None without a
     /// CHARACTER record (an animal's ANIMAL_CHARACTER, or nothing).
     /// </summary>
+    /// <summary>The record's <c>NPC class</c>, except that a player-faction character is an Adventurer (9), as the original sets it when the character is made (<c>FUN_14062b210</c>).</summary>
+    FundamentalType NpcClassFor(CharacterCold cold, GameRecord? record) =>
+        cold.IsPlayer || (data.PlayerFaction >= 0 && cold.Faction == data.PlayerFaction) ? FundamentalType.Adventurer : NpcClassOf(record);
+
     public static FundamentalType NpcClassOf(GameRecord? record) =>
         record is { Type: Meitou.Data.Fcs.FcsRecordType.CHARACTER } ? (FundamentalType)record.GetInt("NPC class", (int)FundamentalType.Military) : FundamentalType.None;
 
@@ -146,7 +150,7 @@ sealed class CharacterAssembly(PopulationData data)
     /// </summary>
     public void Attach(CharacterId id, CharacterCold cold, ref CharacterHot hot, GameRecord? record, GameRecord? race, ulong seed, float age = 1)
     {
-        cold.NpcClass = NpcClassOf(record);
+        cold.NpcClass = NpcClassFor(cold, record);
         if (race is null) return;
         var (raceData, stats, medical) = data.Bodies.Create(race, record, seed, Rng.Key(id), age);
         cold.Race = raceData;

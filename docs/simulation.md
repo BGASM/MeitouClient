@@ -713,10 +713,13 @@ to the next tick. A hostile target is attacked instead.
   [campaigns](game/factions-squads-towns.md#campaigns); `world state` conditions read the live states), recruiting (DA 3 / 18, `DialogueSystem.Recruit`); the rest is
   listed in [dialogue](game/dialogue.md#meitou-design).
 - **Recruiting** ([facts](game/dialogue.md#recruiting)): at the `max faction size` cap the line "It looks like your squad is a little full." is
-  posted and the conversation ends; otherwise the speaker leaves its squad (its leader passes to the first member left) and joins the talking
-  character's squad as a player character: player faction, role Squad1, player default orders, no AI mind, stopped, its save link dropped (a save
-  writes it as a new member of the player's platoon). DA 3 ends the conversation and opens the editor in recruit mode (`EditKind.Recruit`: free,
-  race and gender kept). Engine gaps: the squad-size overflow call, the recruit's dialogue package, the unknown fields and the item field.
+  posted and the conversation ends; otherwise the speaker leaves its squad (its leader passes to the first member left) and joins the player's
+  active squad (the first selected player character's, else `Player.Squad`, else the talker's), or a new "blank squad" squad when that one has
+  `max squad size` members: player faction, role Squad1, NPC class Adventurer (as every player-faction character, `CharacterAssembly`), player
+  default orders, speed mode Free (2), no AI mind, stopped, its save link dropped (a save writes it as a new member of the player's platoon).
+  Its dialogue becomes the player set (`DialogueDatabase.SetFor`). DA 3 ends the conversation and opens the editor in recruit mode
+  (`EditKind.Recruit`: free, race and gender kept). Not modelled: the original's extra empty platoon at the `max squads` cap, and the
+  uniform clear (Meitou has no uniforms).
 - **Conditions**: most DCs are computed; those needing state Meitou lacks (squad memory flags beyond "met", building locks, slavery, walls,
   missions, the personality functions, tech level, ranks) compute "no". `met` and "last seen" come from finished conversations (per squad). IN_MY_BUILDING uses the squad's home building and the lock rounds' extent.
 - **Speech bubbles**: `WorldSnapshot.Speech` lists the lines on show (`SpeechBubble`: speaker, text, large font); `PlayerInterface.DrawSpeech` draws them over the head. Sources and engine choices: [dialogue](game/dialogue.md#meitou-design).

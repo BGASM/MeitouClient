@@ -328,11 +328,17 @@ squad simply takes the speaker in, unless a target flag at +0x1d0 is set):
 - **Cap**: refused (the "little full" line) when the player faction already has CONSTANTS `max faction size` characters (30 in the base
   data). The three CONSTANTS limits sit side by side: `max squad size` (20), `max squads` (10), `max faction size`; the HUD's
   "{1,num}/{2,num}" counters show the faction and squad counts against the first and last.
-- When the recruits would push the active squad past `max squad size` while `max squads` squads exist, a faction call runs first
-  (`FUN_1407f4420`; what it does is **Unknown**).
-- **Each recruit**: joins the player faction (character vfunc +0xa0), two fields are set (+0x20 of a member at 200 = 2, +0xdc of one at
-  0x34 = 9; meaning **Unknown**); a character without its own dialogue package gets its record's `dialogue package player` (none: the
-  faction's `dialog default`) as its dialogue; one field of every inventory item is cleared (+0x1e8, **Unknown**, possibly the owner).
+- **Which squad**: the character leaves its platoon and the player faction's member add (`Faction::vfunc_5` → `FUN_1406b9c60`) puts it
+  into the player's active squad (`FUN_1407f5520`: the cached selection squad, else the faction's first platoon), or, when that squad
+  already holds `max squad size` members, into a new platoon of the SQUAD_TEMPLATE "blank squad" (`FUN_1407f4420`: made, added to the
+  faction's platoon list at +0x210/+0x218). No `max squads` check there.
+- **Before the loop**, when the active squad's count plus the recruits exceeds `max squad size` and the faction already has `max squads`
+  platoons, `FUN_1407f4420` also makes one platoon of the active squad's template (disassembly `1407ff928`-`1407ff978`); the recruits
+  still go through the rule above, so that platoon stays empty (**Observed**, static).
+- **Each recruit**: speed mode set to 2 (RUN; the same field DA 23 writes), NPC class (`+0x1a0 -> +0xdc`) set to 9 ADVENTURER (the
+  value every player-faction character gets when made, `FUN_14062b210`); a character without its own dialogue package (+0x248) gets
+  its record's `dialogue package player` (none: the player faction's `dialog default`) as its dialogue; every armour piece it carries
+  loses its `uniform` faction (Armour+0x1e8, [economy](economy.md#5-runtime-unit-price-item-virtual-slots-81-and-82) prices uniforms at 0.3x).
 - DA 3 then opens the character editor on the recruits (mode 1, [characters](../characters.md#character-editor)) and selects the first.
 - **Verified** (base data scan, 2026-10-18): 332 DIALOG_ACTION records of DA 3 / 18, used by 250 lines in 125 dialogues (hire offers
   such as "hire me 2500", freed prisoners and escaped slaves asking to join, unique recruits such as Crumblejon), reached from mercenary

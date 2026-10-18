@@ -323,8 +323,9 @@ RACE `buy value` is 100 for most races (27 of 53 records); other values in the d
   `+0x140` is the owner the item was taken from, `+0x160` its current holder (a backpack's owner for a backpack); stolen = the from-owner is set,
   differs from the holder and is of another faction, unless the holder's faction is lawless; the type list is the lootable item kinds. Expiry and
   the halving condition remain open.
-- **The meaning of `Armour+0x1e8`** (non-null multiplies the armour price by the hard-coded 0.3) and of `Weapon/Armour+0x208`
-  (inferred as "crafted by the player" from the editor text of the two player rows; not shown by a writer).
+- **The meaning of `Weapon/Armour+0x208`** (inferred as "crafted by the player" from the editor text of the two player rows; not shown by a writer).
+  `Armour+0x1e8` is the armour's `uniform` faction (**Observed**: `Gear::vfunc_76` reads the item state's `uniform` string into it; the
+  recruit join clears it), so a uniform sells at 0.3x. Meitou does not track uniforms yet.
 - **Whether the town being set up is already in the global town list `DAT_142134100` when its own market factors are rolled.**
   If it were, its distance to itself is 0, the spread `w` is 0 and its own `p` is 1.0, which would force every factor to 1.0 and
   make the feature inert; so either the town is added after setup or something not yet seen intervenes. The order of the list
