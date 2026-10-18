@@ -62,7 +62,7 @@ which are descriptive (RTTI knows `MessageBoxManager::Box`; the constructor of a
 | ProspectingWindow | 14049c2e0 | Kenshi_ProspectingWindow | Window | resource lines (`Kenshi_ProspectingWindowResourceLine`) |
 | CharacterStatsWindow | 1408ba700 | Kenshi_StatsWindow | Window | Attributes, Skills1..4, Statistics, Description1/2 data panels |
 | Inventory (character) | 1401538e0 | inventory layouts | Window | slots: back, shirt, head, legs, boots, armour, main weapon, hip weapon, belt, backpack_attach, ARRANGE, LIMBS |
-| Inventory variants | 140154cd0 generic, 140154f80 generic fixed, 140155220 animal, 140155910 research, 140155ee0 trader, 140155f90 building, 1401573d0 limbs | | Window | container contents |
+| Inventory variants | 140154cd0 generic, 140154f80 generic fixed, 140155220 animal, 140155910 research, 140155ee0 trader, 140155f90 building, 1401573d0 limbs | | Window | container contents; which building opens which: [selected building](#selected-building) |
 | CharacterTradingWindow / Box | 14072a880 / 14072a070 | Kenshi_CharacterSelectionWindow / Box | Middle | character picker for trade ([economy.md](economy.md#12-slaves-prisoners-animals)) |
 | DialogueWindow | 140725740 | Kenshi_ConversationPanel | Middle | portraits, names, dialog line, money ([dialogue](dialogue.md#ui)) |
 | DialogueSpeechBubble | 140725f30 | Kenshi_SpeechPanel | Dialog | floating speech ([dialogue](dialogue.md#ui)) |
@@ -153,6 +153,61 @@ to Jobs, independent of the saved `chase mode` flag whose relationship is **Unkn
   built the index is 0 (Walk) until the first refresh. **Verified**: `kenshi_images.xml`, the panel's name list in FUN_14072b540 (exe bytes
   `Run`/`Jog`/`Walk`), arrows FUN_140722580 / FUN_140722630, apply FUN_140722500, refresh FUN_140726930. While any selected
   character's state at +0xe0 is 1 the arrows re-apply without stepping (FUN_1407f3a20); what that state is is **Unknown**.
+
+### Selected building
+
+How a building gets selected: [ui-input](ui-input.md#building-picking-and-selection). **Observed** (decompile) unless noted.
+
+- **HUD panels.** The text panels are DatapanelGUIs bound to the focus object (`FUN_1406e91e0`), so a selected building (a house: its first
+  door) fills the panels a character would. Each panel has a section number (HUD constructor `FUN_14072d3b0`, panel slot 24): `NameText`
+  ("Name") 5, `StateText` ("Info") 3, `StatsText` ("Stats 1") 6, `ExtendedStatsText` ("Stats 2") 7, `MedicalPanel` 0x10. A panel
+  asks the object's slot 40 for its section (`FUN_1406fa7f0`). Building slot 40 (`FUN_140301840`) answers:
+  - 5: slot 113 (`FUN_1402fdea0`): the building's name left; right the owner faction's name, the player's faction always, another
+    faction only when the building is in a town that passes slot 0x340 and town+0x111 is clear, else empty.
+  - 3: `Type:` the record's name when it differs from the building's name, `Town:` the town's name, then the upgrade lines (slot 116:
+    Upgrade / Upgrades To: / Downgrade To:, power) and the construction buttons (slot 117 `FUN_1402fea10`: `Dismantle`, `PAUSE CONSTRUCTION`,
+    `[PAUSED]`; Dismantle confirmations in `FUN_14054db30`).
+  - 6: `Open to public:` coloured `Public` / `Private` for another faction's building; for the player's own building with +0x1f0 set (taken to be its
+    interior) a `Kenshi_Button2` toggle. `For sale:` `c.{price}` (price × `building cost mult`) with a button when slot 88 is true.
+  - 4 (status from slot 114 `FUN_1402fe040`: Normal / Broken / Under construction with a tooltip; slot 115 `FUN_140302380`: `Condition` bar,
+    `{1,num}/{2,num}` materials, "The building is under construction and at {1,num}% completion.") is asked by no HUD panel (**Unknown**
+    which panel shows it in the decompile). 7 gives nothing for buildings.
+  **Observed** (the owner's screenshot of a town house, base game): the medical panel does show a selected building: the header word
+  (`Normal`) and `LifeBar` rows `Door Condition` 10 and `Building Condition` 5, full yellow bars (the number is the current value, the
+  bar its fraction of the maximum, `FUN_140302380` / `FUN_140547200`; where the values come from is **Unknown**). The name bar read the
+  state's own name ("Big Shop") left and the owner faction ("Swampers") right; the info panel `Type:` (the record's name, "Swamp Shack") and
+  `Town:`; the stats panel `Open/Close:` "The door is open", `Security:` "Unlocked (lvl 47)" and `Open to public:` "Public", values pale green.
+  **Observed** (game data, not the decompile): many shop states carry a generic name (`Shop`, `Big Shop`, `General Shop`, `Bar`); what the
+  building is lives in the SQUAD_TEMPLATE named by the state's `squad template`: `building name` ("The Dancing Skeleton") and, for a
+  trader, its `vendors` VENDOR_LISTs ("medical and travel supplies"). The owner's screenshot shows "The Dancing Skeleton" in the name
+  bar with `Type:` the record. Meitou names the building from `building name` when set, and, in the Meitou UI mode only, a trader's shop whose
+  state name is only its layout's generic one ("Shop") from its first vendor list ("Medical and travel supplies"); the Faithful UI keeps "Shop".
+  Meitou shows the header word (Normal, Broken, or a site's construction state) and no condition rows (it models no building health); Open to
+  public is the state's `is public day` / `is public night` for the time of day (**Observed** reading), for another faction's buildings only.
+- **Door** (DoorStuff slot 40 `FUN_140304120`), then the house's own lines of the same section: 4 `Door Condition`; 6 `Open/Close:` with
+  "The door is open / closed / broken" and `Security:` `Locked` / `Unlocked` and `lvl {1,num}`, with tooltips. For the player's own door both
+  lines are `Kenshi_Button2` buttons: Open/Close runs `FUN_140546fb0`, Security `FUN_140547060` ([locks](locks.md#doors); **Verified**: the
+  delegates' thunks `140018c69` / `140051faa` jump to them, exe bytes); for others plain text.
+- **Beds, cages, containers, lamps** (Useable / Storage / Light slot 40 `FUN_140304e90`): 3 `Town:`, `Training:` (function 7), `Cost to use:`
+  `Private` or `Pay c.{1,num}` (beds), `Lock state:` Locked / Unlocked, `Lock complexity:` `Level {1,num}`, `Empty`; 6 `Healing bonus:`
+  `x{1,num}` (beds), `Max Skill Level:` (training); 0xf `Money:`. Turrets, machines, generators and batteries have their own lines
+  (`FUN_14030d620`, `FUN_140300090`, `FUN_140307bf0` ...: Working / No power / Out of resource / Output full, power, workers, fuel).
+- **Window.** Selecting a complete building of the player's faction opens its window (Building slot 38 → `FUN_1406e6640`; one window per
+  building, made on first use by slot 48). Classes from RTTI vtable names, layouts **Verified** (each layout string is referenced only by
+  the base constructor listed):
+
+| Building classes | Window class | Layout |
+|---|---|---|
+| Storage, Useable, Turret, Light (when they have an inventory) | BuildingContainerInventoryLayout | `Kenshi_InventoryGenericWindow` (`FUN_140154cd0`) |
+| Farm, Production, Generator, WindGenerator, RainCollector, Torture | ProductionInventoryLayout | `Kenshi_GenericBuildingWindow` (`FUN_140155f90`) |
+| Furnace | FurnaceInventoryLayout | `Kenshi_GenericBuildingWindow`, plus `OutputDataPanel` |
+| Crafting | CraftingInventoryLayout | `Kenshi_GenericBuildingWindow`, `QueueButton` captioned "Queue...", `CraftingName` |
+| Research | research inventory (`FUN_140155910`) | `Kenshi_InventoryResearchWindow` |
+| Building (houses), Door, Gateway, Wall | none (slot 48 returns 0) | - |
+
+`Kenshi_GenericBuildingWindow` (**Verified**, layout read): Window `Kenshi_WindowCX` captioned "BUILDING NAME", layer Window; `CraftingPanel`
+(`CraftingName`, `QueueButton` "QUEUE..."), `TitlesPanel` (INPUTS / OUTPUT), `Input1Panel` / `Input2Panel` (`InputNText`, `InputNStatusText`,
+slot `inN`, `InputNProgressBar`), output (`out` slot, `OutputProgressBar`, `OutputText`, `OutputDataPanel`).
 
 ### Character stats runtime layout
 

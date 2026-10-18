@@ -21,6 +21,8 @@ public sealed class PlacementServices
     public required Func<string, BuildingFootprint?> Footprint { get; init; }
     /// <summary>The level data's buildings round a point (X, Z) within a radius, with their footprints in the world (those read so far).</summary>
     public required Func<Vector2, float, IEnumerable<PlacedFootprint>> StaticAround { get; init; }
+    /// <summary>The level data's pickable buildings along a ray (origin, direction, length) with their record footprints; empty without level data.</summary>
+    public Func<Vector3, Vector3, float, IEnumerable<PlacedBuilding>> StaticAlong { get; init; } = (_, _, _) => [];
 }
 
 /// <summary>Everything one evaluation reads (the query is pure over it and the services).</summary>

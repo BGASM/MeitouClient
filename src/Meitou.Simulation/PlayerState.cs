@@ -22,6 +22,8 @@ public sealed class PlayerState
     public IReadOnlyList<string> CreationRaces { get; set; } = [];
     /// <summary>The character of another faction the HUD shows (<see cref="InspectCommand"/>), or <see cref="CharacterId.None"/>. Display only: not hashed and not saved.</summary>
     public CharacterId Inspected { get; set; } = CharacterId.None;
+    /// <summary>The instance id of the building the HUD shows (<see cref="InspectBuildingCommand"/>), or null. Display only: not hashed and not saved.</summary>
+    public string? InspectedBuilding { get; set; }
     /// <summary>
     /// What the player knows of each placed town (<see cref="PopulationData.Sites"/> order): discovered, explored, recently discovered (docs/game/ui-screens.md "Map").
     /// Replaced, never changed in place, so a snapshot may hold it. Not hashed: it follows from positions and nothing in the simulation reads it.
@@ -119,6 +121,9 @@ public sealed class PlayerSystem(PopulationData? data = null) : ITickSystem
                     break;
                 case InspectCommand inspect:
                     player.Inspected = inspect.Target;
+                    break;
+                case InspectBuildingCommand building:
+                    player.InspectedBuilding = building.Instance;
                     break;
                 case StopCommand stop:
                     foreach (var id in stop.Characters.Count > 0 ? stop.Characters : player.Selection.ToArray())

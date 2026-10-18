@@ -460,7 +460,10 @@ sealed partial class PlayerInterface
     (BuildingSnapshot Site, Vector2 At, long Since)? sitePending;
 
     /// <summary>The nearest of the player's sites (and finished buildings) under a pixel, by a ray against each one's footprint prism (a sphere round its position without a footprint).</summary>
-    BuildingSnapshot? PickSite(Vector2 pixel)
+    BuildingSnapshot? PickSite(Vector2 pixel) => PickSiteAt(pixel)?.Site;
+
+    /// <summary><see cref="PickSite"/> with the distance along the ray.</summary>
+    (BuildingSnapshot Site, float T)? PickSiteAt(Vector2 pixel)
     {
         if (buildHost is not { } host || session.CurrentSnapshot.Buildings.Count == 0 || Ray(pixel) is not { } ray) return null;
         BuildingSnapshot? best = null;
@@ -473,7 +476,7 @@ sealed partial class PlayerInterface
                 : RaySegment(ray.Origin, ray.Direction, site.Position, site.Position + new Vector3(0, 16, 0), 12);
             if (t is { } hit && hit < bestT) (bestT, best) = (hit, site);
         }
-        return best is null ? null : WallOf(best);
+        return best is null ? null : (WallOf(best), bestT);
     }
 
     /// <summary>The wall an attached short piece, connector or wedge belongs to (its orders, name and materials are the wall's), else the site itself.</summary>

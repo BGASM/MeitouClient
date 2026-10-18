@@ -39,6 +39,9 @@ public sealed record BuildingFootprint(Vector2[] Hull, float YMin, float YMax)
 /// <summary>A placed building's footprint in the world.</summary>
 public readonly record struct PlacedFootprint(string Id, Vector2[] Hull);
 
+/// <summary>A level-data building with the footprint of its record (in its own space), for picking.</summary>
+public readonly record struct PlacedBuilding(BuildingPlacement Placement, BuildingFootprint Footprint);
+
 /// <summary>
 /// Footprints of the BUILDING records (from their collision files, the way the navmesh gatherer places them) and of the level data's placed buildings, for the host's placement
 /// check. A record is read on a worker the first time it is asked for; until then <see cref="Of"/> says null and the buildings that need it are left out.
@@ -91,6 +94,40 @@ public sealed class BuildingFootprints
         if (points.Count < 3) return null;
         var hull = NavGeometry.Footprint(points, 0, 0, 0).Polygon;
         return hull.Length < 3 ? null : new BuildingFootprint(hull, points.Min(p => p.Y), points.Max(p => p.Y));
+    }
+
+    /// <summary>
+    /// The level data's buildings (footprints already read; the others are being read) whose placement lies within reach of the ray's ground track: the candidates a click picks from.
+    /// </summary>
+    public IEnumerable<PlacedBuilding> Along(Vector3 origin, Vector3 direction, float maxDistance)
+    {
+        var map = index.Value;
+        const float Reach = 200;
+        var from = new Vector2(origin.X, origin.Z);
+        var track = new Vector2(direction.X, direction.Z) * maxDistance;
+        float trackLength = track.Length();
+        var zones = new HashSet<ZoneCoordinate>();
+        int samples = (int)MathF.Ceiling(trackLength / (WorldLayout.ZoneSize / 2f)) + 1;
+        for (int i = 0; i <= samples; i++)
+        {
+            var at = from + track * (i / (float)samples);
+            var home = WorldLayout.ZoneOf(at.X, at.Y);
+            for (int dz = -1; dz <= 1; dz++)
+                for (int dx = -1; dx <= 1; dx++) zones.Add(new ZoneCoordinate(home.X + dx, home.Y + dz));
+        }
+        float lengthSquared = track.LengthSquared();
+        foreach (var zone in zones)
+        {
+            if (!map.TryGetValue(zone, out var list)) continue;
+            foreach (var b in list)
+            {
+                if (b.Position == Vector3.Zero || b.TargetsZoneRecord) continue;
+                var p = new Vector2(b.Position.X, b.Position.Z);
+                float s = lengthSquared < 1e-6f ? 0 : Math.Clamp(Vector2.Dot(p - from, track) / lengthSquared, 0, 1);
+                if (Vector2.DistanceSquared(p, from + track * s) > Reach * Reach) continue;
+                if (Of(b.BuildingId) is { } footprint) yield return new PlacedBuilding(b, footprint);
+            }
+        }
     }
 
     /// <summary>The footprints (those already read; the others are being read) of the level data's buildings with a placement within <paramref name="radius"/> of <paramref name="centre"/> (X, Z).</summary>

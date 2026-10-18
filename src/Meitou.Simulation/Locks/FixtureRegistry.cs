@@ -698,6 +698,15 @@ public sealed class FixtureRegistry
         static bool Shown(Fixture f) => f.Site < 0 || f.OpenAmount > 0 || f.Motion != DoorMotion.Closed || f.WantsLock || f.Lock is { EffectivelyLocked: true };
     }
 
+    /// <summary>The panel's view of a building's doors (null for no building, or one without fixtures).</summary>
+    internal BuildingDetail? DetailOf(string? instance)
+    {
+        if (instance is null || !byBuilding.TryGetValue(instance, out var list)) return null;
+        var doorList = list.Where(f => f.Kind == FixtureKind.Door).OrderBy(f => f.DoorIndex)
+            .Select(f => new DoorDetail(f.OpenAmount > 0 || f.Motion == DoorMotion.Open, f.Lock is { EffectivelyLocked: true }, f.Lock?.Level ?? 0, f.DoorBroken)).ToArray();
+        return new BuildingDetail(instance, doorList);
+    }
+
     /// <summary>The registered buildings, in registration order.</summary>
     public IReadOnlyList<string> Buildings => buildings;
 

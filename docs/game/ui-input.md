@@ -160,8 +160,9 @@ pointer's `Size` (`lift` 34×30 in 35×35, `hand` 33×35 in 32×32, `pick_item` 
 **Observed** (FUN_1406e3d60, which calls `PointerManager::setPointer`): pointer mode → name: 0 `arrow` (`invisible` with the free camera
 and the Esc menu hidden), 1 `med`, 2 `search`, 3 `lift`, 4 `pick_item`, 5 `attk`, 7 `talk`, 8 and 10 `s_talk`, 9 `use`, 0xb `build`,
 0xc `door`, 0xd `door_escape`, 0xe `lock`, 0xf `lockpick`, 0x10 `house`, 0x11 `green`, 0x12 `mine`, 0x13 `spanner`, 0x14 `light`,
-0x15 `steal`, 0x16 `hand`, 0x17 `invalidmove`, 0x18 `scavenge`, 0x19 `knockout`; 6 has no case. Which hover state sets each mode is
-**Unknown** (the function has no direct callers in the dump).
+0x15 `steal`, 0x16 `hand`, 0x17 `invalidmove`, 0x18 `scavenge`, 0x19 `knockout`; 6 has no case. It is called through thunk `140053acb`.
+The modes a building hover sets are in [building picking](#building-picking-and-selection) (`house` 0x10 is returned by none of them); a ground
+hit with no walkable point sets `invalidmove` (`FUN_140800250`). Which other hover state sets each mode is **Unknown**.
 
 Meitou (`PlayerInterface.Pointer.cs`, engine choices): the window's own cursor is hidden and the pointer drawn last in the frame (not in
 screenshots or cinema takes). It follows the quick right-click order, so it never disagrees with the click: with a selection, over a
@@ -172,7 +173,8 @@ not read) shows the Windows cursor instead, applied at once.
 
 ### Character picking
 
-Meitou (engine choice; how the original picks is **Unknown**, possibly by its ragdoll shapes, [phs](../formats/phs.md)): clicks, quick orders, the hover
+**Observed** (`FUN_140800250`): the original picks characters with the same physics ray as buildings ([building picking](#building-picking-and-selection)): hits in groups 0, 1,
+3, 4 (3 and 4 are ragdoll shapes, [ragdolls](ragdolls.md#collision-groups); what 0 and 1 are is **Unknown**). Meitou (engine choice, [phs](../formats/phs.md)): clicks, quick orders, the hover
 label, pointer and outline take the nearest character whose posed mesh the ray meets. Each mesh keeps, from its bind-pose vertices, one
 box per bone (vertices by their strongest weight; an unskinned part one box), grown 0.4 units; the boxes are posed by the live bone palette,
 so people and animals pick over their whole drawn body, a ragdoll where it lies. **Verified** (sandbox probe, 2026-10-16): a person hits from the feet to 18 units
@@ -186,13 +188,112 @@ mask (colour pass, live pose, picture levels, own depth planes round it) right a
 linear depth within 1 % + 1 unit of the near slice's scene depth (jittered, render size). Outline and tint take the pointer's order's colour: attack red (only for a faction hostile to the player's; a neutral one is white although a right click attacks it), treat green, talk gold, carry/loot blue, else white (no selection or no order). No name or goal label is shown over a character (**Observed** by the owner in play, not traced in the exe: the original shows none for ordinary NPCs, only the outline; Meitou had a plain name and goal label until 2026-10-17). Off in the free camera, with the interface hidden and in
 screenshots and cinema takes. Not in the Shift+F1 switch list (a game setting, like Attackers per target).
 
+### Building picking and selection
+
+The original's mouse code, kenshi_x64.exe 1.0.68. The panels a selected building fills: [ui-screens](ui-screens.md#selected-building).
+
+**Buttons** (**Verified**: Controls `DAT_142133370`, actions registered in `FUN_1403636c0`): held flags `mouse_select` +0xf3,
+`mouse_command` +0xf4, `highlight` (Left Alt) +0xf2. Each frame `FUN_140801630` stores edges on PlayerInterface (**Observed**): +0x2f1 select
+released, +0x2f2 select pressed, +0x2f3 command released, +0x2f4 command pressed; the two command edges are cleared while the context menu
+is visible or was last frame. Then `FUN_140800f10` (drag box) and, unless a box is being dragged, the pick `FUN_140800250` run every frame, so
+hover and clicks share one pick.
+
+**Ray** (**Observed**, `FUN_1409b3910`, `FUN_1409b37a0`): a PhysX raycast through all shapes from the camera through the cursor, group mask
+`0xffffde7f` (every [collision group](../formats/collision.md#collision-groups-observed-fun_14055f6e0-and-the-loaders) except 7, 8 and 13, the
+interior-mask hulls); the hits are sorted nearest first (**Verified**, comparator `FUN_1409b1820` by disassembly: ascending distance at hit
++0x24). Buildings are therefore picked by their collision shapes; a part without collision cannot be clicked. The walk over the hits
+(`FUN_140800250`, **Observed**) stops at the first decisive one:
+
+| Hit groups | Result |
+|---|---|
+| 2, 6, 14 (terrain, foliage) | ground: ends the walk |
+| 0, 1, 3, 4 (characters, ragdolls) | that character (`FUN_1407fb410`); behind an already taken building only when the building hit was a passable part (23..26) |
+| 3, 4, 28..31 with an item object | that item (`FUN_1407fc440`); behind a taken building only when inside the building's bounding box |
+| 5 (doors) | the door; when a building was taken first, that building |
+| 9..12, 15..31 (building parts) | building candidate, rules below |
+
+- A building of another faction must be visible (slot 33: flag +0x19d): furniture in a house whose floor (+0xa4) is above the floor the house
+  shows is hidden and cannot be picked (`FUN_14092add0`; the town keeps the shown floor per building, 4 = whole building).
+- Parts of a building with an interior (`FUN_140291650`) count only when their floor is not above the floor that building shows; the floor of a
+  hit comes from its group (`FUN_1409b1850`: 10/16/20/24/29 → 1, 11/17/21/25/30 → 2, 12/18/22/26/31 → 3, 27 roof → 4, else 0). So with a
+  floor cut the ray passes the hidden roof and floors and reaches what is shown. When the viewed floor (PlayerInterface+0x1e4, PgUp/PgDn) is
+  below the hit's floor, the walk skips ahead to the next hit on the same building at or below it.
+- A turret or lamp mounted on the hit building (its slot 135 handle) met within 12 units behind the hit is taken instead (`FUN_1407f2af0`).
+
+**Building hover and click** (`FUN_1407fc6e0`, **Observed**). Every frame over a building it sets the pointer; on a command release (a quick
+right click) it gives the order to the selected characters (the shared order dispatch `FUN_1407fa650` / `FUN_1407fae70` / `FUN_1407f9e20`,
+target the building, its parent building (slot 59) and the hit's x, z at the zone or terrain height, `FUN_1409b32f0`, not a building
+floor); on a select release without a command release in
+the same frame it selects. With an animals-only selection (+0x268: no selected character is a CharacterHuman) only the selection runs. Tests
+in order (task numbers are [ai-tasks](ai-tasks.md) taskTypes):
+
+| Building | Pointer | Quick right click |
+|---|---|---|
+| not complete (+0x160, [construction](buildings-production.md#construction-state)) | `build` | 2 BUILD |
+| broken (slot 97: +0x3b6 machines, +0x3ec doors, never for plain buildings) | `spanner` | 95 REPAIR |
+| door (+0x1a0) of an incomplete house (+0x368) | `build` | 2 BUILD on the house |
+| door | own: `lock` if its lock is locked, else `door`; another faction's: `lockpick` if locked (with a tooltip, text **Unknown**), else `door`; `spanner` below 90 % health | another faction's locked door without Alt: "Hold down the ALT key to pick the lock." and a move to the door; otherwise 72 OPEN_DOOR, or 73 CLOSE_DOOR when open (+0x380 = 1) |
+| function 18 (BF_FLUFF), or slot 107 (+0x198, meaning **Unknown**) is 7, 9 or 12, with an inventory (without one, or when `FUN_14004a0cf` refuses another faction's, only the selection runs) | `search` when own (or the owner faction has flag +0x1d0), else `scavenge` | 26 LOOT_TARGET; a shop (function 9) of another faction without Alt: "Hold down the ALT key to steal items" and 29 MOVE |
+| otherwise | slot 130 below | slot 131 below, with the exceptions under the table |
+
+| Class | Pointer (slot 130) | Order (slot 131) |
+|---|---|---|
+| Building, GatewayBuilding, WallBuilding | `arrow` | 29 MOVE_CUS_ORDERED |
+| Crafting, Farm, Production, Generator, WindGenerator, RainCollector, Torture | `mine` for function 1 / 27, else `use` | 87 OPERATE_MACHINERY, 152 OPERATE_AUTOMATIC_MACHINERY when +0x3ac is 0 |
+| FurnaceBuilding | as Farm | 26 LOOT_TARGET |
+| ResearchBuilding | as Storage | 87 |
+| TurretBuilding | as Storage | 146 USE_TURRET |
+| StorageBuilding | `arrow` for function 16; own `use`; no inventory: cage `lockpick` if locked else `door_escape`, other `use`; inventory: `lockpick` if locked else `scavenge` | 26 |
+| LightBuilding | `light` | as UseableStuff |
+| UseableStuff | as Storage | another faction's with an inventory: 26, or when locked 76 PICK_LOCK (owner faction flag +0x1d0) else 29; by function: 2, 9, 13 → 26; 7 → 97 USE_TRAINING_DUMMY; 6, 25 → 258 USE_BED_ORDER; 8 → 76 when another faction's and locked, else 108 PUT_IN_CAGE; 11 → 136 FEED_CORPSE_INTO_MACHINE; 16 → 29; else 87 / 152 |
+
+**Verified** (exe bytes): Building and Gateway/Wall slot 130 return 0, Building slot 131 returns 0x1d. The rest is **Observed**. Exceptions:
+
+- Occupied beds and cages whose BUILDING_FUNCTIONALITY has `occupant selection` (+0x3a8, read by `FUN_1402a0900`): the hover and both clicks
+  go to the occupant (`FUN_1407fb410`). An occupant of another faction ends it there; for one of the player's, the building logic continues and a
+  left click selects the occupant.
+- A cage (its quick click is reached only when the context menu does not open at once, last point): `use` while the lead selected character
+  (+0xf0) carries someone (+0x348). Another faction's empty cage: 108 PUT_IN_CAGE when carrying, else 107 USE_CAGE; the player's own cage:
+  108 (slot 131). In another faction's cage holding one of yours, Alt + right click gives 76 PICK_LOCK when its lock is locked or
+  207 GET_OUT_OF_CAGE_ESCAPE when not; without Alt the bar shows "Hold down the ALT key to pick the lock." / "...to escape the cage.".
+- Another faction's non-cage building with a locked lock: Alt gives 76; without Alt the pick-lock message and a move to it.
+- No order while every selected character is unconscious ("Your selected character is unconscious", `FUN_1407f6f50`).
+- Holding the command button 0.2 s on the same target opens the context menu instead (`FUN_1407a6bc0`). It opens on the press, without the
+  hold, for a building whose function is 8 (BF_CAGE), or 22 (BF_DOOR) whose (first) door is locked and not the player's faction's, unless
+  `DAT_142133449` is set (**Unknown** what it is).
+
+**Selection** (`FUN_1407f9000`, `FUN_1407f7f20`, **Observed**). A building does not join the squad selection (+0x208): it goes into the one
+object slot +0x248 (saved as `selected_gui_object`, [save](../formats/save.md)) that also holds an inspected character of another faction.
+The selected characters stay selected and keep taking orders. A building with doors is selected as its first door (slot 124 → door
+list +0x1c0), except in the editor. The focus handle `DAT_1421345d0` becomes that object and `FUN_1406e91e0` points the HUD panels at it.
+Selecting calls slot 38 (`FUN_1405504a0`): the BUILDING's `select sound` (BuildingSound) as switch `Buildings_Click` with event
+`Building_Click`; when the building is complete and the player's faction's, its window opens (`FUN_1406e6640`; window by class in
+[ui-screens](ui-screens.md#selected-building)). Clicking the selected building again reopens its inventory window if it was closed. No
+highlight or outline call was found for a selected building (**Unknown** whether the renderer marks it).
+
+The object stays selected until something replaces or clears it: a left click on another building or another faction's character replaces it.
+Selecting one of the player's characters without Shift (click, drag box, number keys, `[` / `]`) runs `FUN_1407f3b50`, which clears the
+squad selection, the object slot and the focus. With Shift the object slot stays but the focus (the HUD) moves to the character. A click on the
+ground and Esc do not clear it (**Observed** by absence: `FUN_140800250` has no such path, and `FUN_140917120` does not use the focus handle).
+
+Meitou (`PlayerInterface.BuildingSelect.cs`, engine choices): a left click with no character under the cursor selects the nearest building the ray
+meets before the ground, among the player's sites and the level data's buildings (not `is node` / `is foliage`). Picking is a ray against a vertical
+prism over the convex hull of the record's collision shapes (`BuildingFootprints`), not per-part collision, so a courtyard or concave building is
+selectable over its whole hull and there are no interior floors. The character selection stays. The HUD panels show the building as in
+[ui-screens](ui-screens.md#selected-building) (the simulation publishes the selected building's doors, `InspectBuildingCommand`); no outline
+is drawn (as the original). Selecting or inspecting a character clears it, Shift
+included (the original keeps the slot); a site that disappears clears it. Not built: a house's first-door focus, the select sound, the
+building windows, the Dismantle / pause / door buttons in the panel (the right-click menu has them), the For sale line, the Door and Building
+Condition bars, hover pointers over world buildings, and quick right-click orders on them.
+
 ## Unknowns
 
 - Meaning of the listener's suspended field at +0x50 and of FUN_1409134c0 (possibly splash skip).
 - What exactly the version-below-1 branch of the controls loader does with its action set.
 - Identity of the widget behind FUN_1406e1fd0 (GUI+0x20) and of PlayerInterface+0x2f0, which gate most game events.
 - Which window event 7 toggles (taken to be Tutorials); targets of events 1 and 2 inferred from the action names.
-- Meaning of the target kinds 8 and 0x16 that shortcut the 0.2 s context-menu hold test.
+- Building selection: the meaning of slot 107 (+0x198) and `FUN_14004a0cf` in the loot branch, `DAT_142133449`, the lockpick tooltip text,
+  whether the renderer marks the selected building, and what clears the selection when the building is destroyed.
 - Press versus release timing of the command button, and the exact rotation marker condition.
 - Whether a held, steering right click shows it again each order.
 - Conditions inside FUN_140917120 (which windows count as closable) and the meaning of the held/edge flags.

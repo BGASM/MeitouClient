@@ -51,6 +51,12 @@ public sealed class BuildMenu(IReadOnlyList<BuildingBuildData> catalog)
     }
 }
 
+/// <summary>
+/// A level-data building as the selection panel names it: <paramref name="Name"/> is the placement state's own name (else the record's), <paramref name="Type"/> the record's name when it
+/// differs; <paramref name="Town"/> and <paramref name="Owner"/> are null when it is in no town or the town gives none; <paramref name="PublicDay"/> / <paramref name="PublicNight"/> are the state's flags; <paramref name="Sells"/> is what a generically named shop sells (its first vendor list), for the Meitou UI to name it by, else null.
+/// </summary>
+public sealed record WorldBuildingInfo(string Name, string? Type, string? Town, string? Owner, bool PublicDay = false, bool PublicNight = false, string? Sells = null);
+
 /// <summary>What the game interface needs from the host to run build mode: the catalog, names, the parts of a building, the placement services and the ghost drawing.</summary>
 public sealed class BuildServices
 {
@@ -65,6 +71,8 @@ public sealed class BuildServices
     /// <summary>The placed towns, for <c>PlacementRules.TownBlock</c>.</summary>
     public required Func<IReadOnlyList<PlacementTown>> Towns { get; init; }
     public required Func<string> PlayerFactionId { get; init; }
+    /// <summary>What the panel shows of a level-data building: its name, type, town, owner faction and public flags.</summary>
+    public Func<Meitou.Data.World.BuildingPlacement, WorldBuildingInfo> WorldInfo { get; init; } = p => new(p.BuildingId, null, null, null);
     /// <summary>Hands the renderer the ghosts to draw this frame (empty: none).</summary>
     public required Action<IReadOnlyList<WorldObjectRenderer.GhostDraw>> DrawGhosts { get; init; }
 }

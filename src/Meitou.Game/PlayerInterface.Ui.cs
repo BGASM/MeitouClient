@@ -144,12 +144,22 @@ sealed partial class PlayerInterface
         }
         b.Actions["ExtendedStatsButton"] = "meitou:extendedstats";
         if (session.Simulation.Speed != 0) b.Hidden.Add("PausedPanel");
-        BindMedicalBars(b, lead);
+        var buildingNow = BuildingFocus();
+        bool buildingFocus = buildingNow is not null;
+        BindMedicalBars(b, buildingFocus ? null : lead);
+        // A selected building shows only the status word in the medical header (its condition bars are not modelled: Meitou has no building health).
+        if (buildingNow is not null)
+        {
+            var (_, _, _, buildingStatus, bad) = BuildingLines(buildingNow);
+            b.Text["HealthText"] = buildingStatus;
+            b.Properties["HealthText"] = new Dictionary<string, string> { ["TextAlign"] = "Center", ["TextColour"] = bad ? BadColour : MyGuiColours.InkText };
+        }
         BindJobs(b, own);
         // The squad bar has one tab per squad of the player's; Meitou has one squad, so the first page shows, captioned with its name.
         foreach (var widget in faithfulHud.Find("SquadPanel")?.Children.Where(w => w.Type == "TabItem").Skip(1) ?? []) b.HiddenWidgets.Add(widget);
         b.Text["SquadPanel@tab0"] = SquadTabCaption(own);
-        if (lead is null) { b.Hidden.Add("MedicalPanel"); b.Hidden.Add("InformationPanel"); }
+        if (lead is null && !buildingFocus) b.Hidden.Add("InformationPanel");
+        if (lead is null && !buildingFocus) b.Hidden.Add("MedicalPanel");
         // Buttons without a backend are disabled, except those the original never greys out (the build and floor buttons look live there in the open).
         foreach (var w in faithfulHud.Widgets.Where(w => w.Type == "Button" && !b.Actions.ContainsKey(w.Name) && w.Name is not ("BuildButton" or "FloorArrowUp" or "FloorArrowDown"))) b.Disabled.Add(w.Name);
         if (Selected().Count == 0)

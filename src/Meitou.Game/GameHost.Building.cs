@@ -118,6 +118,11 @@ sealed partial class GameHost
         var footprints = new Meitou.Navigation.BuildingFootprints(install, db, IsSandbox || IsDuel ? null : scene.Objects?.Levels);
         var parts = new Dictionary<string, IReadOnlyList<Meitou.Data.World.PlacedMesh>>(StringComparer.Ordinal);
         IReadOnlyList<Meitou.Data.Gameplay.Construction.PlacementTown>? towns = null;
+        Dictionary<(Meitou.Data.World.ZoneCoordinate, string), (string Town, string? Owner)>? townOf = null;
+        var pickable = new Dictionary<string, bool>(StringComparer.Ordinal);
+        // Resource and node buildings are not selectable objects (TownBuildings leaves them out too).
+        bool Pickable(string record) => pickable.TryGetValue(record, out bool known) ? known
+            : pickable[record] = db.Find(record) is { } r && !r.GetBool("is node") && !r.GetBool("is foliage");
         return new Building.BuildServices
         {
             Menu = new Building.BuildMenu([.. BuildData().Values]),
@@ -135,6 +140,32 @@ sealed partial class GameHost
                 Ground = heights.HeightAt,
                 Footprint = footprints.Of,
                 StaticAround = footprints.StaticAround,
+                StaticAlong = (origin, direction, length) => footprints.Along(origin, direction, length).Where(b => Pickable(b.Placement.BuildingId)),
+            },
+            WorldInfo = placement =>
+            {
+                var (zone, instance, record) = (placement.Zone, placement.InstanceId, placement.BuildingId);
+                if (townOf is null && popData is { } d)
+                {
+                    townOf = [];
+                    foreach (var site in d.Sites)
+                        foreach (var b in site.Buildings)
+                            townOf[(b.Zone, b.InstanceId)] = (site.Town.Name, b.OwnerFactionId is { } id ? d.Factions.FirstOrDefault(f => f.Id == id)?.Name : null);
+                }
+                string recordName = db.Find(record)?.Name ?? record;
+                var levels = scene.Objects?.Levels;
+                var state = levels is not null && placement.StateId is { } stateId && levels.Zones.TryGetValue(zone, out var zoneDb) ? zoneDb.Find(stateId) : null;
+                // The squad template that runs it names a special building ("The Dancing Skeleton") and, for a trader, lists what it sells.
+                var squad = state?.GetString("squad template") is { Length: > 0 } squadId ? db.Find(squadId) : null;
+                string name = squad?.GetString("building name") is { Length: > 0 } squadName ? squadName
+                    : state?.GetString("name") is { Length: > 0 } own ? own : recordName;
+                string? type = name != recordName ? recordName : null;
+                // A shop whose state only carries its layout's generic name ("Shop", "Big Shop"): the Meitou UI calls it after what it sells.
+                string? sells = squad is { } s && s.GetBool("is trader") && state?.GetString("interior layout name") is { } layout && layout.Contains("Shop", StringComparison.Ordinal) && name == layout
+                    && s.GetReferences("vendors").FirstOrDefault().TargetStringId is { } vendor && db.Find(vendor)?.Name is { Length: > 0 } list
+                    ? char.ToUpperInvariant(list[0]) + list[1..] : null;
+                var (town, owner) = townOf is not null && townOf.TryGetValue((zone, instance), out var info) ? (info.Town, info.Owner) : (null, null);
+                return new(name, type, town, owner, state?.GetBool("is public day") ?? false, state?.GetBool("is public night") ?? false, sells);
             },
             Towns = () => towns ??= popData is { } d ? [.. d.Sites.Select(s => new Meitou.Data.Gameplay.Construction.PlacementTown(s.Town, new(s.Position.X, s.Position.Z)))] : [],
             PlayerFactionId = () => popData is { } d && d.PlayerFaction is >= 0 and var mine && mine < d.Factions.Count ? d.Factions[mine].Id : "",

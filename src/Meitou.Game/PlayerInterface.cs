@@ -47,8 +47,11 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
         session.World.Commands.Enqueue(command);
     }
 
-    public void Select(IReadOnlyList<CharacterId> ids, bool additive) =>
+    public void Select(IReadOnlyList<CharacterId> ids, bool additive)
+    {
+        if (ids.Count > 0) SetBuilding(null);   // selecting a character ends the building's selection
         Say(new SelectCommand(ids, additive) { Tick = session.World.Tick });
+    }
 
     public void Move(Vector3 target, bool queued) =>
         Say(new MoveOrder([], target) { Tick = session.World.Tick, Queued = queued });
@@ -157,6 +160,13 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
             // A click on another faction's character shows it in the information and medical panels and drops the squad's selection (docs/game/ui-screens.md section 4). Shift keeps the selection, a click on your own or on the ground clears the inspection.
             var hit = Pick(p);
             var other = hit is null && !shift ? PickWhere(p, c => !c.IsPlayer) : null;
+            // A building under the cursor (and no character) is selected and the characters keep their selection (docs/game/ui-input.md "Building picking and selection").
+            if (hit is null && PickWhere(p, _ => true) is null && PickBuilding(p) is { } building)
+            {
+                SetBuilding(building);
+                Inspect(CharacterId.None);
+                return;
+            }
             Select(hit is { } id ? new[] { id } : [], shift);
             if (other is { } stranger) Inspect(stranger);
             else if (!shift || hit is not null) Inspect(CharacterId.None);
@@ -164,10 +174,14 @@ sealed partial class PlayerInterface(WorldSession session, Func<float, float, fl
     }
 
     /// <summary>Shows <paramref name="target"/> (another faction's character; <see cref="CharacterId.None"/> for nobody) in the HUD panels.</summary>
-    void Inspect(CharacterId target) => Say(new InspectCommand(target) { Tick = session.World.Tick });
+    void Inspect(CharacterId target)
+    {
+        if (!target.IsNone) SetBuilding(null);
+        Say(new InspectCommand(target) { Tick = session.World.Tick });
+    }
 
     /// <summary>
-    /// Once a frame: while the right button is held after a move order, the order is given again at the ground point under the cursor once every world
+    /// Once a frame: while the right button is held after a move order, the order is given again at the floor or terrain point under the cursor once every world
     /// tick (also when the camera moves and the cursor does not). <paramref name="final"/> (the button is let go) gives the last point unless this tick
     /// already has the same one.
     /// </summary>

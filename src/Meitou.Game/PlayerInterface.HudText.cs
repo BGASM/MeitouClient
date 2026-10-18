@@ -117,10 +117,21 @@ sealed partial class PlayerInterface
     }
 
     /// <summary>The information panel's and the medical rows' text (Faithful HUD; called after the layout is arranged).</summary>
+    /// <summary>The original's standard text at 1080 p: <c>Kenshi_StandardFont_Medium</c>, 20 pt at 50 dpi (docs/game/ui-screens.md).</summary>
+    const float StandardTextPixels = 20 * 50 / 72f;
+
     void AddHudText(List<UiControl> controls)
     {
+        float row = 20 * Height / 1080f, sidePixels = StandardTextPixels * Height / 1080f;
+        if (BuildingFocus() is { } focus)
+        {
+            var (name, state, stats, _, _) = BuildingLines(focus);
+            AddLines(controls, "NameText", [name], row, sidePixels);
+            AddLines(controls, "StateText", state, row, sidePixels);
+            AddLines(controls, "StatsText", stats, row, sidePixels);
+            return;
+        }
         if (Lead() is not { } lead) return;
-        float row = 20 * Height / 1080f, sidePixels = 16 * Height / 1080f;
         string faction = FactionName?.Invoke(lead.Faction) ?? "";
         AddLines(controls, "NameText", [new(lead.Name, faction, TitleColour, TitleColour)], row, sidePixels);
         AddLines(controls, "StateText", StateLines(lead), row, sidePixels);
@@ -132,7 +143,7 @@ sealed partial class PlayerInterface
             if (controls.FirstOrDefault(c => c.Name == bar + "Datapanel") is not { } host) continue;
             var fullBar = controls.FirstOrDefault(c => c.Name == bar)?.Bounds ?? host.Bounds;
             var textBounds = new UiRect(host.Bounds.X, fullBar.Y, host.Bounds.Width, fullBar.Height);
-            string pixels = Math.Max(8, (int)MathF.Round(16 * Height / 1080f)).ToString(CultureInfo.InvariantCulture);
+            string pixels = Math.Max(8, (int)MathF.Round(sidePixels)).ToString(CultureInfo.InvariantCulture);
             controls.Add(new($"{bar}-name", "TextBox", textBounds, name, "", "", true,
                 new Dictionary<string, string> { ["FontPixels"] = pixels, ["TextAlign"] = "Center", ["TextColour"] = MyGuiColours.InkText }, Vector4.Zero, Pickable: false, Clip: host.Clip));
             if (arrows.Length > 0)
