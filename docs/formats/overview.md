@@ -76,7 +76,7 @@ holding files to matching base resource group, default General. Skip `leveldata`
 |---|---|
 | 4 `.base`/`.mod` | [FCS records](fcs-mod.md) |
 | 3277 `.mesh`, 365 `.skeleton` (one empty) | [Mesh](ogre-mesh.md), [skeleton](ogre-skeleton.md) |
-| 3995 `.hkt` | **Verified** tagfile magic `1E0DB0CA CEFA11D0`, SDK `hk_2014.2.0-r1`, root `hkRootLevelContainer`; animations and [navtiles](../game/pathfinding.md) |
+| 3995 `.hkt` | [Havok tagfile](havok-tagfile.md) (SDK `hk_2014.2.0-r1`); animations and [navtiles](../game/pathfinding.md) |
 | 181 `.material`/`.program`, ~90 shader/compositor files | [Materials](ogre-material.md), [runtime](runtime-materials.md), [post](post-processing.md) |
 | ~3900 `.dds`/`.png`/`.tga` | [DDS](dds.md); standard images |
 | 701 `.zone`, 14 `.level` | [Zones](zones.md); `.level` type15/headerless; native level paths `newland/leveldata/[<core file>/]leveldata.level` (**Verified** FUN_140870ae0) |

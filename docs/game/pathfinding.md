@@ -229,17 +229,20 @@ re-asked; its zones within `Lookahead` load early. **Observed**: Hub→(-36000,-
 | 4 | open door (cost +5 in WaterCostModifier) |
 | 5 | closed door (blocked by every filter) |
 
+### Meitou debug view
+
+Shift+F11 in the game (`GameHost.NavOverlay.cs`, `NavmeshOverlayRenderer`) steps off, Meitou's mesh, the original's cached exterior tiles
+(`OriginalNavTiles`, [tagfile](../formats/havok-tagfile.md#navmesh-tiles)), both; for the zones the walkers use now (`NavmeshWalkability.World`), 3 (original 4) units
+above the mesh, over the finished picture and fainter where the scene hides it. Meitou: polygons cyan (door polygons blue, seed-pruned red), mesh ends
+yellow. Original: polygons magenta, ends orange, edges joined to the next tile violet. Rebuilt on a worker when the world or view changes.
+**Observed** (Hub, zone 20.32): the original's polygons are large and simplified, building footprints are holes (interiors separate), and rock and cliff
+cuts follow a blocky ~10-unit raster outline. The original has no such view (`rebuild_navmesh` Ctrl+Shift+F11 only rebuilds).
+
 ## Unknowns
 
 - How the game uses `InteriorFilter` (its admit test is "uid < 0x10000", the same side the `ExteriorFilter` requires) and the
   composition of interior instance uids.
 - Which numeric job types the five job adders create (the settings each type uses are now known: 0 whole zone, 1 box
-### Meitou debug view
-
-Shift+F11 in the game (`GameHost.NavOverlay.cs`, `NavmeshOverlayRenderer`) draws the zones the walkers use now (`NavmeshWalkability.World`), 3 units
-above the mesh, over the finished picture and fainter where the scene hides it: polygons cyan (door polygons blue, seed-pruned red), mesh ends yellow,
-other edges faint. Rebuilt on a worker when the world changes. The original has no such view (`rebuild_navmesh` Ctrl+Shift+F11 only rebuilds).
-
   patch, 3 interior).
 - The terrain grid resolution of the generator (FUN_140a08a20); the material of `destroyed boundary` triangles; the
   building flag at +0x1f0 → +0x2c that gates carvers and part of the WALKABLE rule; the global seed list DAT_14212f470;
