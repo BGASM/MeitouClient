@@ -41,6 +41,7 @@ Current algorithms and limitations live in the feature docs, rather than a separ
 Faithful preserves original behaviour; Meitou quality improvements remain independently selectable.
 Optional GI may trade performance for lighting quality.
 
-## Open design question
+## Not planned
 
-Script-extender compatibility: [RE_Kenshi / KenshiLib feasibility](docs/formats/rekenshi.md). Existing DLLs need native object/hook compatibility; extension-data support and source ports are practical candidates. No runtime compatibility layer exists.
+RE_Kenshi / KenshiLib script-extender plugins: not supported (decided 2026-10-18); plugin DLLs are
+ignored, their mods' data still loads. [RE_Kenshi](docs/formats/rekenshi.md).
