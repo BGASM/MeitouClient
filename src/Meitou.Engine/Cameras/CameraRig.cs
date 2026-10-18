@@ -22,6 +22,9 @@ public sealed class CameraRig
     readonly Interpolated<CameraState> states;
     readonly Func<float, float, float> ground;
 
+    /// <summary>The height the cameras keep above (the ground or the sea, whichever is higher).</summary>
+    public float GroundAt(float x, float z) => ground(x, z);
+
     public CameraRig(Func<float, float, float> ground, CameraSettings? settings = null)
     {
         this.ground = ground;

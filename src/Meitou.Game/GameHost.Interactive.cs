@@ -429,6 +429,14 @@ sealed partial class GameHost
                 ApplyTitleCamera();
                 ApplySkyArrival();
             }
+            // The strategy camera's eye clearance (StrategyCamera's height rule) for what bypasses the rig's pivot: a followed character's
+            // feet as the target, and the squad tour's and character flights' arcs over hills.
+            if (skyArrival is null && !TitleVisible && (tour.Active || !session.Camera.IsFree && !cinemaHolds))
+            {
+                var eye = camera.Eye;
+                float shortfall = session.Camera.GroundAt(eye.X, eye.Z) + Meitou.Data.World.KenshiCamera.EyeClearance(camera.Distance) - eye.Y;
+                if (shortfall > 0) camera.Target += new Vector3(0, shortfall, 0);
+            }
             var size = window.FramebufferSize;
             UpdateView(size.X, size.Y);
             // What the mouse is over, decided once before the world is drawn: the pointer (drawn last) and the hover outline (drawn with the world) agree.
