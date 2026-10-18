@@ -10,7 +10,7 @@ public sealed partial class DialogueSystem
     /// <summary>
     /// A line's effects (<c>FUN_140680560</c>, docs/game/dialogue.md "Effects"), run as it is said or clicked, with <paramref name="me"/> the NPC-side speaker and the player character the
     /// target, in the original's order: locks, interrupt, relation changes, then the DA effects in data order. Not built yet: crowd triggers, items given, AI changes and
-    /// contracts, arrests other than the bounty desk's hand-over, and the slavery effects.
+    /// contracts, arrests other than the bounty desk's hand-over, and the slavery effects other than DA 40.
     /// </summary>
     void RunEffects(World world, Conversation c, DialogueNode line, CharacterId me)
     {
@@ -34,7 +34,7 @@ public sealed partial class DialogueSystem
         if (line.TriggerCampaigns.Count > 0) population?.TriggerFromDialogue(world, me, c.Player, line.TriggerCampaigns);
         var target = c.Player;
         var tc = Cold(world, target);
-        bool takeOver = false;
+        bool takeOver = false, enslave = false;
         foreach (var effect in line.Effects)
         {
             switch (effect.Action)
@@ -76,6 +76,9 @@ public sealed partial class DialogueSystem
                 case DialogueActions.ArrestTargetsCarriedPerson when tc is { Carrying.IsNone: false }:
                     takeOver = true;   // after the line's other effects: the original only gives the speaker the lift task, so DA_PAY_BOUNTY still finds the body
                     break;
+                case DialogueActions.EnslaveTargetsCarriedPerson when tc is { Carrying.IsNone: false }:
+                    takeOver = enslave = true;
+                    break;
                 case DialogueActions.ClearBounty when tc?.Bounties is { } ledger && mc is not null:
                     if (ledger.Of(mc.Faction) is { } entry) ledger.Remove(entry);
                     if (Position(world, target) is { } at && TownAt(at) is >= 0 and var town && town < data.SiteFactions.Count && ledger.Of(data.SiteFactions[town]) is { } local)
@@ -92,7 +95,7 @@ public sealed partial class DialogueSystem
                     break;
             }
         }
-        if (takeOver) Arrests?.TakeOver(world, me, target);
+        if (takeOver) Arrests?.TakeOver(world, me, target, enslave);
     }
 
     /// <summary>The arrest system the bounty desk's effects pay and hand over through (<c>DA_PAY_BOUNTY</c>, <c>DA_ARREST_TARGETS_CARRIED_PERSON</c>); null: they do nothing.</summary>

@@ -10,7 +10,7 @@ public sealed partial class DialogueSystem
     /// <summary>
     /// One condition (<c>FUN_140676950</c>, docs/game/dialogue.md "Conditions"): <c>who</c> 0 tests the speaker, any other value the target. Yes/no conditions pass when the computed
     /// answer equals value &gt; 0; counts compare by <c>compare by</c> (Num3: 1 &lt;, 2 &gt;, else ==; Num2: 1 &lt;, else &gt;=). Conditions whose inputs Meitou does not have
-    /// (squad memory flags, building locks, slavery, town walls, missions, personality functions) compute "no".
+    /// (squad memory flags, building locks, town walls, missions, personality functions) compute "no".
     /// </summary>
     bool Condition(World world, Conversation c, DialogueCondition dc, CharacterId me, CharacterCold mc, CharacterId other)
     {
@@ -73,6 +73,10 @@ public sealed partial class DialogueSystem
             case 47: return Num2(s.Bounties?.AmountFor(meF) ?? 0);
             case 48: return Bool(s.Fighter is { IsAnimal: false, Weapon: null });
             case 56: return Bool(s.InCombat);
+            case 59: return Bool(s.SlaveState is 1 or 2);
+            case 61: return Bool(s.SlaveState is 1 or 2 && s.SlaveOwner >= 0 && s.SlaveOwner == meF);
+            case 62: return Bool(s.SlaveState > 1);
+            case 64: return Bool(Locks.LockSystem.WornShackles(s) is not null);
             case 60: return Bool(Position(world, me) is { } here && NearestTownOf(sF, here) is { } d && d <= 23040);
             case 63: return Bool(s.IsImprisoned && s.InWhat is { } cage && world.Fixtures.Find(cage)?.Lock is { EffectivelyLocked: true });
             case 65: return Bool(s.Race is not null && s.Race.StringId == mc.Race?.StringId);

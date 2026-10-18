@@ -400,5 +400,5 @@ lists, 58's field; the speech timer's unit.
 ## Meitou design
 
 As built: [simulation](../simulation.md#dialogue). Speech bubbles (`DialogueSystem.Ambient`, `PlayerInterface.Speech`): ambient lines are said as bubbles over the speaker's head, the chain of its own lines 2 + 0.12 x length seconds apart; fired by the campaign announcement (event 2) and by a sight stand-in (`DialogueSettings.AmbientEvents`, on in the game): every 30 ticks an awake NPC within 600 units of a player character, not fighting, fleeing or caged, says event 66 (its faction hostile to the player's), 67 (ally) or 3 (else), at most 2 per look and once per squad and character per half game hour (engine choices: the original fires 3, 27, 34, 59, 66 and 67 from its perception code `FUN_140859680` with visibility, relation and distance tests that are only partly read). Still planned: the other events (AI-to-AI talk, 4, 15-26, 41 ...), the AI
-tasks 102/159/161, interjector lines in a bubble chain, crowd triggers, AI contracts and `change AI`, items given, the arrest and slavery effects, and
+tasks 102/159/161, interjector lines in a bubble chain, crowd triggers, AI contracts and `change AI`, items given, the arrest and slavery effects (DA 40 is built), and
 moving the surgeon verb, Pay bail and `ArrestSystem`'s fine/arrest stand-ins onto dialogue.

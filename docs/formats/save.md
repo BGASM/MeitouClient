@@ -331,6 +331,9 @@ generated interior buildings, e.g. `19765-zone39.16-INGAME-S23`), `sentence` int
 Meanings: [locks](../game/locks.md#save-keys), [economy 11.5](../game/economy.md#115-bail-and-sentence) (`sentence` = start in game hours, `psts` = length).
 Dialogue locks (**Observed**, `Character::serialise` writer `FUN_140679900`, reader `FUN_14067f780`): character pairs `lok0`, `lok1`, ..., string = DIALOGUE
 string id, bool of the same key = locked ([dialogue](../game/dialogue.md#memory-and-saves)); Meitou reads and writes them (`Saving/DialogueSave`), and reads `personality` when above 0.
+Slave state (**Observed**, `FUN_140626580` writes, `FUN_140626830` reads, in the character's state record with `personality`): `slavestate` int (status `+0`: 0 free, 1 slave, 2 escaped),
+`escap` bool (`+0xe8`, the escaped-prisoner flag), `disguiseblown` float and two short-keyed fields (`+0xe9`, `+0xea`); the owner is the `slaver` handle. Meitou (`Saving/SlaveSave`)
+reads and writes `slavestate`, and the owner as `meitou slave owner` (FACTION string id).
 
 Meitou (`Saving/HeldSave`): reads building keys from the zones' GAMESTATE_BUILDING records when the town registers and writes them back into
 them (the visited zones' files, [Zone files](#zone-files)); the save ids of generated interiors are not mapped, so interior cages and

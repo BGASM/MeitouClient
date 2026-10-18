@@ -101,8 +101,7 @@ it is not part of target eligibility.
    needs; without it job 148 cannot decide whether to run.
 2. The **sensed-list category bits** (`FUN_140853960` masks 1, 0x4010, 0x20, 0x210, 0x4008, 0x811, 0x10): which bit is ally, enemy, dead, slave;
    and the size of the sensed list, which is the search range of every finder.
-3. The **status object at `Character+0x1a0`** (int at +0: 1 slave, `FUN_1405a4940` "{1} has been enslaved"; 2 probably an escaped slave or
-   prisoner); its `+0x88`, `+0xe0` (a slave's owner faction); its class name, and what sets `+0xe9` (the "innocent victim" flag; see the character finder).
+3. The **status object at `Character+0x1a0`** (int at +0, saved as `slavestate`: 1 slave, 2 escaped slave; the setter `FUN_1405a4940` posts "{1} has been enslaved" for a free player-faction character and sets `+0x110` to 250 on 2; its callers: caging, the squad factory's `slaves`, slave processing (task 182), escapes, release and bail); its `+0x88`, `+0xe0` (a slave's owner faction); its class name, and what sets `+0xe9` (the "innocent victim" flag; see the character finder).
    Partly known (**Observed**, [economy 11.4-11.8](economy.md#115-bail-and-sentence)): `+0xe8` escaped-prisoner flag, `+0xea` set on release
    or bail and cleared by a new pending crime, `+0x110` the "recently wanted" marker (250.0).
 4. The **writer of `+0x5b9`**, read as "unconscious" from its readers only.

@@ -99,7 +99,7 @@ public sealed class DialogueNode
 public static class DialogueActions
 {
     public const int None = 0, Trade = 1, JoinSquadWithEdit = 3, JoinSquadFast = 18, AffectRelations = 4, AttackChaseForever = 6, TakeMoney = 8, GiveMoney = 9, PayBounty = 10, CharacterEditor = 11,
-        BubbleWait = 12, ArrestTargetsCarriedPerson = 30, AssignBounty = 32, LockThisDialog = 36, AssaultPhase = 37, RetreatPhase = 38, ClearBounty = 49, AttackStayNearHome = 55, AttackIfNoCoexist = 57;
+        BubbleWait = 12, ArrestTargetsCarriedPerson = 30, EnslaveTargetsCarriedPerson = 40, AssignBounty = 32, LockThisDialog = 36, AssaultPhase = 37, RetreatPhase = 38, ClearBounty = 49, AttackStayNearHome = 55, AttackIfNoCoexist = 57;
 }
 
 /// <summary>The <c>DialogConditionEnum</c> numbers with special handling at load (docs/game/dialogue.md "Line check").</summary>

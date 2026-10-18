@@ -67,6 +67,9 @@ sealed partial class PlayerInterface
             // The wearer works its own shackles when it is selected, else the selection.
             IReadOnlyList<CharacterId> Workers() => selection.Contains(id) ? [id] : selection;
         }
+        // Meitou stand-in for dragging shackles onto a down or caged character's armour slot: a selected character carrying some puts them on, locked.
+        if (target.CanBeShackled && carriers.Length == 0 && Selected().Any(c => c.CarriesShackles))
+            verbs.Add(("Put on Shackles", () => Say(new Meitou.Simulation.Locks.PutShacklesOrder(Selected().Where(c => c.CarriesShackles).Select(c => c.Id).ToArray(), id) { Tick = session.World.Tick })));
         // Out of an unlocked cage a mate lifts the prisoner, awake or down (out of another faction's cage a crime for both, locks.md "Cages and beds").
         if (target.Prison is { Locked: false } && !selection.Contains(id) && target.CarriedBy.IsNone && carriers.Length == 0)
             verbs.Add(("Pick Up", () => Say(new Meitou.Simulation.Carrying.PickUpOrder([], id) { Tick = session.World.Tick })));

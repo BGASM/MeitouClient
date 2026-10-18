@@ -3,10 +3,16 @@ using System.Numerics;
 namespace Meitou.Simulation.Locks;
 
 /// <summary>How a character gets shackles off: the original's context-menu verbs Unlock Shackles (task 201), Use Tools (185) and Use Strength (186).</summary>
-public enum ShackleWork : byte { Pick, Cut, Break }
+public enum ShackleWork : byte { Pick, Cut, Break, PutOn }
 
 /// <summary>A character working on <see cref="Wearer"/>'s shackles (its own or another's).</summary>
 public sealed record ShackleJob(CharacterId Wearer, ShackleWork Work);
+
+/// <summary>
+/// Put shackles on <see cref="Wearer"/> (down or caged, wearing none): the first of the characters (the selection when empty) carrying unworn shackles walks to it and puts them on, locked.
+/// <b>Engine</b> stand-in for the original's drag onto the target's armour slot in its inventory window, which Meitou does not have.
+/// </summary>
+public sealed record PutShacklesOrder(IReadOnlyList<CharacterId> Characters, CharacterId Wearer) : SimCommand;
 
 /// <summary>Work on <see cref="Wearer"/>'s locked shackles: the first of the characters (the selection when empty) who may, walking to the wearer unless it is its own.</summary>
 public sealed record ShackleOrder(IReadOnlyList<CharacterId> Characters, CharacterId Wearer, ShackleWork Work) : SimCommand;
@@ -45,6 +51,62 @@ public sealed partial class LockSystem
 
     static Vector2 Flat(Vector3 p) => new(p.X, p.Z);
 
+    /// <summary>Rebuilds a character's fighter and look after its worn kit changed (null: headless worlds without data, nothing to rebuild).</summary>
+    internal CharacterAssembly? Assembly { get; set; }
+
+    /// <summary>Unworn shackles a character carries that can be put on someone (not broken; null: none).</summary>
+    public static Items.ItemInstance? CarriedShackles(CharacterCold? c) =>
+        c?.Inventory?.All().FirstOrDefault(i => i.IsLocked && !Items.InventoryCommands.IsEquipmentSection(i.Section) && i.Lock is { Broken: false } && i.Quantity == 1);
+
+    /// <summary>Whether shackles can be put on <paramref name="c"/>: alive, down or caged, wearing no shackles, not carried.</summary>
+    public static bool CanBeShackled(CharacterCold? c, bool alive) =>
+        alive && c is { Inventory: not null, CarriedBy.IsNone: true } && c.Medical is not { Dead: true } && (c.IsImprisoned || c.Medical is { Incapacitated: true }) && !c.Inventory.Items.Any(i => i.IsLocked && Items.InventoryCommands.IsEquipmentSection(i.Section));
+
+    void PutShacklesInput(World world, PutShacklesOrder order)
+    {
+        var table = world.Characters;
+        if (!table.TryResolveNext(order.Wearer, out int w) || !CanBeShackled(table.Cold(w), table.Next[w].Alive)) return;
+        foreach (var id in Who(world, order.Characters))
+        {
+            if (id == order.Wearer || !table.TryResolveNext(id, out int s) || table.Cold(s) is not { IsPlayer: true, Medical.Incapacitated: false, IsImprisoned: false } c || !c.CarriedBy.IsNone) continue;
+            if (CarriedShackles(c) is null) continue;
+            c.PickingLock = null;
+            c.Shackles = new ShackleJob(order.Wearer, ShackleWork.PutOn);
+            MovementSystem.GoTo(table, s, Flat(table.Next[w].Position), c.RunSpeed);
+            return;
+        }
+        world.Post("No one selected carries shackles.");
+    }
+
+    /// <summary>
+    /// The shackles go from the worker's inventory onto the wearer's armour slot, locked again (a picked pair locks when put on: engine choice, the original's re-lock is <b>Unknown</b>).
+    /// No crime is booked (<b>Unknown</b> in the original). False when the slot is taken.
+    /// </summary>
+    bool PutOn(World world, CharacterCold worker, CharacterCold wearer, Items.ItemInstance item)
+    {
+        if (!worker.Inventory!.Remove(item)) return false;
+        item.Lock!.Locked = true;
+        item.Lock.PickTime = 0;
+        item.Lock.NextRoll = LockState.FirstRoll;
+        // What the wearer has on in that slot goes into its own inventory first (engine: the original's drop onto a taken slot swaps the two).
+        var inventory = wearer.Inventory!;
+        if (inventory.Items.FirstOrDefault(i => i.Section == item.EquipmentSection) is { } worn && !worn.LockedOn)
+        {
+            inventory.Items.Remove(worn);
+            var (section, x, y) = (worn.Section, worn.X, worn.Y);
+            worn.Section = "main";
+            if (!inventory.Add(worn)) { (worn.Section, worn.X, worn.Y) = (section, x, y); inventory.Items.Add(worn); }
+        }
+        if (!Items.InventoryCommands.TryEquip(inventory, item))
+        {
+            item.Section = "main";
+            worker.Inventory.Add(item);
+            return false;
+        }
+        Assembly?.RefreshEquipment(wearer);
+        return true;
+    }
+
     /// <summary>Once a slow tick: each worker in reach of its wearer works the shackles; one out of reach walks on (a wearer that moved is followed).</summary>
     void ShackleWorkers(World world)
     {
@@ -53,7 +115,10 @@ public sealed partial class LockSystem
         for (int s = 0; s < table.HighWater; s++)
         {
             if (!next[s].Alive || table.Cold(s) is not { Shackles: { } job } c) continue;
-            if (c.Medical is { Incapacitated: true } || !c.CarriedBy.IsNone || !table.TryResolveNext(job.Wearer, out int w) || WornShackles(table.Cold(w)) is not { } item)
+            bool putOn = job.Work == ShackleWork.PutOn;
+            Items.ItemInstance? item = null;
+            if (c.Medical is { Incapacitated: true } || !c.CarriedBy.IsNone || !table.TryResolveNext(job.Wearer, out int w)
+                || (putOn ? !CanBeShackled(table.Cold(w), next[w].Alive) || (item = CarriedShackles(c)) is null : (item = WornShackles(table.Cold(w))) is null))
             {
                 c.Shackles = null;
                 continue;
@@ -72,6 +137,12 @@ public sealed partial class LockSystem
             }
             switch (job.Work)
             {
+                case ShackleWork.PutOn:
+                    c.Shackles = null;
+                    var wearer = table.Cold(w)!;
+                    if (PutOn(world, c, wearer, item)) { if (c.IsPlayer) world.Post($"{c.Name} put {item.Name} on {wearer.Name}"); }
+                    else if (c.IsPlayer) world.Post($"{wearer.Name} already wears something in that slot");
+                    break;
                 case ShackleWork.Pick:
                     switch (Picking.StepShackles(world, s, job.Wearer, item, world.TickSeconds, Crimes))
                     {

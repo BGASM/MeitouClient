@@ -434,7 +434,7 @@ public sealed class FixtureRegistry
         bounty > LifeBounty ? LifeSentence : (float)Math.Truncate(bounty * 0.02 * prisonTime);
 
     /// <summary>The sentence is served (start + length not after <paramref name="nowHours"/>; one without a sentence always is).</summary>
-    public static bool SentenceServed(CharacterCold c, double nowHours) => !c.Kidnapped && (c.SentenceLength <= 0 || c.SentenceStart + c.SentenceLength <= nowHours);
+    public static bool SentenceServed(CharacterCold c, double nowHours) => !c.Kidnapped && c.SlaveState == 0 && (c.SentenceLength <= 0 || c.SentenceStart + c.SentenceLength <= nowHours);
 
     /// <summary>
     /// Puts a character in a free cage (the original's enter, locks.md "Cages and beds"): imprisoned state, held at the cage's position and facing, orders and path dropped, the cage
@@ -464,6 +464,8 @@ public sealed class FixtureRegistry
             c.SentenceStart = 0;
             c.SentenceLength = 0;
         }
+        // An owned slave or escaped slave caged by an owner becomes that owner's slave again (FUN_140330600; the original also tests a type of the cage's owner, Unknown).
+        if (c.SlaveOwner >= 0 && cage.Owner >= 0) SetSlave(world, c, 1, cage.Owner);
         if (cagingsTick != world.Tick) { cagings.Clear(); cagingsTick = world.Tick; }
         var caging = new Imprisonment(world.Tick, carrier ?? CharacterId.None, prisoner, cage);
         cagings.Add(caging);
@@ -531,6 +533,7 @@ public sealed class FixtureRegistry
         }
         Clear(c);
         c.Escaped = false;
+        SetSlave(world, c, 0, -1);   // a release or bail frees a slave (FUN_1406add20, FUN_1406ae170)
         if (c.IsPlayer) world.Post($"{c.Name} has been released from prison.");
         return true;
     }
@@ -551,6 +554,7 @@ public sealed class FixtureRegistry
         if (cage is not null && cage.Occupant == prisoner) cage.Occupant = CharacterId.None;
         Clear(c);
         c.Escaped = escaped;
+        if (escape && c.SlaveState == 1) SetSlave(world, c, 2, c.SlaveOwner);   // a slave getting out is an escaped slave (Task_GetOutOfCage)
         return true;
     }
 
@@ -576,6 +580,23 @@ public sealed class FixtureRegistry
         if (c.InWhat is { } id && Find(id) is { } bed && bed.Occupant == sleeper) bed.Occupant = CharacterId.None;
         Clear(c);
         return true;
+    }
+
+    /// <summary>
+    /// Makes a character <paramref name="owner"/>'s slave (state 1): "{1} has been enslaved" for one of the player's faction that was free (<c>FUN_1405a4940</c>, <b>Observed</b>).
+    /// </summary>
+    public static void Enslave(World world, CharacterCold c, int owner) => SetSlave(world, c, 1, owner);
+
+    /// <summary>
+    /// The slave state setter (<c>FUN_1405a4940</c>, <b>Observed</b>): free to slave posts "{1} has been enslaved" for a player-faction character; becoming an escaped slave sets the
+    /// recently-wanted marker to 250 (status <c>+0x110</c>), so a looker who knows recognises it at once.
+    /// </summary>
+    static void SetSlave(World world, CharacterCold c, byte state, int owner)
+    {
+        if (c.SlaveState == 0 && state == 1 && (c.IsPlayer || world.Player.Faction >= 0 && c.Faction == world.Player.Faction)) world.Post($"{c.Name} has been enslaved");
+        if (state == 2) c.RecentlyWanted = Crime.CrimeSystem.RecentlyWantedSeconds;
+        c.SlaveState = state;
+        c.SlaveOwner = state == 0 ? -1 : owner;
     }
 
     static void Clear(CharacterCold c)

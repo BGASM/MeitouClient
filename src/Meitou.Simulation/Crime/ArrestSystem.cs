@@ -57,10 +57,13 @@ public sealed class Arrest
     public float Waited { get; set; }
     /// <summary>The cage chosen (reserved while the arrest lasts).</summary>
     public string? Cage { get; set; }
+    /// <summary>A slaver's take-over (<c>DA_ENSLAVE_TARGETS_CARRIED_PERSON</c>): the captive becomes the guard faction's slave when caged.</summary>
+    public bool Enslave { get; init; }
 
     internal void Hash(ref StateHasher h)
     {
         h.Add(Guard); h.Add(Target); h.Add(Faction); h.Add((int)Phase); h.Add(Time); h.Add(Fine); h.Add(Tries); h.Add(Waited); h.Add(Cage is { } c ? Rng.StableHash(c) : 0UL);
+        if (Enslave) h.Add(0x536C6176);
     }
 }
 
@@ -403,7 +406,8 @@ public sealed partial class ArrestSystem(CrimeSystem crimes, GameConstants const
                     Carry!.LetGo(world, g);
                     if (!world.Fixtures.Imprison(world, a.Target, cage, constants.PrisonTime)) return ToCage(world, a, g, t);
                     tc.Recognition = 0;
-                    if (tc.IsPlayer) world.Post($"{tc.Name} has been imprisoned by {Crimes.Factions.NameOf(a.Faction)}");
+                    if (a.Enslave) FixtureRegistry.Enslave(world, tc, a.Faction);
+                    else if (tc.IsPlayer) world.Post($"{tc.Name} has been imprisoned by {Crimes.Factions.NameOf(a.Faction)}");
                     return End(world, a, ArrestEventKind.Jailed);
                 }
                 if (!walking)

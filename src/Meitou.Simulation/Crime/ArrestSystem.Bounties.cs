@@ -208,16 +208,17 @@ public sealed partial class ArrestSystem
 
     /// <summary>
     /// <c>DA_ARREST_TARGETS_CARRIED_PERSON</c> (30, economy.md 11.7, <b>Observed</b>): <paramref name="carrier"/> drops the body it carries and <paramref name="guard"/> takes it over: he lifts
-    /// it and carries it to a free cage as an arrest does (no cage: he drops it). False: no body, or the guard is busy.
+    /// it and carries it to a free cage as an arrest does (no cage: he drops it). False: no body, or the guard is busy. <paramref name="enslave"/>: <c>DA_ENSLAVE_TARGETS_CARRIED_PERSON</c>
+    /// (40, the same hand-over, <c>FUN_140680560</c>): once caged the captive is the guard faction's slave (engine: the original's slaver processing, task 182, is not built).
     /// </summary>
-    public bool TakeOver(World world, CharacterId guard, CharacterId carrier)
+    public bool TakeOver(World world, CharacterId guard, CharacterId carrier, bool enslave = false)
     {
         var table = world.Characters;
         if (Carry is null || !table.TryResolveNext(guard, out int g) || table.Cold(g) is not { IsPlayer: false, Medical.Incapacitated: false, Carrying.IsNone: true } gc || Busy(guard)) return false;
         if (!table.TryResolveNext(carrier, out int c) || table.Cold(c) is not { } cc || !table.TryResolveNext(cc.Carrying, out int t) || table.Cold(t) is not { } tc) return false;
         var target = cc.Carrying;
         Carry.LetGo(world, c);
-        var arrest = new Arrest { Guard = guard, Target = target, Faction = gc.Faction, Phase = ArrestPhase.Fight };
+        var arrest = new Arrest { Guard = guard, Target = target, Faction = gc.Faction, Phase = ArrestPhase.Fight, Enslave = enslave };
         arrests.Add(arrest);
         gc.Engaged = true;
         if (tc.Medical is { Incapacitated: true } && Carry.BeginPickUp(world, g, target)) arrest.Phase = ArrestPhase.Lift;

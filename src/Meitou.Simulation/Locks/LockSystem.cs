@@ -57,6 +57,9 @@ public sealed partial class LockSystem(GameConstants constants, BodyOptions opti
                 case ShackleOrder shackles:
                     ShackleInput(world, shackles);
                     break;
+                case PutShacklesOrder putOn:
+                    PutShacklesInput(world, putOn);
+                    break;
                 case ToggleDoorsOrder or ToggleDoorLocksOrder:
                     DoorInputs(world, command);
                     break;

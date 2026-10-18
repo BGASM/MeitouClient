@@ -204,6 +204,13 @@ public sealed class CharacterCold
     public bool Escaped { get; set; }
     /// <summary>Held in a cage by a kidnapper (<see cref="Kidnap.KidnapSystem"/>), not sentenced: no sentence is ever served, no bail is offered, getting out is no crime. Saved as <c>meitou kidnapped</c>. Hashed only while set.</summary>
     public bool Kidnapped { get; set; }
+    /// <summary>
+    /// The original's slave state (status <c>+0</c>, saved as <c>slavestate</c>; <c>FUN_1405a4940</c>): 0 free, 1 slave, 2 escaped slave. A slave's sentence is never served.
+    /// <see cref="Locks.FixtureRegistry.Enslave"/>; hashed only while set.
+    /// </summary>
+    public byte SlaveState { get; set; }
+    /// <summary>The faction owning a slave or escaped slave (the original keeps a <c>slaver</c> handle; -1 none). Saved as <c>meitou slave owner</c>; hashed with <see cref="SlaveState"/>.</summary>
+    public int SlaveOwner { get; set; } = -1;
     /// <summary>The fixture this character is picking the lock of (<see cref="Locks.LockSystem"/>; null: none). Hashed only while set.</summary>
     public string? PickingLock { get; set; }
     /// <summary>The shackles this character is working on (<see cref="Locks.LockSystem"/>: picking, cutting; null: none). Hashed only while set.</summary>
@@ -439,6 +446,7 @@ public sealed class CharacterTable
             if (k.Recognition > 0) { hasher.Add(0x5265636F); hasher.Add(k.Recognition); }
             if (k.Escaped) hasher.Add(0x45736361);
             if (k.Kidnapped) hasher.Add(0x4B64706E);
+            if (k.SlaveState != 0) { hasher.Add(0x536C7653); hasher.Add(k.SlaveState); hasher.Add(k.SlaveOwner); }
             if (k.PickingLock is { } pick) { hasher.Add(0x5069636B); hasher.Add(Rng.StableHash(pick)); }
             if (k.Shackles is { } job) { hasher.Add(0x5368636B); hasher.Add(Rng.Key(job.Wearer)); hasher.Add((int)job.Work); }
             if (k.PickingUpItem is { } taking) { hasher.Add(0x54616B65); hasher.Add(taking); }
