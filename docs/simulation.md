@@ -432,7 +432,13 @@ unload, hashed only once non-empty. Facts: [locks](game/locks.md), [economy 11.5
   (`World.GameHours`) + `SentenceLength`; served when start + length <= now; no bounty with the cage owner: none (served).
 - **Lockpicking** (`Lockpicking`, serial; the player's order is in [Arrest and jail](#arrest-and-jail)): `Step` per task update (pending crime,
   timer on the lock, seeded roll by the lock's roll counter, XP), `Allowed` (min chance; engine: conscious, an arm, not
-  carried, not on a pole), `Break` (strength > 3 x hardness). Not built: cutting locks other than shackles, bashing doors.
+  carried, not on a pole), `Break` (strength > 3 x hardness). Not built: cutting locks other than shackles.
+- **Bashing doors** (`LockSystem.Bash`; blow rule in [locks](game/locks.md)): engine stand-in for the planner. Every 30 ticks an
+  NPC attacking (armed or an animal) whose target is inside a building another faction's locked doors shut (`IsShut`; inside:
+  nearer the door fixture's origin than its farthest door spot) while it is outside takes the nearest door (`CharacterCold.Bashing`);
+  the pursuit leaves it alone, it walks to 12 out from the leaf and swings every 1.5 s (engine; the clip length is not read).
+  Broken: lock unlocked, door broken and opening, the pursuit resumes. Engine: no crime for NPCs, the `Unlocked` sound for
+  `Break`; headless (no door gate, no spots) nothing is bashed. Player characters never bash.
 
 ## Arrest and jail
 
@@ -834,7 +840,7 @@ order. Renderer state lives in Rendering; snapshots are the simulation-to-host b
 
 Original-game unknowns are maintained in each linked subsystem reference; do not infer parity from our determinism tests.
 
-**Engine gaps:** remaining AI is listed in [AI](#ai); persistent town/world state, production, outposts, full UI fidelity, door AI tasks (closing, bashing) and physics remain incomplete (walls: see [Buildings](#buildings)). Save and combat limitations are listed in their subsystem sections.
+**Engine gaps:** remaining AI is listed in [AI](#ai); persistent town/world state, production, outposts, full UI fidelity and physics remain incomplete (walls: see [Buildings](#buildings)). Save and combat limitations are listed in their subsystem sections.
 
 **Behaviour and hash constraints.**
 - No end-of-tick hook: the combat system swaps its arrays at the end of its `SlowWorld`, so the result depends on the system order

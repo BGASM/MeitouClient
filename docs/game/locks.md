@@ -102,8 +102,12 @@ Same targets as picking; Task_CutLock / Task_BruteForceLock share the shackle ta
   The bar shows hardness x 10. Same crime rule as picking (2 for own-target / buildings, 7 for another character).
 - **Break** (`Task_BruteForceShackles` slot 2, **Observed**): instant; succeeds when effective strength x stat scale > 3 x hardness,
   else "I'm not strong enough to do that". Sets broken, "*Crunck*".
-- **Bash door** (81/226/287, `Task_BashDoor`): weapon/unarmed swings damage the building; each swing books Burglary (2)
-  against the owner. The door counts as broken once its building is destroyed (**Observed**).
+- **Bash door** (81/226/287, `Task_BashDoor`, update `FUN_140348c10`, **Observed**): needs a weapon (animals use their natural
+  one); humans play `stonemine`, the blow lands at clip progress 0.6. Each update books Burglary (2) against the owner. A blow
+  (door vfunc 62, `FUN_14029d690`): the attacker's damage packet, x0.25 for an animal (vfunc 0x248), then
+  `f = clamp(2 x blunt + 0.5 x cut, 20, 60)`; the door lock's hardness -= 0.015 x f. At <= 0 the door is broken, its lock
+  unlocked and the door opened, sound `Break`. The task ends once the door is broken, open or opening. No AI package lists the
+  bash tasks: the planner starts them (when, **Unknown**).
 
 ## Doors
 

@@ -72,6 +72,7 @@ public sealed partial class LockSystem(GameConstants constants, BodyOptions opti
         Doors(world);
         Rounds(world);
         ShackleWorkers(world);
+        Bashers(world);
         var table = world.Characters;
         var next = table.Next;
         for (int s = 0; s < table.HighWater; s++)

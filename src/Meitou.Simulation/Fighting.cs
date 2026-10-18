@@ -20,7 +20,7 @@ public sealed class PursuitSystem(CombatSystem combat) : ITickSystem
         for (int i = 0; i < table.HighWater; i++)
         {
             ref var n = ref next[i];
-            if (!n.Alive || n.Task != (byte)CharacterTask.Attack) continue;
+            if (!n.Alive || n.Task != (byte)CharacterTask.Attack || table.Cold(i)?.Bashing is not null) continue;   // a basher walks to its door (Locks.LockSystem)
             var st = combat.StateOf(new CharacterId(i, n.Generation));
             int t = st.TargetSlot;
             if (t < 0 || t >= table.HighWater || !next[t].Alive || next[t].Generation != st.TargetGeneration) continue;

@@ -213,6 +213,10 @@ public sealed class CharacterCold
     public int SlaveOwner { get; set; } = -1;
     /// <summary>The fixture this character is picking the lock of (<see cref="Locks.LockSystem"/>; null: none). Hashed only while set.</summary>
     public string? PickingLock { get; set; }
+    /// <summary>The door this character is bashing in (<see cref="Locks.LockSystem"/>; null: none). Hashed only while set.</summary>
+    public string? Bashing { get; set; }
+    /// <summary>Game seconds since the last swing at <see cref="Bashing"/>' door (-1: walking there).</summary>
+    public float BashTime { get; set; }
     /// <summary>The shackles this character is working on (<see cref="Locks.LockSystem"/>: picking, cutting; null: none). Hashed only while set.</summary>
     public Locks.ShackleJob? Shackles { get; set; }
     /// <summary>The ground item this character walks to and picks up (<see cref="Items.GroundItems"/> id, <see cref="PlayerSystem"/>; null: none). Hashed only while set.</summary>
@@ -448,6 +452,7 @@ public sealed class CharacterTable
             if (k.Kidnapped) hasher.Add(0x4B64706E);
             if (k.SlaveState != 0) { hasher.Add(0x536C7653); hasher.Add(k.SlaveState); hasher.Add(k.SlaveOwner); }
             if (k.PickingLock is { } pick) { hasher.Add(0x5069636B); hasher.Add(Rng.StableHash(pick)); }
+            if (k.Bashing is { } bash) { hasher.Add(0x42617368); hasher.Add(Rng.StableHash(bash)); hasher.Add(k.BashTime); }
             if (k.Shackles is { } job) { hasher.Add(0x5368636B); hasher.Add(Rng.Key(job.Wearer)); hasher.Add((int)job.Work); }
             if (k.PickingUpItem is { } taking) { hasher.Add(0x54616B65); hasher.Add(taking); }
             // A builder's site, bar and the task it goes back to add to the hash only while it works one, so worlds without sites hash as before.
