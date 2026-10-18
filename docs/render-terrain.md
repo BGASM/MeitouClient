@@ -33,9 +33,10 @@ Terrain inside a building's interior mask is not drawn, so a room dug into a hil
 - Meitou (`InteriorMaskRenderer`): masks of loaded buildings within 3000 of the eye, drawn before the scene with the near
   slice's camera into RGBA16F; every face writes depth + 1, min into R, max into A (the nearest and farthest face, the same as
   the game's facing split for a closed mesh seen from outside; not dependent on the meshes' winding). Patches overlapping a
-  drawn building's footprint box use cut variants of the colour and prepass programs; others keep discard-free programs.
-  Engine limits: near slice only; a camera inside a mask cuts from the nearest face, not from the eye (game: R = 0); foliage
-  and CLIP_INTERIOR objects are not cut yet.
+  drawn mask mesh's X/Z box use cut variants of the colour and prepass programs; others keep discard-free programs. With the
+  eye inside a building's trigger hull its masks write R = 0 (the game's value there: every face seen is a back face).
+  Engine limits: near slice only; "inside" is decided by the hull, not per ray; foliage and CLIP_INTERIOR objects are not
+  cut yet.
 
 ## Streaming and budgets
 

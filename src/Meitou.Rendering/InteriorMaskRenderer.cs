@@ -28,13 +28,15 @@ public sealed unsafe class InteriorMaskRenderer : IDisposable
 
     // Every face writes its view depth + 1 (the game's value, interiormask.hlsl) to R (min blend: the nearest) and A (max blend: the farthest). The game
     // splits the faces by facing instead; for a closed mesh seen from outside the nearest face is a front face and the farthest a back face, the same.
+    // With the eye inside the building's hull (uInside) every face it sees is a back face: the game's R stays 0, so here R = 0.
     const string Fragment = """
         #version 330 core
         out vec4 fragColour;
+        uniform int uInside;
         void main()
         {
             float w = 1.0 / gl_FragCoord.w + 1.0;
-            fragColour = vec4(w, 0.0, 0.0, w);
+            fragColour = vec4(uInside != 0 ? 0.0 : w, 0.0, 0.0, w);
         }
         """;
 
@@ -42,13 +44,15 @@ public sealed unsafe class InteriorMaskRenderer : IDisposable
     {
         public DeviceBuffer? Vertices;
         public int Count;
+        /// <summary>The bounds of the positions, in building space.</summary>
+        public Vector3 Min, Max;
     }
 
     readonly GpuContext gpu;
     readonly WorldObjectRenderer objects;
     readonly LegacyProgram program;
     readonly NativeSegment segment;
-    readonly UniformHandle mvp;
+    readonly UniformHandle mvp, inside;
     readonly VertexArrayBindings vertexSource;
     readonly Dictionary<string, MaskMesh> meshes = new(StringComparer.OrdinalIgnoreCase);
     readonly List<InteriorVolume> near = [];
@@ -63,6 +67,7 @@ public sealed unsafe class InteriorMaskRenderer : IDisposable
         program = LegacyProgram.Create(gpu, Vertex, Fragment, "interior mask");
         segment = new NativeSegment(gpu, program, Silk.NET.Vulkan.PrimitiveTopology.TriangleList, "interior mask");
         mvp = program.Uniform("uMvp");
+        inside = program.Uniform("uInside");
         vertexSource = new VertexArrayBindings([new LegacyProgram.Attribute(default, Silk.NET.Vulkan.Format.R32G32B32Sfloat, 12, false)], default);
     }
 
@@ -72,7 +77,7 @@ public sealed unsafe class InteriorMaskRenderer : IDisposable
     /// <summary>The depth range's bindless 2D index (valid while <see cref="Active"/>).</summary>
     public uint Index => bindless?.Index ?? 0;
 
-    /// <summary>The drawn buildings' footprints' X/Z bounds: terrain patches outside all of them need no cut.</summary>
+    /// <summary>The drawn buildings' mask meshes' X/Z bounds: terrain patches outside all of them need no cut.</summary>
     public IReadOnlyList<(Vector2 Min, Vector2 Max)> Boxes => boxes;
 
     /// <summary>The meshes drawn by the last <see cref="Record"/>.</summary>
@@ -110,22 +115,28 @@ public sealed unsafe class InteriorMaskRenderer : IDisposable
             var node = v.Node;
             node.Translation -= eye;
             var m = node * relative;
-            bool any = false;
+            bool any = false, eyeInside = v.Contains(eye);
+            var min = new Vector2(float.MaxValue);
+            var max = new Vector2(float.MinValue);
             foreach (var path in v.MaskMeshes)
             {
                 if (Mesh(path) is not { Vertices: { } buffer } mesh) continue;
                 program.Set(mvp, in m);
+                program.Set(inside, eyeInside ? 1 : 0);
                 program.Flush(cmd);
                 cmd.BindVertexBuffers(0, [new BufferBinding(buffer.Handle, 0)]);
                 cmd.Draw((uint)mesh.Count);
                 Drawn++;
                 any = true;
+                for (int c = 0; c < 8; c++)
+                {
+                    var corner = Vector3.Transform(new Vector3((c & 1) == 0 ? mesh.Min.X : mesh.Max.X, (c & 2) == 0 ? mesh.Min.Y : mesh.Max.Y,
+                        (c & 4) == 0 ? mesh.Min.Z : mesh.Max.Z), v.Node);
+                    min = Vector2.Min(min, new Vector2(corner.X, corner.Z));
+                    max = Vector2.Max(max, new Vector2(corner.X, corner.Z));
+                }
             }
-            if (!any) continue;
-            var min = new Vector2(float.MaxValue);
-            var max = new Vector2(float.MinValue);
-            foreach (var p in v.Footprint) { min = Vector2.Min(min, p); max = Vector2.Max(max, p); }
-            boxes.Add((min, max));
+            if (any) boxes.Add((min, max));
         }
         cmd.EndRendering();
         cmd.Barrier(BarrierBatch.Full);
@@ -155,6 +166,7 @@ public sealed unsafe class InteriorMaskRenderer : IDisposable
                     for (int k = 0; k < 3; k++)
                     {
                         var p = positions[indices[i + k]];
+                        (mesh.Min, mesh.Max) = data.Count == 0 ? (p, p) : (Vector3.Min(mesh.Min, p), Vector3.Max(mesh.Max, p));
                         data.AddRange([p.X, p.Y, p.Z]);
                     }
             }
