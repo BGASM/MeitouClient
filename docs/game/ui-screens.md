@@ -81,6 +81,50 @@ Layer Middle, per-frame update FUN_140728d50 (**Observed**):
 
 **Observed** (user base-game reference): squad portrait frames occupy about 72% of the tab
 page height, leaving space below; Meitou uses this ratio, shrinking further for a full row.
+
+### Portrait cells
+
+**Camera** (**Verified** by decompiling the portrait render `FUN_14084b890`). The character sits alone at the origin of a separate scene,
+unrotated (it faces +Z), in its `idle stance` at time 0 with the `postures`, `shoulder set` and `neck set` layers at the appearance's
+percentages. The camera looks at the `Bip01 Head` bone plus the race's `portrait offset x/y/z`. The offset is scaled by the character's
+size when it has a race. The eye is `(0, 0, portrait distance)` turned first about X by a pitch, then about Y by a yaw, both from the
+character's `portrait serial` `s` (an unsigned int):
+
+- yaw = (s mod 500 / 1000 - 0.25) π, so −45° to +45° about the front;
+- pitch = (s mod 252 / 1000 - 0.083) π, about −15° to +30°.
+
+The camera keeps a fixed Y yaw axis.
+
+**Where the serial comes from** (**Verified**):
+- A new character gets `(int)(random[0,1) × 4e9)` (`FUN_1406223f0`, Character `+0x664`).
+- Loading reads GAMESTATE_CHARACTER `portrait_serial` (`CharacterAnimal::vfunc_18`), or takes the handle's serial when the key is missing.
+- Saving writes it back (`FUN_1406280a0`).
+
+So each character keeps one random angle for life. Most come out three-quarter, some nearly frontal; none are profiles. **Observed**:
+the user's base-game save atlas shows a near-frontal face.
+
+**States** (**Verified**, `FUN_140414dc0` sets the flags, `FUN_140415150` applies them to the `Kenshi_PortraitCharacter` cell). The cell has
+`BackgroundImage`, `BackImage`, `PortraitImage`, `FrontImage`, `NameText` and the `BorderPanel` button. The image set is
+`Kenshi_PortraitImage` in `kenshi_images.xml`.
+
+| Flag | Set when | Shown as |
+| --- | --- | --- |
+| 1 | the character is selected | the `BorderPanel` button's selected state |
+| 2 | the character is ≥ 1000 units from the camera and ≥ ~316 from the camera's focus, and either (a) it is not down (slot 6), the float at its AI `+0xb0` is > 0 and it is not imprisoned, or (b) `+0x279 & 7` | `Background` `Hurt` (red) instead of `Normal`, flashing |
+| 4 | dead or unconscious (slot 107: `+0x5bc` / `+0x5b9`), carried (`+0x3d4`), or in a bed (`+0x2f8 == 1`) | `PortraitImage` alpha 0.25 (faded); this also stops the flash |
+| 8 | in combat (`FUN_140436610(c, 1)`) | `BackOverlay` `Combat` |
+| 0x80 | hunger (`+0x4b8`) < 1.25 | `BackOverlay` `Hunger`, only when not in combat |
+| 0x10 | the inventory holds an item in section 9 or 5 that answers yes to its slot 94 (`FUN_1405c8a10`); read as the slave shackles/collar, **Observed** | `FrontOverlay` `Slave` |
+| 0x20 | imprisoned (`+0x2f8 == 2`, cage or restraint) | `FrontOverlay` `Prison` (wins over Slave) |
+| 0x40 | `+0x279 & 7` | `FrontOverlay` `Eaten` (wins over both) |
+
+- **Flash** (PortraitData `+0x28`, a direction of ±1). When flag 2 turns on, the direction starts at −1. Each frame the background's alpha
+  changes by direction × frame time × 2. At 0 the direction flips to +1, and at 1 it flips back to −1. That is a full 0 → 1 → 0 cycle
+  every second. Without flag 2, or with flag 4, the alpha stays at 1.
+- **Unknown:** what the AI `+0xb0` float means. AI slot 25 (the eat desire) also suppresses itself while it is > 0, so it reads as
+  "danger seen". Also unknown: what `+0x279 & 7` holds, and what slot 94 tests.
+- A portrait is re-rendered when its flags change, when its character changes, or when PortraitData `+0x30` / `+0x58` is set.
+- A cell wider than 94 px switches `NameText` to a larger font.
 The HUD stats rows (`StatsText`: MARTIAL ARTS ...) are drawn in the painted face, Sentencia at its resized 22 pt, 15.3 px at 1080 p
 (**Observed**: glyph shapes and widths in a base-game screenshot; [mygui.md](../formats/mygui.md) for the resize); Meitou uses
 `Kenshi_PaintedTextFont_Medium` there.
