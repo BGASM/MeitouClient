@@ -100,6 +100,12 @@ joins open edges of one tile that coincide reversed and are within the climb at 
 Swamp House `48-Newwworld-INGAME`'s stair foot met the ground at Y124 vs 127 and kept only a 4-unit tile-border link, so radius-4
 agents had no way up; with the seam, ground (-47000,125,48100) reaches the room (-47229,178,47969) (the dome `805-rebirth-INGAME`,
 `6-` and `4-` were already reachable). Its deck (Y~178) was never pruned: the red there in `--png` is roofs, beams under the deck and interior fragments.
+**Tile seams** (engine choice): tiles are rasterised with a 3-cell border from their neighbours (Recast `borderSize`), so contour
+vertices on a tile's edge are kept and those edges come out as portals. Without it Recast treats the edge as a wall and simplifies across
+it (error 1.3 cells): a strip one cell deep along the edge loses its edge vertex and the stitcher finds no edge on the line. **Observed**
+(zone 19.29, scratch probe): the Longhouse `4-Newwworld-INGAME`'s outside ramp ends on the tile line z−13152 one row short of its
+doorstep, which was cut off from the street and its door never joined; with the border the path from the street reaches the room.
+Kept area grows by 0.04..1.1% (zones 20.32, 21.32, 20.29, 18.35) while polygons drop 20..45%.
 **Zone borders** (engine choice): each zone is pruned by its own seeds only and cached that way; when a zone loads, points on the
 kept edges of each shared border seed the neighbour's full mesh (and back) until nothing grows, so the kept set does not depend on load
 order. The original seeds a new zone from already built neighbours' border midpoints (order dependent) but ships prebuilt tiles, so

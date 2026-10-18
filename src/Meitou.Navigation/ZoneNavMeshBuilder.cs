@@ -13,11 +13,15 @@ namespace Meitou.Navigation;
 /// </summary>
 internal static partial class ZoneNavMeshBuilder
 {
+    /// <summary>Cells of the neighbouring tiles rasterised round each tile (Recast's borderSize; engine choice: its usual walkable radius + 3, radius 0 here).</summary>
+    const int TileBorderCells = 3;
+
     public static ZoneNavMesh Build(ZoneGeometry g, NavBuildSettings s, out NavBuildTimes times)
     {
         var total = Stopwatch.StartNew();
         times = new NavBuildTimes();
         float zoneSize = g.ZoneMax.X - g.ZoneMin.X;
+        float pad = TileBorderCells * s.CellSize;
         int cellsPerSide = (int)MathF.Round(zoneSize / s.CellSize);
         if (cellsPerSide % s.TileCells != 0) throw new ArgumentException($"{cellsPerSide} cells per zone side is not a multiple of {s.TileCells}");
         int tilesPerSide = cellsPerSide / s.TileCells;
@@ -33,6 +37,8 @@ internal static partial class ZoneNavMeshBuilder
         for (int i = 0; i < triBuckets.Length; i++) { triBuckets[i] = []; carvers[i] = []; painters[i] = []; }
         void Tiles(float x0, float z0, float x1, float z1, List<int>[] buckets, int id)
         {
+            // A tile also takes what lies in its border (BuildTile).
+            x0 -= pad; z0 -= pad; x1 += pad; z1 += pad;
             int tx0 = Math.Clamp((int)MathF.Floor((x0 - g.ZoneMin.X) / tileWorld), 0, tilesPerSide - 1), tx1 = Math.Clamp((int)MathF.Floor((x1 - g.ZoneMin.X) / tileWorld), 0, tilesPerSide - 1);
             int tz0 = Math.Clamp((int)MathF.Floor((z0 - g.ZoneMin.Y) / tileWorld), 0, tilesPerSide - 1), tz1 = Math.Clamp((int)MathF.Floor((z1 - g.ZoneMin.Y) / tileWorld), 0, tilesPerSide - 1);
             if (x1 < g.ZoneMin.X || x0 > g.ZoneMax.X || z1 < g.ZoneMin.Y || z0 > g.ZoneMax.Y) return;
@@ -123,10 +129,14 @@ internal static partial class ZoneNavMeshBuilder
             }
         float ch = s.CellHeight;
         if ((yMax - yMin) / ch > 8000) ch = (yMax - yMin) / 8000f;
-        var bmin = new RcVec3f(x0, yMin - 1, z0);
-        var bmax = new RcVec3f(x0 + tileWorld, yMax + 1, z0 + tileWorld);
-        int cells = s.TileCells;
-        var hf = new RcHeightfield(cells, cells, bmin, bmax, s.CellSize, ch, 0);
+        // A border of cells from the neighbouring tiles: Recast then keeps the contour vertices on the tile's edge and marks those edges as portals, so a
+        // narrow strip along the edge is not simplified away from it (docs/game/pathfinding.md, "Own builder", tile seams).
+        int border = TileBorderCells;
+        float pad = border * s.CellSize;
+        var bmin = new RcVec3f(x0 - pad, yMin - 1, z0 - pad);
+        var bmax = new RcVec3f(x0 + tileWorld + pad, yMax + 1, z0 + tileWorld + pad);
+        int cells = s.TileCells + 2 * border;
+        var hf = new RcHeightfield(cells, cells, bmin, bmax, s.CellSize, ch, border);
 
         var tileTris = new int[tris.Count * 3];
         var tileAreas = new int[tris.Count];
