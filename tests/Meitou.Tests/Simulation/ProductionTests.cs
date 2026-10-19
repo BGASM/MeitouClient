@@ -18,7 +18,7 @@ namespace Meitou.Tests.Simulation;
 /// <summary>Production (docs/simulation.md "Production", docs/game/buildings-production.md "Production", "Farming", "Research"): wells, farms, research benches.</summary>
 public class ProductionTests
 {
-    const string Water = "50-t", Crop = "51-t", Book = "52-t", Well = "60-t", Farm = "61-t", Bench = "62-t", Study = "70-t";
+    const string Water = "50-t", Crop = "51-t", Book = "52-t", Gadget = "53-t", Well = "60-t", Farm = "61-t", Bench = "62-t", Workshop = "63-t", Study = "70-t";
     /// <summary>The stat that gives skill factor 1: lerp(0.5, 1.4, x/100) = 1.</summary>
     const float Unit = 100 / 1.8f;
     const int PlayerFaction = 2;
@@ -29,7 +29,8 @@ public class ProductionTests
 
     /// <summary>
     /// A well (0.1 water per second at skill 1), an indoor farm (4 plants, 1 h to grow, 2 crops each at farming 33.3, 1 water per game hour) and a level 1 research bench with
-    /// a 4 x 4 grid, and one research of 0.3 h costing 2 books.
+    /// a 4 x 4 grid, one research of 0.3 h costing 2 books, and a workshop crafting a gadget of 1 crop in 1 h (its section consumes water until a craft rebinds it; the output
+    /// holds 3).
     /// </summary>
     static GameDatabase Database()
     {
@@ -71,8 +72,15 @@ public class ProductionTests
         study.Ints["level"] = 1;
         study.Ints["time"] = 1;
         study.References["cost"] = [new FcsReference(Book, 2, 0, 0)];
+        var gadget = Item(Gadget, "Gadget");
+        gadget.Ints["production time"] = 1;
+        gadget.References["ingredients"] = [new FcsReference(Crop, 100, 0, 0)];
+        var workshopFn = Function("84-t", CraftBench.CraftingFunction, (int)StatsEnumerated.Engineering);
+        workshopFn.References["item crafts"] = [new FcsReference(Gadget, 3, 0, 0)];
+        workshopFn.References["consumes"] = [new FcsReference(Water, 5, 100, 0)];
         var file = new FcsFile();
-        file.Records.AddRange([Item(Water, "Water"), Item(Crop, "Crop"), Item(Book, "Book"), wellFn, farmFn, benchFn, farmData, Building(Well, "Test Well", "80-t"), farm, bench, study]);
+        file.Records.AddRange([Item(Water, "Water"), Item(Crop, "Crop"), Item(Book, "Book"), wellFn, farmFn, benchFn, farmData, Building(Well, "Test Well", "80-t"), farm, bench, study, gadget, workshopFn,
+            Building(Workshop, "Test Workshop", "84-t")]);
         var db = new GameDatabase();
         db.Apply(file, "test.mod");
         return db;
@@ -133,19 +141,24 @@ public class ProductionTests
 
     // ------------------------------------------------------------------ determinism
 
-    /// <summary>A well and a farm are worked, water goes into the farm and books into the bench, the study is queued; hashes at six checkpoints.</summary>
-    static List<ulong> Scripted(int threads, out (int Water, int Crops, bool Studied) seen)
+    /// <summary>A well, a farm and a workshop are worked, water goes into the farm, books into the bench and crops into the workshop, the study and three gadgets are
+    /// queued; hashes at six checkpoints.</summary>
+    static List<ulong> Scripted(int threads, out (int Water, int Crops, bool Studied, int Gadgets) seen)
     {
-        using var rig = new Rig(Database(), Constants, [Well, Farm, Bench], threads);
+        using var rig = new Rig(Database(), Constants, [Well, Farm, Bench, Workshop], threads);
         var labourer = rig.Add(0, StatsEnumerated.Labouring, Unit);
         var farmer = rig.Add(1, StatsEnumerated.Farming, 100 / 3f, (Water, 5));
         var scientist = rig.Add(2, StatsEnumerated.Science, Unit, (Book, 3));
+        var crafter = rig.Add(3, StatsEnumerated.Engineering, Unit, (Crop, 5));
         rig.World.RunTick();
         rig.World.Commands.Enqueue(new OperateOrder([labourer], rig.Sites[0]) { Tick = 2 });
         rig.World.Commands.Enqueue(new OperateOrder([farmer], rig.Sites[1]) { Tick = 2 });
         rig.World.Commands.Enqueue(new OperateOrder([scientist], rig.Sites[2]) { Tick = 2 });
+        rig.World.Commands.Enqueue(new QueueCraft(rig.Sites[3], Gadget, 3) { Tick = rig.World.Tick });
+        rig.World.Commands.Enqueue(new OperateOrder([crafter], rig.Sites[3]) { Tick = 2 });
         rig.Put(farmer, Water, 1, 0);
         rig.Put(scientist, Book, 2, -1);
+        rig.Put(crafter, Crop, 3, 0);
         rig.World.RunTick();
         rig.World.Commands.Enqueue(new QueueResearch(Study) { Tick = rig.World.Tick });
         var hashes = new List<ulong>();
@@ -154,15 +167,15 @@ public class ProductionTests
             rig.World.RunTicks(target - (int)rig.World.Tick);
             hashes.Add(rig.World.StateHash());
         }
-        seen = (rig.Machine(0).Output!.Count, rig.Machine(1).Output!.Count, rig.World.Research.IsDone(Study));
+        seen = (rig.Machine(0).Output!.Count, rig.Machine(1).Output!.Count, rig.World.Research.IsDone(Study), rig.Machine(3).Craft!.Done.Sum(i => i.Quantity));
         return hashes;
     }
 
     [Fact]
-    public void Wells_farms_and_research_hash_the_same_at_1_4_and_16_threads()
+    public void Wells_farms_research_and_crafting_hash_the_same_at_1_4_and_16_threads()
     {
         var one = Scripted(1, out var seen);
-        Assert.True(seen.Water > 0 && seen.Crops > 0 && seen.Studied, $"{seen}");
+        Assert.True(seen.Water > 0 && seen.Crops > 0 && seen.Studied && seen.Gadgets == 3, $"{seen}");
         Assert.Equal(one, Scripted(4, out _));
         Assert.Equal(one, Scripted(16, out _));
     }
@@ -213,7 +226,111 @@ public class ProductionTests
         Assert.Contains(rig.World.TakeMessages(), m => m == "Research complete: Test Study");
     }
 
+    // ------------------------------------------------------------------ crafting
+
+    /// <summary>
+    /// Queueing a gadget rebinds the workshop's water section to crops (the water falls out); two gadgets draw 2 crops and wait in the output until taken; a half-made third and
+    /// the rebound section survive a save round-trip (docs/game/buildings-production.md "Crafting").
+    /// </summary>
+    [Fact]
+    public void A_craft_rebinds_its_section_draws_ingredients_waits_to_be_taken_and_saves()
+    {
+        const string PlayerFactionId = "204-gamedata.base";
+        var db = Database();
+        using var rig = new Rig(db, Constants, [Workshop]);
+        var worker = rig.Add(0, StatsEnumerated.Engineering, Unit, (Water, 2), (Crop, 5));
+        rig.World.RunTick();
+        rig.Put(worker, Water, 0, 0);
+        rig.World.RunTick();
+        Assert.Equal((Water, 2), (rig.Machine(0).Inputs[0].Item, rig.Machine(0).Inputs[0].Count));
+
+        rig.World.Commands.Enqueue(new QueueCraft(rig.Sites[0], Gadget, 2) { Tick = rig.World.Tick });
+        rig.World.RunTick();
+        var section = rig.Machine(0).Inputs[0];
+        Assert.Equal((Crop, 0, 1f), (section.Item, section.Count, section.Rate));
+        Assert.Equal(2, rig.World.GroundItems.All.Where(g => g.Item.Record == Water).Sum(g => g.Item.Quantity));
+
+        rig.Put(worker, Crop, 0, 0);
+        rig.World.Commands.Enqueue(new OperateOrder([worker], rig.Sites[0]) { Tick = rig.World.Tick });
+        var craft = rig.Machine(0).Craft!;
+        for (int t = 0; t < 4000 && craft.Queue.Count > 0; t++) rig.World.RunTick();
+        Assert.Empty(craft.Queue);
+        Assert.Equal(2, craft.Done.Sum(i => i.Quantity));
+        Assert.Equal(3, section.Count + section.Level, 0.01f);
+
+        rig.World.Commands.Enqueue(new TakeFromMachine(worker, rig.Sites[0], -2) { Tick = rig.World.Tick });
+        rig.World.RunTick();
+        Assert.Empty(craft.Done);
+        Assert.Equal(2, rig.Count(worker, Gadget));
+
+        rig.World.Commands.Enqueue(new QueueCraft(rig.Sites[0], Gadget) { Tick = rig.World.Tick });
+        for (int t = 0; t < 4000 && (craft.Queue.Count == 0 || craft.Queue[0].Progress < 0.3f); t++) rig.World.RunTick();
+        var job = Assert.Single(craft.Queue);
+
+        var builder = new Meitou.Data.Save.SaveBuilder(1);
+        builder.AddFaction(PlayerFactionId, "Nameless", true, 1000, []);
+        builder.AddEmptyWorldState();
+        Meitou.Simulation.Saving.BuildingSave.Write(builder.Game, rig.World, PlayerFactionId, 5);
+        Meitou.Simulation.Saving.MachineSave.Write(builder.Game, rig.World);
+        string dir = Path.Combine(Path.GetTempPath(), "meitou-craft-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            builder.Game.Write(dir);
+            var save = Meitou.Data.Save.SaveGame.Load(dir);
+            using var back = new Rig(db, Constants, []);
+            Meitou.Simulation.Saving.BuildingSave.Read(save, back.World, db, PlayerFactionId, PlayerFaction);
+            Meitou.Simulation.Saving.MachineSave.Read(save, back.World, back.Production, back.Items);
+            var read = back.World.Machines.Find(rig.Sites[0])!;
+            var again = Assert.Single(read.Craft!.Queue);
+            Assert.Equal((job.Option.Key, job.Progress, job.Critical), (again.Option.Key, again.Progress, again.Critical));
+            Assert.Equal((section.Item, section.Count, section.Level, section.Rate), (read.Inputs[0].Item, read.Inputs[0].Count, read.Inputs[0].Level, read.Inputs[0].Rate));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
     // ------------------------------------------------------------------ the installed game
+
+    /// <summary>
+    /// The installed Weapon Smith (2033) and Leather Armour Crafting Bench (2262) offer the documented crafts (docs/game/buildings-production.md "Crafting"): every PLAYER_WEAPONS
+    /// weapon type in each listed model, a katana at level 30 taking (0.3² x 100 x value/300 x 2/P) h and its material cost in iron plates; a Tricorn Hat taking coverage/100 x
+    /// lerp(0.4, 1, 5) x 0.6 h and drawing coverage/100 leather and that x fabrics amount of fabrics. With no research the weapons are locked; with all of it some are not.
+    /// </summary>
+    [Fact, Slow]
+    public void The_installed_weapon_and_armour_benches_offer_the_documented_crafts()
+    {
+        var db = InstallData.BaseGame;
+        Assert.SkipWhen(db is null, "Kenshi install not found");
+        var constants = GameConstants.FromDatabase(db!);
+        using var rig = new Rig(db!, constants, ["2033-gamedata.base", "2262-gamedata.base"]);
+        rig.World.RunTick();
+        var smith = rig.Machine(0).Data;
+        var maker = db!.Find(CraftBench.PlayerWeapons)!;
+        var models = db.Find(db.Find("2033-gamedata.base")!.GetReferences("functionality")[0].TargetStringId)!.GetReferences("weapon crafts").Select(r => r.TargetStringId).ToHashSet();
+        int types = maker.GetReferences("weapon types").Count(t => db.Find(t.TargetStringId) is { Type: FcsRecordType.WEAPON });
+        int listed = maker.GetReferences("weapon models").Count(m => models.Contains(m.TargetStringId));
+        Assert.Equal(types * listed, smith.Craft!.Options.Count);
+
+        var katana = db.OfType(FcsRecordType.WEAPON).First(r => r.Name == "Katana");
+        var recipe = smith.Craft.Recipe(db, constants, new CraftOption(CraftKind.Weapon, katana.StringId, null, 30, 1), smith.Inputs);
+        Assert.Equal(0.09f * 100 * katana.GetInt("value") / 300f * 2 / constants.ProductionSpeed, recipe.Hours, 0.001f);
+        Assert.Equal((smith.Inputs[0].Item, (float)katana.GetInt("material cost")), (recipe.Inputs[0].Item, recipe.Inputs[0].PerItem));
+
+        var bench = rig.Machine(1).Data;
+        var hat = db.OfType(FcsRecordType.ARMOUR).First(r => r.Name == "Tricorn Hat");
+        float coverage = hat.GetReferences("part coverage").Sum(p => p.TargetStringId == "101-gamedata.quack" ? (int)(p.Values.Value0 * 1.5) : p.Values.Value0) / 100f;
+        var hatRecipe = bench.Craft!.Recipe(db, constants, bench.Craft.Options.First(o => o.Item == hat.StringId), bench.Inputs);
+        Assert.Equal(MathF.Max(1, coverage * 2.6f) * 0.6f, hatRecipe.Hours, 0.001f);
+        var leather = hatRecipe.Inputs.Single(i => i.Item != CraftBench.Fabrics);
+        Assert.Equal(coverage, leather.PerItem, 0.001f);
+        Assert.Equal(coverage * hat.GetFloat("fabrics amount", 0.2f), hatRecipe.Inputs.Single(i => i.Item == CraftBench.Fabrics).PerItem, 0.001f);
+
+        Assert.DoesNotContain(rig.Production.CraftOptions(rig.World, rig.Sites[0]), o => o.Unlocked);
+        rig.World.Research.Set(db, [.. db.OfType(FcsRecordType.RESEARCH).Select(r => r.StringId)]);
+        Assert.Contains(rig.Production.CraftOptions(rig.World, rig.Sites[0]), o => o.Unlocked);
+    }
 
     /// <summary>
     /// The installed Well (1921) at skill factor 1 on ground with no water value (yield 0.5) makes 36 x 0.5 water per game day (docs/game/buildings-production.md "Production"); the Small

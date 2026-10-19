@@ -35,13 +35,15 @@ public sealed partial class ProductionSystem
         if (world.Machines.Find(order.Site) is not { Craft: { } state, Data.Craft: { } bench } m) return;
         if (bench.Options.FirstOrDefault(o => o.Key == order.Option) is not { } option || !CanCraft(world, bench, option)) return;
         for (int i = 0; i < Math.Max(1, order.Count) && state.Queue.Count < MaxCraftQueue; i++) state.Queue.Add(new CraftJob(RecipeOf(m, option)));
+        Bind(world, m, state, state.Queue[0]);
         world.Machines.Touch();
     }
 
     void CancelCraft(World world, CancelCraft order)
     {
-        if (world.Machines.Find(order.Site)?.Craft is not { } state || order.Index < 0 || order.Index >= state.Queue.Count) return;
+        if (world.Machines.Find(order.Site) is not { Craft: { } state } m || order.Index < 0 || order.Index >= state.Queue.Count) return;
         state.Queue.RemoveAt(order.Index);
+        if (state.Queue.Count > 0) Bind(world, m, state, state.Queue[0]);
         world.Machines.Touch();
     }
 
@@ -50,7 +52,8 @@ public sealed partial class ProductionSystem
 
     /// <summary>
     /// Sets the input sections for the first craft (<b>Observed</b>, <c>CraftingBuilding::vfunc_182</c> "setProductionItem"): section k takes ingredient k at its per-item amount;
-    /// sections it does not use draw nothing. Items of another kind in a section fall on the ground (engine choice; the original hands them back to the bench).
+    /// sections it does not use draw nothing. Done when the first craft changes (queued, cancelled, finished). Items of another kind in a section fall on the ground (engine choice; the
+    /// original hands them back to the bench).
     /// </summary>
     void Bind(World world, Machine m, CraftState state, CraftJob job)
     {
