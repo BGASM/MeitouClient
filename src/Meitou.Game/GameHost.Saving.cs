@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Numerics;
 using Meitou.Data;
 using Meitou.Data.Save;
+using Meitou.Data.World;
 using Meitou.Simulation;
 using Meitou.Simulation.Saving;
 
@@ -36,7 +37,13 @@ sealed partial class GameHost
     SaveCaptureOptions CaptureOptions()
     {
         saveDataFiles ??= [.. LoadOrder.FromInstall(install).Entries.Select(e => e.Name)];
-        return new SaveCaptureOptions { DataFiles = saveDataFiles, Placements = townPlacements, Levels = saveLevels, Seed = session.World.Seed ^ (ulong)++captures << 20 };
+        // The strategy camera's view (in free flight: where it was left), as the original saves its camera rig.
+        var view = session.Camera.Strategy;
+        return new SaveCaptureOptions
+        {
+            DataFiles = saveDataFiles, Placements = townPlacements, Levels = saveLevels, Seed = session.World.Seed ^ (ulong)++captures << 20,
+            View = new SavedView(view.Pivot, view.Yaw, view.Pitch, view.Distance),
+        };
     }
 
     /// <summary>The system list and its order are <see cref="StandardSystems"/>' (docs/simulation.md "Threading"); built again for each world.</summary>
@@ -226,13 +233,25 @@ sealed partial class GameHost
         playerSquad = world.Squads.Find(world.Player.Squad);
         foreach (var note in loaded.Notes) Console.WriteLine($"load      {note}");
 
-        // The camera on the leader, keeping the view's heading, pitch and boom; the zones round it get their navmesh before the first tick (like a new game's start).
+        // The saved camera (FUN_1407ade60, docs/formats/camera.md "Saved camera"): pivot, orientation and boom, a pivot out of bounds moved to the loader's fallback. A save
+        // without a view (an older Meitou one) puts the camera on the leader, keeping the view's heading, pitch and boom. The zones round the leader get their navmesh
+        // before the first tick (like a new game's start).
         Task navmesh = Task.CompletedTask;
+        var saved = read.Result.Camera;
+        if (saved.HasView)
+        {
+            var (yaw, pitch, distance) = KenshiCamera.FromSaved(saved.Rotation, saved.Zoom);
+            var pivot = KenshiCamera.SavedPivotInBounds(saved.Position) ? new Vector2(saved.Position.X, saved.Position.Z) : KenshiCamera.SavedPivotFallback;
+            session.Camera.Place(pivot, yaw, pitch, distance);
+        }
         if (playerSquad is { } squad && !squad.Leader.IsNone)
         {
             var at = world.Characters.Previous[squad.Leader.Slot].Position;
-            var view = session.Camera.Current;
-            session.Camera.Place(new Vector2(at.X, at.Z), view.Yaw, view.Pitch, view.Distance);
+            if (!saved.HasView)
+            {
+                var view = session.Camera.Current;
+                session.Camera.Place(new Vector2(at.X, at.Z), view.Yaw, view.Pitch, view.Distance);
+            }
             navmesh = NavmeshAround(at);
         }
         summary = $"{readingFolder}: {loaded.PlayerPlatoons.Sum(p => p.Squad.Members.Count)} player character(s), {loaded.RoamingPlatoons.Count} roaming, {loaded.TownBoundPlatoons} town and {loaded.WildPlatoons} wild platoon(s) kept as saved, day {loaded.Clock.Day} {loaded.Clock.Hour:00}:{loaded.Clock.Minute:00}, made in {watch.ElapsedMilliseconds} ms";
