@@ -347,7 +347,8 @@ public sealed unsafe class TerrainTextures : IDisposable
         double cs = info.CellSize, half = WorldLayout.HalfWorldSize;
         double radius = materialDistance + cs / 2;
         var nearest = new Dictionary<int, double>();
-        void Gather(Vector3 at)
+        // During a flight the arrival's cells come first: the eye's (the flight path) count as farther than any of them.
+        void Gather(Vector3 at, double lead)
         {
             int cx0 = (int)Math.Clamp(Math.Floor((at.X - radius + half) / cs), 0, CellsX - 1), cx1 = (int)Math.Clamp(Math.Floor((at.X + radius + half) / cs), 0, CellsX - 1);
             int cz0 = (int)Math.Clamp(Math.Floor((at.Z - radius + half) / cs), 0, CellsZ - 1), cz1 = (int)Math.Clamp(Math.Floor((at.Z + radius + half) / cs), 0, CellsZ - 1);
@@ -358,12 +359,13 @@ public sealed unsafe class TerrainTextures : IDisposable
                     double dx = Math.Max(Math.Max(x0 - at.X, at.X - (x0 + cs)), 0), dz = Math.Max(Math.Max(z0 - at.Z, at.Z - (z0 + cs)), 0);
                     double d = Math.Sqrt(dx * dx + dz * dz);
                     if (d > radius) continue;
+                    d += lead;
                     for (int k = 0; k < BlendInfoFile.SlotsPerCell; k++)
                         if (rowOf.TryGetValue(info.Slot(cx, cz, k), out int row) && (!nearest.TryGetValue(row, out double best) || d < best)) nearest[row] = d;
                 }
         }
-        Gather(eye);
-        if (ahead is { } arrival) Gather(arrival);
+        if (ahead is { } arrival) Gather(arrival, 0);
+        Gather(eye, ahead is null ? 0 : radius);
         needed.AddRange(nearest.OrderBy(p => p.Value).Select(p => p.Key));
         foreach (int b in needed)
             foreach (var p in state[b].Pairs)

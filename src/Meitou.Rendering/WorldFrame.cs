@@ -1165,6 +1165,7 @@ static class WorldFrame
         gpu.Guard?.Tick();
         if (gpu.Streamer is { } aheadTerrain) aheadTerrain.Ahead = gpu.Ahead;
         if (gpu.Objects is { } aheadObjects) aheadObjects.Ahead = gpu.Ahead;
+        if (gpu.Foliage is { } aheadFoliage) aheadFoliage.Ahead = gpu.Ahead;
         gpu.Streamer?.Update(eye);
         StageClock.Lap(0);
         if (gpu.Objects is { } lodObjects) lodObjects.LodPixelsPerRadian = render.TerrainPixelScale;   // the generated object levels are placed by the pixel size too

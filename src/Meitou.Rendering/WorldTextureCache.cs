@@ -258,6 +258,10 @@ public sealed unsafe class WorldTextureCache : IDisposable
         return t.IndexA;
     }
 
+    /// <summary>Loads started while this is set go ahead of the other streaming work (<see cref="BackgroundWork.RunUrgent"/>): the owner sets it while it
+    /// touches what a flight's arrival view uses (docs/render-objects.md "Arrival prefetch").</summary>
+    public bool Urgent { get; set; }
+
     void Start(WorldTexture t, bool replacing = false)
     {
         string path = t.Path!, name = t.Name;
@@ -272,7 +276,7 @@ public sealed unsafe class WorldTextureCache : IDisposable
         int extra = Mips.Extra;
         if (replacing) t.Replacing = true;
         else t.State = WorldTexture.Residency.Loading;
-        t.Pending = BackgroundWork.Run(() =>
+        Func<TextureData?> load = () =>
         {
             try { return Load(path, quality, need, enabled, perDistance, bias, extra); }
             catch (Exception e) when (e is DdsFormatException or InvalidOperationException or IOException or ArgumentException)
@@ -280,7 +284,8 @@ public sealed unsafe class WorldTextureCache : IDisposable
                 lock (Messages) Messages.Add($"texture {name}: {e.Message}");
                 return null;
             }
-        });
+        };
+        t.Pending = Urgent ? BackgroundWork.RunUrgent(load) : BackgroundWork.Run(load);
         pending.Add(t);
     }
 

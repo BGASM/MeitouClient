@@ -231,6 +231,7 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     Vector2 velocity;
     readonly List<(ZoneCoordinate Zone, Tier Tier, float Urgency)> wanted = [];
     readonly List<ZoneState> dropping = [];
+    readonly HashSet<ZoneCoordinate> candidates = [];
     public List<string> Messages { get; } = [];
 
     /// <summary>Requested work: layouts, grass, meshes, textures and impostors, including used textures deferred by memory pressure.</summary>
@@ -390,6 +391,12 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     /// <summary>Follows the eye: lays out zones, decodes meshes, makes grass pages and uploads, within a frame budget.</summary>
     public void Update(Vector3 eye) => Update(eye, settling: false);
 
+    /// <summary>
+    /// The arrival eye of a character flight (docs/render-objects.md "Arrival prefetch"), or null: zones within the near reach of it are laid out
+    /// and kept as from the eye, and ahead of everything else, so the landing view's foliage loads during the flight (the grass pages wait for the eye).
+    /// </summary>
+    public Vector3? Ahead { get; set; }
+
     void Update(Vector3 eye, bool settling)
     {
         updates++;
@@ -412,7 +419,8 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         }
         dropping.Clear();
         foreach (var state in zones.Values)
-            if (state.Job is null && ZoneDistance(state.Zone, eye) > farReach + WorldLayout.ZoneSize) dropping.Add(state);
+            if (state.Job is null && ZoneDistance(state.Zone, eye) > farReach + WorldLayout.ZoneSize && !(Ahead is { } kept && ZoneDistance(state.Zone, kept) <= nearReach + WorldLayout.ZoneSize))
+                dropping.Add(state);
         foreach (var state in dropping) Drop(state);
 
         // Look ahead along the motion: the work is ordered by how soon a zone becomes needed from where the eye will be in a second
@@ -436,24 +444,40 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
         var centre = WorldLayout.ZoneOf(eye.X, eye.Z);
         int reach = (int)Math.Ceiling((farReach + ahead.Length()) / WorldLayout.ZoneSize) + 1;
         NearestIncompleteZone = NearestUnlaidZone = float.PositiveInfinity;
+        var arrival = settling ? null : Ahead;
+        float arrivalReach = nearReach + PrefetchMargin;
+        candidates.Clear();
         for (int dz = -reach; dz <= reach; dz++)
             for (int dx = -reach; dx <= reach; dx++)
-            {
-                var z = new ZoneCoordinate(centre.X + dx, centre.Y + dz);
-                if (!z.IsInsideGrid) continue;
-                float d = ZoneDistance(z, eye), dp = ZoneDistance(z, predicted), soon = Math.Min(d, dp);
-                if (d > farReach) continue;   // the prediction orders and adds whole layouts, it never adds zones
-                bool meitou = MeitouRange;
-                var need = soon <= wholeReach + PrefetchMargin ? Tier.Whole : meitou && soon <= nearReach + PrefetchMargin ? Tier.Meshes : Tier.Far;
-                zones.TryGetValue(z, out var state);
-                if (state is not null && Satisfies(state, need, meitou)) continue;   // has what it needs
-                if (d <= wholeReach) NearestIncompleteZone = Math.Min(NearestIncompleteZone, d);
-                if (state is not { Ready: true }) NearestUnlaidZone = Math.Min(NearestUnlaidZone, d);
-                if (state?.Job is not null) continue;   // on its way
-                // Whole layouts first (what is missing there is in view near the eye), then the large-only ones, then the far ones, each nearest
-                // first (from the eye or where it will be, whichever is nearer).
-                wanted.Add((z, need, need == Tier.Whole ? soon : need == Tier.Meshes ? nearReach + soon : farReach + soon));
-            }
+                candidates.Add(new ZoneCoordinate(centre.X + dx, centre.Y + dz));
+        if (arrival is { } at)
+        {
+            var landing = WorldLayout.ZoneOf(at.X, at.Z);
+            int around = (int)Math.Ceiling(arrivalReach / WorldLayout.ZoneSize) + 1;
+            for (int dz = -around; dz <= around; dz++)
+                for (int dx = -around; dx <= around; dx++)
+                    candidates.Add(new ZoneCoordinate(landing.X + dx, landing.Y + dz));
+        }
+        foreach (var z in candidates)
+        {
+            if (!z.IsInsideGrid) continue;
+            float d = ZoneDistance(z, eye), dp = ZoneDistance(z, predicted), da = arrival is { } a ? ZoneDistance(z, a) : float.PositiveInfinity;
+            bool landing = da <= arrivalReach;
+            float soon = Math.Min(Math.Min(d, dp), da);
+            if (d > farReach && !landing) continue;   // the prediction orders and adds whole layouts, it never adds zones
+            bool meitou = MeitouRange;
+            var need = soon <= wholeReach + PrefetchMargin ? Tier.Whole : meitou && soon <= nearReach + PrefetchMargin ? Tier.Meshes : Tier.Far;
+            zones.TryGetValue(z, out var state);
+            if (state is not null && Satisfies(state, need, meitou)) continue;   // has what it needs
+            if (d <= wholeReach) NearestIncompleteZone = Math.Min(NearestIncompleteZone, d);
+            if (state is not { Ready: true }) NearestUnlaidZone = Math.Min(NearestUnlaidZone, d);
+            if (state?.Job is not null) continue;   // on its way
+            // Whole layouts first (what is missing there is in view near the eye), then the large-only ones, then the far ones, each nearest
+            // first (from the eye or where it will be, whichever is nearer).
+            // During a flight the arrival's zones go first, then the flight path's (the eye's), each in the same order.
+            float tierBase = need == Tier.Whole ? 0 : need == Tier.Meshes ? nearReach : farReach;
+            wanted.Add((z, need, arrival is null ? tierBase + soon : landing ? tierBase + da : 2 * farReach + tierBase + Math.Min(d, dp)));
+        }
         wanted.Sort((a, b) => a.Urgency.CompareTo(b.Urgency));
         int started = 0;
         foreach (var (zone, tier, _) in wanted)

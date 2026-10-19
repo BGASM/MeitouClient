@@ -204,6 +204,13 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
     public float Near(Vector3 eye, Vector3 p) => Ahead is { } a ? MathF.Min(Vector3.Distance(eye, p), Vector3.Distance(a, p)) : Vector3.Distance(eye, p);
     float NearZone(double x0, double z0, Vector3 eye) => Ahead is { } a ? MathF.Min(ZoneDistance(x0, z0, eye), ZoneDistance(x0, z0, a)) : ZoneDistance(x0, z0, eye);
 
+    /// <summary>
+    /// The load order (smaller first): the distance from the eye, or during a flight from <see cref="Ahead"/>, what is near the eye (the flight path)
+    /// coming after everything within <paramref name="lead"/> of the arrival, so the landing view loads first.
+    /// </summary>
+    public float Rank(Vector3 eye, Vector3 p, float lead) => Ahead is { } a ? MathF.Min(Vector3.Distance(a, p), Vector3.Distance(eye, p) + lead) : Vector3.Distance(eye, p);
+    float RankZone(double x0, double z0, Vector3 eye, float lead) => Ahead is { } a ? MathF.Min(ZoneDistance(x0, z0, a), ZoneDistance(x0, z0, eye) + lead) : ZoneDistance(x0, z0, eye);
+
     /// <summary>Distance on the ground plane from <paramref name="eye"/> to a zone's square.</summary>
     public static float ZoneDistance(double x0, double z0, Vector3 eye)
     {
@@ -229,8 +236,7 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
         foreach (var (coordinate, x0, z0) in populated)
         {
             if (zones.ContainsKey(coordinate) || jobs.ContainsKey(coordinate)) continue;
-            float d = NearZone(x0, z0, eye);
-            if (d <= range) wanted.Add((coordinate, d));
+            if (NearZone(x0, z0, eye) <= range) wanted.Add((coordinate, RankZone(x0, z0, eye, range)));
         }
         foreach (var (coordinate, _) in wanted.OrderBy(w => w.Distance))
         {
@@ -306,7 +312,8 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
     public int Scan(Vector3 eye, float objectRange, float distantRange, bool noDistant, Func<Instance, bool> resolve, int maxResolve = int.MaxValue)
     {
         int waiting = 0, resolved = 0;
-        foreach (var zone in zones.Values)
+        // During a flight the arrival's zones take the resolve budget first.
+        foreach (var zone in Ahead is null ? (IEnumerable<Zone>)zones.Values : zones.Values.OrderBy(z => RankZone(z.X0, z.Z0, eye, objectRange)))
         {
             var list = zone.Unresolved;
             // Parked parts come back once the eye could be within their part distance (the zone's square, less the margin and a part's size).
@@ -345,7 +352,7 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
                 switch (inst.Mesh.Status)
                 {
                     case ObjectMesh.State.None:
-                        meshes.Request(inst.Mesh, d);
+                        meshes.Request(inst.Mesh, d, Rank(eye, inst.Centre, range) - RequestMargin);
                         waiting++;
                         break;
                     case ObjectMesh.State.Loading or ObjectMesh.State.Uploading:
@@ -420,7 +427,7 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
             switch (inst.Mesh.Status)
             {
                 case ObjectMesh.State.None:
-                    meshes.Request(inst.Mesh, d);
+                    meshes.Request(inst.Mesh, d, Rank(eye, inst.Centre, range) - Math.Max(RequestMargin, inst.Radius));
                     waiting++;
                     break;
                 case ObjectMesh.State.Loading or ObjectMesh.State.Uploading:

@@ -487,6 +487,20 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
             float scaled = near / Math.Max(inst.Radius / Math.Max(inst.Gpu.Radius, 1e-6f), 1e-6f);
             if (scaled < set.NearScaled) set.NearScaled = scaled;
         }
+        if (streamer.Ahead is { } arrival)
+        {
+            // A flight: what the arrival view draws is marked first, its textures loaded ahead of the other streaming work (the flight path's after).
+            textureCache.Urgent = true;
+            try
+            {
+                foreach (var zone in streamer.AllZones)
+                {
+                    foreach (var inst in zone.Real) if (Vector3.Distance(arrival, inst.Centre) - inst.Radius < Math.Min(RealRange, inst.Limit)) Mark(inst, RealRange);
+                    if (!NoDistant) foreach (var inst in zone.Stand) if (Vector3.Distance(arrival, inst.Centre) - inst.Radius < DistantReach) Mark(inst, DistantReach);
+                }
+            }
+            finally { textureCache.Urgent = false; }
+        }
         foreach (var zone in streamer.AllZones)
         {
             foreach (var inst in zone.Real) Mark(inst, RealRange);

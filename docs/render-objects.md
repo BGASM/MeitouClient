@@ -22,8 +22,12 @@ reflection and streaming residency need consistent bounds.
 
 During a character flight or squad tour hop ([viewer.md](viewer.md#squad-tour)) the host sets `WorldFrame` `Ahead` to the landing
 view's eye from the tap on. Object zones are laid out and kept, meshes requested, and mesh LOD / texture mips chosen by the nearer of
-the eye and that point (`ObjectStreamer.Near`); terrain biome textures gather cells round both. The terrain height window still follows
-only the eye. The simulation focus moves to the landing character at once, so its towns populate during the flight.
+the eye and that point (`ObjectStreamer.Near`); terrain biome textures gather cells round both. Foliage zones within the near reach of
+that point are laid out and kept as well. The load order puts the arrival first: zone layouts, mesh decodes, instance resolves, terrain
+biome pairs and foliage layouts rank by distance from the arrival, and what is only near the eye (the flight path) ranks after all of it
+(`ObjectStreamer.Rank`). Object textures the arrival view uses are touched first and decode ahead of the other streaming work
+(`WorldTextureCache.Urgent`, `BackgroundWork.RunUrgent`). The terrain height window and the grass pages still follow only the eye.
+The simulation focus moves to the landing character at once, so its towns populate during the flight.
 
 ## Batching and depth
 

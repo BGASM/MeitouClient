@@ -231,11 +231,15 @@ sealed unsafe class ObjectMeshCache(GpuContext gpuContext, AssetLocator assets, 
     }
 
     /// <summary>Asks for a mesh to be loaded; smaller <paramref name="priority"/> (distance) goes first.</summary>
-    public void Request(ObjectMesh mesh, float priority)
+    public void Request(ObjectMesh mesh, float priority) => Request(mesh, priority, priority);
+
+    /// <summary>Asks for a mesh wanted from <paramref name="near"/> (the distance its levels are made for), loaded in the order of <paramref name="order"/>
+    /// (smaller first; <c>ObjectStreamer.Rank</c>, which puts a flight's arrival first).</summary>
+    public void Request(ObjectMesh mesh, float near, float order)
     {
         if (mesh.Status != ObjectMesh.State.None) return;
-        wanted[mesh] = wanted.TryGetValue(mesh, out var old) ? Math.Min(old, priority) : priority;
-        mesh.WantedNear = Math.Min(mesh.WantedNear, priority + 600);   // the scan takes 600 off the camera's distance to the placement
+        wanted[mesh] = wanted.TryGetValue(mesh, out var old) ? Math.Min(old, order) : order;
+        mesh.WantedNear = Math.Min(mesh.WantedNear, near + 600);   // the scan takes 600 off the camera's distance to the placement
     }
 
     /// <summary>Starts decodes (nearest first) and queues the uploads of finished ones.</summary>
