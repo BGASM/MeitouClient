@@ -31,10 +31,11 @@ Native splash precedes Vulkan; worker loading and render-thread GPU steps keep t
 responsive. Scene transitions draw loading between stages, wait on asynchronous results, and
 preserve world on failure. Gameplay warm-up waits for nearby population, terrain, scenery, character
 assets and used textures (including deferred loads), then <40ms frames for0.5s (max5s for frame pacing).
+After 5s of continuous `VramGuard` pressure, content it holds back is no longer waited for (it cannot load until the use falls).
 Population builds are queued/applied at frame boundaries without advancing game time, AI or movement;
 navmesh-gated spawns are retried while loading. Warm-up and the flight hold the simulation paused.
 The Meitou title waits for terrain, scenery, character assets and used textures (including deferred loads), then
-one full second of <40ms frames without a timeout. Its menu artwork/fonts/pipelines warm under the opaque cover too;
+one full second of <40ms frames (max5s of ready content for frame pacing, so slow GPUs reach the menu). Its menu artwork/fonts/pipelines warm under the opaque cover too;
 streaming uploads retire and a compacting GC completes before that final smooth run.
 **GC: Satori** (github.com/VSadov/Satori, experimental low-pause collector) is the default in the self-contained publish: the `PublishWithSatoriGC`
 MSBuild SDK line in `Meitou.Game.csproj` and `Meitou.ModelViewer.csproj` swaps `coreclr`, `clrjit` and `System.Private.CoreLib` (both exes share one
