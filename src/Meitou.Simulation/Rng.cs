@@ -35,6 +35,8 @@ public enum RngPurpose : uint
     Dialogue = 17,
     /// <summary>Farms: the planting draws and the harvest rolls (<see cref="Production.ProductionSystem"/>), keyed by the building.</summary>
     Farm = 18,
+    /// <summary>Crafting: the critical (one tier better) roll of each craft, keyed by the bench.</summary>
+    Craft = 19,
 }
 
 /// <summary>

@@ -186,6 +186,8 @@ public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> C
     public long MachinesVersion { get; init; }
     /// <summary>The player's research: levels, queue, rate and what may be queued.</summary>
     public Production.ResearchSnapshot Research { get; init; } = Production.ResearchSnapshot.Empty;
+    /// <summary>What each of the player's crafting benches can craft (by site), for the Craft tab.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<Production.CraftOptionView>> Crafts { get; init; } = new Dictionary<string, IReadOnlyList<Production.CraftOptionView>>();
 
     static readonly IReadOnlyDictionary<(string Building, int Door), Locks.DoorView> NoDoors = new Dictionary<(string Building, int Door), Locks.DoorView>();
 

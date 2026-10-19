@@ -717,9 +717,9 @@ ghost, commands), `Building/PlacementCheck.cs`, `Building/BuildMenu.cs` (categor
 
 ## Production
 
-`Production/ProductionSystem` runs the player's complete buildings: wells and other producers, farms, research benches.
-Facts: [production](game/buildings-production.md#production), [farming](game/buildings-production.md#farming),
-[research](game/buildings-production.md#research).
+`Production/ProductionSystem` runs the player's complete buildings: mines, wells, refiners (function 4), farms, research and
+crafting benches. Facts: [production](game/buildings-production.md#production), [crafting](game/buildings-production.md#crafting),
+[farming](game/buildings-production.md#farming), [research](game/buildings-production.md#research).
 - **Machines** (`Production/Machines.cs`, data `Construction/MachineData.cs`). A machine is made when a player site completes
   or loads complete, and dropped with the site; its items fall on the ground. It holds:
   - the recipe inputs and the output, as item counts plus a level or progress (engine choice: crops and water have no quality);
@@ -734,7 +734,7 @@ Facts: [production](game/buildings-production.md#production), [farming](game/bui
   works it every tick; work is scaled by its skill factor and trains the stat.
   - Producers make output from their inputs.
   - Farms are harvested and cleared.
-  - Benches add to the research queue.
+  - Research benches add to the research queue; crafting benches work their queue.
   - More characters than `max operators` are refused with "X is already in use.".
   - Farms tick whether anyone is there; there is no offline catch-up on load.
 - **Items.** `PutInMachine` and `TakeFromMachine` move items between a character within 200 of the building and the machine:
@@ -745,7 +745,13 @@ Facts: [production](game/buildings-production.md#production), [farming](game/bui
   - Several operators add with the 0.6^k falloff.
   - Partial progress is kept off the queue (in memory only).
 - **Hash.** Machines and research join the world hash only once the player has one; golden hashes are unchanged.
-  RNG: `RngPurpose.Farm` (replanting, harvest rolls).
+  RNG: `RngPurpose.Farm` (replanting, harvest rolls), `RngPurpose.Craft` (critical rolls).
+- **Crafting** (`ProductionSystem.Crafting.cs`, data `Construction/CraftingData.cs`). `QueueCraft` (at most 20),
+  `CancelCraft`, `RepeatCrafts`. The first craft binds the input sections to its ingredients (other items in a section
+  fall on the ground); finished items wait in the output (section `out`) up to the option's store, then the bench reports
+  output full. Benches listing fewer `consumes` than a recipe's ingredients get extra sections. A repeating queue puts
+  each finished craft back at its end. Crafts no research lists are always available.
+- **Research repeats.** A `repeats` research can be done repeats+1 times, each paid at `cost x repeat mult^n`.
 - **Saves** (`Saving/MachineSave`, `ResearchSave`). Each building's production and farm keys go into its
   GAMESTATE_BUILDING. Items go into an INVENTORY_STATE `<site>-inventory`, listed first by the building, with sections
   `in<k>`, `out` and `main`.
@@ -756,6 +762,9 @@ Facts: [production](game/buildings-production.md#production), [farming](game/bui
     `Kenshi_InventoryResearchWindow`. Items drag in and out.
   - The site menu gains Operate (also the quick right click).
   - The HUD shows the farm's growth, ripeness and fertility, the output, workers and tech level.
+  - A crafting bench's window shows the current craft and QUEUE... (opens the Craft tab); finished items drag out of `out`.
+  - The overview's Craft tab lists stations, their crafts (click to queue; red: locked), the queue (click to cancel),
+    Repeat Queue and the hovered craft's time and inputs.
   - The overview's research tab lists categories, blueprints (click to queue), the queue (click to cancel) and a
     description with the cost.
   - The original's verb names, row widgets and colours are **Unknown**.
@@ -763,7 +772,7 @@ Facts: [production](game/buildings-production.md#production), [farming](game/bui
   - No power: every building runs as if powered.
   - No rain filling farm water.
   - No hauling or auto-jobs: water has to be carried by hand from well to farm.
-  - No crafting, furnaces, generators or turrets.
+  - No furnaces, generators or turrets.
   - Plants are not drawn.
 
 ## Trade

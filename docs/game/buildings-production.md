@@ -294,9 +294,6 @@ holding at most 10. Save (`vfunc_17`/`18` `FUN_1402a1fa0` / `FUN_1402a23a0`, **O
 | 23 BATTERY | battery 0.00125 |
 | 26 RAIN_COLLECTOR | 48 |
 
-**Crafting** (**Observed**, `FUN_1402b5a40`): the same factors / the recipe duration (`craft time hrs` / P); quality roll
-`FUN_1402b5900` (**Unknown**).
-
 ### Resources
 
 (**Observed**, `FUN_140a13540`, `FUN_140a12ff0`.) The BIOME_GROUP at the position (areas map) names an
@@ -305,6 +302,42 @@ ENVIRONMENT_RESOURCES record (`resources`). WATER and GROUND use the prefix `wat
 value = band x `<p> mult` + `<p> min`. STONE uses a noise field (`stone noise zoom`, `cutoff`); IRON/COPPER/CARBON need a
 resource node within 1500 (falloff from the node radius, at least 25). The farm efficiency also reads the record's
 `arid`, `green`, `swamp` coverages (crop types 2, 1, 3).
+
+## Crafting
+
+Function 10, `CraftingBuilding` (**Observed** unless noted).
+- **Lists.** The functionality's `item crafts` (v0 = finished items the output holds), `armour crafts`, `weapon crafts`
+  (MATERIAL_SPECS_WEAPON models), `crossbow crafts`, `backpack crafts`, `robotics crafts`. A weapon bench crafts every
+  WEAPON in the `PLAYER_WEAPONS` manufacturer's `weapon types` in each listed model; the model's level is that
+  manufacturer's `weapon models` v0 (Rusted Junk 5 ... Edge Type 3 80). `tech level` caps the made level (0: none).
+- **Queue item** (`FUN_1402b5ca0`): seconds = hours x G/24, progress, critical state (2 not rolled, 1 critical, 0 none).
+- **Tick** (`CraftingBuilding::vfunc_150` `FUN_1402b5a40`), state 2 with a queue: amount = `output rate x production
+  mult` (/ `max operators` when above 1, `FUN_1402b9aa0`) `x health x s x option x P x dt / seconds`. The critical is
+  rolled at the item's first work: random < chance. Inputs drawn `amount x per-item` as for [recipes](#production);
+  progress 0.999 makes the item (`FUN_1402bcac0`).
+- **Inputs** (`vfunc_182`): section k takes ingredient k at `ingredients` v0/100 x material cost; with `overrides
+  ingredients` or no ingredients, the bench's `consumes` at v1/100. Material cost (item vfunc 102): a weapon's
+  `material cost`, else 1. Armour: each section at `total coverage`/100; Fabrics (`584-gamedata.base`, hard-coded,
+  **Verified** bytes) at that x `fabrics amount`.
+- **Hours:** ITEM `production time` (default 4); crossbow / robotic limb `craft time hrs` / P (defaults 20, 10); weapon
+  (`FUN_1402b76f0`) clamp(q² x 100 x `value`/300 x 2/P, 2, 32), q = level/100; armour (`FUN_140898e90`) coverage/100
+  x lerp(q, 1, 5), at least 1, then hat x0.6, legs x0.45, shirt x3, boots x0.5, chain (`material type` 2) x2. Constants
+  **Verified** by the bytes. `total coverage` (`FUN_14082fd80`): sum of `part coverage` v0, chest `101-gamedata.quack`
+  x1.5 truncated, 0 -> 100.
+- **Quality.** Armour (`FUN_14082e6b0`): tier from the int skill (20, 40, 60, 80 -> 1..4), +1 on a critical, at most 5;
+  quality by tier 5, 20, 40, 60, 80, 95 (**Verified**, jump table). Critical chance (`FUN_1402b5900`): (skill -
+  threshold)/50, none below 0; threshold for stats 8 and 38 the floor of the skill's tier (80/60/40/20, else 5), else
+  the item level. A weapon below the crafter's skill with no critical comes out as a lower model
+  (`uses_weapon_crafts_weapon_models`; which model is **Unknown**, Meitou takes the best at or below the skill).
+- **Research** `enable item`, `enable armour`, `enable weapon type`, `enable weapon model`, `enable crossbow`,
+  `enable backpack`, `enable robotics` unlock crafts, v0 = the repetition that does it; `repeats` and `repeat mult`
+  (cost x mult per repetition). Whether a craft no research lists is available from the start is **Unknown** (Meitou: yes).
+- **Save** (GAMESTATE_BUILDING, `vfunc_17`/`18` `FUN_1402b8440` / `FUN_1402b8ab0`): float `num crafts`, bool `repeat`,
+  per queued k strings `current<k>` (item) and `currentExtraData<k>` (weapon model), float `current prog<k>`, int
+  `crit<k>`; partly drawn items as `craft partial item sid <k>` / `val <k>` / `size` (Meitou does not write these).
+- **UI:** overview CraftTab (`CraftingStationsList`, `QueueItemsPanel`, `CraftQueue`, `QueueRepeat` "Repeat Queue",
+  `QueueDescriptionPanel1/2`); the building window's `CraftingPanel` (`CraftingName`, `QueueButton` "QUEUE...").
+- Example: Weapon Smith 2033, functionality 2035 (stat 7, tech level 25, consumes Iron Plates 5/100).
 
 ## Farming
 
@@ -413,5 +446,5 @@ mult` 1 to 100000; `limit inventory` restricts the items. Locks and containers: 
 - How often Building slot 28 resets the builder counter, the work distance of builders, which storages
   `Task_EmptyMachine_BuildMats` fetches from, and what `FUN_14025c6d0` (holding dismantle work) tests.
 - Event types of the queue at `DAT_1421346d8` other than 8 (research progress) and 11 (build work).
-- Generator fuel and wind units, the minimum powered share, the crafting quality curve and `craft time hrs` units.
+- Generator fuel and wind units and the minimum powered share.
 - Option slider defaults; the third value of reference triples; the record field of `BuildingClassType`.

@@ -37,7 +37,7 @@ sealed partial class PlayerInterface
         if (faithfulScreens is null) return;
         var focus = BuildingFocus();
         var m = focus?.SiteId is { } id && session.CurrentSnapshot.Buildings.FirstOrDefault(s => s.Id == id) is { Complete: true } ? Machine(id) : null;
-        if (m is not null && m.Inputs.Count == 0 && m.Output is null && m.Storage is null) m = null;
+        if (m is not null && m.Inputs.Count == 0 && m.Output is null && m.Storage is null && m.Craft is null) m = null;
         if (closedMachine is not null && closedMachine != m?.Site) closedMachine = null;
         if (shownMachine is not null && (m is null || m.Site != shownMachine))
         {
@@ -77,8 +77,13 @@ sealed partial class PlayerInterface
             b.TemplateScale = InventoryScale;
             return;
         }
-        // The crafting row is the crafting bench's (no crafting yet).
-        b.Hidden.Add("CraftingPanel");
+        if (m?.Craft is { } craft)
+        {
+            b.Text["CraftingName"] = craft.Queue is [var (_, current, progress, _), ..] ? $"{current}  {(int)(progress * 100)}%" : "Nothing queued";
+            b.Disabled.Remove("QueueButton");
+            b.Actions["QueueButton"] = "QueueButton";
+        }
+        else b.Hidden.Add("CraftingPanel");
         if (m is null) return;
         for (int k = 0; k < 2; k++)
         {
@@ -93,6 +98,11 @@ sealed partial class PlayerInterface
         {
             b.Text["OutputText"] = $"{output.Name}\n{output.Count.ToString(CultureInfo.InvariantCulture)}/{output.Capacity.ToString(CultureInfo.InvariantCulture)}";
             b.Progress["OutputProgressBar"] = m.Farm is { } farm ? farm.Ripeness : output.Fill;
+        }
+        else if (m.Craft is { } done)
+        {
+            b.Text["OutputText"] = done.Done is [var first, ..] ? $"{first.Name}\n{done.Done.Sum(d => d.Quantity).ToString(CultureInfo.InvariantCulture)}" : "";
+            b.Progress["OutputProgressBar"] = done.Queue is [var (_, _, p, _), ..] ? p : 0;
         }
         else b.Hidden.Add("OutputColumn");
         if (m.Inputs.Count == 0) b.Hidden.Add("InputTitleText");
@@ -126,6 +136,12 @@ sealed partial class PlayerInterface
         }
         for (int k = 0; k < Math.Min(2, m.Inputs.Count); k++) Slot($"in{k + 1}", m.Inputs[k], 10 + k);
         if (m.Output is { } output) Slot("out", output, 8);
+        else if (m.Craft is { Done: [var made, ..] } && controls.FirstOrDefault(c => c.Name == "out") is { } outSlot && machineDrag is not { Slot: -2 })
+        {
+            var ob = outSlot.Bounds;
+            float side = MathF.Min(ob.Width, ob.Height);
+            AddItemCell(controls, "machine-out", new(ob.X, ob.Y, side, side), made.Record, made.Material, made.Name, made.Quantity, null, "MachineItem", 8, outSlot.Clip);
+        }
     }
 
     /// <summary>A press on an item of the machine window starts its drag (true: taken).</summary>
@@ -141,6 +157,12 @@ sealed partial class PlayerInterface
             return true;
         }
         int slot = code - 10;
+        if (slot == -2 && m.Craft is { Done: [var crafted, ..] })
+        {
+            machineDrag = (m.Site, -2, 0, crafted.Record, crafted.Name, crafted.Quantity, 1, 1, grab);
+            Sound("Item_Lift", item: crafted.Record);
+            return true;
+        }
         MachineSlotView? view = slot == -2 ? m.Output : slot >= 0 && slot < m.Inputs.Count ? m.Inputs[slot] : null;
         if (view is not { Count: > 0 } v) return false;
         machineDrag = (m.Site, slot, 0, v.Item, v.Name, v.Count, 1, 1, grab);
@@ -177,6 +199,7 @@ sealed partial class PlayerInterface
     void MachineAction(MyGuiEvent e)
     {
         if (e.Screen == "bench" && e.Widget == "ResearchButton") { faithfulScreens.Open("overview"); faithfulScreens.SetTab("overview", "TabsMain", 2); }
+        else if (e.Screen == "building" && e.Widget == "QueueButton" && shownMachine is not null) OpenCraftTab(shownMachine);
     }
 
     /// <summary>The verb for a complete machine characters work (the original's verb names for wells, farms and benches are <b>Unknown</b>; Meitou says Operate).</summary>

@@ -17,7 +17,7 @@ public sealed record MachineData
     /// <summary>The game day at speed 1 in seconds, G (<b>Verified</b>, <c>FUN_14066cd50</c>): 24 x 1200/11.</summary>
     public const float DaySeconds = 24 * 1200f / 11f;
 
-    public const int MineFunction = 1, ResearchFunction = 3;
+    public const int MineFunction = 1, ResearchFunction = 3, RefineryFunction = 4, NaturalMineFunction = 27;
     /// <summary><c>MiningResource</c> WATER and GROUND (<b>Verified</b>, editor enum).</summary>
     public const int WaterResource = 5, GroundResource = 6;
 
@@ -53,9 +53,13 @@ public sealed record MachineData
     public float PowerOutput { get; init; }
 
     public bool IsResearch => Function == ResearchFunction;
-    public bool IsProducer => Function == MineFunction && Farm is null && Output is not null;
+    /// <summary>A mine, well or refinery: inputs (if any) into one output (functions 1, 4 and 27, <b>Verified</b> enum; the stone and ore processors are 4).</summary>
+    public bool IsProducer => Function is MineFunction or RefineryFunction or NaturalMineFunction && Farm is null && Output is not null;
+    /// <summary>A crafting bench (function 10): its crafts lists.</summary>
+    public CraftBench? Craft { get; init; }
+    public bool IsCrafting => Craft is not null;
     /// <summary>A building characters can operate.</summary>
-    public bool Operable => IsResearch || Farm is not null || IsProducer;
+    public bool Operable => IsResearch || Farm is not null || IsProducer || IsCrafting;
 
     public static MachineData? From(GameDatabase db, GameRecord building)
     {
@@ -80,6 +84,17 @@ public sealed record MachineData
         }
         int maxOperators = building.GetInt("max operators", -1);
         if (maxOperators <= 0) maxOperators = Math.Max(1, function?.GetInt("max operators", 1) ?? 1);
+        var craft = function is not null ? CraftBench.From(db, function) : null;
+        // A crafting bench's rate is shared by its operators (Observed, FUN_1402b9aa0).
+        if (craft is not null && maxOperators > 1) rate /= maxOperators;
+        // A bench gets a section per ingredient of its widest recipe when it lists fewer (engine choice: the original's section count for such benches is Unknown).
+        if (craft is not null && !craft.OverridesIngredients)
+        {
+            int capacity = inputs.Count > 0 ? inputs[0].Capacity : 5;
+            foreach (var option in craft.Options.Where(o => o.Kind != CraftKind.Armour))
+                if (db.Find(option.Item)?.GetReferences("ingredients") is { } list)
+                    for (int k = inputs.Count; k < list.Count; k++) inputs.Add(new RecipeInput(list[k].TargetStringId, capacity, 0));
+        }
         return new MachineData
         {
             Id = building.StringId,
@@ -95,6 +110,7 @@ public sealed record MachineData
             Inputs = inputs,
             Output = output,
             Farm = farm,
+            Craft = craft,
             HasInventory = stores,
             StorageWidth = Math.Max(1, building.GetInt("storage size width", 18)),
             StorageHeight = Math.Max(1, building.GetInt("storage size height", 18)),

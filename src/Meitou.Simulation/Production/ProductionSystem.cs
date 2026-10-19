@@ -37,7 +37,7 @@ public sealed class ProductionSettings
 /// </list>
 /// Placed after construction and before combat; everything here is serial and reads only the world's state and the command order.
 /// </summary>
-public sealed class ProductionSystem : ITickSystem
+public sealed partial class ProductionSystem : ITickSystem
 {
     /// <summary>The research falloff per earlier contribution in the same tick (<b>Observed</b>, <c>FUN_140836b70</c>).</summary>
     public const float ResearchFalloff = 0.6f;
@@ -104,6 +104,7 @@ public sealed class ProductionSystem : ITickSystem
             Output = data.Output is { } o ? new OutputSlot(o) : null,
             Storage = data.HasInventory ? new Inventory(data.StorageWidth, data.StorageHeight) : null,
             Farm = data.Farm is { } fd ? new FarmState(Meitou.Data.Gameplay.Construction.FarmLayout.Count(fd)) : null,
+            Craft = data.IsCrafting ? new CraftState() : null,
         };
         var p = site.Position;
         if (data.Farm is { } farm)
@@ -148,9 +149,10 @@ public sealed class ProductionSystem : ITickSystem
     {
         var at = m.Position;
         void Drop(ItemInstance? item) { if (item is not null) world.GroundItems.Drop(item, at, 0); }
-        foreach (var i in m.Inputs) if (i.Count > 0) Drop(items.Create(i.Recipe.Item, i.Count));
+        foreach (var i in m.Inputs) if (i.Count > 0) Drop(items.Create(i.Item, i.Count));
         if (m.Output is { Count: > 0 } o) Drop(items.Create(o.Recipe.Item, o.Count));
         if (m.Storage is { } s) foreach (var item in s.Items.ToList()) Drop(item);
+        if (m.Craft is { } c) foreach (var item in c.Done) Drop(item);
     }
 
     // ------------------------------------------------------------------ orders
@@ -185,6 +187,9 @@ public sealed class ProductionSystem : ITickSystem
                 case TakeFromMachine take: Take(world, take); break;
                 case QueueResearch queue: Queue(world, queue.Research); break;
                 case CancelResearch cancel: world.Research.Dequeue(cancel.Research); break;
+                case QueueCraft craft: QueueCraft(world, craft); break;
+                case CancelCraft cancel: CancelCraft(world, cancel); break;
+                case RepeatCrafts repeat: if (world.Machines.Find(repeat.Site)?.Craft is { } state) { state.Repeat = repeat.Repeat; world.Machines.Touch(); } break;
             }
         }
     }
@@ -342,6 +347,7 @@ public sealed class ProductionSystem : ITickSystem
             float s = skill < 0 ? 1 : Lerp(0.5f, 1.4f, Math.Clamp(skill, 0, 100) / 100);
             bool worked;
             if (m.Data.IsResearch) worked = ResearchStep(world, m, s, dt, ref contributions);
+            else if (m.Data.IsCrafting) worked = CraftStep(world, m, skill, s, dt);
             else if (m.Farm is not null) worked = HarvestStep(world, m, skill, s, dt);
             else worked = ProduceStep(world, m, s, dt);
             cold.Operating = worked;
@@ -371,7 +377,7 @@ public sealed class ProductionSystem : ITickSystem
         float amount = m.Yield * m.Data.Rate * dt * constants.ProductionSpeed * s * Settings.ProductionOption;
         foreach (var input in m.Inputs)
         {
-            float rate = input.Recipe.Rate;
+            float rate = input.Rate;
             if (rate == 0) continue;
             float available = input.Level + input.Count;
             if (available < rate * amount) amount = available / rate;
@@ -385,7 +391,7 @@ public sealed class ProductionSystem : ITickSystem
         m.Status = 2;
         foreach (var input in m.Inputs)
         {
-            float need = input.Recipe.Rate * amount;
+            float need = input.Rate * amount;
             while (input.Level < need && input.Count > 0) { input.Count--; input.Level += 1; }
             input.Level = MathF.Max(0, input.Level - need);
         }
@@ -575,9 +581,9 @@ public sealed class ProductionSystem : ITickSystem
         return true;
     }
 
-    /// <summary>The research the player may queue now (<b>Observed</b>, <c>FUN_1408333b0</c>): not blueprint-only, not done or queued, <c>level</c> within the tech level, requirements met.</summary>
+    /// <summary>The research the player may queue now (<b>Observed</b>, <c>FUN_1408333b0</c>): not blueprint-only, not exhausted (every repetition done) or queued, <c>level</c> within the tech level, requirements met.</summary>
     public bool Available(World world, ResearchData r) =>
-        !r.BlueprintOnly && !world.Research.IsDone(r.Id) && !world.Research.IsQueued(r.Id) && r.Level <= world.Research.TechLevel && Met(world, r);
+        !r.BlueprintOnly && !world.Research.Exhausted(db, r.Id) && !world.Research.IsQueued(r.Id) && r.Level <= world.Research.TechLevel && Met(world, r);
 
     bool Met(World world, ResearchData r)
     {
@@ -609,7 +615,7 @@ public sealed class ProductionSystem : ITickSystem
     bool Affordable(World world, ResearchData r)
     {
         if (world.Research.Paid.Contains(r.Id, StringComparer.Ordinal)) return true;
-        foreach (var (item, count) in r.Cost)
+        foreach (var (item, count) in r.CostAt(world.Research.Times(r.Id)))
             if (CountInBenches(world, item) < count) return false;
         return true;
     }
@@ -628,7 +634,7 @@ public sealed class ProductionSystem : ITickSystem
             return;
         }
         if (!world.Research.Paid.Contains(id, StringComparer.Ordinal))
-            foreach (var (item, count) in r.Cost)
+            foreach (var (item, count) in r.CostAt(world.Research.Times(id)))
             {
                 int left = count;
                 foreach (var s in Benches(world))
@@ -659,7 +665,7 @@ public sealed class ProductionSystem : ITickSystem
                 state.Partial.TryGetValue(r.Id, out float s) ? Math.Clamp(s / (r.Hours(constants, Settings.ResearchOption) * (MachineData.DaySeconds / 24)), 0, 1) : 0)
             {
                 Description = r.Description,
-                Cost = state.Paid.Contains(r.Id, StringComparer.Ordinal) ? [] : [.. r.Cost.Select(c => (items.Info(c.Item)?.Name ?? c.Item, c.Count))],
+                Cost = state.Paid.Contains(r.Id, StringComparer.Ordinal) ? [] : [.. r.CostAt(state.Times(r.Id)).Select(c => (items.Info(c.Item)?.Name ?? c.Item, c.Count))],
             }).ToArray();
         return publishedResearch = new ResearchSnapshot(state.TechLevel, state.BenchLevel, queue, state.Rate, available);
     }
@@ -689,7 +695,7 @@ public sealed class ProductionSystem : ITickSystem
         if (owner is null) return;
         if (put.Slot >= 0)
         {
-            if (put.Slot >= m.Inputs.Length || m.Inputs[put.Slot] is not { } input || input.Recipe.Item != item.Record) return;
+            if (put.Slot >= m.Inputs.Length || m.Inputs[put.Slot] is not { } input || input.Item != item.Record) return;
             int room = input.Recipe.Capacity - input.Count;
             int n = Math.Min(room, item.Quantity);
             if (n <= 0) return;
@@ -727,7 +733,12 @@ public sealed class ProductionSystem : ITickSystem
             world.Machines.Touch();
             return;
         }
-        (string Item, int Count) held = take.Slot == -2 ? (m.Output?.Recipe.Item ?? "", m.Output?.Count ?? 0) : take.Slot >= 0 && take.Slot < m.Inputs.Length ? (m.Inputs[take.Slot].Recipe.Item, m.Inputs[take.Slot].Count) : ("", 0);
+        if (take.Slot == -2 && m.Craft is { } craft)
+        {
+            TakeCrafted(world, m, craft, root, take.Index);
+            return;
+        }
+        (string Item, int Count) held = take.Slot == -2 ? (m.Output?.Recipe.Item ?? "", m.Output?.Count ?? 0) : take.Slot >= 0 && take.Slot < m.Inputs.Length ? (m.Inputs[take.Slot].Item, m.Inputs[take.Slot].Count) : ("", 0);
         if (held.Count <= 0 || items.Create(held.Item, held.Count) is not { } made) return;
         root.Add(made);
         int moved = held.Count - made.Quantity;

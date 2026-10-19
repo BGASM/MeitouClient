@@ -22,3 +22,12 @@ public sealed record QueueResearch(string Research) : SimCommand;
 
 /// <summary>Takes a research off the queue; its progress is kept for when it is queued again.</summary>
 public sealed record CancelResearch(string Research) : SimCommand;
+
+/// <summary>Queues a craft at a crafting bench: an option's key (<see cref="Meitou.Data.Gameplay.Construction.CraftOption.Key"/>), <paramref name="Count"/> times.</summary>
+public sealed record QueueCraft(string Site, string Option, int Count = 1) : SimCommand;
+
+/// <summary>Takes the craft at <paramref name="Index"/> off a bench's queue (its progress is lost, as the original).</summary>
+public sealed record CancelCraft(string Site, int Index) : SimCommand;
+
+/// <summary>Sets a bench's repeat flag: a finished craft goes back to the end of the queue.</summary>
+public sealed record RepeatCrafts(string Site, bool Repeat) : SimCommand;
