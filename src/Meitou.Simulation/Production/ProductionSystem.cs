@@ -25,6 +25,10 @@ public sealed class ProductionSettings
     public Func<string, float>? Footprint { get; init; }
     /// <summary>A character gives or takes items from within this far (X/Z) of a building (engine choice; the original walks the character to it first).</summary>
     public float TransferReach { get; init; } = 200;
+    /// <summary>The game option "characters put excess materials into storage": operators empty a full output into storages and fill empty inputs from them (docs/simulation.md "Production").</summary>
+    public bool AutoHaul { get; init; } = true;
+    /// <summary>How far (X/Z) from its machine an operator hauls (engine choice; the original's limit is Unknown).</summary>
+    public float HaulRange { get; init; } = 3000;
 }
 
 /// <summary>
@@ -102,7 +106,7 @@ public sealed partial class ProductionSystem : ITickSystem
             Position = site.Position,
             Inputs = [.. data.Inputs.Select(i => new InputSlot(i))],
             Output = data.Output is { } o ? new OutputSlot(o) : null,
-            Storage = data.HasInventory ? new Inventory(data.StorageWidth, data.StorageHeight) : null,
+            Storage = data.HasInventory ? new Inventory(data.StorageWidth, data.StorageHeight) { StackBonusMult = data.StackBonusMult } : null,
             Farm = data.Farm is { } fd ? new FarmState(Meitou.Data.Gameplay.Construction.FarmLayout.Count(fd)) : null,
             Craft = data.IsCrafting ? new CraftState() : null,
         };
@@ -228,6 +232,8 @@ public sealed partial class ProductionSystem : ITickSystem
         n.TaskTime = 0;
         cold.OperateSite = site.Id;
         cold.OperateClip = m.Data.Animation;
+        cold.HaulSite = null;
+        cold.HaulFetch = null;
         cold.Operating = false;
         if (!AtSite(n, site, m))
         {
@@ -248,6 +254,8 @@ public sealed partial class ProductionSystem : ITickSystem
             n.TaskTime = 0;
         }
         cold.OperateSite = null;
+        cold.HaulSite = null;
+        cold.HaulFetch = null;
         cold.Operating = false;
     }
 
@@ -265,6 +273,8 @@ public sealed partial class ProductionSystem : ITickSystem
             if (n.Task != (byte)CharacterTask.Operate)
             {
                 cold.OperateSite = null;
+                cold.HaulSite = null;
+                cold.HaulFetch = null;
                 cold.Operating = false;
                 continue;
             }
@@ -276,6 +286,8 @@ public sealed partial class ProductionSystem : ITickSystem
                 continue;
             }
             const ushort Path = (ushort)MoveFlags.AnyPath;
+            // A hauling operator walks to its storage instead.
+            if (Hauling(world, cold) is { } haul) (site, m) = haul;
             if (AtSite(n, site, m))
             {
                 if ((n.Flags & Path) != 0)
@@ -334,9 +346,14 @@ public sealed partial class ProductionSystem : ITickSystem
                 End(table, i);
                 continue;
             }
-            bool at = AtSite(n, site, m);
             cold.Operating = false;
-            if (!at) continue;
+            if (Hauling(world, cold) is { } haul)
+            {
+                if (AtSite(n, haul.Site, haul.Machine)) HaulAt(world, cold, m, haul.Machine);
+                continue;
+            }
+            if (!AtSite(n, site, m)) continue;
+            if (Settings.AutoHaul && StartHaul(world, cold, site, m)) continue;
             if (n.Velocity.X == 0 && n.Velocity.Z == 0) n.Yaw = MathF.Atan2(site.Position.X - n.Position.X, site.Position.Z - n.Position.Z);
             m.Operators++;
             var stat = (StatsEnumerated)m.Data.Stat;
@@ -703,7 +720,7 @@ public sealed partial class ProductionSystem : ITickSystem
         }
         else
         {
-            if (m.Storage is not { } storage || item.Contents is not null && item.Section == "backpack_attach") return;
+            if (m.Storage is not { } storage || item.Contents is not null && item.Section == "backpack_attach" || m.Data.IsStorage && !m.Data.Accepts(item.Record, item.Type)) return;
             if (put.X < 0 || put.Y < 0 || put.X > storage.Width - item.Width || put.Y > storage.Height - item.Height || !storage.IsFree("main", put.X, put.Y, item.Width, item.Height)) return;
             owner.Remove(item);
             item.Section = "main";
@@ -738,8 +755,7 @@ public sealed partial class ProductionSystem : ITickSystem
         }
         (string Item, int Count) held = take.Slot == -2 ? (m.Output?.Recipe.Item ?? "", m.Output?.Count ?? 0) : take.Slot >= 0 && take.Slot < m.Inputs.Length ? (m.Inputs[take.Slot].Item, m.Inputs[take.Slot].Count) : ("", 0);
         if (held.Count <= 0 || items.Create(held.Item, held.Count) is not { } made) return;
-        root.Add(made);
-        int moved = held.Count - made.Quantity;
+        int moved = Placed(root, made);
         if (moved <= 0) return;
         if (take.Slot == -2) m.Output!.Count -= moved;
         else m.Inputs[take.Slot].Count -= moved;

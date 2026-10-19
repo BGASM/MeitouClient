@@ -476,6 +476,20 @@ and `power capacity` (battery store, "in seconds" per fcs.def), plus research ([
 
 **Storage** (**Verified**, 603 buildings): 87 have `has inventory`; default 18 x 18, `itemtype limit` 4; `stackable bonus
 mult` 1 to 100000; `limit inventory` restricts the items. Locks and containers: [locks](locks.md).
+Water Tower takes only Water and `Storage: Ore` only Raw Iron, both with mult 100 and functionality `Resource
+storage` (function 2); Large Barrels also hold Water.
+
+### Hauling
+
+- **Tasks** (**Verified** classes, **Observed** meaning): `Task_EmptyMachine` (92 "Collecting resource", 284 "Looting")
+  moves a building's output into the character's inventory while it has room (`FUN_14033cd10`). `Task_FillMachine`
+  (93 "Filling machine", 124 "Hauling to") puts carried items, main grid and backpack, into a machine or a storage
+  (`FUN_140344510`). GOAP rows: [ai-tasks](ai-tasks.md); states 62 machineHasEmptyInputs, 63 isMachineOutputFull,
+  66 haveSomeResourcesFrom, 67 haveSomeResourcesFor, 82 gotInventoryRoomForResources, 169 isMachineInputInvalid.
+- **Option** (**Verified**, string): "If they have nothing else to do, characters will automatically put any excess
+  materials they are carrying into storage."
+- **Unknown:** how the original picks the storage (nearest, same town, a range), and when an operator leaves a
+  machine to haul.
 
 ## Unknowns
 

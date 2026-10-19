@@ -17,7 +17,7 @@ public sealed record MachineData
     /// <summary>The game day at speed 1 in seconds, G (<b>Verified</b>, <c>FUN_14066cd50</c>): 24 x 1200/11.</summary>
     public const float DaySeconds = 24 * 1200f / 11f;
 
-    public const int MineFunction = 1, ResearchFunction = 3, RefineryFunction = 4, GeneratorFunction = 5, BatteryFunction = 23, NaturalMineFunction = 27;
+    public const int MineFunction = 1, ResourceStorageFunction = 2, GeneralStorageFunction = 13, ResearchFunction = 3, RefineryFunction = 4, GeneratorFunction = 5, BatteryFunction = 23, NaturalMineFunction = 27;
     /// <summary><c>MiningResource</c> WATER and GROUND (<b>Verified</b>, editor enum).</summary>
     public const int WaterResource = 5, GroundResource = 6;
 
@@ -49,6 +49,16 @@ public sealed record MachineData
     public bool HasInventory { get; init; }
     public int StorageWidth { get; init; } = 18;
     public int StorageHeight { get; init; } = 18;
+    /// <summary><c>limit inventory</c>: the only ITEMs the storage takes (empty: any).</summary>
+    public IReadOnlyList<string> StorageLimit { get; init; } = [];
+    /// <summary><c>itemtype limit</c>: the record type the storage takes (fcs.def default ITEM).</summary>
+    public FcsRecordType ItemTypeLimit { get; init; } = FcsRecordType.ITEM;
+    /// <summary><c>stackable bonus mult</c>: stacks inside are this many times larger (fcs.def).</summary>
+    public float StackBonusMult { get; init; } = 1;
+    /// <summary>A storage building (function 2 or 13 with an inventory) operators haul to and from (docs/game/buildings-production.md "Hauling").</summary>
+    public bool IsStorage => HasInventory && Function is ResourceStorageFunction or GeneralStorageFunction;
+    /// <summary>Whether the storage takes an item of this record and type.</summary>
+    public bool Accepts(string item, FcsRecordType type) => type == ItemTypeLimit && (StorageLimit.Count == 0 || StorageLimit.Contains(item));
     /// <summary><c>power output</c>: a generator's output, a battery's discharge and charge rate, a consumer's draw when negative (docs/game/buildings-production.md "Power").</summary>
     public float PowerOutput { get; init; }
     /// <summary><c>power capacity</c>: a battery's store, in seconds at its rate (fcs.def).</summary>
@@ -125,6 +135,9 @@ public sealed record MachineData
             HasInventory = stores,
             StorageWidth = Math.Max(1, building.GetInt("storage size width", 18)),
             StorageHeight = Math.Max(1, building.GetInt("storage size height", 18)),
+            StorageLimit = [.. building.GetReferences("limit inventory").Select(r => r.TargetStringId)],
+            ItemTypeLimit = (FcsRecordType)building.GetInt("itemtype limit", (int)FcsRecordType.ITEM),
+            StackBonusMult = building.GetFloat("stackable bonus mult", 1),
             PowerOutput = building.GetInt("power output"),
             PowerCapacity = building.GetInt("power capacity"),
             PowerOperators = powerOperators,

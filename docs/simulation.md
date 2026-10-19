@@ -759,6 +759,14 @@ crafting benches, generators and batteries. Facts: [production](game/buildings-p
   research `improve buildings` (`ResearchState.Upgrades`) scales rates and adds output and capacity. Engine choices: health
   is 1; wind generators give `WindFraction` 0.5 of their output; battery mode is not saved. HUD: output, fuel use, charge,
   "No power" / "Low power".
+- **Hauling** (`ProductionSystem.Hauling.cs`, `ProductionSettings.AutoHaul`, default on; facts in
+  [buildings-production](game/buildings-production.md#hauling)). An operator at its machine first puts carried items
+  into empty input room and takes a full output. It then carries that output to the nearest player storage (function
+  2 or 13) that accepts it and has room, or fetches an empty input's item from the nearest storage holding it. A
+  storage accepts an item when `itemtype limit` matches and `limit inventory` is empty or lists it; `stackable bonus
+  mult` scales its stacks. The player's drops into a storage follow the same rule. Engine choices: storage within
+  `HaulRange` 3000 of the machine, ties by site id, a fetch takes what the inputs have room for; the trip is not saved.
+  Crafted items are not hauled.
 - **Saves** (`Saving/MachineSave`, `ResearchSave`). Each building's production and farm keys go into its
   GAMESTATE_BUILDING. Items go into an INVENTORY_STATE `<site>-inventory`, listed first by the building, with sections
   `in<k>`, `out` and `main`.
@@ -777,8 +785,8 @@ crafting benches, generators and batteries. Facts: [production](game/buildings-p
   - The original's verb names, row widgets and colours are **Unknown**.
 - **Engine gaps:**
   - No rain filling farm water.
-  - No hauling or auto-jobs: water has to be carried by hand from well to farm.
-  - No furnaces, generators or turrets.
+  - No job list (Perma-Jobs): only operators haul, for their own machine.
+  - No furnaces or turrets.
   - Plants are not drawn.
 
 ## Trade
