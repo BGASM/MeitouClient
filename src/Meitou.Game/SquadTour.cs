@@ -55,6 +55,13 @@ sealed class SquadTour
     /// <summary>The member the camera is on or flying to.</summary>
     public CharacterId? Current => next < stops.Count ? stops[next] : stops.Count > 0 ? stops[^1] : null;
 
+    /// <summary>Ends the hop under way at once: the camera cuts to the view it was flying to.</summary>
+    public void Finish(WorldCamera camera, Func<CharacterId, Vector3?> position)
+    {
+        if (Current is { } id && position(id) is { } at) (camera.Target, camera.Yaw, camera.Pitch, camera.Distance) = (at, yaw, pitch, distance);
+        Active = false;
+    }
+
     public void Stop() => Active = false;
 
     /// <summary>Moves the camera by <paramref name="dt"/> seconds; false once the tour is over (the camera is left on the last member).</summary>

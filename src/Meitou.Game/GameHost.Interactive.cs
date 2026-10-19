@@ -153,6 +153,13 @@ sealed partial class GameHost
             (cinemaHolds, tourFollows) = (true, true);
             return true;
         };
+        // Pressing the member again while the flight is under way (a triple tap) cuts straight to the end of it.
+        player.SkipFlight = id =>
+        {
+            if (!tour.Active || !tourFollows || tour.Current != id) return;
+            tour.Finish(camera, TourPosition);
+            EndTour();
+        };
 
         var silkInput = Silk.NET.Input.InputWindowExtensions.CreateInput(window);
         Vector2? lastMouse = null;
