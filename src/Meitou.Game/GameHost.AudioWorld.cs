@@ -13,6 +13,10 @@ sealed partial class GameHost
     AudioSystem? worldAudioFor;
     InteriorSounds? interiorSounds;
     WorldEmitters? worldEmitters;
+    DoorSounds? doorSounds;
+    // The world the door sounds follow, and each door record's `door type` (DoorMaterial).
+    object? doorSoundsFor;
+    readonly Dictionary<string, int> doorTypes = new(StringComparer.Ordinal);
     // The world the emitters were made for, the level's emitters (read on a worker: every building with sounds, positioned on the heightmap) and whether they were added.
     object? emittersFor;
     Task<List<PlacedEmitter>>? levelEmitters;
@@ -29,6 +33,8 @@ sealed partial class GameHost
             worldAudioFor = sound;
             interiorSounds = new InteriorSounds(sound.Player);
             worldEmitters = new WorldEmitters(sound.Player);
+            doorSounds = new DoorSounds(sound.Player);
+            doorSoundsFor = null;
             ForgetEmitters();
         }
 
@@ -38,6 +44,29 @@ sealed partial class GameHost
 
         UpdateEmitters();
         worldEmitters!.Update(eye);
+        UpdateDoorSounds(eye);
+    }
+
+    /// <summary>The doors' open, close, shut and break sounds from the snapshot's doors (docs/audio.md "Other world-side events").</summary>
+    void UpdateDoorSounds(Vector3 eye)
+    {
+        var sounds = doorSounds!;
+        if (!ReferenceEquals(doorSoundsFor, session.World))
+        {
+            sounds.Clear();
+            doorTypes.Clear();
+            doorSoundsFor = session.World;
+        }
+        var db = scene.Database;
+        sounds.Update(session.CurrentSnapshot.Doors.Select(d => KeyValuePair.Create($"{d.Key.Building}#{d.Key.Door}",
+            new DoorSoundState(d.Value.Position, TypeOf(d.Value.Record), (int)d.Value.Motion, d.Value.Broken))), eye);
+
+        int TypeOf(string record)
+        {
+            if (!doorTypes.TryGetValue(record, out int type))
+                doorTypes[record] = type = db?.Find(record)?.GetInt("door type") ?? 0;
+            return type;
+        }
     }
 
     /// <summary>Keeps the emitters in step with the world's buildings: the level's once read, the player's as their sites change.</summary>
@@ -97,11 +126,14 @@ sealed partial class GameHost
     {
         interiorSounds?.Silence();
         worldEmitters?.Clear();
+        doorSounds?.Clear();
+        doorSoundsFor = null;
         ForgetEmitters();
     }
 
     /// <summary>One statistics line: where the pivot is and how many emitters play; empty without audio.</summary>
     string WorldAudioStats() => interiorSounds is null || worldEmitters is null ? "" :
         $"{(interiorSounds.Playing ? $"indoors ({interiorSounds.Indoors})" : interiorSounds.Inside ? "in a building without an ambience" : "outdoors")}, {worldEmitters.Started} of {worldEmitters.Count} emitters playing" +
-        (worldEmitters.NearestName is { } near ? $", nearest {near} {worldEmitters.NearestDistance:0} units from the eye" : "");
+        (worldEmitters.NearestName is { } near ? $", nearest {near} {worldEmitters.NearestDistance:0} units from the eye" : "") +
+        (doorSounds is { Posted: > 0 } doors ? $", {doors.Posted} door sounds" : "");
 }

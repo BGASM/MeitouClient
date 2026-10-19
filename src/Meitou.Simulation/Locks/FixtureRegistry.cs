@@ -698,7 +698,7 @@ public sealed class FixtureRegistry
     IReadOnlyDictionary<(string Building, int Door), DoorView> publishedDoors = new Dictionary<(string Building, int Door), DoorView>();
     ulong publishedDoorsKey;
 
-    /// <summary>The doors of the player's buildings and every other door that is not plainly closed and unlocked (open, moving, locked or set to lock), for the snapshot; a new dictionary only when one of them changed.</summary>
+    /// <summary>The doors of the player's buildings and every other door that is not plainly closed and unlocked (open, moving, locked, set to lock or broken), for the snapshot; a new dictionary only when one of them changed.</summary>
     internal IReadOnlyDictionary<(string Building, int Door), DoorView> PublishedDoors()
     {
         ulong key = 0x446F6F72;
@@ -706,17 +706,17 @@ public sealed class FixtureRegistry
         {
             var f = all[i];
             if (f.Kind != FixtureKind.Door || !Shown(f)) continue;
-            key = Rng.Mix(key ^ (ulong)i) ^ BitConverter.SingleToUInt32Bits(f.OpenAmount) ^ ((ulong)f.Motion << 32) ^ (f.Lock is { EffectivelyLocked: true } ? 1UL << 40 : 0) ^ (f.WantsLock ? 1UL << 41 : 0);
+            key = Rng.Mix(key ^ (ulong)i) ^ BitConverter.SingleToUInt32Bits(f.OpenAmount) ^ ((ulong)f.Motion << 32) ^ (f.Lock is { EffectivelyLocked: true } ? 1UL << 40 : 0) ^ (f.WantsLock ? 1UL << 41 : 0) ^ (f.DoorBroken ? 1UL << 42 : 0);
         }
         if (key == publishedDoorsKey) return publishedDoors;
         var doorViews = new Dictionary<(string Building, int Door), DoorView>();
         foreach (var f in all)
             if (f.Kind == FixtureKind.Door && Shown(f))
-                doorViews[(f.Building, f.DoorIndex)] = new DoorView(f.OpenAmount, f.Motion, f.Lock is { EffectivelyLocked: true }, f.WantsLock);
+                doorViews[(f.Building, f.DoorIndex)] = new DoorView(f.OpenAmount, f.Motion, f.Lock is { EffectivelyLocked: true }, f.WantsLock, f.DoorBroken, DoorSpotOf(f)?.Centre ?? f.Position, f.RecordId);
         publishedDoorsKey = key;
         return publishedDoors = doorViews;
 
-        static bool Shown(Fixture f) => f.Site < 0 || f.OpenAmount > 0 || f.Motion != DoorMotion.Closed || f.WantsLock || f.Lock is { EffectivelyLocked: true };
+        static bool Shown(Fixture f) => f.Site < 0 || f.OpenAmount > 0 || f.Motion != DoorMotion.Closed || f.WantsLock || f.DoorBroken || f.Lock is { EffectivelyLocked: true };
     }
 
     /// <summary>The panel's view of a building's doors (null for no building, or one without fixtures).</summary>

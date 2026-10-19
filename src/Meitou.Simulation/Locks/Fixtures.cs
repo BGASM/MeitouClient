@@ -109,8 +109,11 @@ public sealed class Fixture
     }
 }
 
-/// <summary>A door as the snapshot shows it (<see cref="WorldSnapshot.Doors"/>): its open amount 0..1, motion, whether it is effectively locked and whether it wants to lock.</summary>
-public readonly record struct DoorView(float Open, DoorMotion Motion, bool Locked, bool WantsLock);
+/// <summary>
+/// A door as the snapshot shows it (<see cref="WorldSnapshot.Doors"/>): its open amount 0..1, motion, whether it is effectively locked and whether it wants to lock; for the sounds,
+/// whether it is broken, where it is (the leaf's centre once known, else its building's origin) and its own BUILDING record (<c>door type</c>).
+/// </summary>
+public readonly record struct DoorView(float Open, DoorMotion Motion, bool Locked, bool WantsLock, bool Broken = false, Vector3 Position = default, string Record = "");
 
 /// <summary>The doors of the building the HUD shows (<see cref="InspectBuildingCommand"/>), in the building's door order: what the panel's door lines say.</summary>
 public sealed record BuildingDetail(string Instance, IReadOnlyList<DoorDetail> Doors);
