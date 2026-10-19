@@ -18,13 +18,13 @@ and generated levels use projected demand with stable transitions. Do not treat 
 range as an accidental renderer limit: it can be original fidelity. Visibility/depth/shadow/
 reflection and streaming residency need consistent bounds.
 
-
 ## Arrival prefetch
 
 During a character flight or squad tour hop ([viewer.md](viewer.md#squad-tour)) the host sets `WorldFrame` `Ahead` to the landing
 view's eye from the tap on. Object zones are laid out and kept, meshes requested, and mesh LOD / texture mips chosen by the nearer of
 the eye and that point (`ObjectStreamer.Near`); terrain biome textures gather cells round both. The terrain height window still follows
 only the eye. The simulation focus moves to the landing character at once, so its towns populate during the flight.
+
 ## Batching and depth
 
 Batch compatible mesh/material/state instances; sort colour batches near-first when enabled.
