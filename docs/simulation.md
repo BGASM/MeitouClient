@@ -761,12 +761,12 @@ crafting benches, generators and batteries. Facts: [production](game/buildings-p
   "No power" / "Low power".
 - **Hauling** (`ProductionSystem.Hauling.cs`, `ProductionSettings.AutoHaul`, default on; facts in
   [buildings-production](game/buildings-production.md#hauling)). An operator at its machine first puts carried items
-  into empty input room and takes a full output. It then carries that output to the nearest player storage (function
-  2 or 13) that accepts it and has room, or fetches an empty input's item from the nearest storage holding it. A
+  into empty input room. It takes a full output only when a storage will accept it (else the machine stays full) and
+  carries it to the nearest player storage (function 2 or 13) that accepts it and has room; or it fetches an empty input's item from the nearest storage holding it. A
   storage accepts an item when `itemtype limit` matches and `limit inventory` is empty or lists it; `stackable bonus
-  mult` scales its stacks. The player's drops into a storage follow the same rule. Engine choices: storage within
-  `HaulRange` 3000 of the machine, ties by site id, a fetch takes what the inputs have room for; the trip is not saved.
-  Crafted items are not hauled.
+  mult` scales its stacks. The player's drops into a storage follow the same rule ("does not take").
+  Excess fetched inputs stay with the operator. Engine choices: storage within `HaulRange` 3000 of the machine, ties
+  by site id, a fetch takes what the inputs have room for; the trip is not saved. Crafted items are not hauled.
 - **Saves** (`Saving/MachineSave`, `ResearchSave`). Each building's production and farm keys go into its
   GAMESTATE_BUILDING. Items go into an INVENTORY_STATE `<site>-inventory`, listed first by the building, with sections
   `in<k>`, `out` and `main`.

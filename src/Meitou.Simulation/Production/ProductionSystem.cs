@@ -720,7 +720,12 @@ public sealed partial class ProductionSystem : ITickSystem
         }
         else
         {
-            if (m.Storage is not { } storage || item.Contents is not null && item.Section == "backpack_attach" || m.Data.IsStorage && !m.Data.Accepts(item.Record, item.Type)) return;
+            if (m.Storage is not { } storage || item.Contents is not null && item.Section == "backpack_attach") return;
+            if (m.Data.IsStorage && !m.Data.Accepts(item.Record, item.Type))
+            {
+                world.Post($"{site.Name} does not take {item.Name}.");
+                return;
+            }
             if (put.X < 0 || put.Y < 0 || put.X > storage.Width - item.Width || put.Y > storage.Height - item.Height || !storage.IsFree("main", put.X, put.Y, item.Width, item.Height)) return;
             owner.Remove(item);
             item.Section = "main";
