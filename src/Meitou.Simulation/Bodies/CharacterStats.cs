@@ -61,11 +61,15 @@ public sealed class CharacterStats
         return float.IsNaN(result) ? stat : result;
     }
 
-    /// <summary>Trains a stat by <paramref name="amount"/> through the core curve; returns the new value. A stat without storage is left alone.</summary>
+    /// <summary>
+    /// Trains a stat by <paramref name="amount"/> through the core curve; returns the new value. A stat without storage is left alone. A NaN stat
+    /// stays NaN: in game the XP entries (<c>xpStat_eventBased</c>, <c>xpGeneral</c>) never reach the core's reset to 20 for one (<b>Verified</b> in game, issue #3).
+    /// </summary>
     public float Gain(StatsEnumerated stat, float amount, float cap = XpCap)
     {
         var s = StatsInfo.StorageOf(stat);
         if (s == StatsEnumerated.None) return 0;
+        if (float.IsNaN(values[(int)s])) return values[(int)s];
         return values[(int)s] = CoreGain(values[(int)s], amount, cap);
     }
 

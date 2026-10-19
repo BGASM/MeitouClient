@@ -3,6 +3,12 @@
 What changed in each release, newest first. The release workflow copies the section of the version it builds into the GitHub release
 notes and refuses to release a version without one: add a `## vX.Y.Z` section with one `- ` line per change before running it.
 
+## v0.14.1
+
+- Fix the main menu never appearing on slower GPUs (integrated graphics, GTX 1050 Ti class): it now opens after 5 s of ready content even when frames are not smooth
+- Fix loading hanging on cards short of video memory: content held back by memory pressure is no longer waited for
+- --low-end now takes effect in the game: the saved graphics settings no longer override it, and it does not overwrite them
+
 ## v0.14.0
 
 - NPCs whose target hides behind another faction's locked doors bash the door in

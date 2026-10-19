@@ -236,6 +236,9 @@ public sealed unsafe partial class FoliageRenderer : IDisposable
     /// <summary>Requested work: layouts, grass, meshes, textures and impostors, including used textures deferred by memory pressure.</summary>
     public int Pending => runningWhole + runningFar + zonesWaiting + grassWaiting + decoding.Count + uploads.Count + lodRunning + lodWaiting + textures.PendingCount + textures.UnresidentUsedCount + zones.Values.Sum(z => z.GrassRunning) + ImpostorPending;
 
+    /// <summary>What <see cref="Pending"/> is made of, for the loading log.</summary>
+    public string PendingDetail => $"layouts {runningWhole + runningFar + zonesWaiting}, grass {grassWaiting + zones.Values.Sum(z => z.GrassRunning)}, meshes {decoding.Count + uploads.Count}, lods {lodRunning + lodWaiting}, textures {textures.PendingCount} loading {textures.UnresidentUsedCount} deferred, impostors {ImpostorPending}";
+
     /// <summary>GPU memory held by foliage meshes, textures and grass pages.</summary>
     public long ResidentBytes => residentMeshBytes + textures.ResidentBytes + GrassBytes() + impostorBytes;
     public string ResidentDescription =>

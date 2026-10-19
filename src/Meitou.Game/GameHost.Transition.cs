@@ -30,10 +30,15 @@ sealed partial class GameHost
     double warmSeconds;
     double readySeconds;
     double nextWarmReport;
+    /// <summary>Seconds of the warm-up the VRAM guard has held its pressure without a break.</summary>
+    double guardSeconds;
     bool titleWarmFinalized;
-    /// <summary>After content is ready, gameplay's smooth-frame target and pacing limit; the title requires <see cref="TitleSmoothRun"/>.</summary>
+    /// <summary>After content is ready, gameplay's smooth-frame target and run, and the pacing limit (title too); the title requires <see cref="TitleSmoothRun"/>.</summary>
     const double SmoothFrame = 0.04, SmoothRun = 0.5, WarmLimit = 5;
     const double TitleSmoothRun = 1;
+    /// <summary>Seconds of the guard's pressure after which the content it holds back is not waited for: nothing new loads until the use falls
+    /// (VramGuard), so on a card short of memory it may never come (as <c>WorldObjectRenderer.Settle</c>).</summary>
+    const double GuardWait = 5;
 
     /// <summary>Loading, warm-up, arrival or the loading overlay's final reveal still blocks input.</summary>
     bool Covered => sceneLoad is not null || warming || skyArrival is not null || loading is { Exiting: true };
@@ -87,7 +92,7 @@ sealed partial class GameHost
     void BeginWarm()
     {
         if (loading is null) { skyArrival?.Arrive(); return; }
-        (warming, smoothSeconds, warmSeconds, readySeconds) = (true, 0, 0, 0);
+        (warming, smoothSeconds, warmSeconds, readySeconds, guardSeconds) = (true, 0, 0, 0, 0);
         nextWarmReport = 5;
         titleWarmFinalized = false;
         SetLoadingStep("view");
@@ -109,6 +114,13 @@ sealed partial class GameHost
             session.CurrentSnapshot.Characters.All(c => c.Appearance is null || characters.IsPrepared(c.Appearance));
         bool sceneReady = TitleVisible ? TitleSceneReady : populationReady && charactersReady &&
             gpu.Streamer is not { Idle: false } && !(gpu.Objects?.Pending > 0) && !(gpu.Foliage?.Pending > 0);
+        guardSeconds = gpu.Guard is { Pressure: true } ? guardSeconds + seconds : 0;
+        if (!sceneReady && guardSeconds >= GuardWait && (TitleVisible || populationReady))
+        {
+            sceneReady = true;
+            if (guardSeconds - seconds < GuardWait)
+                Console.WriteLine($"loading   stopped waiting for content held back by memory pressure (VramGuard, {gpu.Guard!.Fraction * 100:0}% of the {gpu.Guard.BudgetBytes / 1048576} MB budget)");
+        }
         if (pendingCreation is not null && !TitleVisible && charactersReady)
         {
             // A new game shows the character editor before the world: the loading screen lifts once the squad is drawable, no sky arrival, and the world's own warm-up
@@ -124,7 +136,7 @@ sealed partial class GameHost
             if (warmSeconds >= nextWarmReport)
             {
                 nextWarmReport = warmSeconds + 5;
-                Console.WriteLine($"loading   {(TitleVisible ? "menu" : "game")} still preparing: terrain {(gpu.Streamer?.Idle == false ? "pending" : "ready")}, objects {gpu.Objects?.Pending ?? 0}, foliage {gpu.Foliage?.Pending ?? 0}, population {(populationReady ? "ready" : "pending")}, characters {((TitleVisible ? TitleCharactersReady : charactersReady) ? "ready" : "pending")}");
+                Console.WriteLine($"loading   {(TitleVisible ? "menu" : "game")} still preparing: terrain {(gpu.Streamer?.Idle == false ? "pending" : "ready")}, objects {gpu.Objects?.Pending ?? 0}{(gpu.Objects is { Pending: > 0 } po ? $" ({po.PendingDetail})" : "")}, foliage {gpu.Foliage?.Pending ?? 0}{(gpu.Foliage is { Pending: > 0 } pf ? $" ({pf.PendingDetail})" : "")}, population {(populationReady ? "ready" : "pending")}, characters {((TitleVisible ? TitleCharactersReady : charactersReady) ? "ready" : "pending")}");
             }
             return;
         }
@@ -138,7 +150,8 @@ sealed partial class GameHost
         }
         readySeconds += seconds;
         smoothSeconds = seconds < SmoothFrame ? smoothSeconds + seconds : 0;
-        if (TitleVisible ? smoothSeconds < TitleSmoothRun : smoothSeconds < SmoothRun && readySeconds < WarmLimit) return;
+        // A machine that cannot draw the view at the smooth pace is let in after WarmLimit seconds of ready content, on the title as in play.
+        if ((TitleVisible ? smoothSeconds < TitleSmoothRun : smoothSeconds < SmoothRun) && readySeconds < WarmLimit) return;
         warming = false;
         loading?.Finish();
         skyArrival?.Arrive();

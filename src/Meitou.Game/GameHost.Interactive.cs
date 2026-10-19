@@ -81,6 +81,8 @@ sealed partial class GameHost
         var switches = WorldFrame.LiveSwitches(o, () => gpu, () => camera, () => render);
         var meitou = new MeitouToggle(switches);
         // Keep the shared rendering settings' callbacks and persistence keys; the game supplies its own modal layout.
+        // --low-end (WorldOptions.LowEnd) is a preset for this run: the saved sliders and switches would undo it, so they are left as saved and not applied.
+        bool lowEnd = Environment.GetCommandLineArgs().Contains("--low-end");
         var settingsValues = overlay is null ? null : WorldFrame.CreateSettingsPanel(overlay, gpu, render,
             getHour: () => (float)session.Clock.HourOfDay, setHour: v => { session.Clock.SetHourOfDay(v); if (IsDuel) duelHour = v; },
             getVSync: () => display.VSync, setVSync: v => display.VSync = v, switches: switches,
@@ -108,12 +110,12 @@ sealed partial class GameHost
                         (population.KeepRoamers, population.OffscreenFights, population.OffscreenHealing, population.CampaignAncestorsOnce, population.KeepWild) = (config.KeepRoamers, config.OffscreenFights, config.OffscreenHealing, config.CampaignAncestorsOnce, config.KeepWild);
                 },
             };
-        if (panel is not null)
+        if (panel is not null && !lowEnd)
             foreach (var slider in panel.Sliders)
                 if (!SessionSliders.Contains(slider.Label) && config.Graphics.TryGetValue(slider.Label, out float v) && !(o.Post.Upscale.Explicit && WorldFrame.UpscalerSliders.Contains(slider.Label)))
                     slider.Set(Math.Clamp(v, slider.Min, slider.Max));
         // The switches as saved, unless the command line chose them (--meitou / --faithful).
-        if (panel is not null && !Environment.GetCommandLineArgs().Any(a => a is "--meitou" or "--faithful"))
+        if (panel is not null && !lowEnd && !Environment.GetCommandLineArgs().Any(a => a is "--meitou" or "--faithful"))
             foreach (var toggle in panel.Toggles)
                 if (config.Graphics.TryGetValue(SwitchKey(toggle.Label), out float v) && (v >= 0.5f) != toggle.Get()) toggle.Set(v >= 0.5f);
         var stats = new List<string>();
@@ -595,7 +597,7 @@ sealed partial class GameHost
             savedVSync = display.VSync;
             savedFullScreen = BorderlessFullScreen.IsOn(window);
             initialFpsLimit = fpsLimit;
-            if (panel is not null)
+            if (panel is not null && !lowEnd)
             {
                 foreach (var slider in panel.Sliders)
                     if (!SessionSliders.Contains(slider.Label)) config.Graphics[slider.Label] = slider.Get();

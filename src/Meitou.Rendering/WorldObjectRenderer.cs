@@ -329,6 +329,8 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
     public int Pending => streamer.Pending + meshes.Pending + uploads.Count + textureCache.PendingCount + textureCache.UnresidentUsedCount + unresolvedInRange + (landmarkTask is not null ? 1 : 0);
 
     int unresolvedInRange;
+    /// <summary>What <see cref="Pending"/> is made of, for the loading log.</summary>
+    public string PendingDetail => $"zones {streamer.Pending}, meshes {meshes.Pending}, uploads {uploads.Count}, textures {textureCache.PendingCount} loading {textureCache.UnresidentUsedCount} deferred, unresolved {unresolvedInRange}, landmarks {(landmarkTask is not null ? 1 : 0)}";
     public List<string> Messages { get; } = [];
 
     /// <summary>A line about what is loaded, for the log.</summary>
