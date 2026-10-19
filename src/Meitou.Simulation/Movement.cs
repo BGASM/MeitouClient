@@ -32,6 +32,8 @@ public enum CharacterTask : byte
     Dismantle = 12,
     /// <summary>At <see cref="CharacterCold.BuildSite"/>, filling the 5 s bar that hands over one unit per missing material (<see cref="Construction.ConstructionSystem"/>; <c>Task_AddMaterialsToBuilding</c>).</summary>
     DeliverMaterials = 13,
+    /// <summary>Walks to <see cref="CharacterCold.OperateSite"/> and works it: a well, a farm's harvest, a research bench (<see cref="Production.ProductionSystem"/>; the original's <c>Task_OperateMachine</c>).</summary>
+    Operate = 14,
 }
 
 /// <summary>Bits of <see cref="CharacterHot.Flags"/> the movement system uses.</summary>

@@ -59,7 +59,7 @@ factories/database/relations and lazy body/combat/item assembly. Research owns o
 `StandardSystems.Build` is the single wiring authority. Ordered systems:
 Population, Player, AI, Pursuit, Movement, FirstAid, Body, Carry, Construction, Combat, Animation, Ragdoll
 (only with `StandardSystemOptions.Ragdolls`), Feed, Retaliation, Aggro, Flee, Crime, Arrest, Locks, Trade, Dialogue (Arrest and
-Locks come with the Crime part). Tests selecting subsets retain this relative order.
+Locks come with the Crime part), with Production right after Construction. Tests selecting subsets retain this relative order.
 Population spawns before later SlowWorld work; player selection precedes movement orders;
 AI writes tasks before movement; pursuit schedules paths before movement answers them.
 First aid reads patients in its own Act barrier and applies treatment during serial commit.
@@ -550,7 +550,7 @@ Player construction contract (Faithful UI). Facts: [construction](game/buildings
 [placement](game/buildings-production.md#placement), [build menu](game/buildings-production.md#build-menu),
 [build tasks](game/ai-tasks.md#build-tasks), [save keys](formats/zones.md#placement-keys). Out of scope: the
 outpost behaviour beyond the record (residents, raids, renaming, the map marker), the door x3 rule,
-production/power/storage, research progress, fetching from storage (task 247).
+power, fetching from storage (task 247); production and research: [Production](#production).
 
 **Shared types** (stubs f4cb78c, filled by the simulation track):
 - `Meitou.Data/Gameplay/Construction/BuildingBuildData.cs`: `BuildingBuildData.From/LoadAll` (build fields, material
@@ -715,6 +715,57 @@ ghost, commands), `Building/PlacementCheck.cs`, `Building/BuildMenu.cs` (categor
 `Meitou.Ui/*`; `Meitou.Rendering/WorldObjects.cs`, `ObjectStreamer.cs` and the object shader plumbing;
 `Meitou.Navigation/NavSystem.cs`, `NavMeshService.cs`, `ZoneGeometryGatherer*.cs`, new `NavRuntimeBuildings.cs`.
 
+## Production
+
+`Production/ProductionSystem` runs the player's complete buildings: wells and other producers, farms, research benches.
+Facts: [production](game/buildings-production.md#production), [farming](game/buildings-production.md#farming),
+[research](game/buildings-production.md#research).
+- **Machines** (`Production/Machines.cs`, data `Construction/MachineData.cs`). A machine is made when a player site completes
+  or loads complete, and dropped with the site; its items fall on the ground. It holds:
+  - the recipe inputs and the output, as item counts plus a level or progress (engine choice: crops and water have no quality);
+  - the storage grid of a `has inventory` building (a bench's books), as a real `Inventory`;
+  - the farm's plants.
+- **Yield.** Set at creation from the ground under the building: a resource's value (0 becomes 0.5), and for a farm its
+  fertility factor, crop match and water rate.
+  - Fertility and the crop match come from the BIOME_GROUP's ENVIRONMENT_RESOURCES at the weather-area cell.
+  - The altitude test uses the building's y.
+  - **Observed** with the vanilla map: only the central biomes give farming ground.
+- **Operating.** `OperateOrder` sets `CharacterTask.Operate`. The character walks within use range of the building and
+  works it every tick; work is scaled by its skill factor and trains the stat.
+  - Producers make output from their inputs.
+  - Farms are harvested and cleared.
+  - Benches add to the research queue.
+  - More characters than `max operators` are refused with "X is already in use.".
+  - Farms tick whether anyone is there; there is no offline catch-up on load.
+- **Items.** `PutInMachine` and `TakeFromMachine` move items between a character within 200 of the building and the machine:
+  inputs, output, or storage cells.
+- **Research** (`Construction/ResearchState`). A queue paid at queue time from the benches' storage; a paid id is never
+  charged again.
+  - Bench level is the best complete bench's `tech level`.
+  - Several operators add with the 0.6^k falloff.
+  - Partial progress is kept off the queue (in memory only).
+- **Hash.** Machines and research join the world hash only once the player has one; golden hashes are unchanged.
+  RNG: `RngPurpose.Farm` (replanting, harvest rolls).
+- **Saves** (`Saving/MachineSave`, `ResearchSave`). Each building's production and farm keys go into its
+  GAMESTATE_BUILDING. Items go into an INVENTORY_STATE `<site>-inventory`, listed first by the building, with sections
+  `in<k>`, `out` and `main`.
+  - A loaded farm's plants all take its growth.
+  - The original's reading of these inventories is unverified: no sample holds a working player building.
+- **UI** (Faithful, `PlayerInterface.Production.cs`).
+  - Selecting a machine opens its window beside the inventory: `Kenshi_GenericBuildingWindow`, or for a bench
+    `Kenshi_InventoryResearchWindow`. Items drag in and out.
+  - The site menu gains Operate (also the quick right click).
+  - The HUD shows the farm's growth, ripeness and fertility, the output, workers and tech level.
+  - The overview's research tab lists categories, blueprints (click to queue), the queue (click to cancel) and a
+    description with the cost.
+  - The original's verb names, row widgets and colours are **Unknown**.
+- **Engine gaps:**
+  - No power: every building runs as if powered.
+  - No rain filling farm water.
+  - No hauling or auto-jobs: water has to be carried by hand from well to farm.
+  - No crafting, furnaces, generators or turrets.
+  - Plants are not drawn.
+
 ## Trade
 
 `TradeSystem`: trader-squad stock/purse/restock, open trade, buying/selling/fencing. Charge,
@@ -722,7 +773,7 @@ quality, culture, market, forbidden/stolen factors follow [economy.md](game/econ
 A squad shop holds one 18 x 18 stock grid (the building storage size and the vanilla trader window width); `ArrangeStock` arranges it. A housed trader whose template makes no
 prisoners or slaves and whose home has stock containers gets a building shop instead ([building shops](game/economy.md#building-shops-observed-decompile)): one merged stock
 (`Shop.ForBuilding`, `Shop.Building`), its own purse rule, the containers' locks opened at each fill. Shop state is hashed; open UI trade is not world state; stock is not saved.
-Production/research remain incomplete. Transfers and money changes must succeed together.
+Transfers and money changes must succeed together.
 
 ## Dialogue
 
@@ -840,7 +891,7 @@ order. Renderer state lives in Rendering; snapshots are the simulation-to-host b
 
 Original-game unknowns are maintained in each linked subsystem reference; do not infer parity from our determinism tests.
 
-**Engine gaps:** remaining AI is listed in [AI](#ai); persistent town/world state, production, outposts, full UI fidelity and physics remain incomplete (walls: see [Buildings](#buildings)). Save and combat limitations are listed in their subsystem sections.
+**Engine gaps:** remaining AI is listed in [AI](#ai); persistent town/world state, power, hauling, crafting, outposts, full UI fidelity and physics remain incomplete (walls: see [Buildings](#buildings)). Save and combat limitations are listed in their subsystem sections.
 
 **Behaviour and hash constraints.**
 - No end-of-tick hook: the combat system swaps its arrays at the end of its `SlowWorld`, so the result depends on the system order

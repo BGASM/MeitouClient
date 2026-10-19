@@ -39,7 +39,7 @@ sealed partial class PlayerInterface
             soundScreens.Remove(id);
             switch (id)
             {
-                case "inventory" or "bag" or "trader": Sound("Inventory_Close"); break;
+                case "inventory" or "bag" or "trader" or "building" or "bench": Sound("Inventory_Close"); break;
                 case "stats": Sound("Stats_Close"); break;
                 case "overview": if (soundOverviewTab == 0) Sound("Map_Close"); else if (soundOverviewTab == 2) Sound("Tech_Close"); soundOverviewTab = -1; break;
                 case "menu": Sound("General_Click"); break;
@@ -50,7 +50,7 @@ sealed partial class PlayerInterface
             if (!soundScreens.Add(id)) continue;
             switch (id)
             {
-                case "inventory" or "bag" or "trader": Sound("Inventory_Open"); break;
+                case "inventory" or "bag" or "trader" or "building" or "bench": Sound("Inventory_Open"); break;
                 case "stats": Sound("Stats_Open"); break;
                 case "build": Sound("Building_Button"); break;
                 case "menu": Sound("General_Click"); break;
@@ -168,7 +168,7 @@ sealed partial class PlayerInterface
     static readonly HashSet<string> OrderCommands = new(StringComparer.Ordinal)
     {
         "MoveOrder", "AttackOrder", "BuildOrder", "DismantleOrder", "GetOutOrder", "LootOrder", "PayBailOrder", "PickLockOrder", "PickUpOrder", "PutDownOrder", "PutInCageOrder", "PutShacklesOrder",
-        "RestOrder", "SplintOrder", "StealthKoOrder", "TalkOrder", "TreatOrder",
+        "OperateOrder", "RestOrder", "SplintOrder", "StealthKoOrder", "TalkOrder", "TreatOrder",
     };
 
     /// <summary>A command the player is about to send: orders sound as the exe's order dispatcher (1407f9e20), item moves and trades as the inventory handlers.</summary>

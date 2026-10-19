@@ -225,6 +225,12 @@ public sealed class CharacterCold
     public string? BuildSite { get; set; }
     /// <summary>The material delivery bar (0 to 1, filling at 0.2 per second, <see cref="CharacterTask.DeliverMaterials"/>). Hashed with <see cref="BuildSite"/>.</summary>
     public float BuildBar { get; set; }
+    /// <summary>The building the <see cref="CharacterTask.Operate"/> task works (<see cref="Construction.BuildSite.Id"/>; null: none). Serial phases only. Hashed only while set.</summary>
+    public string? OperateSite { get; set; }
+    /// <summary>The clip the operator plays while it works (the functionality's <c>animation</c>).</summary>
+    public string? OperateClip { get; set; }
+    /// <summary>The operator did work this tick (it plays <see cref="OperateClip"/>); derived, not hashed.</summary>
+    public bool Operating { get; set; }
 }
 
 /// <summary>
@@ -457,6 +463,7 @@ public sealed class CharacterTable
             if (k.PickingUpItem is { } taking) { hasher.Add(0x54616B65); hasher.Add(taking); }
             // A builder's site, bar and the task it goes back to add to the hash only while it works one, so worlds without sites hash as before.
             if (k.BuildSite is { } site) { hasher.Add(0x4275696C); hasher.Add(Rng.StableHash(site)); hasher.Add(k.BuildBar); hasher.Add((int)k.ResumeTask); }
+            if (k.OperateSite is { } machine) { hasher.Add(0x4F706572); hasher.Add(Rng.StableHash(machine)); }
         }
         hasher.Add(free.Count);
         foreach (int slot in free) hasher.Add(slot);

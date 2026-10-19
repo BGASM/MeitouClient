@@ -363,8 +363,8 @@ to `FUN_140836b70`: contribution k of the frame is x 0.6^k (counter `+0x174`, cl
 - **Tech levels** (**Verified**, probe): Tech Level 2 time 4 (6 Book, requires Small House), 3 time 10 (10 Book),
   4 time 16 (4 Ancient Science Book), 5 time 24 (8 Ancient Science Book), 6 time 32 (2 AI Core), each after the previous.
 - **Save** (RESEARCH record, `FUN_1408310b0` / `FUN_1408360f0`): floats `num currents`, `num finished`; strings
-  `current<k>` (queued id), floats `current prog<k>` (seconds), strings `finished<k>`; a third string list (prefix at
-  `14171dd08`, **Unknown**).
+  `current<k>` (queued id), floats `current prog<k>` (seconds), strings `finished<k>` and `paid<k>` (the paid ids; the prefix
+  at `14171dd08` is "paid", **Verified** by the exe bytes).
 - **UI**: the overview window's ResearchTab (`ResearchTypeList`, `ResearchQueueList`, `ResearchBenchMessage`, description
   panels); the bench's `Kenshi_InventoryResearchWindow` (`ResearchButton`); HUD `ResearchProgressBar`; header
   "RESEARCH - LEVEL {1} (CURRENT RATE: {2}x)" (`FUN_140494af0`).

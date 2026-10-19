@@ -180,6 +180,12 @@ public sealed record WorldSnapshot(long Tick, IReadOnlyList<CharacterSnapshot> C
 
     /// <summary>The doors of the building the HUD shows (<see cref="InspectBuildingCommand"/>); null when none is shown or it has no fixtures.</summary>
     public Locks.BuildingDetail? InspectedBuilding { get; init; }
+    /// <summary>The machines of the player's complete buildings (docs/simulation.md "Production"), in the order they were made.</summary>
+    public IReadOnlyList<Production.MachineSnapshot> Machines { get; init; } = [];
+    /// <summary>Bumped on every machine change (items, progress, status).</summary>
+    public long MachinesVersion { get; init; }
+    /// <summary>The player's research: levels, queue, rate and what may be queued.</summary>
+    public Production.ResearchSnapshot Research { get; init; } = Production.ResearchSnapshot.Empty;
 
     static readonly IReadOnlyDictionary<(string Building, int Door), Locks.DoorView> NoDoors = new Dictionary<(string Building, int Door), Locks.DoorView>();
 

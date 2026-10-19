@@ -94,6 +94,7 @@ sealed partial class PlayerInterface
                 stats.Add(new("Open/Close:", door.Broken ? "The door is broken" : door.Open ? "The door is open" : "The door is closed", MainColour, door.Open && !door.Broken ? GoodColour : null));
                 stats.Add(new("Security:", $"{(door.Locked ? "Locked" : "Unlocked")} (lvl {door.Level.ToString(CultureInfo.InvariantCulture)})", MainColour, door.Locked ? null : GoodColour));
             }
+            if (own && Machine(focus.SiteId) is { } machine) AddMachineLines(machine, stats, ref status, ref bad);
             if (!own && (focus.PublicDay || focus.PublicNight))
             {
                 bool open = session.Clock.IsDaytime ? focus.PublicDay : focus.PublicNight;

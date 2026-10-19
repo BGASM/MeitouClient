@@ -75,6 +75,7 @@ public sealed partial class World : IDisposable
     IAnimationSource? animations;
     IProjectileSource? projectiles;
     Trading.ITradeSource? trades;
+    Production.ProductionSystem? production;
     Dialogue.IDialogueSource? dialogues;
     Ragdolls.IRagdollSource? ragdolls;
 
@@ -90,6 +91,7 @@ public sealed partial class World : IDisposable
         animations = this.systems.OfType<IAnimationSource>().FirstOrDefault();
         projectiles = this.systems.OfType<IProjectileSource>().FirstOrDefault();
         trades = this.systems.OfType<Trading.ITradeSource>().FirstOrDefault();
+        production = this.systems.OfType<Production.ProductionSystem>().FirstOrDefault();
         dialogues = this.systems.OfType<Dialogue.IDialogueSource>().FirstOrDefault();
         ragdolls = this.systems.OfType<Ragdolls.IRagdollSource>().FirstOrDefault();
         Characters = characters ?? new CharacterTable();
@@ -135,8 +137,10 @@ public sealed partial class World : IDisposable
     /// each that its loaded save has none of. Only read by saves, so not hashed.
     /// </summary>
     public HashSet<Meitou.Data.World.ZoneCoordinate> VisitedZones { get; } = [];
-    /// <summary>The player's completed research and the buildings it unlocks; static this milestone, so not hashed.</summary>
+    /// <summary>The player's research: finished, queued, paid (docs/simulation.md "Production"); hashed once it changed in play.</summary>
     public Construction.ResearchState Research { get; } = new();
+    /// <summary>The machines of the player's complete buildings: recipe slots, storage, farms (docs/simulation.md "Production").</summary>
+    public Production.MachineRegistry Machines { get; } = new();
     public IReadOnlyList<ITickSystem> Systems => systems;
     /// <summary>The number of ticks run; during a tick, the number of the tick being run.</summary>
     public long Tick { get; private set; }
@@ -307,6 +311,8 @@ public sealed partial class World : IDisposable
         if (Fixtures.Count > 0) Fixtures.Hash(ref h);   // only once a town with buildings registered, so worlds without them hash as before
         if (Buildings.Count > 0 || Buildings.Towns.Count > 0) Buildings.Hash(ref h);   // only once the player has a site, so worlds without one hash as before
         if (GroundItems.Count > 0) GroundItems.Hash(ref h);   // only once something lies on the ground, so worlds without hash as before
+        if (Machines.Count > 0) Machines.Hash(ref h);   // only once the player has a working building
+        if (Research.Changed) Research.Hash(ref h);   // only once research changed in play
         foreach (var s in systems) if (s is IStateHashed hashed) hashed.Hash(ref h);
         return h.Value;
     }

@@ -278,38 +278,3 @@ public sealed partial class BuildingRegistry
     }
 }
 
-/// <summary>
-/// The player's completed research and what it unlocks (docs/game/buildings-production.md "Build menu"). Set at a new game (<see cref="ResearchGate.StartResearch"/>) and when a save loads;
-/// research progress is not built this milestone, so it is static and not hashed. <see cref="Unlocked"/> is replaced, never changed in place, so a snapshot may hold it.
-/// </summary>
-public sealed class ResearchState
-{
-    static readonly IReadOnlySet<string> Nothing = new HashSet<string>(StringComparer.Ordinal);
-
-    readonly List<string> completed = [];
-
-    /// <summary>The finished RESEARCH ids, in the order they were finished (the save's <c>finished&lt;k&gt;</c> order).</summary>
-    public IReadOnlyList<string> Completed => completed;
-    /// <summary>The BUILDING ids the completed research unlocks.</summary>
-    public IReadOnlySet<string> Unlocked { get; private set; } = Nothing;
-
-    /// <summary>Replaces the completed research.</summary>
-    public void Set(GameDatabase db, IEnumerable<string> ids)
-    {
-        completed.Clear();
-        foreach (var id in ids)
-            if (!completed.Contains(id, StringComparer.Ordinal)) completed.Add(id);
-        Unlocked = ResearchGate.Unlocked(db, completed);
-    }
-
-    /// <summary>Finishes one research (nothing when it is done already).</summary>
-    public bool Complete(GameDatabase db, string id)
-    {
-        if (completed.Contains(id, StringComparer.Ordinal)) return false;
-        completed.Add(id);
-        Unlocked = ResearchGate.Unlocked(db, completed);
-        return true;
-    }
-
-    public bool IsUnlocked(string building) => Unlocked.Contains(building);
-}

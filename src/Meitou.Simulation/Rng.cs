@@ -33,6 +33,8 @@ public enum RngPurpose : uint
     Campaign = 16,
     /// <summary>Dialogue: line and text picks, chance rolls, interjectors, personalities (<see cref="Dialogue.DialogueSystem"/>).</summary>
     Dialogue = 17,
+    /// <summary>Farms: the planting draws and the harvest rolls (<see cref="Production.ProductionSystem"/>), keyed by the building.</summary>
+    Farm = 18,
 }
 
 /// <summary>

@@ -36,8 +36,10 @@ public enum StandardParts
     Construction = 65536,
     /// <summary>Talking to NPCs: the Talk order and the conversation (<see cref="Meitou.Simulation.Dialogue.DialogueSystem"/>).</summary>
     Dialogue = 131072,
+    /// <summary>Production, farms and research of the player's complete buildings (<see cref="Meitou.Simulation.Production.ProductionSystem"/>).</summary>
+    Production = 262144,
     /// <summary>What the game runs.</summary>
-    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee | Carry | Crime | Trade | Ai | Construction | Dialogue,
+    All = Population | Player | Pursuit | Movement | Body | Combat | Animation | Feed | Retaliation | FirstAid | Aggro | Flee | Carry | Crime | Trade | Ai | Construction | Dialogue | Production,
 }
 
 /// <summary>What <see cref="StandardSystems.Build"/> builds and with which settings; the defaults are the game's.</summary>
@@ -71,6 +73,7 @@ public sealed class StandardSystemOptions
     public Meitou.Simulation.Trading.TradeSettings? Trade { get; init; }
     public Meitou.Simulation.Ai.AiSettings? Ai { get; init; }
     public Meitou.Simulation.Construction.ConstructionSettings? Construction { get; init; }
+    public Meitou.Simulation.Production.ProductionSettings? Production { get; init; }
     /// <summary>The rigs the characters are drawn with: given, the physics ragdolls run (after the animation); null, the fall and lying clips stand in for them.</summary>
     public Meitou.Data.Characters.CharacterRigs? Ragdolls { get; init; }
     /// <summary>What ragdolls fall onto (null: the walkable ground, no buildings).</summary>
@@ -94,6 +97,7 @@ public sealed class StandardSystemSet
     public Meitou.Simulation.Trading.TradeSystem? Trade { get; init; }
     public Meitou.Simulation.Ai.AiSystem? Ai { get; init; }
     public Meitou.Simulation.Construction.ConstructionSystem? Construction { get; init; }
+    public Meitou.Simulation.Production.ProductionSystem? Production { get; init; }
     public Meitou.Simulation.Ragdolls.RagdollSystem? Ragdolls { get; init; }
     public Meitou.Simulation.Dialogue.DialogueSystem? Dialogue { get; init; }
 }
@@ -119,6 +123,7 @@ public sealed class StandardSystemSet
 /// drops its load in the same tick; its <c>Inputs</c> come before combat's, so a carrier ordered to attack lets go of the body first. Everything it does is serial.</item>
 /// <item><b>Kidnap right after carry</b>: it lifts with the carry system and cages with the fixtures, in the same serial step order; it adds nothing to the hash until a kidnapping runs.</item>
 /// <item><b>Construction after carry, before combat</b>: its walks and work (all serial) see the characters the body and carry systems left this tick, and a builder ordered to attack lets go of its site before combat's <c>Inputs</c> run; it adds nothing to the hash until the player has a site.</item>
+/// <item><b>Production right after construction</b>: it sees the sites completed this tick and makes their machines; it adds nothing to the hash until the player has a working building.</item>
 /// <item><b>Feed after body</b>: the game's order; eating reads hunger the body system advanced in the same tick.</item>
 /// <item><b>Retaliation, then aggro, last</b>: both defer <c>AttackOrder</c>s for the next tick (<see cref="World.Defer"/>) after combat has swapped its arrays; aggro's
 /// leash sweep sees the tasks every other system left, and its look (<c>Act</c>) runs after combat's, reading only the last tick's positions.
@@ -166,6 +171,8 @@ public static class StandardSystems
         }
         Meitou.Simulation.Construction.ConstructionSystem? construction = null;
         if (Has(StandardParts.Construction)) systems.Add(construction = new Meitou.Simulation.Construction.ConstructionSystem(data, o.Construction));
+        Meitou.Simulation.Production.ProductionSystem? production = null;
+        if (Has(StandardParts.Production)) systems.Add(production = new Meitou.Simulation.Production.ProductionSystem(data, o.Production));
         if (Has(StandardParts.Combat)) systems.Add(combat!);
         if (Has(StandardParts.Animation))
         {
@@ -208,6 +215,6 @@ public static class StandardSystems
         if (Has(StandardParts.Dialogue)) systems.Add(talk = new Meitou.Simulation.Dialogue.DialogueSystem(data, o.Dialogue, population));
         if (talk is not null && population is not null) (population.Announcer, population.PendingTalk) = (talk.Announce, talk.HasInterrupt);
         if (talk is not null) talk.Arrests = arrest;
-        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Kidnap = kidnap, Crime = crime, Arrest = arrest, Locks = locks, Trade = trade, Ai = ai, Construction = construction, Ragdolls = ragdolls, Dialogue = talk };
+        return new StandardSystemSet { Systems = systems, Population = population, Movement = movement, Combat = combat, Aggro = aggro, Carry = carry, Kidnap = kidnap, Crime = crime, Arrest = arrest, Locks = locks, Trade = trade, Ai = ai, Construction = construction, Production = production, Ragdolls = ragdolls, Dialogue = talk };
     }
 }

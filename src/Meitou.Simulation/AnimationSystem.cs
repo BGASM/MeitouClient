@@ -142,6 +142,8 @@ public sealed class AnimationSystem(AnimationLibrary library, AnimationLengths l
         CharacterTask.Treat or CharacterTask.Build or CharacterTask.DeliverMaterials => TreatingClip,
         CharacterTask.Rest => cold.Ai?.SitClip is { } sit && SitClipOf(sit) is >= 0 and var chair ? chair : RestingClip,
         CharacterTask.Dismantle => DismantlingClip,
+        // An operator at work plays its functionality's clip (Observed, Task_OperateMachine; stonemine without one).
+        CharacterTask.Operate => cold.Operating ? cold.OperateClip is { } clip && SitClipOf(clip) is >= 0 and var used ? used : DismantlingClip : -1,
         _ => -1,
     };
     // The combat system asks this system for its hit reaction clips (it owns the stun, this system the clips).

@@ -61,6 +61,7 @@ sealed partial class PlayerInterface
         ("advanced", "Kenshi_AdvancedOptionsWindow", true), ("save", "Kenshi_SaveGamePanel", true),
         ("load", "Kenshi_LoadGamePanel", true), ("message", "Kenshi_MessageBox", true),
         ("bag", "Kenshi_InventoryGenericWindow", false), ("limbs", "Kenshi_LimbReplacementWindow", false), ("trader", "Kenshi_InventoryTraderWindow", false),
+        ("building", "Kenshi_GenericBuildingWindow", false), ("bench", "Kenshi_InventoryResearchWindow", false),
         ("build", "Kenshi_BuildWindow", false), ("editor", "Kenshi_CharacterEditor", true), ("dialogue", "Kenshi_ConversationPanel", true),
     ];
 
@@ -181,6 +182,7 @@ sealed partial class PlayerInterface
     IReadOnlyList<UiControl> ArrangeUi()
     {
         SyncTradeScreens();
+        SyncMachineScreens();
         SyncDialogueScreen();
         ValidateInventoryDrag();
         var b = BindUi();

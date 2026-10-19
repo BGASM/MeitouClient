@@ -25,6 +25,7 @@ sealed partial class PlayerInterface
             tradeDrag = (stock, Grab());
             return true;
         }
+        if (MachinePointerDown(picked.Control, Grab())) return true;
         if (!picked.Control.Properties.TryGetValue("InventoryItem", out var index) || Selected().FirstOrDefault() is not { ItemGrid: { } grid } lead) return false;
         var item = grid.Items.FirstOrDefault(i => i.Index == int.Parse(index, CultureInfo.InvariantCulture));
         if (item is null || !(InventoryCommands.IsMovableSection(item.Section) || InventoryCommands.IsLimbSection(item.Section))) return false;
@@ -38,11 +39,14 @@ sealed partial class PlayerInterface
         scrollDrag = null;
         var buying = tradeDrag;
         var moving = inventoryDrag;
+        var taking = machineDrag;
         tradeDrag = null;
         inventoryDrag = null;
-        if ((buying is null && moving is null) || !UiVisible) return;
+        machineDrag = null;
+        if ((buying is null && moving is null && taking is null) || !UiVisible) return;
         ArrangeUi();
         if (faithfulScreens.HitTest(p) is not { } hit) return;
+        if (taking is { } t) { MachineDrop(t, hit.Screen); return; }
         var trade = session.CurrentSnapshot.Trade;
 
         if (buying is { } b)
@@ -71,6 +75,7 @@ sealed partial class PlayerInterface
             Sell(trade, token, item.Quantity, sx, sy);
             return;
         }
+        if (PutDrop(p, hit.Screen, drag.Character, item, token, drag.Grab)) return;
         if (hit.Screen == "limbs")
         {
             // A prosthetic dropped on a slot of the limbs window: fitted there (the sim checks the side and that the limb is missing).
@@ -150,6 +155,8 @@ sealed partial class PlayerInterface
     {
         if (inventoryDrag is { } drag)
             Preview(drag.Item.Record, drag.Item.Material, drag.Item.Name, drag.Item.Quantity, drag.Item.Width, drag.Item.Height, drag.Grab);
+        else if (machineDrag is { } machine)
+            Preview(machine.Record, "", machine.Name, machine.Quantity, machine.Width, machine.Height, machine.Grab);
         else if (tradeDrag is { } stock)
             Preview(stock.Item.Record, stock.Item.Material, stock.Item.Name, stock.Item.Quantity, stock.Item.Width, stock.Item.Height, stock.Grab);
         AddFencePrompt(controls);
@@ -164,8 +171,9 @@ sealed partial class PlayerInterface
 
     bool CancelInventoryDrag()
     {
-        bool captured = inventoryDrag is not null || tradeDrag is not null || scrollDrag is not null;
+        bool captured = inventoryDrag is not null || tradeDrag is not null || scrollDrag is not null || machineDrag is not null;
         scrollDrag = null;
+        machineDrag = null;
         inventoryDrag = null;
         tradeDrag = null;
         return captured;

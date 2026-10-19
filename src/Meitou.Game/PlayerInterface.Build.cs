@@ -528,6 +528,7 @@ sealed partial class PlayerInterface
         var selection = SelectedIds();
         if (selection.Count == 0) return verbs;
         if (!site.Complete) verbs.Add(("Build", () => Say(new BuildOrder(selection, site.Id) { Tick = session.World.Tick })));
+        AddMachineVerb(verbs, site, selection);
         verbs.Add(("Dismantle", () => Say(new DismantleOrder(selection, site.Id) { Tick = session.World.Tick })));
         if (!site.Complete && site.Progress <= 0 && site.Materials.All(m => m.Delivered <= 0))
             verbs.Add(("Cancel Construction", () => Say(new CancelSite(site.Id) { Tick = session.World.Tick })));
@@ -556,6 +557,7 @@ sealed partial class PlayerInterface
         if (sitePending is not { } pending) return;
         sitePending = null;
         if (!pending.Site.Complete) Say(new BuildOrder(SelectedIds(), pending.Site.Id) { Tick = session.World.Tick });
+        else if (Machine(pending.Site.Id) is { Operable: true }) Say(new Meitou.Simulation.Production.OperateOrder(SelectedIds(), pending.Site.Id) { Tick = session.World.Tick });
     }
 
     /// <summary>Once a frame: a site press held long enough opens its menu.</summary>

@@ -149,4 +149,65 @@ public static class SaveInventory
     }
 
     internal static FcsInstance Link(int index, string target) => new() { Id = index.ToString(System.Globalization.CultureInfo.InvariantCulture), Target = target, Position = Vector3.Zero, Rotation = Quaternion.Identity };
+
+    /// <summary>
+    /// Replaces what an INVENTORY_STATE of <paramref name="file"/> holds with <paramref name="items"/>: the old item records (and the contents of containers among them) leave the file, and
+    /// each item gets an INVENTORY_ITEM_STATE linked by an instance numbered from 1; a container's contents get an INVENTORY_STATE of their own, linked by the item's one instance, as the
+    /// game writes them. An item read from this inventory keeps its record's id and place in the file, so an inventory that did not change is written back the same. New records take the
+    /// next numbers of the file, named by <paramref name="idOf"/>.
+    /// </summary>
+    public static void Replace(SaveFile file, FcsRecord inventory, IReadOnlyList<SaveItem> items, Func<int, string> idOf)
+    {
+        var old = Reachable(file, inventory);
+        var oldRecords = file.Records.Where(r => old.Contains(r.StringId)).ToDictionary(r => r.StringId, StringComparer.Ordinal);
+        var reused = new Dictionary<string, FcsRecord>(StringComparer.Ordinal);
+        var added = new List<FcsRecord>();
+        int next = SaveBuilder.NextNumber(file);
+
+        FcsRecord Take(FcsRecord fresh, string? oldId)
+        {
+            if (oldId is not null && oldRecords.TryGetValue(oldId, out var was) && !reused.ContainsKey(oldId))
+            {
+                (fresh.Id, fresh.StringId, fresh.Name, fresh.Flags) = (was.Id, was.StringId, was.Name, was.Flags);
+                reused[oldId] = fresh;
+            }
+            else
+            {
+                fresh.Id = next;
+                fresh.StringId = idOf(next);
+                file.Data.NextId = Math.Max(file.Data.NextId, next++);
+                added.Add(fresh);
+            }
+            return fresh;
+        }
+
+        void Fill(FcsRecord state, IReadOnlyList<SaveItem> list, int depth)
+        {
+            state.Instances.Clear();
+            int index = 0;
+            foreach (var item in list)
+            {
+                var r = Take(ItemRecord(item), item.Source?.StringId);
+                state.Instances.Add(Link(++index, r.StringId));
+                if (item.Contents is { } contents && depth < 4)
+                {
+                    string? oldInner = item.Source is { Instances.Count: > 0 } s ? s.Instances[0].Target : null;
+                    var inner = Take(new FcsRecord { Type = (int)FcsRecordType.INVENTORY_STATE, Name = "0" }, oldInner);
+                    r.Instances.Add(Link(1, inner.StringId));
+                    Fill(inner, contents, depth + 1);
+                }
+            }
+        }
+
+        Fill(inventory, items, 0);
+        // Reused records take the place of the ones they replace; the rest of the old ones leave; new ones go at the end.
+        for (int i = file.Records.Count - 1; i >= 0; i--)
+        {
+            string id = file.Records[i].StringId;
+            if (!old.Contains(id)) continue;
+            if (reused.TryGetValue(id, out var replacement)) file.Records[i] = replacement;
+            else file.Records.RemoveAt(i);
+        }
+        file.Records.AddRange(added);
+    }
 }

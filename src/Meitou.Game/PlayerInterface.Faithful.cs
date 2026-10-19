@@ -79,7 +79,8 @@ sealed partial class PlayerInterface
         else if (e.Screen == "stats" && e.Action.StartsWith("stat:", StringComparison.Ordinal)) selectedStat = e.Action[5..];
         else if (e.Screen == "build") BuildAction(e);
         else if (e.Screen == "dialogue") DialogueAction(e);
-        else if (e.Screen == "overview") MapAction(e.Widget);
+        else if (e.Screen == "overview") { MapAction(e.Widget); ResearchAction(e); }
+        else if (e.Screen is "building" or "bench") MachineAction(e);
         else if (e.Screen == "trader" && e.Widget == "ArrangeButton") Say(new Meitou.Simulation.Trading.ArrangeStock { Tick = session.World.Tick });
         else if (e.Screen is "inventory" or "bag")
         {
@@ -99,6 +100,7 @@ sealed partial class PlayerInterface
         else if (id == "trader") BindTraderScreen(b);
         else if (id == "dialogue") BindDialogueScreen(b);
         else if (id == "build") BindBuildScreen(b);
+        else if (id is "building" or "bench") BindMachineScreen(id, b);
         else if (id is "inventory" or "stats" or "bag" or "limbs")
         {
             b.Text["Root"] = id == "stats" ? lead?.Name.ToUpperInvariant() ?? "CHARACTER STATS"
@@ -137,6 +139,7 @@ sealed partial class PlayerInterface
             b.Text["MessagesTextBox"] = string.Join('\n', uiMessages);
             b.Properties["MessagesTextBox"] = new Dictionary<string, string> { ["Static"] = "true", ["WordWrap"] = "true", ["TextAlign"] = "Left Top" };
             b.Lists["SquadsPanel"] = session.CurrentSnapshot.Characters.Where(c => c.IsPlayer).Select(c => new UiListItem(c.Id.ToString(), c.Name)).ToArray();
+            BindResearchTab(b);
             // Editor preview markers are unrelated to the current camera and orders.
             b.Hidden.Add("CameraMarker"); b.Hidden.Add("MovemementMarker");
         }
@@ -173,7 +176,9 @@ sealed partial class PlayerInterface
         if (id == "editor") { AddEditorContent(controls); return; }
         if (id == "build") { AddBuildContent(controls); return; }
         if (id == "dialogue") { AddDialogueChoices(controls); return; }
+        if (id is "building" or "bench") { AddMachineContent(id, controls); return; }
         AddMapContent(id, controls);
+        if (id == "overview") AddResearchContent(controls);
         if (id == "trader") { ArrangeTraderWindow(controls); AddTraderContent(controls); return; }
         if (id is not ("inventory" or "bag" or "limbs") || Selected().FirstOrDefault() is not { ItemGrid: { } grid } lead) return;
         string gridSection = id == "bag" ? "backpack_content" : "main";

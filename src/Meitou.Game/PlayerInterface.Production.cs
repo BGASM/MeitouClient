@@ -1,0 +1,282 @@
+using System.Globalization;
+using System.Numerics;
+using Meitou.Data.Ui;
+using Meitou.Simulation;
+using Meitou.Simulation.Items;
+using Meitou.Simulation.Production;
+using Meitou.Ui;
+
+namespace Meitou.Game;
+
+/// <summary>
+/// Production in the UI (docs/simulation.md "Production", docs/game/ui-screens.md "Selected building"):
+/// <list type="bullet">
+/// <item>Selecting a complete machine of the player's opens its window beside the inventory: a well or farm the original's <c>Kenshi_GenericBuildingWindow</c> (inputs in <c>in1</c> / <c>in2</c>,
+/// the output in <c>out</c>, their bars and texts), a research bench <c>Kenshi_InventoryResearchWindow</c> (its storage grid; the RESEARCH button opens the overview's research tab).
+/// Items are dragged between the windows and the selected character's inventory (<see cref="PutInMachine"/>, <see cref="TakeFromMachine"/>).</item>
+/// <item>The site menu has Operate for a machine characters work; a quick right click on one gives it.</item>
+/// <item>The overview's research tab: TYPES lists the categories, BLUEPRINTS the research of the selected category that can be queued (a click queues it), QUEUE the queue (a click
+/// takes one off), DESCRIPTION the hovered or last clicked research. The original's row widgets and colours are <b>Unknown</b>; Meitou draws plain text rows.</item>
+/// </list>
+/// </summary>
+sealed partial class PlayerInterface
+{
+    /// <summary>The site whose machine window is shown (null: none), and a site whose window the player closed (not reopened until the selection changes).</summary>
+    string? shownMachine, closedMachine;
+    /// <summary>An item being dragged out of a machine window: its site, slot (-2 output, k input, -1 storage) and storage index.</summary>
+    (string Site, int Slot, int Index, string Record, string Name, int Quantity, int Width, int Height, Vector2 Grab)? machineDrag;
+    string? researchCategory, researchFocus;
+
+    MachineSnapshot? Machine(string? site) => site is null ? null : session.CurrentSnapshot.Machines.FirstOrDefault(m => m.Site == site);
+
+    static string MachineScreen(MachineSnapshot m) => m.Storage is not null && m.Inputs.Count == 0 && m.Output is null ? "bench" : "building";
+
+    /// <summary>Opens the selected machine's window and closes it when the selection moves on.</summary>
+    void SyncMachineScreens()
+    {
+        if (faithfulScreens is null) return;
+        var focus = BuildingFocus();
+        var m = focus?.SiteId is { } id && session.CurrentSnapshot.Buildings.FirstOrDefault(s => s.Id == id) is { Complete: true } ? Machine(id) : null;
+        if (m is not null && m.Inputs.Count == 0 && m.Output is null && m.Storage is null) m = null;
+        if (closedMachine is not null && closedMachine != m?.Site) closedMachine = null;
+        if (shownMachine is not null && (m is null || m.Site != shownMachine))
+        {
+            faithfulScreens.Close("building");
+            faithfulScreens.Close("bench");
+            shownMachine = null;
+            machineDrag = null;
+        }
+        if (shownMachine is not null && Machine(shownMachine) is { } shown && !faithfulScreens.IsOpen(MachineScreen(shown)))
+        {
+            closedMachine = shownMachine;
+            shownMachine = null;
+            machineDrag = null;
+            return;
+        }
+        if (m is null || shownMachine == m.Site || closedMachine == m.Site) return;
+        shownMachine = m.Site;
+        string screen = MachineScreen(m);
+        inventoryScroll.Remove(screen);
+        if (Selected().Count > 0 && !faithfulScreens.IsOpen("inventory")) faithfulScreens.Open("inventory");
+        faithfulScreens.Open(screen);
+        PlaceInventoryBeside(screen, left: false);
+    }
+
+    void BindMachineScreen(string id, UiBindings b)
+    {
+        var m = Machine(shownMachine);
+        b.Text["Root"] = (selectedBuilding?.Name ?? "BUILDING").ToUpperInvariant();
+        if (id == "bench")
+        {
+            b.Disabled.Remove("ResearchButton");
+            b.Actions["ResearchButton"] = "ResearchButton";
+            b.Disabled.Remove("ArrangeButton");
+            b.Hidden.Add("ArrangeButton");
+            if (m?.Storage is { } grid)
+                b.Positions["Root"] = new(0, 0, grid.Width * InventoryCell + 40 * InventoryScale, Math.Min(Height * 0.8f, grid.Height * InventoryCell + 108 * InventoryScale));
+            b.TemplateScale = InventoryScale;
+            return;
+        }
+        // The crafting row is the crafting bench's (no crafting yet).
+        b.Hidden.Add("CraftingPanel");
+        if (m is null) return;
+        for (int k = 0; k < 2; k++)
+        {
+            string n = (k + 1).ToString(CultureInfo.InvariantCulture);
+            if (k >= m.Inputs.Count) { b.Hidden.Add($"Input{n}Panel"); continue; }
+            var input = m.Inputs[k];
+            b.Text[$"Input{n}Text"] = input.Name;
+            b.Text[$"Input{n}StatusText"] = $"{input.Count.ToString(CultureInfo.InvariantCulture)}/{input.Capacity.ToString(CultureInfo.InvariantCulture)}";
+            b.Progress[$"Input{n}ProgressBar"] = input.Fill;
+        }
+        if (m.Output is { } output)
+        {
+            b.Text["OutputText"] = $"{output.Name}\n{output.Count.ToString(CultureInfo.InvariantCulture)}/{output.Capacity.ToString(CultureInfo.InvariantCulture)}";
+            b.Progress["OutputProgressBar"] = m.Farm is { } farm ? farm.Ripeness : output.Fill;
+        }
+        else b.Hidden.Add("OutputColumn");
+        if (m.Inputs.Count == 0) b.Hidden.Add("InputTitleText");
+    }
+
+    void AddMachineContent(string id, List<UiControl> controls)
+    {
+        if (Machine(shownMachine) is not { } m) return;
+        if (id == "bench")
+        {
+            if (m.Storage is not { } grid) return;
+            ArrangeContainerGrid(id, controls, grid.Width, grid.Height);
+            if (controls.FirstOrDefault(c => c.Name == "backpack_content") is not { } slot) return;
+            var area = slot.Bounds;
+            foreach (var item in grid.Items)
+            {
+                if (machineDrag is { Slot: -1 } d && d.Index == item.Index) continue;
+                AddItemCell(controls, $"machine-item-{item.Index}",
+                    new(area.X + item.X * area.Width / grid.Width, area.Y + item.Y * area.Height / grid.Height, item.Width * area.Width / grid.Width, item.Height * area.Height / grid.Height),
+                    item.Record, item.Material, item.Name, item.Quantity, $"Weight\t{item.Weight.ToString("0.#", CultureInfo.InvariantCulture)} kg", "MachineItem", 1000 + item.Index,
+                    slot.Bounds.Intersect(slot.Clip ?? slot.Bounds), charge: item.Charge);
+            }
+            return;
+        }
+        void Slot(string name, MachineSlotView view, int code)
+        {
+            if (view.Count <= 0 || controls.FirstOrDefault(c => c.Name == name) is not { } slot || (machineDrag is { } d && d.Slot == code - 10)) return;
+            var b = slot.Bounds;
+            float side = MathF.Min(b.Width, b.Height);
+            AddItemCell(controls, $"machine-{name}", new(b.X, b.Y, side, side), view.Item, "", view.Name, view.Count, null, "MachineItem", code, slot.Clip);
+        }
+        for (int k = 0; k < Math.Min(2, m.Inputs.Count); k++) Slot($"in{k + 1}", m.Inputs[k], 10 + k);
+        if (m.Output is { } output) Slot("out", output, 8);
+    }
+
+    /// <summary>A press on an item of the machine window starts its drag (true: taken).</summary>
+    bool MachinePointerDown(UiControl control, Vector2 grab)
+    {
+        if (!control.Properties.TryGetValue("MachineItem", out var raw) || Machine(shownMachine) is not { } m) return false;
+        int code = int.Parse(raw, CultureInfo.InvariantCulture);
+        if (code >= 1000)
+        {
+            if (m.Storage?.Items.FirstOrDefault(i => i.Index == code - 1000) is not { } item) return false;
+            machineDrag = (m.Site, -1, item.Index, item.Record, item.Name, item.Quantity, item.Width, item.Height, grab);
+            Sound("Item_Lift", item: item.Record);
+            return true;
+        }
+        int slot = code - 10;
+        MachineSlotView? view = slot == -2 ? m.Output : slot >= 0 && slot < m.Inputs.Count ? m.Inputs[slot] : null;
+        if (view is not { Count: > 0 } v) return false;
+        machineDrag = (m.Site, slot, 0, v.Item, v.Name, v.Count, 1, 1, grab);
+        Sound("Item_Lift", item: v.Item);
+        return true;
+    }
+
+    /// <summary>A machine item let go over the selected character's inventory or bag: taken into it.</summary>
+    void MachineDrop((string Site, int Slot, int Index, string Record, string Name, int Quantity, int Width, int Height, Vector2 Grab) d, string screen)
+    {
+        if (screen is not ("inventory" or "bag") || Selected().FirstOrDefault() is not { } lead) return;
+        Say(new TakeFromMachine(lead.Id, d.Site, d.Slot, d.Index, screen == "bag" ? "backpack_content" : "main") { Tick = session.World.Tick });
+    }
+
+    /// <summary>A character's item let go over a machine window: into the input slot under it (or the first input taking it), or the bench's grid cell.</summary>
+    bool PutDrop(Vector2 p, string screen, CharacterId character, InventoryItemView item, InventoryItemToken token, Vector2 grab)
+    {
+        if (screen is not ("building" or "bench") || Machine(shownMachine) is not { } m) return false;
+        if (screen == "bench")
+        {
+            if (m.Storage is { } grid && DropCell(p, screen, "backpack_content", grid.Width, grid.Height, grab, item.Width, item.Height, grid.Items.Select(i => (i.X, i.Y, i.Width, i.Height)), out int x, out int y))
+                Say(new PutInMachine(character, token, m.Site, -1, x, y) { Tick = session.World.Tick });
+            return true;
+        }
+        var controls = faithfulScreens.Arrange(Width, Height, BindFaithfulScreen, AddFaithfulContent).First(f => f.Id == screen).Controls;
+        int slot = -1;
+        for (int k = 0; k < Math.Min(2, m.Inputs.Count); k++)
+            if (controls.FirstOrDefault(c => c.Name == $"Input{k + 1}Panel") is { } panel && panel.Bounds.Contains(p.X, p.Y)) slot = k;
+        if (slot < 0 || m.Inputs[slot].Item != item.Record) slot = m.Inputs.ToList().FindIndex(i => i.Item == item.Record);
+        if (slot >= 0) Say(new PutInMachine(character, token, m.Site, slot) { Tick = session.World.Tick });
+        return true;
+    }
+
+    void MachineAction(MyGuiEvent e)
+    {
+        if (e.Screen == "bench" && e.Widget == "ResearchButton") { faithfulScreens.Open("overview"); faithfulScreens.SetTab("overview", "TabsMain", 2); }
+    }
+
+    /// <summary>The verb for a complete machine characters work (the original's verb names for wells, farms and benches are <b>Unknown</b>; Meitou says Operate).</summary>
+    void AddMachineVerb(List<(string Caption, Action Give)> verbs, Meitou.Simulation.Construction.BuildingSnapshot site, IReadOnlyList<CharacterId> selection)
+    {
+        if (site.Complete && Machine(site.Id) is { Operable: true }) verbs.Insert(0, ("Operate", () => Say(new OperateOrder(selection, site.Id) { Tick = session.World.Tick })));
+    }
+
+    /// <summary>The stats lines of a selected machine: the farm's crop and growth, the output's progress, workers and the bench's tech level.</summary>
+    void AddMachineLines(MachineSnapshot m, List<HudLine> stats, ref string status, ref bool bad)
+    {
+        string N(int v) => v.ToString(CultureInfo.InvariantCulture);
+        string P(float v) => ((int)(Math.Clamp(v, 0, 1) * 100)).ToString(CultureInfo.InvariantCulture) + "%";
+        if (m.Farm is { } f)
+        {
+            status = f.Status switch { FarmStatus.NoWater => "No water", FarmStatus.OutputFull => "Output full", FarmStatus.Harvest => "Ready to harvest", _ => "Growing" };
+            bad = f.Status is FarmStatus.NoWater or FarmStatus.OutputFull;
+            stats.Add(new("Growth:", P(MathF.Min(f.Growth, 1)), MainColour));
+            if (f.Growth >= 1) stats.Add(new("Ripeness:", P(f.Ripeness), MainColour, f.Growth >= 2 ? BadColour : GoodColour));
+            stats.Add(new("Fertility:", P(f.Fertility), MainColour));
+            if (f.Death > 0) stats.Add(new("Dying:", P(f.Death), MainColour, BadColour));
+        }
+        else if (m.Output is { } o)
+        {
+            status = m.Status switch { 2 => "Working", 1 => "Output full", _ => "Idle" };
+            bad = m.Status == 1;
+            stats.Add(new("Output:", $"{o.Name} {N(o.Count)}/{N(o.Capacity)}", MainColour));
+        }
+        if (m.TechLevel > 0) stats.Add(new("Tech level:", N(m.TechLevel), MainColour));
+        if (m.MaxOperators > 0) stats.Add(new("Workers:", $"{N(m.Operators)}/{N(m.MaxOperators)}", MainColour));
+    }
+
+    // ---- the overview's research tab ----
+
+    void BindResearchTab(UiBindings b)
+    {
+        var research = session.CurrentSnapshot.Research;
+        var categories = research.Available.Select(r => r.Category).Distinct(StringComparer.Ordinal).ToList();
+        if (researchCategory is null || !categories.Contains(researchCategory)) researchCategory = categories.FirstOrDefault();
+        b.Lists["ResearchTypeList"] = [.. categories.Select(c => new UiListItem(c, c))];
+        b.SelectedItems["ResearchTypeList"] = researchCategory is null ? -1 : categories.IndexOf(researchCategory);
+        string message = research.BenchLevel <= 0 ? "Research needs a research bench." : research.Queue.Count == 0 ? "Nothing being researched." : "";
+        if (message.Length > 0) b.Text["ResearchBenchMessage"] = message;
+        else b.Hidden.Add("ResearchBenchMessage");
+    }
+
+    void ResearchAction(MyGuiEvent e)
+    {
+        if (e.Widget == "ResearchTypeList" && e.Action == "select") researchCategory = e.Text;
+        else if (e.Action.StartsWith("research-queue:", StringComparison.Ordinal))
+        {
+            researchFocus = e.Action[15..];
+            Say(new QueueResearch(researchFocus) { Tick = session.World.Tick });
+        }
+        else if (e.Action.StartsWith("research-cancel:", StringComparison.Ordinal)) Say(new CancelResearch(e.Action[16..]) { Tick = session.World.Tick });
+    }
+
+    /// <summary>The blueprint rows, the queue rows and the description, drawn into the research tab's panels.</summary>
+    void AddResearchContent(List<UiControl> controls)
+    {
+        if (faithfulScreens.GetTab("overview", "TabsMain") != 2) return;
+        var research = session.CurrentSnapshot.Research;
+        var face = new Dictionary<string, string> { ["FontName"] = "Kenshi_StandardFont_Medium", ["TextAlign"] = "Left VCenter" };
+        float line = MathF.Max(18, 24 * InventoryScale);
+        var ink = new Vector4(0.86f, 0.82f, 0.71f, 1);
+        if (controls.FirstOrDefault(c => c.Name == "BlueprintsAvailablePanel") is { } blueprints)
+        {
+            var rows = research.Available.Where(r => r.Category == researchCategory).OrderBy(r => r.Level).ThenBy(r => r.Name, StringComparer.Ordinal).ToList();
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var r = rows[i];
+                bool queued = research.Queue.Any(q => q.Id == r.Id);
+                string caption = $"{r.Name}  (lvl {r.Level.ToString(CultureInfo.InvariantCulture)})" + (r.Progress > 0 ? $"  {(int)(r.Progress * 100)}%" : "");
+                var colour = queued ? new Vector4(0.6f, 0.6f, 0.6f, 1) : r.BenchTooLow || !r.Affordable ? new Vector4(0.75f, 0.35f, 0.3f, 1) : ink;
+                controls.Add(new($"research-row-{i}", "Button", new(blueprints.Bounds.X + 6, blueprints.Bounds.Y + i * line, blueprints.Bounds.Width - 12, line), caption,
+                    queued ? "" : "research-queue:" + r.Id, "", !queued, face, Vector4.Zero, TextColour: colour, HoverColour: new(0, 1, 0, 1), Pickable: true, Clip: blueprints.Bounds));
+            }
+        }
+        if (controls.FirstOrDefault(c => c.Name == "ResearchQueueList") is { } queue)
+            for (int i = 0; i < research.Queue.Count; i++)
+            {
+                var (qid, name, progress) = research.Queue[i];
+                controls.Add(new($"research-queue-{i}", "Button", new(queue.Bounds.X + 6, queue.Bounds.Y + i * line, queue.Bounds.Width - 12, line),
+                    $"{name}  {(int)(progress * 100)}%", "research-cancel:" + qid, "", true, face, Vector4.Zero, TextColour: i == 0 ? new(0.66f, 0.72f, 0.45f, 1) : ink,
+                    HoverColour: new(1, 0.4f, 0.3f, 1), Pickable: true, Clip: queue.Bounds));
+            }
+        var hovered = controls.LastOrDefault(c => c.Name.StartsWith("research-row-", StringComparison.Ordinal) && c.Bounds.Contains(mouse.X, mouse.Y))?.Action;
+        string? focus = hovered is { Length: > 15 } h ? h[15..] : researchFocus;
+        if (focus is null || research.Available.FirstOrDefault(r => r.Id == focus) is not { Id: not null } option) return;
+        var lines = new List<HudLine>
+        {
+            new(option.Name, ""),
+            new("Level:", option.Level.ToString(CultureInfo.InvariantCulture), MainColour, option.BenchTooLow ? BadColour : null),
+            new("Time:", $"{option.Hours.ToString("0.#", CultureInfo.InvariantCulture)} h", MainColour),
+        };
+        foreach (var (item, count) in option.Cost) lines.Add(new(item, count.ToString(CultureInfo.InvariantCulture), MainColour, option.Affordable ? null : BadColour));
+        AddLines(controls, "ResearchDescriptionPanel1", lines, line);
+        if (option.Description.Length > 0 && controls.FirstOrDefault(c => c.Name == "ResearchDescriptionPanel2") is { } text)
+            controls.Add(new("research-description", "EditBox", text.Bounds, option.Description, "", "", true,
+                new Dictionary<string, string> { ["FontName"] = "Kenshi_StandardFont_Medium", ["WordWrap"] = "true", ["MultiLine"] = "true", ["Static"] = "true", ["TextAlign"] = "Left Top" },
+                Vector4.Zero, TextColour: ink, Pickable: false, Clip: text.Bounds));
+    }
+}

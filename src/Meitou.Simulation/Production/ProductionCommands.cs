@@ -1,0 +1,24 @@
+using Meitou.Simulation.Items;
+
+namespace Meitou.Simulation.Production;
+
+/// <summary>Sends characters (the selection when empty) to work a complete player building: operate a well, harvest a farm, research at a bench.</summary>
+public sealed record OperateOrder(IReadOnlyList<CharacterId> Characters, string Site) : SimCommand;
+
+/// <summary>
+/// A character puts an item of its own into a machine: <paramref name="Slot"/> k into recipe input k (as many units as the input still takes), -1 into the storage grid at
+/// (<paramref name="X"/>, <paramref name="Y"/>) (the whole stack). The character must stand within <see cref="ProductionSettings.TransferReach"/> of the building.
+/// </summary>
+public sealed record PutInMachine(CharacterId Character, InventoryItemToken Item, string Site, int Slot, int X = 0, int Y = 0) : SimCommand;
+
+/// <summary>
+/// A character takes from a machine: <paramref name="Slot"/> -2 the output's items, k the items of input k, -1 the storage item at <paramref name="Index"/>; into its own <c>main</c> grid
+/// (or <paramref name="Section"/> "backpack_content") at the first free cells.
+/// </summary>
+public sealed record TakeFromMachine(CharacterId Character, string Site, int Slot, int Index = 0, string Section = "main") : SimCommand;
+
+/// <summary>Queues a research (paying its cost from the research benches when it was never paid).</summary>
+public sealed record QueueResearch(string Research) : SimCommand;
+
+/// <summary>Takes a research off the queue; its progress is kept for when it is queued again.</summary>
+public sealed record CancelResearch(string Research) : SimCommand;

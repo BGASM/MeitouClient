@@ -51,7 +51,7 @@ public sealed class SaveBuilder
     // ------------------------------------------------------------------ ids
 
     /// <summary>The next number of a file: one more than the highest numeric id in it.</summary>
-    internal static int NextNumber(SaveFile file) => file.Records.Count == 0 ? Math.Max(file.Data.NextId, 0) + 1 : Math.Max(file.Data.NextId, file.Records.Max(r => Math.Max(r.Id, SaveGame.NumberOf(r)))) + 1;
+    public static int NextNumber(SaveFile file) => file.Records.Count == 0 ? Math.Max(file.Data.NextId, 0) + 1 : Math.Max(file.Data.NextId, file.Records.Max(r => Math.Max(r.Id, SaveGame.NumberOf(r)))) + 1;
 
     static string QuickId(int n) => $"{n}-{SaveFolder.QuickSaveName}-INGAME";
 
@@ -351,57 +351,7 @@ public sealed class SaveBuilder
     {
         var file = platoon.File ?? throw new InvalidOperationException("The platoon has no file.");
         var inventory = character.Inventory ?? throw new InvalidOperationException("The character has no INVENTORY_STATE.");
-        var old = SaveInventory.Reachable(file, inventory);
-        var oldRecords = file.Records.Where(r => old.Contains(r.StringId)).ToDictionary(r => r.StringId, StringComparer.Ordinal);
-        var reused = new Dictionary<string, FcsRecord>(StringComparer.Ordinal);
-        var added = new List<FcsRecord>();
-        int next = NextNumber(file);
-
-        FcsRecord Take(FcsRecord fresh, string? oldId)
-        {
-            if (oldId is not null && oldRecords.TryGetValue(oldId, out var was) && !reused.ContainsKey(oldId))
-            {
-                (fresh.Id, fresh.StringId, fresh.Name, fresh.Flags) = (was.Id, was.StringId, was.Name, was.Flags);
-                reused[oldId] = fresh;
-            }
-            else
-            {
-                fresh.Id = next;
-                fresh.StringId = $"{next}--INGAME";
-                file.Data.NextId = Math.Max(file.Data.NextId, next++);
-                added.Add(fresh);
-            }
-            return fresh;
-        }
-
-        void Fill(FcsRecord state, IReadOnlyList<SaveItem> list, int depth)
-        {
-            state.Instances.Clear();
-            int index = 0;
-            foreach (var item in list)
-            {
-                var r = Take(SaveInventory.ItemRecord(item), item.Source?.StringId);
-                state.Instances.Add(SaveInventory.Link(++index, r.StringId));
-                if (item.Contents is { } contents && depth < 4)
-                {
-                    string? oldInner = item.Source is { Instances.Count: > 0 } s ? s.Instances[0].Target : null;
-                    var inner = Take(new FcsRecord { Type = (int)FcsRecordType.INVENTORY_STATE, Name = "0" }, oldInner);
-                    r.Instances.Add(SaveInventory.Link(1, inner.StringId));
-                    Fill(inner, contents, depth + 1);
-                }
-            }
-        }
-
-        Fill(inventory, items, 0);
-        // Reused records take the place of the ones they replace; the rest of the old ones leave; new ones go at the end.
-        for (int i = file.Records.Count - 1; i >= 0; i--)
-        {
-            string id = file.Records[i].StringId;
-            if (!old.Contains(id)) continue;
-            if (reused.TryGetValue(id, out var replacement)) file.Records[i] = replacement;
-            else file.Records.RemoveAt(i);
-        }
-        file.Records.AddRange(added);
+        SaveInventory.Replace(file, inventory, items, n => $"{n}--INGAME");
     }
 
     // ------------------------------------------------------------------ STATS defaults

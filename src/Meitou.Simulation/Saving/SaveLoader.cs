@@ -74,6 +74,8 @@ public static class SaveLoader
         // The research the player has finished, and the buildings the player made (docs/simulation.md "Buildings").
         ResearchSave.Load(save.Research, world.Research, data.Db);
         if (playerFaction is not null) BuildingSave.Read(save, world, data.Db, playerFaction.Id, playerIndex);
+        // The machines of the player's complete buildings: recipe slots, storage, farms (docs/simulation.md "Production").
+        if (playerFaction is not null && world.Systems.OfType<Production.ProductionSystem>().FirstOrDefault() is { } production) MachineSave.Read(save, world, production, data.Items);
         // The loose items of the zone files (docs/simulation.md "Ground items").
         if (GroundItemSave.Load(save, world, data.Items) is > 0 and var lost) loaded.Notes.Add($"{lost} loose items name records this game does not have; they stay in the zone files.");
 
