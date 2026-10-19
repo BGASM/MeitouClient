@@ -546,16 +546,27 @@ sealed partial class PlayerInterface
     /// <summary>A right press on a site with characters selected: a click released within the hold time orders the build, held longer it opens the menu (true: taken).</summary>
     bool SitePress(Vector2 p)
     {
-        if (SelectedIds().Count == 0 || PickSite(p) is not { } site || SiteVerbs(site).Count == 0) return false;
+        if (SelectedIds().Count == 0 || PickSite(p) is not { } site) return false;
+        // With Shift a storage takes a job even without verbs.
+        if (SiteVerbs(site).Count == 0 && !(SlowModifier && site.Complete && Machine(site.Id) is { IsStorage: true })) return false;
         sitePending = (site, p, System.Diagnostics.Stopwatch.GetTimestamp());
         return true;
     }
 
-    /// <summary>The right button let go: a press on a site released before the menu opened gives the quick order (Build; a finished building has none).</summary>
+    /// <summary>
+    /// The right button let go: a press on a site released before the menu opened gives the quick order (Build; Operate a finished machine). With Shift a finished machine or storage is
+    /// added to the selection's job lists instead (the original's Perma-Jobs: Operating machine, Hauling to).
+    /// </summary>
     void SiteRelease()
     {
         if (sitePending is not { } pending) return;
         sitePending = null;
+        if (SlowModifier && pending.Site.Complete && Machine(pending.Site.Id) is { } job && (job.Operable || job.IsStorage))
+        {
+            var type = job.Operable ? Meitou.Data.Gameplay.Ai.TaskType.OPERATE_MACHINERY : Meitou.Data.Gameplay.Ai.TaskType.OPERATE_STORAGE;
+            Say(new Meitou.Simulation.Production.AddJob(SelectedIds(), type, pending.Site.Id) { Tick = session.World.Tick });
+            return;
+        }
         if (!pending.Site.Complete) Say(new BuildOrder(SelectedIds(), pending.Site.Id) { Tick = session.World.Tick });
         else if (Machine(pending.Site.Id) is { Operable: true }) Say(new Meitou.Simulation.Production.OperateOrder(SelectedIds(), pending.Site.Id) { Tick = session.World.Tick });
     }

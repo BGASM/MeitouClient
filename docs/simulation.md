@@ -767,6 +767,20 @@ crafting benches, generators and batteries. Facts: [production](game/buildings-p
   mult` scales its stacks. The player's drops into a storage follow the same rule ("does not take").
   Excess fetched inputs stay with the operator. Engine choices: storage within `HaulRange` 3000 of the machine, ties
   by site id, a fetch takes what the inputs have room for; the trip is not saved. Crafted items are not hauled.
+- **Job lists** (`PermaJobs.cs`, `ProductionSystem.Jobs.cs`, `Saving/PermaJobSave`; facts in [perma-jobs](game/ai-tasks.md#perma-jobs)).
+  `CharacterCold.Jobs` is the ordered list; `AddJob` (Shift + right click on a finished machine or storage) adds through the original's rules
+  (remap, duplicate refusal, companion, switch on); `RemoveJob` is the list's X. Every `JobCheckTicks` 10 (staggered by slot) a player character
+  that is idle or on a job takes the first job that is not blocked, so a higher job takes over as soon as it can run and a blocked one passes
+  to the next; an order replaces the job's task, and the list resumes once the character is idle. Meitou runs two types; the others are kept,
+  listed and saved:
+  - 87 Operating machine: blocked while others hold every operator place or the machine has no work (no power; no queued research or craft; a
+    farm with nothing ripe or dead; an empty input the operator cannot fill from its pack or a storage; a full output no storage takes).
+  - 124 Hauling to (`CharacterTask.Haul`): the nearest player machine within `HaulRange` of the storage whose output the storage takes is
+    emptied into the hauler's pack and carried there; items the hauler already carries that some machine makes go first. Blocked with neither.
+  - Engine choices: the check period; the medic and rescue buttons stay flags outside the list (the original's 58 and 148), and the medic stays
+    gated by the Jobs switch; no reordering by drag; kind-2 (turret) and implicit jobs are not run.
+  - Saves: GAMESTATE_AI `pjob<i>` / `pjobT<i>` / `jobs` as the original, plus `meitou pjob<i>` (the site id) for a building the handle cannot
+    name; Meitou's `meitou jobs enabled` is still written beside `jobs` and wins on load. A job's trip is not saved.
 - **Saves** (`Saving/MachineSave`, `ResearchSave`). Each building's production and farm keys go into its
   GAMESTATE_BUILDING. Items go into an INVENTORY_STATE `<site>-inventory`, listed first by the building, with sections
   `in<k>`, `out` and `main`.
@@ -775,7 +789,7 @@ crafting benches, generators and batteries. Facts: [production](game/buildings-p
 - **UI** (Faithful, `PlayerInterface.Production.cs`).
   - Selecting a machine opens its window beside the inventory: `Kenshi_GenericBuildingWindow`, or for a bench
     `Kenshi_InventoryResearchWindow`. Items drag in and out.
-  - The site menu gains Operate (also the quick right click).
+  - The site menu gains Operate (also the quick right click); Shift + quick right click adds a job instead ([job lists](#production)).
   - The HUD shows the farm's growth, ripeness and fertility, the output, workers and tech level.
   - A crafting bench's window shows the current craft and QUEUE... (opens the Craft tab); finished items drag out of `out`.
   - The overview's Craft tab lists stations, their crafts (click to queue; red: locked), the queue (click to cancel),
@@ -785,7 +799,6 @@ crafting benches, generators and batteries. Facts: [production](game/buildings-p
   - The original's verb names, row widgets and colours are **Unknown**.
 - **Engine gaps:**
   - No rain filling farm water.
-  - No job list (Perma-Jobs): only operators haul, for their own machine.
   - No furnaces or turrets.
   - Plants are not drawn.
 

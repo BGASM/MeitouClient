@@ -636,6 +636,54 @@ vfunc 5 `FUN_14050caf0`). TaskData fields: +0x108 desire (a member function, nea
 - **24 Wandering** (`FUN_140998040`): the nearest town; list A holds `atATown`, so it is dropped while in a town.
 - **36 Patrolling town**: `Task_PatrolTown`, behaviour **Unknown**.
 
+## Perma-jobs
+
+A character's job list (the Orders menu's "Perma-Jobs"; class `OrdersReceiver`, base of `AITaskSytem`). Meitou: [simulation](../simulation.md#production).
+
+- **Lists** (**Verified**, add function `FUN_1405086d0`, constructor `FUN_140507d20`): `OrdersReceiver` +0x70 holds one-shot orders, +0x88 (count +0x90,
+  data +0x98) the perma-jobs in priority order, +0x35 the jobs switch. Each entry is a Tasker: +0x10 target hand, +0x70 its TaskData (+0x44 task type).
+- **Adding** (**Verified**, `FUN_1405086d0(orders, type, target, position, permanent)`; Shift with an order, tutorial `FUN_14098d8c0`):
+  1. TaskData row +4 set and +0xc set: the type becomes +0xc (orders too).
+  2. Not permanent, or the resulting row's +4 is 0: appended to the order list.
+  3. Else refused when a job of that type exists and the row's +8 is 0, or when one exists with the same target. Otherwise appended, the jobs
+     switch turns on (`FUN_140508210`, which also posts a UI event for a player character), and +0x10, when set, is appended as a second job on the
+     same target with no checks (0x1f becomes 0x121 when character vfunc +0x248 returns non-null; that test is **Unknown**). Type 45 also stores
+     the target at +0x18.
+  4. The planner is re-run (vfunc +0x18). The UI then posts the Wwise event `Permanent_Job` (`FUN_1407f5a90`, **Observed**).
+- **Row fields** (**Verified**, `FUN_140319a60`; the 36 rows that set +4, all others leave it 0, **Observed**). +4 kind (2 = turret jobs), +8 several
+  targets allowed, +0xc job type, +0x10 companion:
+
+  | Ordered → job (+ companion) | +4 | +8 |
+  |---|---|---|
+  | 87 → 87, 221 → 221, 124 → 124, 97 → 97 | 1 | 1 |
+  | 152 → 152 + 124 | 1 | 1 |
+  | 2, 95 → 125; 25 → 58; 249 → 250; 60 → 57; 26 → 238; 4, 5, 61 → 16 | 1 | 0 |
+  | 146 → 234 | 2 | 0 (234: 1) |
+  | 45 → 45 + 31 (31, 289 rows: +8 1) | 1 | 1 |
+  | 148 → 148 + 106; 223 → 223 + 224; 273 → 273 + 274 | 1 | 0 |
+  | 136, 137 → 137 + 138 | 1 | 1 |
+  | 98, 175, 261 → 153 (153 has no +4: the bed order stays one-shot) | 1 | 0 |
+  | 58, 250, 57, 238, 16, 125, 106, 138, 187 (plain jobs) | 1 | 0 |
+
+  The medic and rescue buttons correspond to 58 and 148, so in the original they are list entries (**Observed** by row text only).
+- **Choosing** (**Verified**, decision pass `FUN_140510ef0`, job scoring `FUN_14050e5b0`, pick `FUN_140510650`): order list → jobs of kind 2 while
+  the AI flag at +0xbc is set → urgent tier (3) → all jobs → tiers 2, 1 → idle. Within a job pass each job considered gets the key N+8, N+7, ...
+  (N = list length) in list order, kept when its desire is above 0. The pick takes the highest key above 0. **So the first job that can run wins,
+  and a higher job takes over as soon as it can run** at the next re-plan. A job is skipped when: it has no TaskData; the switch is off and its
+  type is not 16, 31, 45, 57, 58 or 250 (`FUN_14050c1c0`: these run regardless, so the medic job ignores the switch and rescue does not); the
+  planner finds an unmet list-B state and the row has no effect (row +0x14 clear; `FUN_14060f940`); its list A holds (done; `FUN_14060f570`,
+  `FUN_14050c8e0`); or desire × target finder is 0. Type 187 (Obedient Slave) has a slave-state branch of its own.
+- **Implicit jobs** (**Verified**, same function, after the list, switch on and not a slave): lowest keys for squad toggles at `DAT_142134690`
+  +0x117 → 242 "Ditching resources" (only with an empty task queue), +0x116 → 153 and 257, +0x118 → 275.
+- **Save** (**Verified**, `OrdersReceiver` vfunc 1 / 2; 4122 GAMESTATE_AI records of the owner's saves, 199 jobs, types 187 and 57 only): record
+  `ai` (GAMESTATE_AI); bool `jobs` = the switch; per job i from 0, int `pjob<i>` (type) and handle `pjobT<i>`. The loader re-adds each job
+  through the add function (so companions and the switch are re-run) until `pjob<i>` is missing, then reads `jobs`. `AITaskSytem` vfunc 1 / 2
+  also saves the task queue (+0x40 deque): `tjob<i>` type, vec3 `tjobP<i>`, handle `tjobT<i>`.
+- **UI** (strings, `FUN_14072b540` JobsPanel): "No jobs assigned", "To add jobs, hold shift key when giving an order", the Jobs toggle "If this is
+  disabled then the character won't do any of the jobs listed."; tutorial: jobs are reordered by dragging and removed with X. Row text: **Unknown**.
+- **Unknown:** what +0xbc of the AI flags is; what list A/B mean per job type in detail (operating 87: A `IS_WORKING`; B free slot, power, inputs not
+  empty, output not full, at the machine); how 124 "Hauling to" gets the items it needs (B 67 `haveSomeResourcesFor`; no row's effect is 67).
+
 ## Unknowns
 
 - Why `taskType` 289 and 290 exist without an enum name (they build `Task_Follow` and `Task_BashDoor`; row 290 of the TaskData table repeats the data of `BASH_GATE`).

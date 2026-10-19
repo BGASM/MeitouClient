@@ -68,6 +68,8 @@ public sealed record CharacterSnapshot(CharacterId Id, CharacterAppearance? Appe
     /// <summary>The orders panel's toggles and the move speed mode (<see cref="CharacterCold.Orders"/>, <see cref="CharacterCold.RunSpeed"/>).</summary>
     public CharacterOrders Orders { get; init; }
     public byte RunSpeed { get; init; } = SpeedMode.Free;
+    /// <summary>The job list (<see cref="CharacterCold.Jobs"/>), first = highest priority.</summary>
+    public IReadOnlyList<Production.PermaJob> Jobs { get; init; } = [];
     /// <summary>The path being followed from the next waypoint, for selected characters only (the host draws it).</summary>
     public IReadOnlyList<Vector3> Path { get; init; } = [];
     /// <summary>Null for a character without a body (an animal).</summary>

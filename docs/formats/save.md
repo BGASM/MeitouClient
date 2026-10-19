@@ -342,6 +342,9 @@ beds keep rolled state. `in what` resolves only to a placed building; Meitou-onl
 carry the rest and win on load. Unchanged held state keeps the original keys as read; a changed one without a building handle writes `in something` 0
 and the null handle. `sentence`/`psts` are written while a sentence is set or the save had them; Meitou's start equals `World.GameHours` (day x 24 + hour).
 
+Job lists (`Saving/PermaJobSave`): the original's GAMESTATE_AI (`ai`) keys `jobs`, `pjob<i>`, `pjobT<i>` ([perma-jobs](../game/ai-tasks.md#perma-jobs)), plus
+Meitou's string `meitou pjob<i>` (the job's building id, which wins on load over the handle).
+
 Meitou-only crime keys (`Saving/CrimeSave`, `LockSystem`, `FixtureRegistry`; the original's keys for these facts are **Unknown**), each written only while set and removed otherwise:
 - GAMESTATE_CHARACTER `meitou escaped` (bool, escaped-prisoner flag), `meitou kidnapped` (bool, held by a kidnapper: no sentence, no bail), `meitou recently wanted` (float, game seconds left), `meitou recognition` (float 0..1, bounty recognition meter).
 - GAMESTATE_BUILDING `meitou house locked` (bool, a lock-up round locked this home and nothing unlocked it since).

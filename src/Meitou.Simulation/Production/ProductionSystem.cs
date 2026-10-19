@@ -183,6 +183,8 @@ public sealed partial class ProductionSystem : ITickSystem
                     }
                     break;
                 }
+                case AddJob add: AddJobs(world, add); break;
+                case RemoveJob remove: RemoveJobAt(world, remove); break;
                 case PutInMachine put: Put(world, put); break;
                 case TakeFromMachine take: Take(world, take); break;
                 case QueueResearch queue: Queue(world, queue.Research); break;
@@ -235,6 +237,7 @@ public sealed partial class ProductionSystem : ITickSystem
         cold.HaulSite = null;
         cold.HaulFetch = null;
         cold.Operating = false;
+        cold.JobIndex = -1;
         if (!AtSite(n, site, m))
         {
             n.Goal = new Vector2(site.Position.X, site.Position.Z);
@@ -247,7 +250,7 @@ public sealed partial class ProductionSystem : ITickSystem
     {
         var cold = table.Cold(slot)!;
         ref var n = ref table.Next[slot];
-        if (n.Task == (byte)CharacterTask.Operate)
+        if (n.Task is (byte)CharacterTask.Operate or (byte)CharacterTask.Haul)
         {
             MovementSystem.Stop(table, slot);
             n.Task = (byte)CharacterTask.Idle;
@@ -257,11 +260,13 @@ public sealed partial class ProductionSystem : ITickSystem
         cold.HaulSite = null;
         cold.HaulFetch = null;
         cold.Operating = false;
+        cold.JobIndex = -1;
     }
 
     public void Schedule(World world)
     {
         if (world.Machines.Count == 0 && !sweep) return;
+        PickJobs(world);
         var table = world.Characters;
         float dt = world.TickSeconds;
         for (int i = 0; i < table.HighWater; i++)
@@ -269,7 +274,18 @@ public sealed partial class ProductionSystem : ITickSystem
             ref var n = ref table.Next[i];
             if (!n.Alive) continue;
             var cold = table.Cold(i)!;
-            if (cold.OperateSite is not { } id) continue;
+            if (n.Task == (byte)CharacterTask.Haul)
+            {
+                if (cold.HaulSite is { } to && world.Buildings.Find(to) is { Complete: true } leg && world.Machines.Find(to) is { } legMachine && Able(cold)) Approach(ref n, cold, leg, legMachine, dt);
+                else End(table, i);
+                continue;
+            }
+            if (cold.OperateSite is not { } id)
+            {
+                // A hauler an order took off its job.
+                if (cold.HaulSite is not null) { cold.HaulSite = null; cold.HaulFetch = null; }
+                continue;
+            }
             if (n.Task != (byte)CharacterTask.Operate)
             {
                 cold.OperateSite = null;
@@ -285,29 +301,35 @@ public sealed partial class ProductionSystem : ITickSystem
                 End(table, i);
                 continue;
             }
-            const ushort Path = (ushort)MoveFlags.AnyPath;
             // A hauling operator walks to its storage instead.
             if (Hauling(world, cold) is { } haul) (site, m) = haul;
-            if (AtSite(n, site, m))
-            {
-                if ((n.Flags & Path) != 0)
-                {
-                    n.Flags = (ushort)(n.Flags & ~Path);
-                    n.PathCursor = 0;
-                    cold.PathRequest = 0;
-                }
-                n.TaskTime = 0;
-                continue;
-            }
-            if ((n.Flags & Path) != 0) continue;
-            n.TaskTime -= dt;
-            if (n.TaskTime > 0) continue;
-            n.Goal = new Vector2(site.Position.X, site.Position.Z);
-            n.Mode = SpeedMode.Free;
-            n.Flags |= (ushort)MoveFlags.NeedPath;
-            n.TaskTime = PursuitSystem.RepathSeconds;
+            Approach(ref n, cold, site, m, dt);
         }
         if (world.Machines.Count == 0) sweep = false;
+    }
+
+    /// <summary>Walks a character to a building: at it, its path is dropped; else a path is asked for, again every <see cref="PursuitSystem.RepathSeconds"/> while it has none.</summary>
+    void Approach(ref CharacterHot n, CharacterCold cold, BuildSite site, Machine m, float dt)
+    {
+        const ushort Path = (ushort)MoveFlags.AnyPath;
+        if (AtSite(n, site, m))
+        {
+            if ((n.Flags & Path) != 0)
+            {
+                n.Flags = (ushort)(n.Flags & ~Path);
+                n.PathCursor = 0;
+                cold.PathRequest = 0;
+            }
+            n.TaskTime = 0;
+            return;
+        }
+        if ((n.Flags & Path) != 0) return;
+        n.TaskTime -= dt;
+        if (n.TaskTime > 0) return;
+        n.Goal = new Vector2(site.Position.X, site.Position.Z);
+        n.Mode = SpeedMode.Free;
+        n.Flags |= (ushort)MoveFlags.NeedPath;
+        n.TaskTime = PursuitSystem.RepathSeconds;
     }
 
     // ------------------------------------------------------------------ the tick
@@ -339,7 +361,9 @@ public sealed partial class ProductionSystem : ITickSystem
         for (int i = 0; i < table.HighWater; i++)
         {
             ref var n = ref table.Next[i];
-            if (!n.Alive || n.Task != (byte)CharacterTask.Operate) continue;
+            if (!n.Alive) continue;
+            if (n.Task == (byte)CharacterTask.Haul) { HaulStep(world, i); continue; }
+            if (n.Task != (byte)CharacterTask.Operate) continue;
             var cold = table.Cold(i)!;
             if (cold.OperateSite is not { } id || world.Buildings.Find(id) is not { Complete: true } site || world.Machines.Find(id) is not { } m || !Able(cold))
             {

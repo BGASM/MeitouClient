@@ -488,8 +488,12 @@ storage` (function 2); Large Barrels also hold Water.
   66 haveSomeResourcesFrom, 67 haveSomeResourcesFor, 82 gotInventoryRoomForResources, 169 isMachineInputInvalid.
 - **Option** (**Verified**, string): "If they have nothing else to do, characters will automatically put any excess
   materials they are carrying into storage."
-- **Unknown:** how the original picks the storage (nearest, same town, a range), and when an operator leaves a
-  machine to haul.
+- **Jobs** (**Verified**, [perma-jobs](ai-tasks.md#perma-jobs)): Shift with an order on a machine adds job 87 "Operating machine";
+  on a storage 124 "Hauling to" (several targets allowed); an automatic machine (152) adds 152 plus 124 on it. The first job in a
+  character's list that can run wins; operating is skipped while the machine's output is full or its inputs are empty (task 87's start
+  conditions), so a character moves down its list and returns when the machine can work again.
+- **Unknown:** how the original picks the storage (nearest, same town, a range), when an operator leaves a
+  machine to haul, and where a 124 job takes its items from.
 
 ## Unknowns
 

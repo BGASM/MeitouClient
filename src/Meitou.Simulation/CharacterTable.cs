@@ -231,6 +231,10 @@ public sealed class CharacterCold
     public string? HaulSite { get; set; }
     /// <summary>The ITEM a hauling operator fetches from <see cref="HaulSite"/>; null: it stores what it carries.</summary>
     public string? HaulFetch { get; set; }
+    /// <summary>The job list (Perma-Jobs, <see cref="Production.PermaJobs"/>), first = highest priority. Serial phases only. Hashed only while not empty.</summary>
+    public List<Production.PermaJob> Jobs { get; } = [];
+    /// <summary>The <see cref="Jobs"/> entry the current task was started from (-1: none, the task was ordered). Hashed with <see cref="Jobs"/>.</summary>
+    public int JobIndex { get; set; } = -1;
     /// <summary>The clip the operator plays while it works (the functionality's <c>animation</c>).</summary>
     public string? OperateClip { get; set; }
     /// <summary>The operator did work this tick (it plays <see cref="OperateClip"/>); derived, not hashed.</summary>
@@ -469,6 +473,12 @@ public sealed class CharacterTable
             if (k.BuildSite is { } site) { hasher.Add(0x4275696C); hasher.Add(Rng.StableHash(site)); hasher.Add(k.BuildBar); hasher.Add((int)k.ResumeTask); }
             if (k.OperateSite is { } machine) { hasher.Add(0x4F706572); hasher.Add(Rng.StableHash(machine)); }
             if (k.HaulSite is { } haul) { hasher.Add(0x4861756C); hasher.Add(Rng.StableHash(haul)); hasher.Add(Rng.StableHash(k.HaulFetch ?? "")); }
+            if (k.Jobs.Count > 0)
+            {
+                hasher.Add(0x4A6F6273);
+                hasher.Add(k.JobIndex);
+                foreach (var perma in k.Jobs) { hasher.Add((int)perma.Type); hasher.Add(Rng.StableHash(perma.Site ?? "")); }
+            }
         }
         hasher.Add(free.Count);
         foreach (int slot in free) hasher.Add(slot);

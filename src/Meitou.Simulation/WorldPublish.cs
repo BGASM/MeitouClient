@@ -80,6 +80,7 @@ public sealed partial class World
                 CarriesShackles = selected && Locks.LockSystem.CarriedShackles(cold) is not null,
                 Orders = cold?.Orders ?? CharacterOrders.None,
                 RunSpeed = cold?.RunSpeed ?? SpeedMode.Free,
+                Jobs = cold is { Jobs.Count: > 0 } ? cold.Jobs.ToArray() : [],
                 Scale = cold is { Fighter.IsAnimal: true, Medical: { } size } ? size.ScaleK : 1,
                 Activity = cold is { Ai.Goal: { } goal } && Ai.AiSystem.Holds(state[i], cold) ? Ai.TaskBehaviours.Text(goal.Task.Type) : null,
                 Stealth = sneaking ? watchers.Length == 0 ? StealthExposure.Unobserved : watchers.Max(w => w.Level) : null,

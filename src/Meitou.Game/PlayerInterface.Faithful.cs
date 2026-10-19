@@ -232,13 +232,21 @@ sealed partial class PlayerInterface
 
     /// <summary>
     /// The jobs list (<c>JobsPanel</c>, docs/game/ui-screens.md section 4): the lead's jobs, one row each with an X that removes it from that character; with none, the
-    /// layout's hint. Meitou's jobs are the medic and rescue jobs, named as their buttons, in that order (the original's row text and order are <b>Unknown</b>).
+    /// layout's hint. The medic and rescue jobs (flags in Meitou, list entries 58 and 148 in the original) come first, named as their buttons, then the job list (<see cref="Meitou.Simulation.Production.PermaJobs"/>)
+    /// as "&lt;row text&gt;: &lt;building&gt;" (the original's row text is <b>Unknown</b>; its rows are dragged to reorder, which Meitou does not offer).
     /// </summary>
     void BindJobs(UiBindings b, Meitou.Simulation.CharacterSnapshot? lead)
     {
         var jobs = new List<UiListItem>();
         if (lead?.Body is { MedicJob: true }) jobs.Add(new("medic", "Medic"));
         if (lead?.Body is { RescueJob: true }) jobs.Add(new("rescue", "Rescue"));
+        for (int i = 0; i < (lead?.Jobs.Count ?? 0); i++)
+        {
+            var job = lead!.Jobs[i];
+            string text = Meitou.Simulation.Production.PermaJobs.Text(job.Type) ?? job.Type.ToString();
+            if (job.Site is { } id && session.CurrentSnapshot.Buildings.FirstOrDefault(s => s.Id == id) is { } site) text += ": " + SiteName(site);
+            jobs.Add(new("job:" + i.ToString(CultureInfo.InvariantCulture), text));
+        }
         b.Lists["JobsPanel"] = jobs;
         // A few rows never overflow the box, and MyGUI shows an ItemBox's scroll bars only on overflow.
         foreach (var bar in faithfulHud.Find("JobsPanel")?.Children.Where(w => w.Type == "ScrollBar") ?? []) b.HiddenWidgets.Add(bar);
@@ -263,6 +271,8 @@ sealed partial class PlayerInterface
         if ((Selected().FirstOrDefault() ?? Lead()) is not { IsPlayer: true } lead) return;
         if (job == "medic") Say(new Meitou.Simulation.FirstAid.MedicJobCommand([lead.Id], false) { Tick = session.World.Tick });
         else if (job == "rescue") Say(new Meitou.Simulation.Carrying.RescueJobCommand([lead.Id], false) { Tick = session.World.Tick });
+        else if (job.StartsWith("job:", StringComparison.Ordinal) && int.TryParse(job.AsSpan(4), NumberStyles.None, CultureInfo.InvariantCulture, out int index))
+            Say(new Meitou.Simulation.Production.RemoveJob(lead.Id, index) { Tick = session.World.Tick });
     }
 
     /// <summary>The speed icon per mode: the <c>Kenshi_CharacterSpeedSet</c> image names, in mode order.</summary>

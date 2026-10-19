@@ -31,6 +31,8 @@ public sealed record MachineSnapshot(string Site, string Record, IReadOnlyList<M
     public int TechLevel { get; init; }
     /// <summary>Characters can work it (a well, farm or research bench).</summary>
     public bool Operable { get; init; }
+    /// <summary>A storage (a "Hauling to" job can name it).</summary>
+    public bool IsStorage { get; init; }
     /// <summary>The crafting bench state (null for other machines).</summary>
     public CraftView? Craft { get; init; }
     /// <summary>Its power (null for a building outside the grid).</summary>
@@ -46,7 +48,7 @@ public sealed record MachineSnapshot(string Site, string Record, IReadOnlyList<M
                 { Material = item.MaterialId, Charge = item.ChargeFraction }).ToArray())) : null;
         FarmView? farm = m.Farm is { } f && m.Data.Farm is { } fd
             ? new FarmView(f.Growth, f.Death, f.Harvested, f.Plants.Length, f.Status, m.Yield, m.CropMatch, ProductionSystem.Ripeness(f)) { PlantGrowth = [.. f.Plants] } : null;
-        return new MachineSnapshot(m.Site, m.Data.Id, inputs, output, storage, farm, m.Status, m.Operators, m.Data.MaxOperators) { TechLevel = m.Data.IsResearch ? m.Data.TechLevel : 0, Operable = m.Data.Operable, Craft = Crafting(m, items),
+        return new MachineSnapshot(m.Site, m.Data.Id, inputs, output, storage, farm, m.Status, m.Operators, m.Data.MaxOperators) { TechLevel = m.Data.IsResearch ? m.Data.TechLevel : 0, Operable = m.Data.Operable, IsStorage = m.Data.IsStorage, Craft = Crafting(m, items),
             Power = m.Data.IsConsumer || m.Data.IsGenerator || m.Data.IsBattery ? new PowerView(m.Data.IsBattery ? PowerKind.Battery : m.Data.IsGenerator ? PowerKind.Generator : PowerKind.Consumer, m.Demand, m.Granted, m.Usage, m.Charge, m.Store, m.Inputs.Length == 0 || Array.Exists(m.Inputs, i => i.Level > 0 || i.Count > 0)) : null };
     }
 

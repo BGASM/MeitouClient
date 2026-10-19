@@ -103,7 +103,7 @@ vtable is the RTTI class named here; the editor's enum names are matched to the 
 - Roles of the six category sets that flag bits 1, 2, 4, 0x10, 0x20, 0x40 register into; the meaning of the `*` marker on some
   condition entries (the entry's second flag byte) and of the TaskData flag +0x14.
 - The extra x1.25 under an owner-object condition in scoring; the rule that drops a candidate whose B list holds with no effect.
-- What the extra Tasker list at +0x70 of `OrdersReceiver` holds, and the "AI flag +0xbc" gating urgent jobs.
+- The "AI flag +0xbc" that lets kind-2 (turret) perma-jobs run before urgent tasks; +0x70 of `OrdersReceiver` is the one-shot order list ([perma-jobs](ai-tasks.md#perma-jobs)).
 - Why `clears existing jobs` has no string reference in the exe (editor-only field, or read some other way).
 - Which AI packages use which `unloaded func` value (not surveyed in the data). The unloaded update itself, the keep test `FUN_1407ec570`
   and the 60 s orphan timer are in [off-screen world](factions-squads-towns.md#off-screen-world).

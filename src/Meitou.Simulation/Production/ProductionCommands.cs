@@ -6,6 +6,15 @@ namespace Meitou.Simulation.Production;
 public sealed record OperateOrder(IReadOnlyList<CharacterId> Characters, string Site) : SimCommand;
 
 /// <summary>
+/// Gives characters (the selection when empty) the job an order of <paramref name="Type"/> on a player building becomes, at the end of their job lists (the original's Shift with an order;
+/// <see cref="PermaJobs.Add"/>).
+/// </summary>
+public sealed record AddJob(IReadOnlyList<CharacterId> Characters, Meitou.Data.Gameplay.Ai.TaskType Type, string Site) : SimCommand;
+
+/// <summary>Takes the job at <paramref name="Index"/> off a character's job list (the list's X button).</summary>
+public sealed record RemoveJob(CharacterId Character, int Index) : SimCommand;
+
+/// <summary>
 /// A character puts an item of its own into a machine: <paramref name="Slot"/> k into recipe input k (as many units as the input still takes), -1 into the storage grid at
 /// (<paramref name="X"/>, <paramref name="Y"/>) (the whole stack). The character must stand within <see cref="ProductionSettings.TransferReach"/> of the building.
 /// </summary>

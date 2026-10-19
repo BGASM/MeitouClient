@@ -102,6 +102,8 @@ public static partial class SaveCapture
         WriteLocks(world, buildings);
         ResearchSave.Write(game.Research, world.Research);
         var outposts = data.PlayerFaction >= 0 ? BuildingSave.Write(game, world, data.Factions[data.PlayerFaction].Id, options.Seed) : new Dictionary<int, Hand>();
+        // Again, with the states of the buildings first written now (job targets name them by handle).
+        buildings = HeldSave.BuildingStates(game);
         MachineSave.Write(game, world);
         GroundItemSave.Write(game, world, data.Items);
         var races = new Dictionary<string, RaceData?>(StringComparer.Ordinal);
@@ -342,6 +344,7 @@ public static partial class SaveCapture
             SlaveSave.Write(g, cold, data);
             DialogueSave.Write(g, cold);
             if (orders) Orders.Write(g, cold);
+            if (orders && sc.Ai is { } ai) PermaJobSave.Write(ai, cold, world.Buildings, buildings);
             HeldSave.Write(g, cold, link, world.Fixtures, buildings);
             if (cold.PortraitSerial is { } portraitSerial) g.Ints["portrait_serial"] = (int)portraitSerial;
         }
