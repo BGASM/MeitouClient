@@ -332,6 +332,47 @@ public class ProductionTests
         Assert.Equal(charge - ticks * rig.World.TickSeconds, battery.Charge, 0.01f);
     }
 
+    // ------------------------------------------------------------------ ore
+
+    sealed class Rocks(params ResourceNode[] nodes) : IResourceNodes
+    {
+        public IReadOnlyList<ResourceNode> Near(int resource, float x, float z, float range) =>
+            [.. nodes.Where(n => n.Resource == resource && Vector2.Distance(new(n.Position.X, n.Position.Z), new(x, z)) <= range)];
+    }
+
+    /// <summary>
+    /// An ore mine yields the nearest rock of its resource x (1 - (d² - 625) / (1500² - 625)) (docs/game/buildings-production.md "Resources"): the rock's own yield is the resources
+    /// record's iron mult (0.6), 0.1 for copper which the record lacks; nothing beyond 1500, for a resource with no rock, or with no rock source at all.
+    /// </summary>
+    [Fact]
+    public void An_ore_mine_yields_its_nearest_rock_with_distance_falloff()
+    {
+        var resources = Rec("91-t", FcsRecordType.ENVIRONMENT_RESOURCES, "Ore ground");
+        resources.Floats["iron mult"] = 0.6f;
+        var group = Rec("90-t", FcsRecordType.BIOME_GROUP, "Ore lands");
+        group.References["resources"] = [new FcsReference("91-t", 0, 0, 0)];
+        var file = new FcsFile();
+        file.Records.AddRange([resources, group]);
+        var db = new GameDatabase();
+        db.Apply(file, "ore.mod");
+        var cells = new int[WeatherAreas.Cells * WeatherAreas.Cells];
+        var map = new BiomeMap(BiomeGroupData.LoadAll(db), cells);
+        var rock = new Vector3(1000, 300, 2000);
+        var field = new ResourceField(db, map, new Rocks(
+            new ResourceNode(rock, ResourceField.IronResource, 25),
+            new ResourceNode(rock + new Vector3(1000, 0, 0), ResourceField.IronResource, 25),
+            new ResourceNode(rock + new Vector3(0, 0, 500), ResourceField.CopperResource, 25)));
+        float Falloff(float d) => 1 - (d * d - 625) / (1500f * 1500f - 625);
+
+        Assert.Equal(0.6f, field.Yield(ResourceField.IronResource, rock), 0.0001f);
+        Assert.Equal(0.6f * Falloff(400), field.Yield(ResourceField.IronResource, rock + new Vector3(-400, 0, 0)), 0.0001f);
+        Assert.Equal(0.6f * Falloff(100), field.Yield(ResourceField.IronResource, rock + new Vector3(900, 0, 0)), 0.0001f);
+        Assert.Equal(0, field.Yield(ResourceField.IronResource, rock + new Vector3(-1600, 0, 0)));
+        Assert.Equal(0.1f, field.Yield(ResourceField.CopperResource, rock + new Vector3(0, 0, 500)), 0.0001f);
+        Assert.Equal(0, field.Yield(ResourceField.CarbonResource, rock));
+        Assert.Equal(0, new ResourceField(db, map).Yield(ResourceField.IronResource, rock));
+    }
+
     // ------------------------------------------------------------------ the installed game
 
     /// <summary>
@@ -429,5 +470,25 @@ public class ProductionTests
         var (generator, battery, wind) = (rig.Machine(0), rig.Machine(1), rig.Machine(2));
         Assert.True(wind.Data.IsWind && !generator.Data.IsWind && battery.Data.IsBattery);
         Assert.Equal((55f, 50 * ProductionSystem.WindFraction, 60f, 180f), (generator.Demand, wind.Demand, battery.Granted, battery.Store));
+    }
+
+    /// <summary>
+    /// The foliage of the middle zone (32, 32) holds Iron Resource rocks; an ore mine standing on one yields the rock's own yield, which is between 0.1 and 1
+    /// (docs/game/buildings-production.md "Resources").
+    /// </summary>
+    [Fact, Slow]
+    public void The_installed_world_has_iron_rocks_an_ore_mine_finds()
+    {
+        var db = InstallData.BaseGame;
+        Assert.SkipWhen(db is null || InstallData.Levels is null, "Kenshi install not found");
+        var install = InstallData.Install!;
+        using var nodes = new FoliageResourceNodes(new FoliageWorld(install, db!, InstallData.Levels!), db!);
+        var (x, z) = WorldLayout.ZoneOrigin(new ZoneCoordinate(32, 32));
+        var rocks = nodes.Near(ResourceField.IronResource, (float)x + WorldLayout.ZoneSize / 2f, (float)z + WorldLayout.ZoneSize / 2f, WorldLayout.ZoneSize / 2f);
+        Assert.NotEmpty(rocks);
+        var field = new ResourceField(db!, BiomeMap.Create(db!, WeatherAreas.Load(install)), nodes);
+        float own = field.NodeYield(ResourceField.IronResource, rocks[0].Position);
+        Assert.InRange(own, 0.1f, 1f);
+        Assert.Equal(own, field.Yield(ResourceField.IronResource, rocks[0].Position));
     }
 }
