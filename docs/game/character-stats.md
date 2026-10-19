@@ -9,8 +9,11 @@ Movement/combat formulas belong to [pathfinding](pathfinding.md) and [combat](co
 
 **Observed:** skills are floats, not discrete levels plus XP counters. Factory combines record
 values/randomness, race modifiers and derived stats. Core gain: `f=((cap-stat)/cap)^2`, cap101;
-add amount*f only for 0<amount<=20, 0<f<=20, reject new NaN; old NaN becomes20. Above101 gain
-can resume because f is squared; no implicit level100 clamp. Activity/scaling table defines
+add amount*f only for 0<amount<=20, 0<f<=20, reject new NaN; old NaN becomes20 (exe).
+**Verified** in game (1.0.68, scripted harness, issue #3): both limits; the 20 cap is on the
+already-scaled amount (event input >148 or general >444 at f=1 adds nothing, not clamped); gain
+resumes above101 until f>20 (stat >552 or < -350). A NaN stat stays NaN through
+`xpStat_eventBased` and `xpGeneral`: they skip the core's reset (where: **Unknown**). Activity/scaling table defines
 continuous/event gains, race factors, skill difference and moving/carrying gains. Global XP3
 is stored as0.75; continuous base0.02*dt, event base0.075. Caller clamps are not assumed.
 
