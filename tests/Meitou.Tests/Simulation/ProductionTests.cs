@@ -19,7 +19,7 @@ namespace Meitou.Tests.Simulation;
 public class ProductionTests
 {
     const string Water = "50-t", Crop = "51-t", Book = "52-t", Gadget = "53-t", Well = "60-t", Farm = "61-t", Bench = "62-t", Workshop = "63-t", Study = "70-t",
-        Fuel = "54-t", Generator = "64-t", Battery = "65-t", Lamp = "66-t", BigLamp = "67-t", PoweredWorkshop = "68-t";
+        Fuel = "54-t", Generator = "64-t", Battery = "65-t", Lamp = "66-t", BigLamp = "67-t", PoweredWorkshop = "68-t", Tank = "69-t";
     /// <summary>The stat that gives skill factor 1: lerp(0.5, 1.4, x/100) = 1.</summary>
     const float Unit = 100 / 1.8f;
     const int PlayerFaction = 2;
@@ -31,7 +31,8 @@ public class ProductionTests
     /// <summary>
     /// A well (0.1 water per second at skill 1), an indoor farm (4 plants, 1 h to grow, 2 crops each at farming 33.3, 1 water per game hour) and a level 1 research bench with
     /// a 4 x 4 grid, one research of 0.3 h costing 2 books, and a workshop crafting a gadget of 1 crop in 1 h (its section consumes water until a craft rebinds it; the output
-    /// holds 3); a generator (20 power, 0.01 x P fuel a second at full load), a battery (rate 10, store 30 s), lamps drawing 4 and 8 and the workshop drawing 5.
+    /// holds 3); a generator (20 power, 0.01 x P fuel a second at full load), a battery (rate 10, store 30 s), lamps drawing 4 and 8 and the workshop drawing 5;
+    /// a 2 x 2 tank storing only water, its stacks x 10.
     /// </summary>
     static GameDatabase Database()
     {
@@ -85,11 +86,18 @@ public class ProductionTests
         generatorFn.References["consumes"] = [new FcsReference(Fuel, 10, 100, 0)];
         var batteryFn = Function("86-t", MachineData.BatteryFunction, 0);
         var lampFn = Function("87-t", 15, 0);
+        var tankFn = Function("88-t", MachineData.ResourceStorageFunction, 0);
+        var tank = Building(Tank, "Test Tank", "88-t");
+        tank.Bools["has inventory"] = true;
+        tank.Ints["storage size width"] = 2;
+        tank.Ints["storage size height"] = 2;
+        tank.Floats["stackable bonus mult"] = 10;
+        tank.References["limit inventory"] = [new FcsReference(Water, 0, 0, 0)];
         var file = new FcsFile();
         file.Records.AddRange([Item(Water, "Water"), Item(Crop, "Crop"), Item(Book, "Book"), wellFn, farmFn, benchFn, farmData, Building(Well, "Test Well", "80-t"), farm, bench, study, gadget, workshopFn,
             Building(Workshop, "Test Workshop", "84-t"), Item(Fuel, "Fuel"), generatorFn, batteryFn, lampFn, Powered(Building(Generator, "Test Generator", "85-t"), 20),
             Powered(Building(Battery, "Test Battery", "86-t"), 10, 30), Powered(Building(Lamp, "Lamp", "87-t"), -4), Powered(Building(BigLamp, "Big Lamp", "87-t"), -8),
-            Powered(Building(PoweredWorkshop, "Powered Workshop", "84-t"), -5)]);
+            Powered(Building(PoweredWorkshop, "Powered Workshop", "84-t"), -5), tankFn, tank]);
         var db = new GameDatabase();
         db.Apply(file, "test.mod");
         return db;
@@ -151,10 +159,10 @@ public class ProductionTests
     // ------------------------------------------------------------------ determinism
 
     /// <summary>A well, a farm and a powered workshop are worked, water goes into the farm, books into the bench and crops into the workshop, the study and three gadgets
-    /// are queued, a fuelled generator powers the workshop and charges a battery; hashes at six checkpoints.</summary>
-    static List<ulong> Scripted(int threads, out (int Water, int Crops, bool Studied, int Gadgets, float Charge) seen)
+    /// are queued, a fuelled generator powers the workshop and charges a battery, the labourer hauls the well's water to a tank; hashes at six checkpoints.</summary>
+    static List<ulong> Scripted(int threads, out (int Water, int Crops, bool Studied, int Gadgets, float Charge, int Stored) seen)
     {
-        using var rig = new Rig(Database(), Constants, [Well, Farm, Bench, PoweredWorkshop, Generator, Battery], threads);
+        using var rig = new Rig(Database(), Constants, [Well, Farm, Bench, PoweredWorkshop, Generator, Battery, Tank], threads);
         var labourer = rig.Add(0, StatsEnumerated.Labouring, Unit);
         var farmer = rig.Add(1, StatsEnumerated.Farming, 100 / 3f, (Water, 5));
         var scientist = rig.Add(2, StatsEnumerated.Science, Unit, (Book, 3));
@@ -177,7 +185,8 @@ public class ProductionTests
             rig.World.RunTicks(target - (int)rig.World.Tick);
             hashes.Add(rig.World.StateHash());
         }
-        seen = (rig.Machine(0).Output!.Count, rig.Machine(1).Output!.Count, rig.World.Research.IsDone(Study), rig.Machine(3).Craft!.Done.Sum(i => i.Quantity), rig.Machine(5).Charge);
+        seen = (rig.Machine(0).Output!.Count, rig.Machine(1).Output!.Count, rig.World.Research.IsDone(Study), rig.Machine(3).Craft!.Done.Sum(i => i.Quantity), rig.Machine(5).Charge,
+            rig.Machine(6).Storage!.Items.Sum(i => i.Quantity));
         return hashes;
     }
 
@@ -185,7 +194,7 @@ public class ProductionTests
     public void Wells_farms_research_crafting_and_power_hash_the_same_at_1_4_and_16_threads()
     {
         var one = Scripted(1, out var seen);
-        Assert.True(seen.Water > 0 && seen.Crops > 0 && seen.Studied && seen.Gadgets == 3 && seen.Charge > 0, $"{seen}");
+        Assert.True(seen.Water > 0 && seen.Crops > 0 && seen.Studied && seen.Gadgets == 3 && seen.Charge > 0 && seen.Stored > 0, $"{seen}");
         Assert.Equal(one, Scripted(4, out _));
         Assert.Equal(one, Scripted(16, out _));
     }
@@ -380,6 +389,48 @@ public class ProductionTests
     /// weapon type in each listed model, a katana at level 30 taking (0.3² x 100 x value/300 x 2/P) h and its material cost in iron plates; a Tricorn Hat taking coverage/100 x
     /// lerp(0.4, 1, 5) x 0.6 h and drawing coverage/100 leather and that x fabrics amount of fabrics. With no research the weapons are locked; with all of it some are not.
     /// </summary>
+    // ------------------------------------------------------------------ hauling
+
+    /// <summary>
+    /// Taking an output into an empty inventory moves it (once); the labourer carries the well's full output to the tank, the farmer fetches it for the farm's empty input with no
+    /// water made or lost on the way; the tank refuses crops, by hand and as the farm's output (docs/simulation.md "Production", Hauling).
+    /// </summary>
+    [Fact]
+    public void Operators_haul_a_full_output_to_a_storage_that_takes_it_and_fetch_an_empty_input()
+    {
+        using var rig = new Rig(Database(), Constants, [Well, Farm, Tank]);
+        var taker = rig.Add(0, StatsEnumerated.Labouring, Unit);
+        var labourer = rig.Add(0, StatsEnumerated.Labouring, Unit);
+        var farmer = rig.Add(1, StatsEnumerated.Farming, Unit, (Crop, 1));
+        rig.World.RunTick();
+        var (well, farm, tank) = (rig.Machine(0), rig.Machine(1), rig.Machine(2).Storage!);
+        well.Output!.Count = 3;
+        rig.World.Commands.Enqueue(new TakeFromMachine(taker, rig.Sites[0], -2) { Tick = rig.World.Tick });
+        rig.World.RunTick();
+        Assert.Equal((0, 3), (well.Output.Count, rig.Count(taker, Water)));
+
+        rig.Put(farmer, Crop, 2, -1);
+        rig.World.RunTick();
+        Assert.Equal((1, 0), (rig.Count(farmer, Crop), tank.Items.Count));
+        Assert.Contains(rig.World.TakeMessages(), m => m == "Test Tank does not take Crop.");
+
+        // The well makes nothing more, so the 10 water only move.
+        well.Output.Count = 10;
+        well.Yield = 0;
+        rig.World.Commands.Enqueue(new OperateOrder([labourer], rig.Sites[0]) { Tick = rig.World.Tick });
+        rig.World.Commands.Enqueue(new OperateOrder([farmer], rig.Sites[1]) { Tick = rig.World.Tick });
+        int TotalWater() => well.Output.Count + farm.Inputs[0].Count + tank.Items.Where(i => i.Record == Water).Sum(i => i.Quantity) + rig.Count(labourer, Water) + rig.Count(farmer, Water);
+        bool stored = false;
+        for (int t = 0; t < 6000 && farm.Inputs[0].Count == 0; t++)
+        {
+            rig.World.RunTick();
+            stored |= tank.Items.Any(i => i.Record == Water);
+            Assert.Equal(10, TotalWater());
+        }
+        Assert.True(stored && farm.Inputs[0].Count > 0, $"tank {tank.Items.Count}, farm {farm.Inputs[0].Count}");
+        Assert.Equal((1, 0), (rig.Count(farmer, Crop), tank.Items.Count(i => i.Record == Crop)));
+    }
+
     [Fact, Slow]
     public void The_installed_weapon_and_armour_benches_offer_the_documented_crafts()
     {
@@ -490,5 +541,19 @@ public class ProductionTests
         float own = field.NodeYield(ResourceField.IronResource, rocks[0].Position);
         Assert.InRange(own, 0.1f, 1f);
         Assert.Equal(own, field.Yield(ResourceField.IronResource, rocks[0].Position));
+    }
+
+    /// <summary>The installed Water Tower (1950) takes only Water and Storage: Ore only Raw Iron (1866), both resource storages with stacks x 100 (docs/game/buildings-production.md "Storage").</summary>
+    [Fact, Slow]
+    public void The_installed_water_tower_and_ore_storage_take_only_their_resource()
+    {
+        var db = InstallData.BaseGame;
+        Assert.SkipWhen(db is null, "Kenshi install not found");
+        var tower = MachineData.From(db!, db!.Find("1950-gamedata.base")!)!;
+        var ore = MachineData.From(db!, db!.OfType(FcsRecordType.BUILDING).First(r => r.Name == "Storage: Ore"))!;
+        string water = db!.OfType(FcsRecordType.ITEM).First(r => r.Name == "Water").StringId, iron = "1866-gamedata.base";
+        Assert.True(tower.IsStorage && ore.IsStorage);
+        Assert.Equal((true, false, false, true), (tower.Accepts(water, FcsRecordType.ITEM), tower.Accepts(iron, FcsRecordType.ITEM), ore.Accepts(water, FcsRecordType.ITEM), ore.Accepts(iron, FcsRecordType.ITEM)));
+        Assert.Equal((100f, 100f), (tower.StackBonusMult, ore.StackBonusMult));
     }
 }
