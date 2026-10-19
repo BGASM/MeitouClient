@@ -477,6 +477,7 @@ public sealed class CharacterTable
             {
                 hasher.Add(0x4A6F6273);
                 hasher.Add(k.JobIndex);
+                hasher.Add((int)k.ResumeTask);
                 foreach (var perma in k.Jobs) { hasher.Add((int)perma.Type); hasher.Add(Rng.StableHash(perma.Site ?? "")); }
             }
         }

@@ -253,7 +253,8 @@ public sealed partial class ProductionSystem : ITickSystem
         if (n.Task is (byte)CharacterTask.Operate or (byte)CharacterTask.Haul)
         {
             MovementSystem.Stop(table, slot);
-            n.Task = (byte)CharacterTask.Idle;
+            // A job's task goes back to the following or wandering it took the character from.
+            n.Task = (byte)(cold.JobIndex >= 0 && cold.ResumeTask is CharacterTask.Wander or CharacterTask.Follow ? cold.ResumeTask : CharacterTask.Idle);
             n.TaskTime = 0;
         }
         cold.OperateSite = null;

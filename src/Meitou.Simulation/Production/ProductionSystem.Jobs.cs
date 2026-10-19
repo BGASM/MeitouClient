@@ -41,7 +41,8 @@ public sealed partial class ProductionSystem
             // An order replaced the job's task.
             if (cold.JobIndex >= 0 && task is not (CharacterTask.Operate or CharacterTask.Haul)) cold.JobIndex = -1;
             if (cold.Jobs.Count == 0 || !cold.IsPlayer || (world.Tick + i) % JobCheckTicks != 0) continue;
-            if (task != CharacterTask.Idle && cold.JobIndex < 0) continue;
+            // Idle as the medic job counts it: no task, or following or wandering.
+            if (cold.JobIndex < 0 && task is not (CharacterTask.Idle or CharacterTask.Wander or CharacterTask.Follow)) continue;
             if (!Able(cold)) continue;
             int pick = -1;
             for (int k = 0; k < cold.Jobs.Count && pick < 0; k++)
@@ -140,6 +141,7 @@ public sealed partial class ProductionSystem
         var job = cold.Jobs[k];
         var site = world.Buildings.Find(job.Site!)!;
         var m = Ensure(world, site)!;
+        if (cold.JobIndex < 0) cold.ResumeTask = (CharacterTask)table.Next[slot].Task;
         if (job.Type == TaskType.OPERATE_MACHINERY)
         {
             if (cold.OperateSite != site.Id) Begin(world, slot, site, m);

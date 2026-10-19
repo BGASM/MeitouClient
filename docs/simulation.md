@@ -770,8 +770,9 @@ crafting benches, generators and batteries. Facts: [production](game/buildings-p
 - **Job lists** (`PermaJobs.cs`, `ProductionSystem.Jobs.cs`, `Saving/PermaJobSave`; facts in [perma-jobs](game/ai-tasks.md#perma-jobs)).
   `CharacterCold.Jobs` is the ordered list; `AddJob` (Shift + right click on a finished machine or storage) adds through the original's rules
   (remap, duplicate refusal, companion, switch on); `RemoveJob` is the list's X. Every `JobCheckTicks` 10 (staggered by slot) a player character
-  that is idle or on a job takes the first job that is not blocked, so a higher job takes over as soon as it can run and a blocked one passes
-  to the next; an order replaces the job's task, and the list resumes once the character is idle. Meitou runs two types; the others are kept,
+  that is idle (no task, following or wandering, as for the medic job) or on a job takes the first job that is not blocked, so a higher job takes over as soon as it can run and a blocked one passes
+  to the next; an order replaces the job's task, and the list resumes once the character is idle. A job that ends returns the
+  character to the following or wandering it took it from. Meitou runs two types; the others are kept,
   listed and saved:
   - 87 Operating machine: blocked while others hold every operator place or the machine has no work (no power; no queued research or craft; a
     farm with nothing ripe or dead; an empty input the operator cannot fill from its pack or a storage; a full output no storage takes).
