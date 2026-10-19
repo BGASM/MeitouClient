@@ -374,7 +374,7 @@ public class ProductionTests
     }
 
     /// <summary>
-    /// The installed Well (1921) at skill factor 1 on ground with no water value (yield 0.5) makes 36 x 0.5 water per game day (docs/game/buildings-production.md "Production"); the Small
+    /// The installed Well (1921) at skill factor 1 yields nothing on ground with no water value (the 0.5 fallback is not the player's), and at yield 0.5 makes 36 x 0.5 water per game day (docs/game/buildings-production.md "Production"); the Small
     /// Research Bench (1875) finishes a free level 1 research in its hours x G/24 seconds at its output rate 0.85.
     /// </summary>
     [Fact, Slow]
@@ -387,7 +387,8 @@ public class ProductionTests
         var labourer = rig.Add(0, StatsEnumerated.Labouring, Unit);
         var scientist = rig.Add(1, StatsEnumerated.Science, Unit);
         rig.World.RunTick();
-        Assert.Equal(0.5f, rig.Machine(0).Yield);
+        Assert.Equal(0f, rig.Machine(0).Yield);
+        rig.Machine(0).Yield = 0.5f;
         rig.World.Commands.Enqueue(new OperateOrder([labourer], rig.Sites[0]) { Tick = rig.World.Tick });
         rig.World.Commands.Enqueue(new OperateOrder([scientist], rig.Sites[1]) { Tick = rig.World.Tick });
         rig.World.RunTicks(30);

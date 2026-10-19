@@ -725,7 +725,8 @@ crafting benches, generators and batteries. Facts: [production](game/buildings-p
   - the recipe inputs and the output, as item counts plus a level or progress (engine choice: crops and water have no quality);
   - the storage grid of a `has inventory` building (a bench's books), as a real `Inventory`;
   - the farm's plants.
-- **Yield.** Set at creation from the ground under the building: a resource's value (0 becomes 0.5), and for a farm its
+- **Yield.** Set at creation from the ground under the building: a resource's value (`ResourceField.Yield`; 0 stays 0 for the player), ore from the
+  nearest foliage rock (`FoliageResourceNodes`, given by the host; none headless), and for a farm its
   fertility factor, crop match and water rate.
   - Fertility and the crop match come from the BIOME_GROUP's ENVIRONMENT_RESOURCES at the weather-area cell.
   - The altitude test uses the building's y.

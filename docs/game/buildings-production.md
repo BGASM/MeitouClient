@@ -268,7 +268,7 @@ research `14213358c`) default **Unknown**; 1 below.
 - outputRate = BUILDING `output rate` x functionality `production mult`; with `output per day`, / (2G) (loader
   `FUN_14029e7b0`). So a building makes `output rate x production mult x P/2 x s` cycles per game day.
 - yield (slot 120 via offset `0x46c`): 1 without `world resource mining`; else the resource at the position
-  ([resources](#resources)), 0 replaced by 0.5 for a non-natural site, at least 0.1 for a natural one.
+  ([resources](#resources)), at least 0.1 for a natural site; 0 becomes 0.5 for a building not the player's.
 - health x powerSat (slot 109): health `min(1, hp/max)`; powerSat the granted share of the demand, 1 with no demand.
 - upgrade = the research `production mult` of the building ([research](#research)), default 1.
 
@@ -296,12 +296,24 @@ holding at most 10. Save (`vfunc_17`/`18` `FUN_1402a1fa0` / `FUN_1402a23a0`, **O
 
 ### Resources
 
-(**Observed**, `FUN_140a13540`, `FUN_140a12ff0`.) The BIOME_GROUP at the position (areas map) names an
-ENVIRONMENT_RESOURCES record (`resources`). WATER and GROUND use the prefix `water` / `farming`: band = 1 between
-`<p> altitude min` and `max` (height y), ramping to 0 over `<p> altitude fade` below the min and above the max, else 0;
-value = band x `<p> mult` + `<p> min`. STONE uses a noise field (`stone noise zoom`, `cutoff`); IRON/COPPER/CARBON need a
-resource node within 1500 (falloff from the node radius, at least 25). The farm efficiency also reads the record's
-`arid`, `green`, `swamp` coverages (crop types 2, 1, 3).
+(**Observed**, `uses_world_resource_mining` `FUN_14029c670`, `uses_resources` `FUN_140a13540`,
+`FUN_140a12ff0`.) The BIOME_GROUP at the position (areas map) names an ENVIRONMENT_RESOURCES record (`resources`);
+field prefixes by MiningResource: `iron`, `stone`, `copper`, `carbon`, `water`, `farming`.
+- WATER and GROUND: band = 1 between `<p> altitude min` and `max` (height y), ramping to 0 over `<p> altitude fade`
+  below the min and above the max, else 0; value = band x `<p> mult` + `<p> min`.
+- STONE: the coverage noise of [foliage](../formats/foliage.md) (`Foliage_NoiseHashC`, five octaves) at scale `stone noise
+  zoom` x 1000, cutoff `stone noise cutoff`, boost 3 and cap 1 (**Verified** bytes `141f12ce0`/`ce4`), x `stone mult`.
+- IRON, COPPER, CARBON: the nearest rock of that resource within 1500 (3D, squared 2.25e6): its yield x (1 - f),
+  f = clamp((d² - r²) / (1500² - r²)), r = the rock's mean horizontal half-size, at least 25 (Meitou always 25: the term
+  moves the result under 0.5% for rocks up to 100). No `resources` record or no rock: 0.
+- Rocks are BUILDINGs with `is foliage` placed by the foliage system as a FOLIAGE_MESH's `building type` ("Iron
+  Resource", "Copper Resource", "Stone Resource"; functionality 1 with the resource, not 27). A rock is a natural
+  site: its yield is the resources record's `<p> mult` where it stands (0.1 when missing), at least 0.1
+  (`FarmBuilding::vfunc_92` returns it).
+- A building that is not the player's (`FUN_140546dd0`: its owner's `+0x250`, the test also used by research
+  upgrades and generator fuel) yields 0.5 where it would get 0; the player's yields 0.
+- The farm efficiency also reads the record's `arid`, `green`, `swamp` coverages (crop types 2, 1, 3).
+- Mining the rocks directly and the prospecting window are not in the engine.
 
 ## Crafting
 

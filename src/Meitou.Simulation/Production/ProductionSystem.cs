@@ -55,18 +55,18 @@ public sealed partial class ProductionSystem : ITickSystem
     // Some character may still hold a machine that is gone.
     bool sweep;
 
-    public ProductionSystem(GameDatabase db, GameConstants constants, BodyOptions options, ItemFactory items, BiomeMap? biomes, ProductionSettings? settings = null)
+    public ProductionSystem(GameDatabase db, GameConstants constants, BodyOptions options, ItemFactory items, BiomeMap? biomes, ProductionSettings? settings = null, IResourceNodes? nodes = null)
     {
         this.db = db;
         this.constants = constants;
         this.items = items;
         Settings = settings ?? new ProductionSettings();
         xp = new XpService(constants, options);
-        resources = new ResourceField(db, biomes);
+        resources = new ResourceField(db, biomes, nodes);
     }
 
     public ProductionSystem(PopulationData data, ProductionSettings? settings = null)
-        : this(data.Db, data.Bodies.Constants, data.BodyOptions, data.Items, data.Biomes, settings)
+        : this(data.Db, data.Bodies.Constants, data.BodyOptions, data.Items, data.Biomes, settings, data.ResourceNodes)
     {
     }
 
@@ -115,12 +115,8 @@ public sealed partial class ProductionSystem : ITickSystem
             m.WaterRate = farm.ConsumptionRate / MachineData.DaySeconds * (farm.Indoor ? 1 : resources.WaterUsage(p.X, p.Z));
             Replant(world, m);
         }
-        else if (data.Resource is MachineData.WaterResource or MachineData.GroundResource)
-        {
-            // A non-natural site with nothing there still yields half (Observed, ProductionBuilding vfunc_91); the other resources need nodes (not modelled: 1).
-            float v = resources.Value(data.Resource, p.X, p.Y, p.Z);
-            m.Yield = v == 0 ? 0.5f : v;
-        }
+        // A player's mine yields what the ground or the nearest rock gives, 0 for nothing (the original's 0.5 for nothing is for buildings not the player's; Observed, uses_world_resource_mining).
+        else if (data.Resource != 0) m.Yield = resources.Yield(data.Resource, p);
         world.Machines.Add(m);
         return m;
     }

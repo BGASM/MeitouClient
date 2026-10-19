@@ -209,12 +209,58 @@ public sealed class ResourceField
 {
     readonly BiomeMap? map;
     readonly GameDatabase db;
+    readonly IResourceNodes? nodes;
     readonly Dictionary<int, GameRecord?> resourcesOf = [];
 
-    public ResourceField(GameDatabase db, BiomeMap? map)
+    /// <summary>How far a mine finds a rock of its resource (<b>Observed</b>, <c>uses_resources</c>: 1500², 2.25e6).</summary>
+    public const float NodeRange = 1500;
+    public const int IronResource = 1, StoneResource = 2, CopperResource = 3, CarbonResource = 4;
+
+    public ResourceField(GameDatabase db, BiomeMap? map, IResourceNodes? nodes = null)
     {
         this.db = db;
         this.map = map;
+        this.nodes = nodes;
+    }
+
+    /// <summary>The field prefix of a MiningResource (<c>read_stone_n3</c>).</summary>
+    static string Prefix(int resource) => resource switch
+    {
+        IronResource => "iron", StoneResource => "stone", CopperResource => "copper", CarbonResource => "carbon", MachineData.WaterResource => "water", MachineData.GroundResource => "farming", _ => "",
+    };
+
+    /// <summary>
+    /// A player building's <c>world resource mining</c> yield at a position (<b>Observed</b>, <c>uses_world_resource_mining</c> -> <c>uses_resources</c>): WATER and GROUND as
+    /// <see cref="Value"/>; STONE the coverage noise (<c>Foliage_NoiseHashC</c>: scale <c>stone noise zoom</c> x 1000, cutoff <c>stone noise cutoff</c>, boost 3 and cap 1,
+    /// <b>Verified</b> bytes) x <c>stone mult</c>; IRON, COPPER and CARBON the nearest rock of the resource within <see cref="NodeRange"/>: its own yield x (1 - falloff), falloff
+    /// = (d² - r²) / (1500² - r²) clamped, r² at least 625. Nothing (0) without a resources record or a rock; the original's 0.5 for nothing applies to buildings not the player's.
+    /// </summary>
+    public float Yield(int resource, System.Numerics.Vector3 at)
+    {
+        if (resource is MachineData.WaterResource or MachineData.GroundResource) return Value(resource, at.X, at.Y, at.Z);
+        if (Resources(at.X, at.Z) is not { } r) return 0;
+        if (resource == StoneResource)
+            return World.FoliageNoise.Coverage(at.X, at.Z, r.GetFloat("stone noise zoom") * 1000, r.GetFloat("stone noise cutoff"), 3, 1) * r.GetFloat("stone mult");
+        if (nodes is null || Prefix(resource).Length == 0) return 0;
+        ResourceNode? best = null;
+        float bestD = float.MaxValue;
+        foreach (var node in nodes.Near(resource, at.X, at.Z, NodeRange))
+        {
+            float d = System.Numerics.Vector3.DistanceSquared(node.Position, at);
+            if (d < bestD) (best, bestD) = (node, d);
+        }
+        const float Range2 = NodeRange * NodeRange;
+        if (best is not { } n || bestD > Range2) return 0;
+        float r2 = Math.Min(Range2, MathF.Max(625, n.Radius * n.Radius));
+        float falloff = Math.Clamp((bestD - r2) / (Range2 - r2), 0, 1);
+        return NodeYield(resource, n.Position) * (1 - falloff);
+    }
+
+    /// <summary>A rock's own yield (its natural site's, <c>FarmBuilding::vfunc_92</c>): the resources record's <c>&lt;p&gt; mult</c> where it stands, 0.1 when missing, at least 0.1.</summary>
+    public float NodeYield(int resource, System.Numerics.Vector3 at)
+    {
+        string key = Prefix(resource) + " mult";
+        return Resources(at.X, at.Z) is { } r && r.Floats.ContainsKey(key) ? MathF.Max(0.1f, r.GetFloat(key)) : 0.1f;
     }
 
     GameRecord? Group(float x, float z)

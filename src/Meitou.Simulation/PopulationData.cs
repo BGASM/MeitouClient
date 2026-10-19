@@ -92,6 +92,8 @@ public sealed class PopulationData
     public IReadOnlyList<int> SiteFactions { get; init; } = [];
     /// <summary>The area sectors and their BIOME_GROUPs (6.2, 6.3): when set, zones get their homeless squads and the biome groups their nests; null: no wild population (the worlds of the pinned tests).</summary>
     public BiomeMap? Biomes { get; init; }
+    /// <summary>The world's mineable rocks (ore mines' yield); null: none known, so ore mines yield nothing.</summary>
+    public Meitou.Data.Gameplay.Construction.IResourceNodes? ResourceNodes { get; set; }
     /// <summary>The road network off-screen squads may travel by (null: none, they go straight).</summary>
     public RoadNetwork? Roads { get; init; }
     /// <summary>The new-game options that change the body mechanics (hunger time, chance of death...).</summary>
