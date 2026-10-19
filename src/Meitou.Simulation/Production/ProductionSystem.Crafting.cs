@@ -55,20 +55,29 @@ public sealed partial class ProductionSystem
     void Bind(World world, Machine m, CraftState state, CraftJob job)
     {
         if (state.Bound == job.Option.Key) return;
-        state.Bound = job.Option.Key;
-        var inputs = job.Recipe.Inputs;
         for (int k = 0; k < m.Inputs.Length; k++)
         {
             var slot = m.Inputs[k];
-            string item = k < inputs.Count ? inputs[k].Item : slot.Recipe.Item;
-            if (slot.Item != item && slot.Count > 0 && items.Create(slot.Item, slot.Count) is { } back)
+            if (slot.Item != ItemOf(m, job, k) && slot.Count > 0 && items.Create(slot.Item, slot.Count) is { } back)
             {
                 world.GroundItems.Drop(back, m.Position, 0);
                 slot.Count = 0;
                 slot.Level = 0;
             }
-            slot.Item = item;
-            slot.Rate = k < inputs.Count ? inputs[k].PerItem : 0;
+        }
+        Apply(m, state, job);
+    }
+
+    static string ItemOf(Machine m, CraftJob job, int k) => k < job.Recipe.Inputs.Count ? job.Recipe.Inputs[k].Item : m.Inputs[k].Recipe.Item;
+
+    /// <summary>Sets the sections' items and rates for a craft (also on load, before the saved section items are read back).</summary>
+    static void Apply(Machine m, CraftState state, CraftJob job)
+    {
+        state.Bound = job.Option.Key;
+        for (int k = 0; k < m.Inputs.Length; k++)
+        {
+            m.Inputs[k].Item = ItemOf(m, job, k);
+            m.Inputs[k].Rate = k < job.Recipe.Inputs.Count ? job.Recipe.Inputs[k].PerItem : 0;
         }
     }
 
@@ -197,6 +206,7 @@ public sealed partial class ProductionSystem
         string key = model is null ? item : item + "|" + model;
         if (m.Craft is not { } state || m.Data.Craft?.Options.FirstOrDefault(o => o.Key == key) is not { } option) return;
         state.Queue.Add(new CraftJob(RecipeOf(m, option)) { Progress = Math.Clamp(progress, 0, 1), Critical = critical });
+        if (state.Queue.Count == 1) Apply(m, state, state.Queue[0]);
     }
 
     /// <summary>A finished item taken from a bench's output into a character's inventory (what does not fit stays).</summary>

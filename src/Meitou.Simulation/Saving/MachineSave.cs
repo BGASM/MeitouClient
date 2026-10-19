@@ -116,8 +116,13 @@ public static class MachineSave
             {
                 if (item.Section == "out" && m.Craft is { } craft) { if (SavedKit.ItemOf(item, factory) is { } done) craft.Done.Add(done); }
                 else if (item.Section == "out" && m.Output is { } o && o.Recipe.Item == item.BaseId) o.Count = Math.Min(o.Recipe.Capacity, o.Count + item.Quantity);
-                else if (item.Section.StartsWith("in", StringComparison.Ordinal) && int.TryParse(item.Section.AsSpan(2), CultureInfo.InvariantCulture, out int k) && k < m.Inputs.Length && m.Inputs[k].Item == item.BaseId)
+                else if (item.Section.StartsWith("in", StringComparison.Ordinal) && int.TryParse(item.Section.AsSpan(2), CultureInfo.InvariantCulture, out int k) && k < m.Inputs.Length
+                    && (m.Inputs[k].Item == item.BaseId || m.Craft is not null && m.Inputs[k].Count == 0))
+                {
+                    // A crafting bench's sections hold its last craft's ingredients, also with nothing queued.
+                    m.Inputs[k].Item = item.BaseId;
                     m.Inputs[k].Count = Math.Min(m.Inputs[k].Recipe.Capacity, m.Inputs[k].Count + item.Quantity);
+                }
                 else storage.Add(item);
             }
             if (m.Storage is { } grid && storage.Count > 0)
