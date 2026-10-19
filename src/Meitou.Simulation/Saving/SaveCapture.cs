@@ -30,7 +30,13 @@ public sealed class SaveCaptureOptions
     /// handle. Null: no zone files are made and new towns get new handles.
     /// </summary>
     public WorldLevelData? Levels { get; init; }
+
+    /// <summary>The strategy camera's view, written into CAMERA <c>pos</c> / <c>rot</c> / <c>zoom</c> (docs/formats/camera.md "Saved camera"). Null: the record keeps what it had.</summary>
+    public SavedView? View { get; init; }
 }
+
+/// <summary>A strategy-camera view: the pivot on the ground, yaw (0 looks along -Z), pitch (radians below the horizon) and boom length.</summary>
+public readonly record struct SavedView(Vector3 Pivot, float Yaw, float Pitch, float Distance);
 
 /// <summary>
 /// Turns a <see cref="World"/> into a <see cref="SaveGame"/> (docs/simulation.md "Saves"). With the <see cref="LoadedSave"/> the world was loaded from, the save it came
@@ -78,6 +84,14 @@ public static partial class SaveCapture
         camera.SetMods(options.DataFiles);
         if (data.PlayerFaction >= 0) camera.PlayerFactionName = data.Factions[data.PlayerFaction].Name;
         camera.Record.Strings[SaveLoader.SeedKey] = world.Seed.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (options.View is { } view)
+        {
+            // FUN_1406b0740: the pivot's position and orientation, the camera's local z, alt and the tracked object; Meitou's camera follows nobody.
+            (camera.Rotation, camera.Zoom) = KenshiCamera.ToSaved(view.Yaw, view.Pitch, view.Distance);
+            camera.Position = view.Pivot;
+            camera.Record.Floats["alt"] = 0;
+            camera.Tracking = Hand.Null;
+        }
 
         UpdateFactions(game, data, loaded);
         WriteTownKnowledge(builder, data, world.Player);

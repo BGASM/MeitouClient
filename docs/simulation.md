@@ -800,6 +800,15 @@ serially at a boundary, write/read on workers; `ReplaceWorld` publishes a succes
 world and preserves the running world on failure. [save.md](formats/save.md) owns file keys,
 handles and original saved/derived/regenerated state.
 
+Code map:
+- **Capture.** `SaveCapture.PrepareBase` clones the loaded `SaveGame` (else builds a fresh one with `SaveBuilder`). `Capture` writes what
+  the world models over the clone, so every key Meitou does not model passes through. Characters from the loaded save keep their own records
+  (`WriteCharacter` gets their `SaveCharacter`; `SaveBuilder.AddCharacter` only makes new ones). Per-system key helpers live in `Saving/*Save.cs`.
+- **Host hooks.** `SaveCaptureOptions` carries what only the host knows: `Bodies`, `View` (the strategy camera). `GameHost.CaptureOptions`
+  fills them in. `GameHost.SwapInSave` applies host-side state after `SaveLoader.Load`: the camera and the weather.
+- **Load.** `SaveLoader.Load` makes characters before the first tick. The character table copies its previous state over the next one at
+  `BeginTick`, so state that must reach a tick is not written into `Next` there. It goes through `World.Commands` like player input.
+
 ### Quicksave and quickload
 
 F5/F9 and named save menus share mapping. Restore clock, player money/faction, relation/prosperity,
@@ -807,7 +816,7 @@ player squads, character transforms/names/roles, stats/medical parts, appearance
 bounties, bed/cage state and sentence, and registered buildings' locks and doors (into the zone files: every visited zone gets one, made from the level data when the
 loaded save has none, [save.md](formats/save.md#zone-files)) and selection; the host restores and writes every region's season, weather, strength and wind ([BIOMES](formats/save.md#biomes-type-28-quicksave-weather-per-region)). NPC platoons whose `basetown` is a placed town load as their saved characters at their saved positions: town-bound ones (not travellers) are pinned to the town (no trips, AI-run, homed in the building their `homebuilding` handle names, else at the site) and a town holding any makes no squads of its own; travellers become roaming stand-ins made from the saved characters on activation. A platoon that unloads keeps its members' state. Meitou saves write them back and the population's own squads as new platoons with their town and home building by handle ([save.md](formats/save.md#npc-platoons-meitou-mapping)). A save's nests are the wild layout's first, and its wild platoons load as themselves bound to their nest (`hometown`) or the sector they stand in, which make only the rest; Meitou saves write the nests made so far and the wild squads the original's way, the others rolled again from the saved seed ([save.md](formats/save.md#nests-town-list)). Orders/paths, animation,
 combat engagement, wound-list/pain, base-game building state beyond locks and doors (interiors, inventories: a new zone file leaves them to the original's
-generation), ground items, camera/speed are not fully restored. Loaded hashes need not match captured hashes: compare carried fields and agreement
+generation), ground items and game speed are not fully restored. The camera view is ([saved camera](formats/camera.md#saved-camera)). Loaded hashes need not match captured hashes: compare carried fields and agreement
 between repeated loads. QuickSaveTests checks carried fields and repeatable loading.
 
 **Crime and jail** (keys in [save.md](formats/save.md#locks-cages-and-sentences)). Saved: bounty ledger, held state and sentence, the escaped flag, the recently-wanted
