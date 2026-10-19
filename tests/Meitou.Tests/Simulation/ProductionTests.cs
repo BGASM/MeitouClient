@@ -18,7 +18,8 @@ namespace Meitou.Tests.Simulation;
 /// <summary>Production (docs/simulation.md "Production", docs/game/buildings-production.md "Production", "Farming", "Research"): wells, farms, research benches.</summary>
 public class ProductionTests
 {
-    const string Water = "50-t", Crop = "51-t", Book = "52-t", Gadget = "53-t", Well = "60-t", Farm = "61-t", Bench = "62-t", Workshop = "63-t", Study = "70-t";
+    const string Water = "50-t", Crop = "51-t", Book = "52-t", Gadget = "53-t", Well = "60-t", Farm = "61-t", Bench = "62-t", Workshop = "63-t", Study = "70-t",
+        Fuel = "54-t", Generator = "64-t", Battery = "65-t", Lamp = "66-t", BigLamp = "67-t", PoweredWorkshop = "68-t";
     /// <summary>The stat that gives skill factor 1: lerp(0.5, 1.4, x/100) = 1.</summary>
     const float Unit = 100 / 1.8f;
     const int PlayerFaction = 2;
@@ -30,7 +31,7 @@ public class ProductionTests
     /// <summary>
     /// A well (0.1 water per second at skill 1), an indoor farm (4 plants, 1 h to grow, 2 crops each at farming 33.3, 1 water per game hour) and a level 1 research bench with
     /// a 4 x 4 grid, one research of 0.3 h costing 2 books, and a workshop crafting a gadget of 1 crop in 1 h (its section consumes water until a craft rebinds it; the output
-    /// holds 3).
+    /// holds 3); a generator (20 power, 0.01 x P fuel a second at full load), a battery (rate 10, store 30 s), lamps drawing 4 and 8 and the workshop drawing 5.
     /// </summary>
     static GameDatabase Database()
     {
@@ -78,9 +79,17 @@ public class ProductionTests
         var workshopFn = Function("84-t", CraftBench.CraftingFunction, (int)StatsEnumerated.Engineering);
         workshopFn.References["item crafts"] = [new FcsReference(Gadget, 3, 0, 0)];
         workshopFn.References["consumes"] = [new FcsReference(Water, 5, 100, 0)];
+        FcsRecord Powered(FcsRecord building, int output, int capacity = 0) { building.Ints["power output"] = output; building.Ints["power capacity"] = capacity; return building; }
+        var generatorFn = Function("85-t", MachineData.GeneratorFunction, 0);
+        generatorFn.Floats["production mult"] = 0.01f;
+        generatorFn.References["consumes"] = [new FcsReference(Fuel, 10, 100, 0)];
+        var batteryFn = Function("86-t", MachineData.BatteryFunction, 0);
+        var lampFn = Function("87-t", 15, 0);
         var file = new FcsFile();
         file.Records.AddRange([Item(Water, "Water"), Item(Crop, "Crop"), Item(Book, "Book"), wellFn, farmFn, benchFn, farmData, Building(Well, "Test Well", "80-t"), farm, bench, study, gadget, workshopFn,
-            Building(Workshop, "Test Workshop", "84-t")]);
+            Building(Workshop, "Test Workshop", "84-t"), Item(Fuel, "Fuel"), generatorFn, batteryFn, lampFn, Powered(Building(Generator, "Test Generator", "85-t"), 20),
+            Powered(Building(Battery, "Test Battery", "86-t"), 10, 30), Powered(Building(Lamp, "Lamp", "87-t"), -4), Powered(Building(BigLamp, "Big Lamp", "87-t"), -8),
+            Powered(Building(PoweredWorkshop, "Powered Workshop", "84-t"), -5)]);
         var db = new GameDatabase();
         db.Apply(file, "test.mod");
         return db;
@@ -141,16 +150,17 @@ public class ProductionTests
 
     // ------------------------------------------------------------------ determinism
 
-    /// <summary>A well, a farm and a workshop are worked, water goes into the farm, books into the bench and crops into the workshop, the study and three gadgets are
-    /// queued; hashes at six checkpoints.</summary>
-    static List<ulong> Scripted(int threads, out (int Water, int Crops, bool Studied, int Gadgets) seen)
+    /// <summary>A well, a farm and a powered workshop are worked, water goes into the farm, books into the bench and crops into the workshop, the study and three gadgets
+    /// are queued, a fuelled generator powers the workshop and charges a battery; hashes at six checkpoints.</summary>
+    static List<ulong> Scripted(int threads, out (int Water, int Crops, bool Studied, int Gadgets, float Charge) seen)
     {
-        using var rig = new Rig(Database(), Constants, [Well, Farm, Bench, Workshop], threads);
+        using var rig = new Rig(Database(), Constants, [Well, Farm, Bench, PoweredWorkshop, Generator, Battery], threads);
         var labourer = rig.Add(0, StatsEnumerated.Labouring, Unit);
         var farmer = rig.Add(1, StatsEnumerated.Farming, 100 / 3f, (Water, 5));
         var scientist = rig.Add(2, StatsEnumerated.Science, Unit, (Book, 3));
         var crafter = rig.Add(3, StatsEnumerated.Engineering, Unit, (Crop, 5));
         rig.World.RunTick();
+        rig.Production.Ensure(rig.World, rig.World.Buildings.Find(rig.Sites[4])!)!.Inputs[0].Count = 10;
         rig.World.Commands.Enqueue(new OperateOrder([labourer], rig.Sites[0]) { Tick = 2 });
         rig.World.Commands.Enqueue(new OperateOrder([farmer], rig.Sites[1]) { Tick = 2 });
         rig.World.Commands.Enqueue(new OperateOrder([scientist], rig.Sites[2]) { Tick = 2 });
@@ -167,15 +177,15 @@ public class ProductionTests
             rig.World.RunTicks(target - (int)rig.World.Tick);
             hashes.Add(rig.World.StateHash());
         }
-        seen = (rig.Machine(0).Output!.Count, rig.Machine(1).Output!.Count, rig.World.Research.IsDone(Study), rig.Machine(3).Craft!.Done.Sum(i => i.Quantity));
+        seen = (rig.Machine(0).Output!.Count, rig.Machine(1).Output!.Count, rig.World.Research.IsDone(Study), rig.Machine(3).Craft!.Done.Sum(i => i.Quantity), rig.Machine(5).Charge);
         return hashes;
     }
 
     [Fact]
-    public void Wells_farms_research_and_crafting_hash_the_same_at_1_4_and_16_threads()
+    public void Wells_farms_research_crafting_and_power_hash_the_same_at_1_4_and_16_threads()
     {
         var one = Scripted(1, out var seen);
-        Assert.True(seen.Water > 0 && seen.Crops > 0 && seen.Studied && seen.Gadgets == 3, $"{seen}");
+        Assert.True(seen.Water > 0 && seen.Crops > 0 && seen.Studied && seen.Gadgets == 3 && seen.Charge > 0, $"{seen}");
         Assert.Equal(one, Scripted(4, out _));
         Assert.Equal(one, Scripted(16, out _));
     }
@@ -291,6 +301,37 @@ public class ProductionTests
         }
     }
 
+    // ------------------------------------------------------------------ power
+
+    /// <summary>
+    /// A 20 generator powers lamps of 4 and 8 and charges the battery (rate 10) from the 8 left until its 30 s store is full, then runs at load 12/20; out of fuel, the battery
+    /// takes over the tick after and its 10 is shared smallest demand first (4, then 6 of 8), draining 1 s of store a second (docs/game/buildings-production.md "Power").
+    /// </summary>
+    [Fact]
+    public void A_town_shares_generator_power_charges_its_battery_and_falls_back_on_it()
+    {
+        using var rig = new Rig(Database(), Constants, [Generator, Lamp, BigLamp, Battery]);
+        rig.World.RunTick();
+        var generator = rig.Production.Ensure(rig.World, rig.World.Buildings.Find(rig.Sites[0])!)!;
+        generator.Inputs[0].Count = 10;
+        rig.World.RunTicks(2);
+        var (lamp, big, battery) = (rig.Machine(1), rig.Machine(2), rig.Machine(3));
+        Assert.Equal((4f, 8f, 8f, 1f, 1f), (lamp.Granted, big.Granted, battery.Granted, lamp.Power, big.Power));
+        for (int t = 0; t < 4000 && battery.Charge < 30; t++) rig.World.RunTick();
+        rig.World.RunTick();
+        Assert.Equal(30, battery.Charge);
+        Assert.Equal(0.6f, generator.Usage, 0.001f);
+
+        generator.Inputs[0].Count = 0;
+        generator.Inputs[0].Level = 0;
+        rig.World.RunTicks(2);
+        Assert.Equal((4f, 6f, -10f, 1f, 0.75f), (lamp.Granted, big.Granted, battery.Granted, lamp.Power, big.Power));
+        float charge = battery.Charge;
+        int ticks = (int)(10 / rig.World.TickSeconds);
+        rig.World.RunTicks(ticks);
+        Assert.Equal(charge - ticks * rig.World.TickSeconds, battery.Charge, 0.01f);
+    }
+
     // ------------------------------------------------------------------ the installed game
 
     /// <summary>
@@ -366,5 +407,26 @@ public class ProductionTests
         Assert.InRange(well.Count + well.Progress, 36 * 0.5f / 4 * 0.95f, 36 * 0.5f / 4 * 1.1f);
         Assert.True(done > 0, research.Name);
         Assert.InRange((done - started) * rig.World.TickSeconds, expectedSeconds * 0.9f, expectedSeconds * 1.02f);
+    }
+
+    /// <summary>
+    /// The installed Small Generator (1976, 40) with Upgraded Small Generators gives 55; the Battery Bank (1855, rate 40, store 60) with Battery Power, Advanced Battery Power,
+    /// Battery Capacity and Advanced Battery Capacity charges at 60 into 180; the Wind Generator (1999, 50, no fuel) gives its output x the wind fraction
+    /// (docs/game/buildings-production.md "Power").
+    /// </summary>
+    [Fact, Slow]
+    public void The_installed_generators_and_battery_take_their_research_improvements()
+    {
+        var db = InstallData.BaseGame;
+        Assert.SkipWhen(db is null, "Kenshi install not found");
+        using var rig = new Rig(db!, GameConstants.FromDatabase(db!), ["1976-gamedata.base", "1855-gamedata.base", "1999-gamedata.base"]);
+        string[] names = ["Upgraded Small Generators", "Battery Power", "Advanced Battery Power", "Battery Capacity", "Advanced Battery Capacity"];
+        rig.World.Research.Set(db!, [.. names.Select(n => db!.OfType(FcsRecordType.RESEARCH).First(r => r.Name == n).StringId)]);
+        rig.World.RunTick();
+        rig.Production.Ensure(rig.World, rig.World.Buildings.Find(rig.Sites[0])!)!.Inputs[0].Count = 10;
+        rig.World.RunTicks(2);
+        var (generator, battery, wind) = (rig.Machine(0), rig.Machine(1), rig.Machine(2));
+        Assert.True(wind.Data.IsWind && !generator.Data.IsWind && battery.Data.IsBattery);
+        Assert.Equal((55f, 50 * ProductionSystem.WindFraction, 60f, 180f), (generator.Demand, wind.Demand, battery.Granted, battery.Store));
     }
 }
