@@ -34,7 +34,7 @@ sealed class GameOptions
 
     public const string Usage = """
         meitou [where] [options]     boots into the world with the Kenshi camera (default --town "The Hub")
-          --fps-limit <n>            frame limit when vsync is off (default 240 from meitou.user.json; 0 = unlimited)
+          --fps-limit <n>            frame limit when vsync is off (default 150 from meitou.user.json; 0 = unlimited)
           --vsync / --no-vsync       vsync (default off)
           --seed <n>                 the world seed (default 0)
           --ui <faithful|meitou>      UI mode, independent of graphics; also available in the settings (default faithful)

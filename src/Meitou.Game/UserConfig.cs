@@ -15,8 +15,8 @@ sealed class UserConfig
 {
     public const string FileName = "meitou.user.json";
 
-    /// <summary>Frames per second when vsync is off; 0 = unlimited. Engine default 240.</summary>
-    public int FpsLimit { get; set; } = 240;
+    /// <summary>Frames per second when vsync is off; 0 = unlimited. Engine default 150.</summary>
+    public int FpsLimit { get; set; } = 150;
     public bool VSync { get; set; }
     public Meitou.Data.Ui.UiMode UiMode { get; set; } = Meitou.Data.Ui.UiMode.Meitou;
     /// <summary>The unit of the run speed in the information panel (Interface settings): mph as the game, or km/h.</summary>
