@@ -109,7 +109,7 @@ public sealed partial class ProductionSystem
             float roll = Rng.Float(Rng.Hash(world.Seed, Rng.StableHash(m.Site), RngPurpose.Craft, (ulong)(uint)state.Rolls++));
             job.Critical = (byte)(roll < chance ? 1 : 0);
         }
-        float amount = m.Data.Rate * s * Settings.ProductionOption * constants.ProductionSpeed * dt / MathF.Max(1e-3f, job.Seconds);
+        float amount = m.Data.Rate * WorkFactor(world, m) * s * Settings.ProductionOption * constants.ProductionSpeed * dt / MathF.Max(1e-3f, job.Seconds);
         foreach (var input in m.Inputs)
             if (input.Rate > 0 && input.Level + input.Count < input.Rate * amount) amount = (input.Level + input.Count) / input.Rate;
         amount = MathF.Min(amount, 1 - job.Progress);

@@ -422,7 +422,8 @@ to `FUN_140836b70`: contribution k of the frame is x 0.6^k (counter `+0x174`, cl
   player's research benches near the player (`FUN_14082e750`, `FUN_14082e810`), then removed; a paid id is remembered and
   never charged again. Partial progress is kept when an item leaves the queue.
 - **Complete** (`FUN_140834550`): leaves the queue, joins the finished set, `improve buildings` applied
-  (`FUN_140831a60`: `production mult`, additive `power increase`, `power capacity increase` per listed building), lists
+  (`FUN_140831a60`, the research's own fields for each listed building: `production mult` replaces the building's, so the
+  last finished wins; `power increase` and `power capacity increase` add; lookup `FUN_14082ec70`, default 1, 0, 0), lists
   rebuilt, message "Research complete: {1}", sound `Thing_Complete`.
 - **Tech levels** (**Verified**, probe): Tech Level 2 time 4 (6 Book, requires Small House), 3 time 10 (10 Book),
   4 time 16 (4 Ancient Science Book), 5 time 24 (8 Ancient Science Book), 6 time 32 (2 AI Core), each after the previous.
@@ -433,12 +434,35 @@ to `FUN_140836b70`: contribution k of the frame is x 0.6^k (counter `+0x174`, cl
   panels); the bench's `Kenshi_InventoryResearchWindow` (`ResearchButton`); HUD `ResearchProgressBar`; header
   "RESEARCH - LEVEL {1} (CURRENT RATE: {2}x)" (`FUN_140494af0`).
 
-## Power and storage
+## Power
 
-**Observed**: a building's power is data `power output` plus research `power increase`; capacity data plus increase, x
-health. A town shares generator supply among consumers max-min fairly, batteries cover the shortfall and charge from
-surplus (`Town::vfunc_87` `FUN_14092cd60`). Wind fraction, fuel units and the minimum powered share are **Unknown**.
-Storage (**Verified**, 603 buildings): 87 have `has inventory`; default 18 x 18, `itemtype limit` 4; `stackable bonus
+**Observed** unless noted. Per building: `power output` (generator output, battery rate, consumer draw when negative)
+and `power capacity` (battery store, "in seconds" per fcs.def), plus research ([improvements](#research)).
+- **Kinds** (registration `FUN_14092da80`, from switching on `vfunc_99`): capacity > 0 a battery, else output > 0 a
+  generator; output < 0 a consumer. Function 5 without `consumes` is a wind generator, otherwise fuelled; batteries
+  (23) share the generator class (factory `FUN_14057cc70`).
+- **Generator output** (`GeneratorBuilding::vfunc_166`): health x (output + increase) when switched on (`power on`) and
+  fuelled ("Out of fuel" otherwise). Wind: x a value read from the turbine's animation (`FUN_1404cbd90`, **Unknown**
+  units), nothing below 1. A battery's output is its rate while it holds charge.
+- **Demand** (`vfunc_163`): a consumer's |output + increase|, x operators / raw `max operators` when that is above 0; a
+  battery's rate while below its capacity health x (capacity + increase) (`FUN_140297650`).
+- **Town frame** (`Town::vfunc_87`): consumers sorted by ascending demand (`FUN_140927350`); each takes
+  min(demand, supply left / consumers left). Consumers left short with `gets battery` are counted; if batteries were in
+  use the previous frame (town `+0x470`) they share the batteries' output the same way. With no supply left the
+  batteries drain by what was drawn (`FUN_1402978d0`) and the town enters battery mode; with a surplus it leaves it and
+  the batteries charge from it, each at most its rate. Factor = granted / demand (1 with no demand), x health
+  (`vfunc_109`); production, crafting, research and farm growth are scaled by it.
+- **Fuel** (`vfunc_183` on generators): inputs drawn as a producer's, x the load (`GeneratorBuilding::vfunc_167`):
+  output / rated x (battery charging + consumer demand) / all generators' output, at most 1 ("Fuel Consumption {1}%").
+- **Battery store** (`vfunc_27`): += flow / rate x dt, clamped to 0..capacity.
+- **Save** (building `vfunc_17`/`18`): bools `power on`, `gets battery`, `broken`; float `batterycharge`.
+- **Status strings** (`GeneratorBuilding::vfunc_114`): "Out of fuel", battery "Charging" / "Draining" / "Stored" / "Empty".
+- Data (**Verified**, probe): Small Generator 40, Generator II 100, Wind Generator 50, Small Wind 25, Wind II 100,
+  Battery Bank 40 / capacity 60; Weapon Smith -8, refineries -10 to -40, Research Bench III-VI -10 to -30. Power
+  research: Upgraded Small Generators +15, Amplified Generators +15, Battery Power / Advanced +10 each, Battery
+  Capacity / Advanced +60 each.
+
+**Storage** (**Verified**, 603 buildings): 87 have `has inventory`; default 18 x 18, `itemtype limit` 4; `stackable bonus
 mult` 1 to 100000; `limit inventory` restricts the items. Locks and containers: [locks](locks.md).
 
 ## Unknowns
@@ -446,5 +470,5 @@ mult` 1 to 100000; `limit inventory` restricts the items. Locks and containers: 
 - How often Building slot 28 resets the builder counter, the work distance of builders, which storages
   `Task_EmptyMachine_BuildMats` fetches from, and what `FUN_14025c6d0` (holding dismantle work) tests.
 - Event types of the queue at `DAT_1421346d8` other than 8 (research progress) and 11 (build work).
-- Generator fuel and wind units and the minimum powered share.
+- The wind generator's animation value (its output share), and what `vfunc_0x520` (a consumer counted as active) tests.
 - Option slider defaults; the third value of reference triples; the record field of `BuildingClassType`.

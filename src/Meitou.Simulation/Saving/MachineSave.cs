@@ -9,7 +9,7 @@ namespace Meitou.Simulation.Saving;
 
 /// <summary>
 /// The machines of the player's buildings in a save (docs/simulation.md "Production"): the production and farm keys of each building's GAMESTATE_BUILDING (docs/game/buildings-production.md
-/// "Production" and "Farming": <c>production amount</c>, <c>resource mult</c>, <c>consumption amount-&lt;k&gt;</c>, <c>plant growth</c>, <c>plant death</c>, <c>plant start</c>, <c>plants harvested</c>,
+/// "Production", "Farming" and "Power": <c>production amount</c>, <c>resource mult</c>, <c>power on</c>, <c>gets battery</c>, <c>batterycharge</c>, <c>consumption amount-&lt;k&gt;</c>, <c>plant growth</c>, <c>plant death</c>, <c>plant start</c>, <c>plants harvested</c>,
 /// <c>save time</c>), and its items in an INVENTORY_STATE named first by the building's instance states (docs/formats/save.md "Zone files"). The items' sections are <c>in&lt;k&gt;</c>, <c>out</c>
 /// and, for the storage grid, <c>main</c> (the original's storage section name is <b>Unknown</b>; no sample save holds a player building with items, so the original reading these is unverified).
 /// A loaded farm's plants all take the farm's growth (the harvested ones -10): the stagger between plants is not saved.
@@ -54,6 +54,10 @@ public static class MachineSave
     static void WriteKeys(FcsRecord state, Machine m, double gameHours)
     {
         state.Floats["resource mult"] = m.Yield;
+        // The power keys (Observed, vfunc_17/18 of the building classes FUN_1402a14b0 / FUN_1402a1750).
+        state.Bools["power on"] = m.PowerOn;
+        state.Bools["gets battery"] = m.GetsBattery;
+        if (m.Data.IsBattery) state.Floats["batterycharge"] = m.Charge;
         if (m.Output is { } o) state.Floats["production amount"] = o.Progress;
         for (int k = 0; k < m.Inputs.Length; k++) state.Floats["consumption amount-" + k.ToString(CultureInfo.InvariantCulture)] = m.Inputs[k].Level;
         if (m.Craft is { } c) WriteCraft(state, c);
@@ -147,6 +151,9 @@ public static class MachineSave
     static void ReadKeys(FcsRecord state, Machine m)
     {
         if (state.Floats.TryGetValue("resource mult", out float y)) m.Yield = y;
+        m.PowerOn = state.Bools.GetValueOrDefault("power on", true);
+        m.GetsBattery = state.Bools.GetValueOrDefault("gets battery", true);
+        if (m.Data.IsBattery) m.Charge = Math.Max(0, state.Floats.GetValueOrDefault("batterycharge"));
         if (m.Output is { } o) o.Progress = state.Floats.GetValueOrDefault("production amount");
         for (int k = 0; k < m.Inputs.Length; k++) m.Inputs[k].Level = state.Floats.GetValueOrDefault("consumption amount-" + k.ToString(CultureInfo.InvariantCulture));
         if (m.Farm is not { } f || !state.Floats.ContainsKey("plant growth")) return;

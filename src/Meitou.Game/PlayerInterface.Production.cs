@@ -228,6 +228,29 @@ sealed partial class PlayerInterface
             bad = m.Status == 1;
             stats.Add(new("Output:", $"{o.Name} {N(o.Count)}/{N(o.Capacity)}", MainColour));
         }
+        // Power, in the original's words where it has them (GeneratorBuilding vfunc_114, vfunc_153); "No power" and "Low power" are Meitou's.
+        if (m.Power is { } pw)
+        {
+            string F(float v) => v.ToString("0.#", CultureInfo.InvariantCulture);
+            if (pw.Kind == PowerKind.Battery)
+            {
+                status = pw.Granted > 0 ? "Charging" : pw.Granted < 0 ? "Draining" : pw.Charge <= 0 ? "Empty" : "Stored";
+                bad = pw.Charge <= 0;
+                stats.Add(new("Charge:", P(pw.Store > 0 ? pw.Charge / pw.Store : 0), MainColour));
+            }
+            else if (pw.Kind == PowerKind.Generator)
+            {
+                status = pw.Fueled ? "Running" : "Out of fuel";
+                bad = !pw.Fueled;
+                stats.Add(new("Power:", F(pw.Demand), MainColour));
+                if (m.Inputs.Count > 0) stats.Add(new("Fuel Consumption", P(pw.Usage), MainColour));
+            }
+            else if (pw.Demand > 0)
+            {
+                if (pw.Granted < pw.Demand) { status = pw.Granted <= 0 ? "No power" : "Low power"; bad = true; }
+                stats.Add(new("Power:", $"{F(pw.Granted)}/{F(pw.Demand)}", MainColour, pw.Granted < pw.Demand ? BadColour : null));
+            }
+        }
         if (m.TechLevel > 0) stats.Add(new("Tech level:", N(m.TechLevel), MainColour));
         if (m.MaxOperators > 0) stats.Add(new("Workers:", $"{N(m.Operators)}/{N(m.MaxOperators)}", MainColour));
     }

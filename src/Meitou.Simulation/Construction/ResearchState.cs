@@ -87,6 +87,16 @@ public sealed class ResearchState
                     if (repetition < times) crafts.Add((kind, item));
             }
         UnlockedCrafts = crafts;
+        // Each finished repetition applies its improvements in finishing order: the multiplier is replaced, the increases add (Observed, FUN_140831a60).
+        var upgrades = new Dictionary<string, BuildingUpgrade>(StringComparer.Ordinal);
+        foreach (var id in completed)
+            if (db.Find(id) is { Type: FcsRecordType.RESEARCH } record && ResearchData.From(record) is { ImproveBuildings.Count: > 0 } r)
+                foreach (var building in r.ImproveBuildings)
+                {
+                    var u = upgrades.GetValueOrDefault(building, BuildingUpgrade.None);
+                    upgrades[building] = new BuildingUpgrade(r.ProductionMult, u.PowerIncrease + r.PowerIncrease, u.CapacityIncrease + r.CapacityIncrease);
+                }
+        Upgrades = upgrades;
         int level = 1;
         foreach (var id in completed)
             if (db.Find(id) is { Type: FcsRecordType.RESEARCH } r && r.GetBool("is level upgrade") && r.GetInt("level") is var l && l >= level) level = l + 1;
@@ -118,6 +128,10 @@ public sealed class ResearchState
     }
     /// <summary>Every repetition is finished.</summary>
     public bool Exhausted(GameDatabase db, string id) => Times(id) > RepeatsOf(db, id);
+    /// <summary>The finished research's <c>improve buildings</c> by BUILDING record.</summary>
+    public IReadOnlyDictionary<string, BuildingUpgrade> Upgrades { get; private set; } = new Dictionary<string, BuildingUpgrade>();
+    public BuildingUpgrade Upgrade(string building) => Upgrades.GetValueOrDefault(building, BuildingUpgrade.None);
+
     /// <summary>The crafts the finished research unlocks (kind and record; a weapon type or model by its own id).</summary>
     public IReadOnlySet<(CraftKind Kind, string Id)> UnlockedCrafts { get; private set; } = new HashSet<(CraftKind, string)>();
 
@@ -152,4 +166,10 @@ public sealed class ResearchState
         foreach (var id in paid) h.Add(Rng.StableHash(id));
         foreach (var (id, s) in partial.OrderBy(p => p.Key, StringComparer.Ordinal)) { h.Add(Rng.StableHash(id)); h.Add(s); }
     }
+}
+
+/// <summary>A building's research improvements (<b>Observed</b>, <c>FUN_14082ec70</c>, default 1, 0, 0): production multiplier, power output and capacity increases.</summary>
+public readonly record struct BuildingUpgrade(float ProductionMult, float PowerIncrease, float CapacityIncrease)
+{
+    public static BuildingUpgrade None { get; } = new(1, 0, 0);
 }

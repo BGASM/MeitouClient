@@ -312,6 +312,7 @@ public sealed partial class ProductionSystem : ITickSystem
         int bench = 0;
         foreach (var m in world.Machines.All)
         {
+            m.LastOperators = m.Operators;
             m.Operators = 0;
             if (m.Data.IsResearch && world.Buildings.Find(m.Site) is { Complete: true }) bench = Math.Max(bench, m.Data.TechLevel);
         }
@@ -354,6 +355,7 @@ public sealed partial class ProductionSystem : ITickSystem
             // Operating trains the stat (Observed, FUN_1408c7250: 0.5, farming x1.5, through the continuous entry), every frame at the machine.
             if (m.Data.Stat > 0 && cold.Stats is { } stats && cold.Race is { } race) xp.Continuous(stats, race, stat, dt, OperateXp(m.Data.Stat));
         }
+        PowerTick(world, dt);
         if (research.Queue.Count > 0 && contributions > 0) research.Touch();
         world.Machines.Touch();
     }
@@ -374,7 +376,7 @@ public sealed partial class ProductionSystem : ITickSystem
     bool ProduceStep(World world, Machine m, float s, float dt)
     {
         if (m.Output is not { } output) return false;
-        float amount = m.Yield * m.Data.Rate * dt * constants.ProductionSpeed * s * Settings.ProductionOption;
+        float amount = m.Yield * m.Data.Rate * WorkFactor(world, m) * dt * constants.ProductionSpeed * s * Settings.ProductionOption;
         foreach (var input in m.Inputs)
         {
             float rate = input.Rate;
@@ -457,7 +459,7 @@ public sealed partial class ProductionSystem : ITickSystem
         var fd = m.Data.Farm!;
         float h = dt / (MachineData.DaySeconds / 24);
         bool watered = m.Inputs.Length == 0 || DrawWater(m, dt * m.WaterRate);
-        float inc = h * m.Yield / fd.GrowthTime;
+        float inc = h * m.Yield * m.Power / fd.GrowthTime;
         if (!watered) inc *= fd.DroughtMultiplier;
         bool changed = false;
         if (f.Growth >= 1)
@@ -560,7 +562,7 @@ public sealed partial class ProductionSystem : ITickSystem
     bool ResearchStep(World world, Machine m, float s, float dt, ref int k)
     {
         var research = world.Research;
-        float c = m.Data.Rate * s;
+        float c = m.Data.Rate * WorkFactor(world, m) * s;
         for (int i = 0; i < k; i++) c *= ResearchFalloff;
         k++;
         research.Rate += c;

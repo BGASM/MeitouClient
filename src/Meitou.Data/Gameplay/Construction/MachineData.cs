@@ -17,7 +17,7 @@ public sealed record MachineData
     /// <summary>The game day at speed 1 in seconds, G (<b>Verified</b>, <c>FUN_14066cd50</c>): 24 x 1200/11.</summary>
     public const float DaySeconds = 24 * 1200f / 11f;
 
-    public const int MineFunction = 1, ResearchFunction = 3, RefineryFunction = 4, NaturalMineFunction = 27;
+    public const int MineFunction = 1, ResearchFunction = 3, RefineryFunction = 4, GeneratorFunction = 5, BatteryFunction = 23, NaturalMineFunction = 27;
     /// <summary><c>MiningResource</c> WATER and GROUND (<b>Verified</b>, editor enum).</summary>
     public const int WaterResource = 5, GroundResource = 6;
 
@@ -49,8 +49,17 @@ public sealed record MachineData
     public bool HasInventory { get; init; }
     public int StorageWidth { get; init; } = 18;
     public int StorageHeight { get; init; } = 18;
-    /// <summary><c>power output</c> (negative consumes). Power is not modelled: every building runs as if powered (engine gap).</summary>
+    /// <summary><c>power output</c>: a generator's output, a battery's discharge and charge rate, a consumer's draw when negative (docs/game/buildings-production.md "Power").</summary>
     public float PowerOutput { get; init; }
+    /// <summary><c>power capacity</c>: a battery's store, in seconds at its rate (fcs.def).</summary>
+    public float PowerCapacity { get; init; }
+    /// <summary>The raw <c>max operators</c> (building, else functionality; 0 none): a consumer's draw is x operators / this when it is above 0 (<b>Observed</b>, <c>vfunc_163</c>).</summary>
+    public int PowerOperators { get; init; }
+    /// <summary>A wind generator: function 5 without <c>consumes</c> (<b>Observed</b>, the factory <c>FUN_14057cc70</c>).</summary>
+    public bool IsWind { get; init; }
+    public bool IsBattery => PowerCapacity > 0;
+    public bool IsGenerator => PowerOutput > 0 && !IsBattery;
+    public bool IsConsumer => PowerOutput < 0;
 
     public bool IsResearch => Function == ResearchFunction;
     /// <summary>A mine, well or refinery: inputs (if any) into one output (functions 1, 4 and 27, <b>Verified</b> enum; the stone and ore processors are 4).</summary>
@@ -83,6 +92,8 @@ public sealed record MachineData
             if (function.GetReferences("produces") is [var p, ..] && db.Find(p.TargetStringId) is not null) output = new RecipeOutput(p.TargetStringId, p.Values.Value0);
         }
         int maxOperators = building.GetInt("max operators", -1);
+        int powerOperators = maxOperators > 0 ? maxOperators : Math.Max(0, function?.GetInt("max operators") ?? 0);
+        bool wind = fn == GeneratorFunction && inputs.Count == 0;
         if (maxOperators <= 0) maxOperators = Math.Max(1, function?.GetInt("max operators", 1) ?? 1);
         var craft = function is not null ? CraftBench.From(db, function) : null;
         // A crafting bench's rate is shared by its operators (Observed, FUN_1402b9aa0).
@@ -115,6 +126,9 @@ public sealed record MachineData
             StorageWidth = Math.Max(1, building.GetInt("storage size width", 18)),
             StorageHeight = Math.Max(1, building.GetInt("storage size height", 18)),
             PowerOutput = building.GetInt("power output"),
+            PowerCapacity = building.GetInt("power capacity"),
+            PowerOperators = powerOperators,
+            IsWind = wind,
         };
     }
 }

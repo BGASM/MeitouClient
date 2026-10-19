@@ -19,6 +19,11 @@ public sealed record CraftView(IReadOnlyList<(string Key, string Name, float Pro
 /// <summary>Something a bench can craft, with its hours and inputs per item, and whether research and the bench level allow it now.</summary>
 public sealed record CraftOptionView(string Key, string Name, CraftKind Kind, int Level, float Hours, IReadOnlyList<(string Name, float PerItem)> Inputs, bool Unlocked);
 
+/// <summary>A machine's power as the host shows it: a consumer's demand and grant, a generator's output and load, a battery's flow and store (docs/game/buildings-production.md "Power").</summary>
+public enum PowerKind : byte { Consumer, Generator, Battery }
+
+public readonly record struct PowerView(PowerKind Kind, float Demand, float Granted, float Usage, float Charge, float Store, bool Fueled);
+
 /// <summary>A machine of a complete player building after a tick (docs/simulation.md "Production"); <see cref="Site"/> is the building's instance id.</summary>
 public sealed record MachineSnapshot(string Site, string Record, IReadOnlyList<MachineSlotView> Inputs, MachineSlotView? Output, InventoryView? Storage, FarmView? Farm, byte Status, int Operators, int MaxOperators)
 {
@@ -28,6 +33,8 @@ public sealed record MachineSnapshot(string Site, string Record, IReadOnlyList<M
     public bool Operable { get; init; }
     /// <summary>The crafting bench state (null for other machines).</summary>
     public CraftView? Craft { get; init; }
+    /// <summary>Its power (null for a building outside the grid).</summary>
+    public PowerView? Power { get; init; }
 
     internal static MachineSnapshot Of(Machine m, ItemFactory items)
     {
@@ -39,7 +46,8 @@ public sealed record MachineSnapshot(string Site, string Record, IReadOnlyList<M
                 { Material = item.MaterialId, Charge = item.ChargeFraction }).ToArray())) : null;
         FarmView? farm = m.Farm is { } f && m.Data.Farm is { } fd
             ? new FarmView(f.Growth, f.Death, f.Harvested, f.Plants.Length, f.Status, m.Yield, m.CropMatch, ProductionSystem.Ripeness(f)) { PlantGrowth = [.. f.Plants] } : null;
-        return new MachineSnapshot(m.Site, m.Data.Id, inputs, output, storage, farm, m.Status, m.Operators, m.Data.MaxOperators) { TechLevel = m.Data.IsResearch ? m.Data.TechLevel : 0, Operable = m.Data.Operable, Craft = Crafting(m, items) };
+        return new MachineSnapshot(m.Site, m.Data.Id, inputs, output, storage, farm, m.Status, m.Operators, m.Data.MaxOperators) { TechLevel = m.Data.IsResearch ? m.Data.TechLevel : 0, Operable = m.Data.Operable, Craft = Crafting(m, items),
+            Power = m.Data.IsConsumer || m.Data.IsGenerator || m.Data.IsBattery ? new PowerView(m.Data.IsBattery ? PowerKind.Battery : m.Data.IsGenerator ? PowerKind.Generator : PowerKind.Consumer, m.Demand, m.Granted, m.Usage, m.Charge, m.Store, m.Inputs.Length == 0 || Array.Exists(m.Inputs, i => i.Level > 0 || i.Count > 0)) : null };
     }
 
     static CraftView? Crafting(Machine m, ItemFactory items) => m.Craft is { } c

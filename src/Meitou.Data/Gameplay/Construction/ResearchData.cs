@@ -26,6 +26,14 @@ public sealed record ResearchData
     /// <summary>The crafts it unlocks (<c>enable item</c>, <c>enable armour</c>, ...): kind, record and the repetition (v0, 0 = the first) that unlocks it.</summary>
     public IReadOnlyList<(CraftKind Kind, string Id, int Repetition)> EnableCrafts { get; init; } = [];
 
+    /// <summary><c>improve buildings</c>: the BUILDINGs its <see cref="ProductionMult"/>, <see cref="PowerIncrease"/> and <see cref="CapacityIncrease"/> apply to (<b>Observed</b>, <c>FUN_140831a60</c>).</summary>
+    public IReadOnlyList<string> ImproveBuildings { get; init; } = [];
+    /// <summary><c>production mult</c>: replaces the listed buildings' multiplier (the last finished research wins).</summary>
+    public float ProductionMult { get; init; } = 1;
+    /// <summary><c>power increase</c> and <c>power capacity increase</c>: added to the listed buildings' <c>power output</c> and <c>power capacity</c>.</summary>
+    public int PowerIncrease { get; init; }
+    public int CapacityIncrease { get; init; }
+
     /// <summary>The <c>enable</c> list of each craft kind (fcs.def, <b>Verified</b>); weapon types and models both unlock weapons.</summary>
     public static readonly (string Field, CraftKind Kind)[] EnableFields =
     [
@@ -65,6 +73,10 @@ public sealed record ResearchData
         EnableBuildings = [.. r.GetReferences("enable buildings").Select(l => l.TargetStringId)],
         Repeats = Math.Max(0, r.GetInt("repeats")),
         RepeatMult = r.GetFloat("repeat mult", 1),
+        ImproveBuildings = [.. r.GetReferences("improve buildings").Select(l => l.TargetStringId)],
+        ProductionMult = r.GetFloat("production mult", 1),
+        PowerIncrease = r.GetInt("power increase"),
+        CapacityIncrease = r.GetInt("power capacity increase"),
         EnableCrafts = [.. EnableFields.SelectMany(e => r.GetReferences(e.Field).Select(l => (e.Kind, l.TargetStringId, l.Values.Value0)))],
     };
 

@@ -718,8 +718,8 @@ ghost, commands), `Building/PlacementCheck.cs`, `Building/BuildMenu.cs` (categor
 ## Production
 
 `Production/ProductionSystem` runs the player's complete buildings: mines, wells, refiners (function 4), farms, research and
-crafting benches. Facts: [production](game/buildings-production.md#production), [crafting](game/buildings-production.md#crafting),
-[farming](game/buildings-production.md#farming), [research](game/buildings-production.md#research).
+crafting benches, generators and batteries. Facts: [production](game/buildings-production.md#production), [crafting](game/buildings-production.md#crafting),
+[farming](game/buildings-production.md#farming), [research](game/buildings-production.md#research), [power](game/buildings-production.md#power).
 - **Machines** (`Production/Machines.cs`, data `Construction/MachineData.cs`). A machine is made when a player site completes
   or loads complete, and dropped with the site; its items fall on the ground. It holds:
   - the recipe inputs and the output, as item counts plus a level or progress (engine choice: crops and water have no quality);
@@ -752,6 +752,12 @@ crafting benches. Facts: [production](game/buildings-production.md#production), 
   output full. Benches listing fewer `consumes` than a recipe's ingredients get extra sections. A repeating queue puts
   each finished craft back at its end. Crafts no research lists are always available.
 - **Research repeats.** A `repeats` research can be done repeats+1 times, each paid at `cost x repeat mult^n`.
+- **Power** (`ProductionSystem.Power.cs`). Generators (fuelled or wind), batteries and consumers are machines; each
+  town (sites grouped by `Town`, 0 included) shares power as the [original](game/buildings-production.md#power) after the
+  operators, so grants follow last tick's operators. The factor scales production, crafting, research and farm growth;
+  research `improve buildings` (`ResearchState.Upgrades`) scales rates and adds output and capacity. Engine choices: health
+  is 1; wind generators give `WindFraction` 0.5 of their output; battery mode is not saved. HUD: output, fuel use, charge,
+  "No power" / "Low power".
 - **Saves** (`Saving/MachineSave`, `ResearchSave`). Each building's production and farm keys go into its
   GAMESTATE_BUILDING. Items go into an INVENTORY_STATE `<site>-inventory`, listed first by the building, with sections
   `in<k>`, `out` and `main`.
@@ -769,7 +775,6 @@ crafting benches. Facts: [production](game/buildings-production.md#production), 
     description with the cost.
   - The original's verb names, row widgets and colours are **Unknown**.
 - **Engine gaps:**
-  - No power: every building runs as if powered.
   - No rain filling farm water.
   - No hauling or auto-jobs: water has to be carried by hand from well to farm.
   - No furnaces, generators or turrets.

@@ -101,12 +101,30 @@ public sealed class Machine
     public byte Status { get; set; }
     /// <summary>Characters working it this tick (derived; not saved, not hashed).</summary>
     public int Operators { get; set; }
+    /// <summary>Operators last tick: what a consumer's draw is scaled by (the grid runs after the operators, so its result applies one tick later).</summary>
+    public int LastOperators { get; set; }
+    /// <summary>The power factor its work is scaled by: granted / demand for a consumer (1 with no demand), building health being 1 (docs/game/buildings-production.md "Power").</summary>
+    public float Power { get; set; } = 1;
+    /// <summary>A consumer's demand and the share granted, a generator's output, a battery's flow (+ charging, - draining).</summary>
+    public float Demand { get; set; }
+    public float Granted { get; set; }
+    /// <summary>A generator's load (<c>vfunc_167</c>): the share of its output the grid uses; fuel burns at this rate.</summary>
+    public float Usage { get; set; }
+    /// <summary>A battery's store in seconds at its rate (the save's <c>batterycharge</c>).</summary>
+    public float Charge { get; set; }
+    /// <summary>A battery's capacity now (data + research), for the view.</summary>
+    public float Store { get; set; }
+    /// <summary>The save's <c>gets battery</c>: a consumer short of generator power draws from batteries (default on).</summary>
+    public bool GetsBattery { get; set; } = true;
+    /// <summary>The save's <c>power on</c> (default on; no UI switch yet).</summary>
+    public bool PowerOn { get; set; } = true;
 
     internal void Hash(ref StateHasher h)
     {
         h.Add(Rng.StableHash(Site));
         h.Add(Yield);
         h.Add(Status);
+        h.Add(Power); h.Add(Charge); h.Add(Granted);
         foreach (var i in Inputs) { h.Add(i.Count); h.Add(i.Level); }
         if (Output is { } o) { h.Add(o.Count); h.Add(o.Progress); }
         if (Storage is { } s) { h.Add(s.Items.Count); foreach (var item in s.Items) { h.Add(Rng.StableHash(item.Record)); h.Add(item.Quantity); h.Add(item.X); h.Add(item.Y); } }
