@@ -123,7 +123,7 @@ sealed partial class SettingsMenu(PlayerInterface player, SettingsPanel values, 
         if (key is "VSync" or "Full screen" || key.StartsWith("Grading (", StringComparison.Ordinal))
             return new(key == "Full screen" ? "Borderless full screen" : key == "VSync" ? "Vertical sync" : "Colour grading",
                 SliderHint(slider), Toggle: new(key, () => slider.Get() >= 0.5f, v => slider.Set(v ? 1 : 0)));
-        string[]? options = key == WorldFrame.UpscalerSliders[0] ? ["Off", "FXAA", "TAA", "FSR", "DLSS"]
+        string[]? options = key == WorldFrame.UpscalerSliders[0] ? ["Off", "FXAA", "SMAA", "TAA", "FSR", "DLSS"]
             : key == WorldFrame.TextureQualitySlider ? global::Meitou.Data.Textures.TextureQuality.Labels
             : key == WorldFrame.ParticleSliders[0] ? ["Off", "Quarter resolution", "Half resolution", "Automatic", "Full resolution"]
             : key.StartsWith("Tone map", StringComparison.Ordinal) ? ["Original", "Shoulder", "ACES", "Hybrid"]

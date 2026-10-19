@@ -248,6 +248,7 @@ sealed class WorldOptions
           --upscaler <off|taa|fsr|dlss>   temporal upscaling (default taa in Meitou, off in Faithful; FSR and DLSS need the vendor library, else TAA)
           --render-scale <0.25..1|native|ultra-quality|quality|balanced|performance|ultra>   render size per axis (Meitou default 0.83 with an upscaler, else 1)
           --no-fxaa                the game's FXAA off when no upscaler runs (the game's own FXAA setting, default on)
+          --smaa                   SMAA instead of FXAA when no upscaler runs
           --particle-divisor <0|1|2|4>   the weather's alpha and additive particles drawn at 1/n of the render size (0, the default: by sprite size; `--faithful particles` draws them full size)
           --no-heat-haze           no heat haze (the game's HeatHaze setting, default on: strength from the weather's `heat haze`)
           (ambient occlusion, dithering, light shafts, heat haze strength, the tone map, night grading and the rest are the switches above: --meitou / --faithful <id>; their strengths are Tab sliders)
@@ -887,20 +888,20 @@ static class WorldFrame
     /// <summary>Draws a frame: the sky, then the far depth slice (terrain, water), then the near one (terrain, objects, water).</summary>
     // The Tab panel: draw distances and LOD.
     /// <summary>The upscaler sliders' labels (the game keeps command-line upscaler options over the saved ones).</summary>
-    // The anti-aliasing slider's label changed when "0 off" was added (2026-10-09), so a value saved under the old numbering is not misread.
-    public static readonly string[] UpscalerSliders = ["Anti-aliasing: 0 off 1 FXAA 2 TAA 3 FSR 4 DLSS", "Render scale (upscaler)", "Upscaler sharpness"];
+    // The anti-aliasing slider's label changes with its numbering ("0 off" 2026-10-09, SMAA 2026-10-19), so a value saved under an old one is not misread.
+    public static readonly string[] UpscalerSliders = ["Anti-aliasing: 0 off 1 FXAA 2 SMAA 3 TAA 4 FSR 5 DLSS", "Render scale (upscaler)", "Upscaler sharpness"];
 
-    /// <summary>The anti-aliasing slider's value for the options: 0 none, 1 FXAA, 2.. the upscaler kinds (TAA, FSR, DLSS).</summary>
+    /// <summary>The anti-aliasing slider's value for the options: 0 none, 1 FXAA, 2 SMAA, 3.. the upscaler kinds (TAA, FSR, DLSS).</summary>
     public const string FilteringSlider = "Anisotropic filtering (texture filtering)";
     public const string TextureQualitySlider = "Texture quality 0-4 (game)";
     public static readonly string[] ParticleSliders = ["Weather particles: 0 off 1 quarter 2 half 3 auto 4 full", "Particle density x"];
     /// <summary>The weather particles slider's position for the renderer's state: 0 off, 1 quarter, 2 half, 3 by sprite size (auto), 4 full size.</summary>
     public static int WeatherParticlesSlider(bool weatherOn, PostOptions o) =>
         !weatherOn ? 0 : !o.LowResParticles || o.ParticleDivisor == 1 ? 4 : o.ParticleDivisor switch { 4 => 1, 2 => 2, _ => 3 };
-    public static int AntiAliasingSlider(PostOptions o) => o.Upscale.Kind != UpscalerKind.Off ? (int)o.Upscale.Kind + 1 : o.Fxaa ? 1 : 0;
+    public static int AntiAliasingSlider(PostOptions o) => o.Upscale.Kind != UpscalerKind.Off ? (int)o.Upscale.Kind + 2 : o.Smaa ? 2 : o.Fxaa ? 1 : 0;
 
-    /// <summary>The upscaler a value of the anti-aliasing slider picks (<see cref="UpscalerKind.Off"/> for none and FXAA).</summary>
-    public static UpscalerKind AntiAliasingKind(float v) => (int)MathF.Round(v) is var i && i >= 2 ? (UpscalerKind)Math.Min(i - 1, (int)UpscalerKind.Dlss) : UpscalerKind.Off;
+    /// <summary>The upscaler a value of the anti-aliasing slider picks (<see cref="UpscalerKind.Off"/> for none, FXAA and SMAA).</summary>
+    public static UpscalerKind AntiAliasingKind(float v) => (int)MathF.Round(v) is var i && i >= 3 ? (UpscalerKind)Math.Min(i - 2, (int)UpscalerKind.Dlss) : UpscalerKind.Off;
 
     /// <summary>
     /// The Faithful / Meitou switches over the live renderer (the game's Shift+F keys, the viewer's F keys, the Tab checkboxes): they change the
@@ -1032,10 +1033,12 @@ static class WorldFrame
         {
             // Upscaling (docs/engine.md "Upscaling"): FSR and DLSS fall back to TAA where their library or backend is missing.
             var up = post.Options.Upscale;
-            sliders.Add(new Slider(UpscalerSliders[0], 0, 4, () => AntiAliasingSlider(post.Options), v =>
+            sliders.Add(new Slider(UpscalerSliders[0], 0, 5, () => AntiAliasingSlider(post.Options), v =>
             {
                 up.Kind = AntiAliasingKind(v);
-                post.Options.Fxaa = MathF.Round(v) >= 1;   // 0: no anti-aliasing at all (FXAA off, no upscaler)
+                int i = (int)MathF.Round(v);
+                post.Options.Smaa = i == 2;
+                post.Options.Fxaa = i >= 1 && i != 2;   // 0: no anti-aliasing at all (FXAA off, no upscaler); FXAA stays the fallback of the upscalers
                 if (up.Kind != UpscalerKind.Off) up.Preferred = up.Kind;   // what the Meitou anti-aliasing switch turns back on
             }, "0"));
             sliders.Add(new Slider(UpscalerSliders[1], 0.33f, 1, () => up.EffectiveScale, v => up.Scale = MathF.Round(v * 100) / 100, "0.00",

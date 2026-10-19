@@ -51,6 +51,16 @@ appearance/population, not just shading cost. Depth-aware reduced-resolution com
 preserve opaque intersections. Texture anisotropy caps mipmapped samplers, distinct from texture
 resolution/LOD bias. [Particle simulation](formats/particle-universe.md).
 
+## SMAA
+
+Meitou's non-temporal alternative to FXAA (`--smaa`, or anti-aliasing "SMAA" in settings). It runs on the
+composite's LDR picture instead of FXAA, before the heat haze, and only when no upscaler runs. Passes
+(`PostProcessShaders.Smaa*`): luma edges (threshold 0.1, local contrast adaptation 2); blending weights;
+neighbourhood blend. The weights use SMAA 1x's orthogonal L/U/Z revectorization (16-pixel search per side,
+U shapes smoothed below 32 pixels). Unlike reference SMAA, it computes areas analytically instead of using
+AreaTex/SearchTex. It has no diagonal or corner patterns, as SMAA's low/medium presets.
+**Observed**: 0.6 ms at 1280×720 on the low-end laptop; smooths the stair-steps on The Hub's walls and ridges.
+
 ## Tried: UI depth stamp (removed)
 
 Writing depth 0 under fully opaque UI (22% of the HUD screen, `UiPainter.OpaqueCoverage`) so the
