@@ -194,6 +194,16 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
     public int Instances => zones.Values.Sum(z => z.Real.Count + z.Stand.Count) + (LandmarkZone?.Real.Count ?? 0);
     public int Resolved => zones.Values.Sum(z => z.Real.Count(i => i.Gpu is not null) + z.Stand.Count(i => i.Gpu is not null)) + (LandmarkZone?.Real.Count(i => i.Gpu is not null) ?? 0);
 
+    /// <summary>
+    /// Where the camera is about to be (a character flight's arrival eye, docs/render-objects.md "Arrival prefetch"), or null: zones are laid out and kept, and
+    /// meshes asked for, by the nearer of the eye and this point, so the arrival's objects load during the flight.
+    /// </summary>
+    public Vector3? Ahead { get; set; }
+
+    /// <summary>Distance from the nearer of <paramref name="eye"/> and <see cref="Ahead"/> to <paramref name="p"/>.</summary>
+    public float Near(Vector3 eye, Vector3 p) => Ahead is { } a ? MathF.Min(Vector3.Distance(eye, p), Vector3.Distance(a, p)) : Vector3.Distance(eye, p);
+    float NearZone(double x0, double z0, Vector3 eye) => Ahead is { } a ? MathF.Min(ZoneDistance(x0, z0, eye), ZoneDistance(x0, z0, a)) : ZoneDistance(x0, z0, eye);
+
     /// <summary>Distance on the ground plane from <paramref name="eye"/> to a zone's square.</summary>
     public static float ZoneDistance(double x0, double z0, Vector3 eye)
     {
@@ -219,7 +229,7 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
         foreach (var (coordinate, x0, z0) in populated)
         {
             if (zones.ContainsKey(coordinate) || jobs.ContainsKey(coordinate)) continue;
-            float d = ZoneDistance(x0, z0, eye);
+            float d = NearZone(x0, z0, eye);
             if (d <= range) wanted.Add((coordinate, d));
         }
         foreach (var (coordinate, _) in wanted.OrderBy(w => w.Distance))
@@ -237,7 +247,7 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
         }
         Wanted = wanted.Count(w => !jobs.ContainsKey(w.Coordinate));
         foreach (var zone in zones.Values.ToArray())
-            if (ZoneDistance(zone.X0, zone.Z0, eye) > range + WorldLayout.ZoneSize) zones.Remove(zone.Coordinate);
+            if (NearZone(zone.X0, zone.Z0, eye) > range + WorldLayout.ZoneSize) zones.Remove(zone.Coordinate);
         FillZones(maxNew > 8 ? double.MaxValue : 1.0);
     }
 
@@ -300,12 +310,12 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
         {
             var list = zone.Unresolved;
             // Parked parts come back once the eye could be within their part distance (the zone's square, less the margin and a part's size).
-            if (zone.Parked.Count > 0 && ZoneDistance(zone.X0, zone.Z0, eye) - RequestMargin - ParkedSlack <= zone.ParkedLimit)
+            if (zone.Parked.Count > 0 && NearZone(zone.X0, zone.Z0, eye) - RequestMargin - ParkedSlack <= zone.ParkedLimit)
             {
                 for (int i = zone.Parked.Count - 1; i >= 0; i--)
                 {
                     var inst = zone.Parked[i];
-                    if (Vector3.Distance(eye, inst.Centre) - RequestMargin > Math.Min(objectRange, inst.Limit)) continue;
+                    if (Near(eye, inst.Centre) - RequestMargin > Math.Min(objectRange, inst.Limit)) continue;
                     list.Add(inst);
                     zone.Parked[i] = zone.Parked[^1];
                     zone.Parked.RemoveAt(zone.Parked.Count - 1);
@@ -319,7 +329,7 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
                 // a mesh nothing marks as used, unloaded a minute later and asked for again (docs/renderer-native.md 8.17).
                 float range = inst.Stand ? distantRange : Math.Min(objectRange, inst.Limit);
                 // The placement point, less a guess at the size: a mesh is wanted a little before it can be seen.
-                float d = Vector3.Distance(eye, inst.Centre) - RequestMargin;
+                float d = Near(eye, inst.Centre) - RequestMargin;
                 if (d > range)
                 {
                     // Parked out of the list walked every frame (thousands at long object distances).
@@ -405,7 +415,7 @@ sealed class ObjectStreamer(WorldObjects objects, ObjectMeshCache meshes) : IDis
         {
             var inst = list[i];
             float range = Math.Min(reach, inst.Limit);
-            float d = Vector3.Distance(eye, inst.Centre) - Math.Max(RequestMargin, inst.Radius);
+            float d = Near(eye, inst.Centre) - Math.Max(RequestMargin, inst.Radius);
             if (d > range) continue;
             switch (inst.Mesh.Status)
             {

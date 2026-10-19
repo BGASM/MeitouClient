@@ -630,6 +630,8 @@ static class WorldFrame
         /// <summary>The characters (null without <c>--crowd</c> or a host that feeds them).</summary>
         public Characters.CharacterRenderer? Characters;
         public TerrainStreamer? Streamer;
+        /// <summary>Where the camera is about to arrive (a character flight's end view's eye; null otherwise): the object and terrain texture streaming load there too.</summary>
+        public Vector3? Ahead;
         /// <summary>Keeps the video memory under the budget by clamping the ranges and pausing the streaming (null with <c>MEITOU_VRAM_GUARD=0</c>).</summary>
         public VramGuard? Guard;
         /// <summary>The scene's native host (wave 4), made at the first frame.</summary>
@@ -1161,6 +1163,8 @@ static class WorldFrame
         var jitter = gpu.Post?.JitterPixels ?? Vector2.Zero;
         var eye = camera.Eye;
         gpu.Guard?.Tick();
+        if (gpu.Streamer is { } aheadTerrain) aheadTerrain.Ahead = gpu.Ahead;
+        if (gpu.Objects is { } aheadObjects) aheadObjects.Ahead = gpu.Ahead;
         gpu.Streamer?.Update(eye);
         StageClock.Lap(0);
         if (gpu.Objects is { } lodObjects) lodObjects.LodPixelsPerRadian = render.TerrainPixelScale;   // the generated object levels are placed by the pixel size too

@@ -62,6 +62,12 @@ sealed class SquadTour
         Active = false;
     }
 
+    /// <summary>The eye of the view the hop under way lands on (the next stop's during a hold), for the streaming to load there first; null with no flight.</summary>
+    public Vector3? ArrivalEye(Func<CharacterId, Vector3?> position) =>
+        Active && Current is { } id && position(id) is { } at
+            ? at + new Vector3(MathF.Cos(pitch) * MathF.Sin(yaw), MathF.Sin(pitch), MathF.Cos(pitch) * MathF.Cos(yaw)) * distance   // WorldCamera.Eye's boom
+            : null;
+
     public void Stop() => Active = false;
 
     /// <summary>Moves the camera by <paramref name="dt"/> seconds; false once the tour is over (the camera is left on the last member).</summary>

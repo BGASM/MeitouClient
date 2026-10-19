@@ -420,8 +420,10 @@ sealed partial class GameHost
             if (!cinemaHolds) ApplyCamera(session.CameraAt());
             cinema.Advance(cinema.FrameTime(dt));   // a flight through the keys moves the camera (and takes it from the rig)
             if (tour.Active && !tour.Advance(dt, camera, TourPosition)) EndTour();
+            gpu.Ahead = tour.ArrivalEye(TourPosition);   // the streaming loads the landing view during the flight
             string? takeFile = cinema.TakeFrame();
-            SendFocus(cinemaHolds ? camera.Target : null);
+            // A flight puts the focus on where it lands from the first frame (the towns there populate during the flight), not on the arc.
+            SendFocus(tour.Active && tour.Current is { } landing && TourPosition(landing) is { } landingAt ? landingAt : cinemaHolds ? camera.Target : null);
             if (!cinemaHolds) SandboxFollowCamera();
             if (!cinemaHolds) FollowCamera();
             if (!cinemaHolds) EditorCamera();

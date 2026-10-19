@@ -325,7 +325,7 @@ public sealed unsafe class TerrainTextures : IDisposable
     /// the eye use, starts decoding the ones not resident (nearest first), queues the uploads of what finished, and
     /// moves the overlay/colour window when the eye has left the middle of it.
     /// </summary>
-    public void Update(Vector3 eye, float materialDistance, UploadQueue uploads)
+    public void Update(Vector3 eye, float materialDistance, UploadQueue uploads, Vector3? ahead = null)
     {
         frame++;
         while (problems.TryDequeue(out var m))
@@ -333,31 +333,37 @@ public sealed unsafe class TerrainTextures : IDisposable
         if (HasBiomes)
         {
             while (decoded.TryDequeue(out var d)) Install(d, uploads);
-            UpdateBiomes(eye, materialDistance);
+            UpdateBiomes(eye, materialDistance, ahead);
         }
         UpdateMaps(eye, uploads);
         if (cellsDirty) UploadCells();
     }
 
-    void UpdateBiomes(Vector3 eye, float materialDistance)
+    /// <summary>The biomes of the cells near <paramref name="eye"/> and, during a character flight, near its arrival eye <paramref name="ahead"/> (kept and loaded alike).</summary>
+    void UpdateBiomes(Vector3 eye, float materialDistance, Vector3? ahead)
     {
         stamp++;
         needed.Clear();
         double cs = info.CellSize, half = WorldLayout.HalfWorldSize;
         double radius = materialDistance + cs / 2;
-        int cx0 = (int)Math.Clamp(Math.Floor((eye.X - radius + half) / cs), 0, CellsX - 1), cx1 = (int)Math.Clamp(Math.Floor((eye.X + radius + half) / cs), 0, CellsX - 1);
-        int cz0 = (int)Math.Clamp(Math.Floor((eye.Z - radius + half) / cs), 0, CellsZ - 1), cz1 = (int)Math.Clamp(Math.Floor((eye.Z + radius + half) / cs), 0, CellsZ - 1);
         var nearest = new Dictionary<int, double>();
-        for (int cz = cz0; cz <= cz1; cz++)
-            for (int cx = cx0; cx <= cx1; cx++)
-            {
-                double x0 = cx * cs - half, z0 = cz * cs - half;
-                double dx = Math.Max(Math.Max(x0 - eye.X, eye.X - (x0 + cs)), 0), dz = Math.Max(Math.Max(z0 - eye.Z, eye.Z - (z0 + cs)), 0);
-                double d = Math.Sqrt(dx * dx + dz * dz);
-                if (d > radius) continue;
-                for (int k = 0; k < BlendInfoFile.SlotsPerCell; k++)
-                    if (rowOf.TryGetValue(info.Slot(cx, cz, k), out int row) && (!nearest.TryGetValue(row, out double best) || d < best)) nearest[row] = d;
-            }
+        void Gather(Vector3 at)
+        {
+            int cx0 = (int)Math.Clamp(Math.Floor((at.X - radius + half) / cs), 0, CellsX - 1), cx1 = (int)Math.Clamp(Math.Floor((at.X + radius + half) / cs), 0, CellsX - 1);
+            int cz0 = (int)Math.Clamp(Math.Floor((at.Z - radius + half) / cs), 0, CellsZ - 1), cz1 = (int)Math.Clamp(Math.Floor((at.Z + radius + half) / cs), 0, CellsZ - 1);
+            for (int cz = cz0; cz <= cz1; cz++)
+                for (int cx = cx0; cx <= cx1; cx++)
+                {
+                    double x0 = cx * cs - half, z0 = cz * cs - half;
+                    double dx = Math.Max(Math.Max(x0 - at.X, at.X - (x0 + cs)), 0), dz = Math.Max(Math.Max(z0 - at.Z, at.Z - (z0 + cs)), 0);
+                    double d = Math.Sqrt(dx * dx + dz * dz);
+                    if (d > radius) continue;
+                    for (int k = 0; k < BlendInfoFile.SlotsPerCell; k++)
+                        if (rowOf.TryGetValue(info.Slot(cx, cz, k), out int row) && (!nearest.TryGetValue(row, out double best) || d < best)) nearest[row] = d;
+                }
+        }
+        Gather(eye);
+        if (ahead is { } arrival) Gather(arrival);
         needed.AddRange(nearest.OrderBy(p => p.Value).Select(p => p.Key));
         foreach (int b in needed)
             foreach (var p in state[b].Pairs)

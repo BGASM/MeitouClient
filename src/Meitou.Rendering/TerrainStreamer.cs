@@ -106,6 +106,9 @@ public sealed class TerrainStreamer : IDisposable
     public double LastUpdateMs { get; private set; }
     public string LastSteps => uploads.LastRun;
 
+    /// <summary>A character flight's arrival eye: the biome textures there load during the flight (the height window still moves only with the eye).</summary>
+    public Vector3? Ahead { get; set; }
+
     public void Update(Vector3 eye)
     {
         var watch = Stopwatch.StartNew();
@@ -140,7 +143,7 @@ public sealed class TerrainStreamer : IDisposable
                 return (window, bounds);
             });
         }
-        textures?.Update(eye, MaterialDistance, uploads);
+        textures?.Update(eye, MaterialDistance, uploads, Ahead);
         uploads.Run(budgetMs);
     }
 
