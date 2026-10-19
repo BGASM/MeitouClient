@@ -313,7 +313,8 @@ resource node within 1500 (falloff from the node radius, at least 25). The farm 
 plants, `growth time` 22 h, `harvest time` 48 h, `death time` 8 h, `drought death time` 48 h, `drought multiplier` 0,
 `death threshold` 0.4, `consumption rate` 2 /day, `harvest rate` 256 /day, `clear rate` 500 /day, `output per plant` 1,
 `fertility effect` 0.25, `minimum fertility` 0, crop weights `arid` 0.5 `green` 1 `swamp` 0, `inside`; layout `spacing`,
-`jitter`, `aspect`, `layout`, `plants` (part records with v1 a growth percentage).
+`jitter`, `aspect`, `layout`, `plants` (FARM_PART meshes, see [farm plants](#farm-plants)). The farm has
+the [layout's plant count](#farm-plants), not `amount`.
 - **Setup**: water rate w = `consumption rate`/G x the biome group's `farm water usage` (Desert 8, most 1, Floodlands 0.1);
   harvest and clear rates / G; harvest time at least 1e-6; indoor = `fertility effect` 0; every input's rate is 1.
   Fertility factor F = `1 - (1 - f) x fertility effect`, 0 when f <= `minimum fertility`, f the GROUND resource
@@ -339,6 +340,36 @@ plants, `growth time` 22 h, `harvest time` 48 h, `death time` 8 h, `drought deat
 - **Save** (GAMESTATE_BUILDING, after the [production keys](#production)): floats `plant growth` (farm growth), `plant death` (d),
   `plant start`, `save time` (game hours); int `plants harvested`. A load with more than an hour since `save time`
   simulates the gap (`FUN_1400df6e0`); with no farm keys, growth is random (`FUN_1409b1c10`).
+
+### Farm plants
+
+**Observed** by decompile unless marked: layout `FUN_1400e6230`, part counts `FUN_1400e7a70`, plant look `FUN_1400df360`,
+harvest look `FUN_1400e4800`, replant `FUN_1400e48e0`, geometry `FUN_1400e4a20`, material `FUN_1400e70a0`, upload `FUN_1400e4540`.
+- **Data** (**Verified**, probe of all 27 vanilla farm buildings): every FARM_DATA has `layout` 0; `spacing` 5 to 13, `jitter`
+  0.3 to 0.7, `aspect` 1 outdoors and 0.7 for indoor farms. `plants` entries have v0 0 and v1 20 to 100 (e.g. Wheat 25 / 100,
+  Cotton 50 / 100 / 100). FARM_PART fields: `mesh`, `material` (Crops_material, hempfarm), `scale start` 0.1, `scale end` 1,
+  `scale variance` 0, `offset start` / `end` 0, `delay` 0 in every vanilla part.
+- **Part shares**: v0 is a group, v1 a weight; each part gets `floor(amount x v1 / group total + 0.5)` plants, the rounding rest
+  going to the group's last part with more than one. So `plants` is a fixed mesh mix (Wheat: 20 % Wheat1, 80 % Wheat2), not
+  growth stages: a plant never changes mesh.
+- **Positions**, n = `amount`, s = `spacing`. Layout 0 grid: `across` = trunc(sqrt(n) x `aspect` + 0.5) (at least 1) along the
+  building's x axis, n / `across` (integer) along its z, centred on the building (constants 0.5, **Verified** by the exe bytes);
+  each cell moved by (U - 0.5) x `jitter` x s on both axes. The plant count is `across` x (n / `across`), fewer than `amount` for
+  e.g. Wheat 50 (49), Wheat 75 (72), Hemp 40 (36), indoor 20 (18) (**Verified** by the formula on the data). Layout 1: one plant at
+  the building, the others at angle U x 2pi, radius s + U x U x sqrt(n) x s, x times `aspect`, z divided by it (0 becomes 0.001).
+  Layout 2: uniform in a box sqrt(n) x `aspect` x s by sqrt(n) / `aspect` x s. Not `inside`: each plant's y is the ground's.
+- **Meshes**: each plant takes one part per group: a roll in [0, n) walks the parts cyclically from the first (at most
+  2 x parts - 1 steps), subtracting their shares; the first group part reached below 0 that has plants left is used. A plant also
+  rolls r = rand / 32767.
+- **Look** while g >= -1: f = (clamp01(g) - `delay`) / (1 - `delay`); scale = lerp(`scale start`, `scale end`, f) x
+  (1 + (r - 0.5) x `scale variance`); height offset = lerp(`offset start`, `offset end`, f), minus death² x the tallest part mesh's
+  top for a non-static part (static: scale and offset start = end). Harvested (g = -10) and replanting zero a non-static part's
+  scale. Vanilla: scale 0.1 + 0.9 x clamp01(g); a dying crop sinks by d² x mesh height.
+- **Shader** (**Verified**, `data/materials/deferred/foliage.hlsl` `farm_vs`, `foliage.material` `FarmPlants : StaticObject`,
+  cull none, `FarmShadowCaster`): `plantData[256]` = 128 plants x (position - building, offset | scale, ±0.1 r, sin 37r, cos 37r);
+  yaw basis dx = (sin, 0, cos), dz = dx x up; colour = lerp(white, `death colour`, saturate(death)) + 0.1 r, `death` =
+  d / `death threshold` x 0.8; a static part has -0.1 r (darker) and no death tint. The mesh merges every plant's part mesh with its
+  slot index (`BLENDINDICES`); slots are cumulative per part, capped at 127.
 
 ## Research
 
@@ -384,4 +415,3 @@ mult` 1 to 100000; `limit inventory` restricts the items. Locks and containers: 
 - Event types of the queue at `DAT_1421346d8` other than 8 (research progress) and 11 (build work).
 - Generator fuel and wind units, the minimum powered share, the crafting quality curve and `craft time hrs` units.
 - Option slider defaults; the third value of reference triples; the record field of `BuildingClassType`.
-- The farm plant layout (`spacing`, `jitter`, `aspect`, `layout`) and the parts' growth thresholds (`FUN_1400e7a70`).

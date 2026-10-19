@@ -103,7 +103,7 @@ public sealed class ProductionSystem : ITickSystem
             Inputs = [.. data.Inputs.Select(i => new InputSlot(i))],
             Output = data.Output is { } o ? new OutputSlot(o) : null,
             Storage = data.HasInventory ? new Inventory(data.StorageWidth, data.StorageHeight) : null,
-            Farm = data.Farm is { } fd ? new FarmState(fd.Plants) : null,
+            Farm = data.Farm is { } fd ? new FarmState(Meitou.Data.Gameplay.Construction.FarmLayout.Count(fd)) : null,
         };
         var p = site.Position;
         if (data.Farm is { } farm)

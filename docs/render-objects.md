@@ -53,6 +53,13 @@ only) at a transform, from the `ObjectStreamer.Loose` pseudo-zone (never streame
 landmarks), with 65 % dither coverage and a tint through the push `FlatColour` (`uTint` only reaches grey-channel
 materials): green valid, red invalid, blue queued. Not drawn in shadow or landmarks-only passes.
 
+**Farm plants.** The host lays out each farm machine of the snapshot once (`FarmLayout.Plant`, seeded by the building id) and
+recomputes its plants' transforms (`FarmLayout.Transform`) when the farm's growth, death or harvest count changes
+([farm plants](game/buildings-production.md#farm-plants)). `WorldObjectRenderer.SetFarmPlants` keeps one `Loose` instance per
+plant mesh (a `BuildingPart` of the farm building, its FARM_PART material) and draws the shown ones through `DrawReal`, shadows
+included. The original draws one merged mesh per farm with a `plantData` shader array; Meitou instances each plant (batched by
+mesh). Not drawn: the death tint and the per-plant brightness.
+
 ## Doors
 
 Door parts carry `PlacedMesh.DoorIndex` (their entry in the building's `doors` list). The host hands the renderer the snapshot's

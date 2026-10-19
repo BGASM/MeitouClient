@@ -63,7 +63,7 @@ public sealed record MachineData
         bool stores = building.GetBool("has inventory");
         if (function is null && !stores) return null;
         int fn = function?.GetInt("function", -1) ?? -1;
-        var farm = building.GetReferences("farm data") is [var farmLink, ..] && db.Find(farmLink.TargetStringId) is { Type: FcsRecordType.FARM_DATA } fd ? FarmData.From(fd) : null;
+        var farm = building.GetReferences("farm data") is [var farmLink, ..] && db.Find(farmLink.TargetStringId) is { Type: FcsRecordType.FARM_DATA } fd ? FarmData.From(db, fd) : null;
         float rate = building.GetFloat("output rate", 1);
         if (fn != ResearchFunction && function is not null)
         {
@@ -107,8 +107,19 @@ public sealed record MachineData
 public sealed record FarmData
 {
     public required string Id { get; init; }
-    /// <summary><c>amount</c>: the number of plants.</summary>
+    /// <summary><c>amount</c>: the plants asked for; the farm has <see cref="FarmLayout.Count"/> (a grid can hold fewer).</summary>
     public int Plants { get; init; } = 1;
+    /// <summary>The plant layout (docs/game/buildings-production.md "Farm plants"): <c>layout</c> 0 grid, 1 ring, 2 random, with <c>spacing</c>, <c>jitter</c>, <c>aspect</c>.</summary>
+    public int Layout { get; init; }
+    public float Spacing { get; init; } = 10;
+    public float Jitter { get; init; }
+    public float Aspect { get; init; } = 1;
+    /// <summary><c>inside</c>: the plants stand at the building's height, not on the ground.</summary>
+    public bool Inside { get; init; }
+    /// <summary><c>death colour</c> (ARGB): the tint of a dying crop.</summary>
+    public uint DeathColour { get; init; } = 0xFFFFFFFF;
+    /// <summary>The <c>plants</c> list: the FARM_PART meshes the plants are made of.</summary>
+    public IReadOnlyList<FarmPart> Parts { get; init; } = [];
     public float GrowthTime { get; init; } = 1;
     public float HarvestTime { get; init; } = 1;
     public float DeathTime { get; init; } = 1;
@@ -128,10 +139,17 @@ public sealed record FarmData
     /// <summary>An indoor farm (<c>fertility effect</c> 0): fertility and biome do not matter (<b>Observed</b>, ctor <c>FUN_1400e8420</c>).</summary>
     public bool Indoor => FertilityEffect == 0;
 
-    public static FarmData From(GameRecord r) => new()
+    public static FarmData From(GameDatabase db, GameRecord r) => new()
     {
         Id = r.StringId,
         Plants = Math.Max(1, r.GetInt("amount", 1)),
+        Layout = r.GetInt("layout"),
+        Spacing = r.GetFloat("spacing", 10),
+        Jitter = r.GetFloat("jitter"),
+        Aspect = r.GetFloat("aspect", 1),
+        Inside = r.GetBool("inside"),
+        DeathColour = unchecked((uint)r.GetInt("death colour", -1)),
+        Parts = [.. r.GetReferences("plants").Select(p => db.Find(p.TargetStringId) is { Type: FcsRecordType.FARM_PART } part ? FarmPart.From(db, part, p.Values.Value0, p.Values.Value1) : null).OfType<FarmPart>()],
         GrowthTime = r.GetFloat("growth time", 1),
         HarvestTime = r.GetFloat("harvest time", 1) is > 0 and var h ? h : 1e-6f,
         DeathTime = r.GetFloat("death time", 1),

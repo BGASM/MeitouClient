@@ -41,6 +41,7 @@ sealed partial class GameHost
         }
         UpdateGroundItems(snapshot);
         UpdateDoors();
+        UpdateFarms(snapshot);
         if (gpu.Objects is not { } objects) return;
         constructionLook.Clear();
         foreach (var site in snapshot.Buildings)
@@ -105,6 +106,7 @@ sealed partial class GameHost
     {
         gpu?.Objects?.ClearRuntime();
         ForgetGroundItems();
+        ForgetFarms();
         foreach (string id in navBuildings) nav?.RemoveRuntimeBuilding(id);
         navBuildings.Clear();
         shownBuildings.Clear();

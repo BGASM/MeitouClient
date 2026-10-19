@@ -345,6 +345,14 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
     public double BudgetMs { get; set; } = 2;
 
     /// <summary>Follows the eye: lays out zones and loads meshes and textures around it, within <see cref="BudgetMs"/> of render-thread time.</summary>
+    /// <summary>The arrival eye of a character flight (<see cref="ObjectStreamer.Ahead"/>): its objects are laid out, loaded and kept, their meshes and textures as fine
+    /// as seen from there. A new point re-marks at the next update instead of within the second.</summary>
+    public Vector3? Ahead
+    {
+        get => streamer.Ahead;
+        set { if (value is not null && streamer.Ahead is null) lastMark = 0; streamer.Ahead = value; }
+    }
+
     public void Update(Vector3 eye) => Update(eye, BudgetMs);
 
     /// <summary>Colour draws of parts whose diffuse map was not resident (drawn grey) and, at the same moment, textures waiting for a finer image,
@@ -455,7 +463,7 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
         void Mark(ObjectStreamer.Instance inst, float range)
         {
             if (inst.Gpu is null) return;
-            float distance = Vector3.Distance(eye, inst.Centre), value = distance - inst.Radius, limit = Math.Min(range, inst.Limit);
+            float distance = streamer.Near(eye, inst.Centre), value = distance - inst.Radius, limit = Math.Min(range, inst.Limit);   // or from the arrival point (Ahead)
             if (value >= limit)
             {
                 // Not drawn, but still within what Scan asks meshes for: kept, or it would be unloaded and asked for again.
@@ -821,6 +829,8 @@ public sealed unsafe partial class WorldObjectRenderer : IDisposable
             float reach = LandmarkReach;
             foreach (var inst in landmarkZone.Real) DrawReal(landmarkZone, inst, reach, eye, frustum, options, now);
         }
+        // The crops of the player's farms: drawn as real objects, in the shadow passes too.
+        if (farmSlots.Count > 0 && !landmarksOnly) DrawFarms(real, eye, frustum, options, now);
         // The placement ghost (Build mode): its parts at the cursor, dithered and tinted green or red; not in a shadow or the landmarks-only pass.
         if (ghostsDrawn && !depthPass && !landmarksOnly) DrawGhosts(eye, frustum, now);
         if (!NoDistant && !landmarksOnly)

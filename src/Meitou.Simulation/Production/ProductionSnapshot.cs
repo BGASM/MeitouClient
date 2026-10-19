@@ -6,7 +6,11 @@ namespace Meitou.Simulation.Production;
 public readonly record struct MachineSlotView(string Item, string Name, int Count, int Capacity, float Fill);
 
 /// <summary>A farm as the host shows it (docs/simulation.md "Production").</summary>
-public readonly record struct FarmView(float Growth, float Death, int Harvested, int Plants, FarmStatus Status, float Fertility, float CropMatch, float Ripeness);
+public readonly record struct FarmView(float Growth, float Death, int Harvested, int Plants, FarmStatus Status, float Fertility, float CropMatch, float Ripeness)
+{
+    /// <summary>Each plant's growth (a copy; -10 harvested): what its crop mesh is drawn at.</summary>
+    public IReadOnlyList<float> PlantGrowth { get; init; } = [];
+}
 
 /// <summary>A machine of a complete player building after a tick (docs/simulation.md "Production"); <see cref="Site"/> is the building's instance id.</summary>
 public sealed record MachineSnapshot(string Site, string Record, IReadOnlyList<MachineSlotView> Inputs, MachineSlotView? Output, InventoryView? Storage, FarmView? Farm, byte Status, int Operators, int MaxOperators)
@@ -25,7 +29,7 @@ public sealed record MachineSnapshot(string Site, string Record, IReadOnlyList<M
             Array.AsReadOnly(s.Items.Select((item, index) => new InventoryItemView(index, item.Record, item.Name, "main", item.X, item.Y, item.Width, item.Height, item.Quantity, item.Weight, item.Quality)
                 { Material = item.MaterialId, Charge = item.ChargeFraction }).ToArray())) : null;
         FarmView? farm = m.Farm is { } f && m.Data.Farm is { } fd
-            ? new FarmView(f.Growth, f.Death, f.Harvested, f.Plants.Length, f.Status, m.Yield, m.CropMatch, ProductionSystem.Ripeness(f)) : null;
+            ? new FarmView(f.Growth, f.Death, f.Harvested, f.Plants.Length, f.Status, m.Yield, m.CropMatch, ProductionSystem.Ripeness(f)) { PlantGrowth = [.. f.Plants] } : null;
         return new MachineSnapshot(m.Site, m.Data.Id, inputs, output, storage, farm, m.Status, m.Operators, m.Data.MaxOperators) { TechLevel = m.Data.IsResearch ? m.Data.TechLevel : 0, Operable = m.Data.Operable };
     }
 }
